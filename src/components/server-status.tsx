@@ -84,7 +84,7 @@ export function ServerStatusSection() {
 
     // Radarr / Sonarr : en direct pour l'admin, sinon via le serveur Lumio
     const direct = manager && (settings.radarr.apiKey || settings.sonarr.apiKey);
-    const viaServerP = !direct && settings.chatUrl && settings.jellyfin ? lumio.status(settings).catch(() => null) : Promise.resolve(null);
+    const viaServerP = settings.chatUrl && settings.jellyfin ? lumio.status(settings).catch(() => null) : Promise.resolve(null);
     const radarrP = direct && settings.radarr.url && settings.radarr.apiKey ? probeArr(settings.radarr) : Promise.resolve(null);
     const sonarrP = direct && settings.sonarr.url && settings.sonarr.apiKey ? probeArr(settings.sonarr) : Promise.resolve(null);
 
@@ -93,9 +93,16 @@ export function ServerStatusSection() {
     if (settings.jellyfin) out.push({ key: 'jf', name: 'Jellyfin', icon: 'albums-outline', status: jfS });
     const r = radarrS ?? viaServer?.radarr ?? null;
     const so = sonarrS ?? viaServer?.sonarr ?? null;
-    if (r || direct || viaServer) out.push({ key: 'radarr', name: 'Radarr', icon: 'film-outline', status: r });
-    if (so || direct || viaServer) out.push({ key: 'sonarr', name: 'Sonarr', icon: 'tv-outline', status: so });
+    if (r || direct || viaServer?.radarr) out.push({ key: 'radarr', name: 'Radarr', icon: 'film-outline', status: r });
+    if (so || direct || viaServer?.sonarr) out.push({ key: 'sonarr', name: 'Sonarr', icon: 'tv-outline', status: so });
     if (settings.chatUrl) out.push({ key: 'lumio', name: 'Serveur Lumio', icon: 'server-outline', status: lumioS });
+    if (viaServer?.alldebrid)
+      out.push({
+        key: 'alldebrid',
+        name: 'AllDebrid',
+        icon: 'flash-outline',
+        status: { ...viaServer.alldebrid, name: viaServer.alldebrid.premium === false ? 'compte non premium' : viaServer.alldebrid.name },
+      });
     if (settings.seerr?.url) out.push({ key: 'seerr', name: 'Seerr', icon: 'paper-plane-outline', status: seerrS });
 
     setRows(out);

@@ -4,6 +4,7 @@ Petit serveur, en un seul fichier et sans dépendance, qui sert trois choses dan
 
 - **Chat famille** : onglet Chat, et bouton « Proposer à la famille » sur les fiches.
 - **Téléchargements pour tous** : un compte Jellyfin normal peut lancer un film ou une série dans Radarr ou Sonarr, en choisissant le dossier (Films, Kids, Anime…). Les clés Radarr et Sonarr restent sur ce serveur, jamais sur les téléphones. Chaque ajout est annoncé dans le chat.
+- **Stream des téléchargements en cours** (facultatif, AllDebrid) : quand Radarr ou Sonarr envoie un torrent à rdt-client, le serveur retrouve ce torrent dans AllDebrid grâce à son hash, et donne le lien direct à l'appli pour qu'elle le lise tout de suite.
 - **État des serveurs** : Jellyfin, Radarr et Sonarr (en ligne ou non, version, espace disque, file d'attente).
 
 On se connecte avec son compte Jellyfin, sans mot de passe en plus. Les données sont dans `/data` : `messages.json`, `history.json` et `config.json`.
@@ -22,6 +23,7 @@ On se connecte avec son compte Jellyfin, sans mot de passe en plus. Les données
       # - RADARR_API_KEY=xxxx
       # - SONARR_URL=http://sonarr:8989
       # - SONARR_API_KEY=xxxx
+      # - ALLDEBRID_API_KEY=xxxx
     volumes:
       - ./lumio-server/data:/data
     ports:
@@ -47,6 +49,7 @@ Si Radarr, Sonarr et Jellyfin sont dans le même compose, utilise les noms des s
 | DELETE | `/api/messages/:id` | Supprimer un message : l'auteur ou un admin |
 | GET | `/api/arr/folders?type=movie\|tv` | Dossiers racine disponibles |
 | POST | `/api/grab` | `{ type, tmdbId, tvdbId?, seasons?, rootFolderPath?, seriesType?, title, poster, askFolder? }`. Avec `askFolder` et sans dossier, le serveur renvoie `{ needFolder, folders }` si le titre est nouveau |
+| GET | `/api/stream?type=movie\|tv&tmdbId&tvdbId&season&episode` | Lien AllDebrid du torrent en cours (`status` : searching, downloading, ready…) |
 | GET | `/api/queue` | Téléchargements en cours |
 | GET | `/api/history` | Qui a lancé quoi |
 | POST | `/api/admin/arr` | Admin uniquement : `{ radarr: {url, apiKey, qualityProfileId…}, sonarr: {…} }` |

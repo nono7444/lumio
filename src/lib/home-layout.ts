@@ -130,3 +130,30 @@ export function currentTabPrefs(s: Settings): TabPref[] {
   for (const n of MOVABLE_TABS) if (!known.has(n)) ordered.push({ name: n });
   return ordered;
 }
+
+// ——— Rangées de l'onglet Bibliothèque ———
+
+export type LibraryRowDef = { id: string; label: string; view?: JfItem };
+
+export function libraryRowDefs(views: JfItem[]): LibraryRowDef[] {
+  return [
+    { id: 'libs', label: 'Mes bibliothèques (raccourcis)' },
+    { id: 'continue', label: 'Reprendre' },
+    { id: 'nextup', label: 'À suivre' },
+    { id: 'favorites', label: 'Favoris' },
+    ...views.map((v) => ({
+      id: `latest:${v.Id}`,
+      label: `Ajouts récents · ${VIEW_LABEL[v.CollectionType ?? ''] ?? v.Name}`,
+      view: v,
+    })),
+  ];
+}
+
+/** Ordre et visibilité de la Bibliothèque (tout est visible par défaut). */
+export function orderLibraryRows<T extends { id: string }>(defs: T[], layout: HomeRow[]): (T & { hidden: boolean })[] {
+  const pos = new Map(layout.map((r, i) => [r.id, i]));
+  const hidden = new Map(layout.map((r) => [r.id, Boolean(r.hidden)]));
+  return defs
+    .map((d, i) => ({ ...d, hidden: hidden.get(d.id) ?? false, order: pos.has(d.id) ? pos.get(d.id)! : 10_000 + i }))
+    .sort((a, b) => a.order - b.order);
+}

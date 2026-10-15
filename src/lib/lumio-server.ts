@@ -14,7 +14,13 @@ export type ServiceStatus = {
   queue?: number;
   disks?: ServerFolder[];
 };
-export type ServerStatus = { lumio: ServiceStatus; jellyfin?: ServiceStatus; radarr?: ServiceStatus; sonarr?: ServiceStatus };
+export type ServerStatus = {
+  lumio: ServiceStatus;
+  jellyfin?: ServiceStatus;
+  radarr?: ServiceStatus;
+  sonarr?: ServiceStatus;
+  alldebrid?: ServiceStatus & { premium?: boolean };
+};
 export type ServerHealth = { ok: boolean; version?: string; features?: string[]; radarr?: boolean; sonarr?: boolean };
 
 export type GrabResult =
@@ -63,7 +69,29 @@ export async function serverCanGrab(s: Settings, type?: 'movie' | 'tv') {
   return Boolean(h.radarr || h.sonarr);
 }
 
+export type DebridStream = {
+  status: 'ready' | 'downloading' | 'searching' | 'absent' | 'imported' | 'unsupported' | 'error';
+  url?: string;
+  filename?: string;
+  message?: string;
+  progress?: number | null;
+  release?: string;
+};
+
+/** Le serveur peut-il fournir le lien AllDebrid du torrent choisi par Radarr / Sonarr ? */
+export async function serverHasDebrid(s: Settings) {
+  const h = await serverHealth(s);
+  return Boolean(h?.features?.includes('debrid'));
+}
+
 export const lumio = {
+  stream: (s: Settings, q: { type: 'movie' | 'tv'; tmdbId: number; tvdbId?: number; season?: number; episode?: number }) => {
+    const p = new URLSearchParams({ type: q.type, tmdbId: String(q.tmdbId) });
+    if (q.tvdbId) p.set('tvdbId', String(q.tvdbId));
+    if (q.season != null) p.set('season', String(q.season));
+    if (q.episode != null) p.set('episode', String(q.episode));
+    return serverCall<DebridStream>(s, `/api/stream?${p}`);
+  },
   status: (s: Settings) => serverCall<ServerStatus>(s, '/api/status'),
   folders: (s: Settings, type: 'movie' | 'tv') =>
     serverCall<{ folders: ServerFolder[]; default: string | null }>(s, `/api/arr/folders?type=${type}`),
@@ -77,6 +105,7 @@ export const lumio = {
       body: JSON.stringify({
         radarr: s.radarr.url && s.radarr.apiKey ? s.radarr : undefined,
         sonarr: s.sonarr.url && s.sonarr.apiKey ? s.sonarr : undefined,
+        alldebrid: s.alldebridKey ? { apiKey: s.alldebridKey } : undefined,
       }),
     }).finally(() => {
       healthCache = null;

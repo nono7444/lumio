@@ -16,7 +16,7 @@ const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '2.0.0';
+const VERSION = '2.1.0';
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -271,6 +271,133 @@ async function queue() {
   return { records: out, errors };
 }
 
+
+// ——— Stream via AllDebrid : le torrent choisi par Radarr/Sonarr (envoyé à rdt-client) est retrouvé dans AllDebrid ———
+const AD = process.env.ALLDEBRID_BASE || 'https://api.alldebrid.com';
+function debridKey() {
+  return process.env.ALLDEBRID_API_KEY || (config.alldebrid && config.alldebrid.apiKey) || '';
+}
+
+async function ad(path, params) {
+  const key = debridKey();
+  if (!key) throw new HttpError(503, 'Clé AllDebrid non configurée sur le serveur Lumio');
+  const body = new URLSearchParams();
+  for (const [k, v] of Object.entries(params || {})) {
+    if (Array.isArray(v)) v.forEach((x) => body.append(`${k}[]`, String(x)));
+    else if (v !== undefined) body.append(k, String(v));
+  }
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 20000);
+  try {
+    const res = await fetch(`${AD}${path}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+      signal: ctrl.signal,
+    });
+    const json = await res.json().catch(() => null);
+    if (!json || json.status !== 'success') {
+      const err = json && json.error;
+      throw new HttpError(502, `AllDebrid : ${(err && (err.message || err.code)) || `HTTP ${res.status}`}`);
+    }
+    return json.data;
+  } catch (e) {
+    if (e instanceof HttpError) throw e;
+    throw new HttpError(502, e && e.name === 'AbortError' ? 'AllDebrid ne répond pas' : 'AllDebrid injoignable');
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+const VIDEO_RE = /\.(mkv|mp4|m4v|avi|mov|ts|m2ts|webm|wmv)$/i;
+
+function flattenFiles(nodes, out = []) {
+  for (const n of nodes || []) {
+    if (n.e) flattenFiles(n.e, out);
+    else if (n.l) out.push({ name: n.n, size: n.s || 0, link: n.l });
+  }
+  return out;
+}
+
+function pickFile(files, season, episode) {
+  const videos = files.filter((f) => VIDEO_RE.test(f.name) && !/sample|extras?\b|trailer/i.test(f.name));
+  const pool = videos.length ? videos : files;
+  if (season != null && episode != null) {
+    const s = Number(season);
+    const e = Number(episode);
+    const re = new RegExp(`(s0?${s}[ ._-]?e0?${e}(?!\\d))|(\\b${s}x0?${e}(?!\\d))`, 'i');
+    const hit = pool.filter((f) => re.test(f.name)).sort((a, b) => b.size - a.size)[0];
+    if (hit) return hit;
+    if (pool.length > 1) return null;
+  }
+  return [...pool].sort((a, b) => b.size - a.size)[0] || null;
+}
+
+/** Torrent en cours pour ce titre dans la file Radarr / Sonarr (hash = downloadId). */
+async function queueTorrent(q) {
+  if (q.type === 'tv') {
+    const series = (await arr('sonarr', `/series?tvdbId=${Number(q.tvdbId)}`))[0];
+    if (!series) return { state: 'absent' };
+    const list = await arr('sonarr', `/queue?page=1&pageSize=200&seriesIds=${series.id}&includeEpisode=true`);
+    const recs = (list.records || []).filter((r) => r.seriesId === series.id && r.downloadId);
+    const ep = recs.find((r) => r.episode && r.episode.seasonNumber === Number(q.season) && r.episode.episodeNumber === Number(q.episode));
+    const sea = recs.find((r) => r.episode && r.episode.seasonNumber === Number(q.season));
+    const rec = ep || sea;
+    return rec ? { state: 'queued', hash: rec.downloadId, title: rec.title, protocol: rec.protocol } : { state: 'searching' };
+  }
+  const movie = (await arr('radarr', `/movie?tmdbId=${Number(q.tmdbId)}`))[0];
+  if (!movie) return { state: 'absent' };
+  if (movie.hasFile) return { state: 'imported' };
+  const list = await arr('radarr', `/queue?page=1&pageSize=200&movieIds=${movie.id}`);
+  const rec = (list.records || []).find((r) => r.movieId === movie.id && r.downloadId);
+  return rec ? { state: 'queued', hash: rec.downloadId, title: rec.title, protocol: rec.protocol } : { state: 'searching' };
+}
+
+const unlocked = new Map(); // hash:season:episode → { url, filename, until }
+
+async function debridStream(q) {
+  const cacheKey = `${q.type}:${q.tmdbId}:${q.tvdbId}:${q.season}:${q.episode}`;
+  const hit = unlocked.get(cacheKey);
+  if (hit && hit.until > Date.now()) return { status: 'ready', url: hit.url, filename: hit.filename };
+
+  const t = await queueTorrent(q);
+  if (t.state === 'absent') return { status: 'absent', message: 'Pas encore dans Radarr / Sonarr.' };
+  if (t.state === 'imported') return { status: 'imported', message: 'Déjà téléchargé : il arrive dans Jellyfin.' };
+  if (t.state === 'searching') return { status: 'searching', message: 'Recherche d’une release…' };
+  if (t.protocol && t.protocol !== 'torrent') return { status: 'unsupported', message: 'Release Usenet : pas de stream possible.' };
+  const hash = String(t.hash).toLowerCase();
+  if (!/^[a-f0-9]{40}$/.test(hash)) return { status: 'unsupported', message: 'Identifiant de torrent inconnu.' };
+
+  // AllDebrid renvoie le magnet déjà présent (ajouté par rdt-client) ou l'ajoute
+  const up = await ad('/v4/magnet/upload', { magnets: [hash] });
+  const m = up.magnets && up.magnets[0];
+  if (!m || m.error) throw new HttpError(502, `AllDebrid : ${(m && m.error && m.error.message) || 'magnet refusé'}`);
+  if (!m.ready) {
+    const st = await ad('/v4.1/magnet/status', { id: m.id }).catch(() => null);
+    const mag = st && (Array.isArray(st.magnets) ? st.magnets[0] : st.magnets);
+    const pct = mag && mag.size ? Math.round((mag.downloaded / mag.size) * 100) : null;
+    if (mag && mag.statusCode > 4) return { status: 'error', message: `AllDebrid : ${mag.status}` };
+    return { status: 'downloading', progress: pct, message: `AllDebrid prépare le fichier${pct != null ? ` (${pct} %)` : ''}…`, release: t.title };
+  }
+  const filesRes = await ad('/v4/magnet/files', { id: [m.id] });
+  const entry = filesRes.magnets && filesRes.magnets[0];
+  const file = pickFile(flattenFiles(entry && entry.files), q.type === 'tv' ? q.season : null, q.type === 'tv' ? q.episode : null);
+  if (!file) return { status: 'error', message: 'Épisode introuvable dans le torrent.' };
+  const un = await ad('/v4/link/unlock', { link: file.link });
+  let link = un.link;
+  if (!link && un.delayed) {
+    for (let i = 0; i < 6 && !link; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      const d = await ad('/v4/link/delayed', { id: un.delayed });
+      if (d.status === 2) link = d.link;
+      if (d.status === 3) break;
+    }
+  }
+  if (!link) return { status: 'error', message: 'AllDebrid n’a pas pu générer le lien.' };
+  unlocked.set(cacheKey, { url: link, filename: file.name, until: Date.now() + 2 * 60 * 60 * 1000 });
+  return { status: 'ready', url: link, filename: un.filename || file.name, size: file.size, release: t.title };
+}
+
 // ——— État des services ———
 async function probe(url, headers) {
   const start = Date.now();
@@ -290,6 +417,14 @@ async function probe(url, headers) {
 
 async function status() {
   const out = { lumio: { ok: true, version: VERSION } };
+  if (debridKey()) {
+    try {
+      const u = await ad('/v4/user', {});
+      out.alldebrid = { ok: true, name: u.user && u.user.username, premium: Boolean(u.user && u.user.isPremium) };
+    } catch (e) {
+      out.alldebrid = { ok: false, error: String(e.message || e) };
+    }
+  }
   const jf = await probe(`${JELLYFIN_URL}/System/Info/Public`);
   out.jellyfin = { ok: jf.ok, ms: jf.ms, error: jf.error, version: jf.body && jf.body.Version, name: jf.body && jf.body.ServerName };
   await Promise.all(
@@ -381,7 +516,7 @@ const server = http.createServer(async (req, res) => {
       ok: true,
       version: VERSION,
       messages: messages.length,
-      features: ['chat', 'grab', 'status'],
+      features: ['chat', 'grab', 'status', ...(debridKey() ? ['debrid'] : [])],
       radarr: Boolean(arrConfig('radarr')),
       sonarr: Boolean(arrConfig('sonarr')),
     });
@@ -460,6 +595,11 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && url.pathname === '/api/status') return send(res, 200, await status());
 
+    if (req.method === 'GET' && url.pathname === '/api/stream') {
+      const q = Object.fromEntries(url.searchParams);
+      return send(res, 200, await debridStream(q));
+    }
+
     // ——— Admin : reçoit la config Radarr / Sonarr depuis l'appli ———
     if (req.method === 'POST' && url.pathname === '/api/admin/arr') {
       if (!user.admin) return send(res, 403, { error: 'réservé aux admins Jellyfin' });
@@ -467,6 +607,7 @@ const server = http.createServer(async (req, res) => {
       const next = { ...config };
       if (b.radarr) next.radarr = pick(b.radarr, ['url', 'apiKey', 'qualityProfileId', 'rootFolderPath', 'minimumAvailability', 'searchOnAdd']);
       if (b.sonarr) next.sonarr = pick(b.sonarr, ['url', 'apiKey', 'qualityProfileId', 'languageProfileId', 'rootFolderPath', 'seasonFolder', 'searchOnAdd']);
+      if (b.alldebrid && b.alldebrid.apiKey) next.alldebrid = { apiKey: String(b.alldebrid.apiKey).trim() };
       config = next;
       writeJson(CONFIG_FILE, config);
       return send(res, 200, await status());

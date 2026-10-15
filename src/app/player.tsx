@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CastIcon, CastingScreen, guessContentType, useCasting } from '@/components/players/cast';
 import { MpvPlayer } from '@/components/players/mpv-player';
 import { NativePlayer } from '@/components/players/native-player';
+import { Toasts } from '@/components/toast';
 import { Button } from '@/components/ui';
 import { C } from '@/constants/theme';
 import { getPlayback, jf, jfImage, playback, type PlaybackTarget } from '@/lib/jellyfin';
@@ -316,6 +317,7 @@ export default function Player() {
           <Ionicons name="close" size={24} color="#fff" />
         </Pressable>
       )}
+      <Toasts />
     </View>
   );
 }

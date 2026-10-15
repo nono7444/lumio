@@ -6,6 +6,7 @@ import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, Sty
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { JfRow } from '@/components/jf-cards';
+import { libraryRowDefs, orderLibraryRows } from '@/lib/home-layout';
 import { Button, ScreenTitle, tap } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
 import { jf, jfImage, JellyfinError, type JfItem } from '@/lib/jellyfin';
@@ -20,8 +21,6 @@ const LIB_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
   homevideos: 'videocam-outline',
   mixed: 'folder-open-outline',
 };
-
-const VIEW_LABEL: Record<string, string> = { movies: 'Films', tvshows: 'Séries', boxsets: 'Collections' };
 
 export default function Library() {
   const { settings, update } = useSettings();
@@ -94,9 +93,13 @@ export default function Library() {
         </View>
       ) : (
         <>
-          {/* Toutes les bibliothèques du serveur */}
-          {sections.length > 0 && (
-            <FlatList
+          {orderLibraryRows(libraryRowDefs(sections.map((x) => x.view)), settings.libraryLayout)
+            .filter((r) => !r.hidden)
+            .map((r) => {
+              if (r.id === 'libs')
+                return sections.length > 0 ? (
+                  <View key="libs">
+                    <FlatList
               horizontal
               data={sections.map((x) => x.view)}
               keyExtractor={(v) => v.Id}
@@ -125,18 +128,26 @@ export default function Library() {
                 </Pressable>
               )}
             />
-          )}
-          <JfRow title="Reprendre" items={resume} wide />
-          <JfRow title="À suivre" items={nextUp} wide />
-          <JfRow title="Favoris" items={favorites} />
-          {sections.map(({ view, latest }) => (
-            <JfRow
-              key={view.Id}
-              title={`Ajouts récents · ${VIEW_LABEL[view.CollectionType ?? ''] ?? view.Name}`}
-              items={latest}
-              onSeeAll={() => router.push({ pathname: '/jellyfin/[id]', params: { id: view.Id } })}
-            />
-          ))}
+                  </View>
+                ) : null;
+              if (r.id === 'continue') return <JfRow key={r.id} title="Reprendre" items={resume} wide />;
+              if (r.id === 'nextup') return <JfRow key={r.id} title="À suivre" items={nextUp} wide />;
+              if (r.id === 'favorites') return <JfRow key={r.id} title="Favoris" items={favorites} />;
+              const sec = sections.find((x) => `latest:${x.view.Id}` === r.id);
+              if (!sec) return null;
+              return (
+                <JfRow
+                  key={r.id}
+                  title={r.label}
+                  items={sec.latest}
+                  onSeeAll={() => router.push({ pathname: '/jellyfin/[id]', params: { id: sec.view.Id } })}
+                />
+              );
+            })}
+          <Pressable onPress={() => router.push('/customize')} style={styles.customize} hitSlop={8}>
+            <Ionicons name="options-outline" size={16} color={C.textDim} />
+            <Text style={{ color: C.textDim, fontSize: 13, fontWeight: '600' }}>Personnaliser la bibliothèque</Text>
+          </Pressable>
           {!resume.length && !nextUp.length && !sections.some((s) => s.latest.length) && (
             <Text style={{ color: C.textDim, textAlign: 'center', marginTop: 40 }}>Ta bibliothèque est vide.</Text>
           )}
@@ -161,4 +172,5 @@ const styles = StyleSheet.create({
   },
   libShade: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.45)' },
   libName: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  customize: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 14 },
 });

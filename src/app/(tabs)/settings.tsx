@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Field, ScreenTitle, Section } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { CalendarSection, ChatSection, ThemeSection } from '@/components/extra-sections';
+import { DiagnosticSection } from '@/components/diagnostic-section';
 import { SeerrSection } from '@/components/seerr-section';
 import { ServerStatusSection } from '@/components/server-status';
 import { Addon, DEFAULT_ADDON, isManager, useSettings } from '@/lib/settings';
@@ -347,6 +348,8 @@ export default function SettingsScreen() {
             )}
           </View>
         </Section>
+
+        <DiagnosticSection />
 
         <Text style={styles.version}>Lumio · v{Constants.expoConfig?.version ?? '1.0.0'}</Text>
       </ScrollView>

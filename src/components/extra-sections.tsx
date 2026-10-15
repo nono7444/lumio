@@ -38,6 +38,7 @@ export function ChatSection() {
   const [url, setUrl] = useState(settings.chatUrl);
   const [busy, setBusy] = useState(false);
   const [pushing, setPushing] = useState(false);
+  const [adKey, setAdKey] = useState(settings.alldebridKey);
   const manager = isManager(settings);
   const hasArr = Boolean((settings.radarr.url && settings.radarr.apiKey) || (settings.sonarr.url && settings.sonarr.apiKey));
   return (
@@ -77,8 +78,17 @@ export function ChatSection() {
       />
       {manager && settings.chatUrl && settings.jellyfin ? (
         <View style={{ marginTop: 10 }}>
+          <Field
+            label="Clé API AllDebrid (facultatif)"
+            value={adKey}
+            onChangeText={setAdKey}
+            onEndEditing={() => update({ alldebridKey: adKey.trim() })}
+            placeholder="alldebrid.com → Apikeys"
+            secureTextEntry
+            hint="Permet de lancer le stream du torrent choisi par Radarr / Sonarr (celui envoyé à rdt-client) pendant qu'il se télécharge."
+          />
           <Button
-            title="Envoyer la config Radarr/Sonarr"
+            title="Envoyer la config au serveur"
             icon="cloud-upload-outline"
             variant="secondary"
             loading={pushing}
@@ -86,9 +96,15 @@ export function ChatSection() {
             onPress={async () => {
               setPushing(true);
               try {
-                const st = await lumio.pushArr(settings);
+                const st = await lumio.pushArr({ ...settings, alldebridKey: adKey.trim() });
+                if (adKey.trim() !== settings.alldebridKey) update({ alldebridKey: adKey.trim() });
                 const line = (n: string, x?: { ok: boolean; error?: string }) => `${n} : ${x?.ok ? 'OK ✅' : (x?.error ?? 'non configuré')}`;
-                Alert.alert('Config envoyée', [line('Radarr', st.radarr), line('Sonarr', st.sonarr)].join('\n'));
+                Alert.alert(
+                  'Config envoyée',
+                  [line('Radarr', st.radarr), line('Sonarr', st.sonarr), st.alldebrid ? line('AllDebrid', st.alldebrid) : null]
+                    .filter(Boolean)
+                    .join('\n')
+                );
               } catch (e: any) {
                 Alert.alert('Envoi impossible', e?.message ?? String(e));
               } finally {

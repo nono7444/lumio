@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 
 import { FolderPickerHost } from '@/components/folder-picker';
+import { Toasts } from '@/components/toast';
 import { C } from '@/constants/theme';
 import { SettingsProvider, useSettings } from '@/lib/settings';
 
@@ -50,6 +51,7 @@ export default function RootLayout() {
         <StatusBar style="light" />
         <Root />
         <FolderPickerHost />
+        <Toasts />
       </SettingsProvider>
     </ThemeProvider>
   );
