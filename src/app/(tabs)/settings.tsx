@@ -13,10 +13,11 @@ import {
   View,
 } from 'react-native';
 
+import { ArrSection, Picker, Toggle } from '@/components/arr-section';
 import { Button, Field, Section } from '@/components/ui';
 import { C, R } from '@/constants/theme';
-import { seerr } from '@/lib/seerr';
 import { Addon, DEFAULT_ADDON, useSettings } from '@/lib/settings';
+import { tmdb as tmdbApi } from '@/lib/tmdb';
 import {
   catalogKey,
   fetchManifest,
@@ -84,27 +85,20 @@ function AddonCard({ addon, onChange, onRemove }: { addon: Addon; onChange: (a: 
 
 export default function SettingsScreen() {
   const { settings, update } = useSettings();
-  const [url, setUrl] = useState(settings.seerrUrl);
-  const [key, setKey] = useState(settings.seerrApiKey);
   const [tmdb, setTmdb] = useState(settings.tmdbKey);
   const [testing, setTesting] = useState(false);
   const [addonUrl, setAddonUrl] = useState('');
   const [adding, setAdding] = useState(false);
 
-  const dirty = url !== settings.seerrUrl || key !== settings.seerrApiKey || tmdb !== settings.tmdbKey;
-
-  async function saveAndTest() {
-    const seerrUrl = url.trim().replace(/\/+$/, '');
-    setUrl(seerrUrl);
-    await update({ seerrUrl, seerrApiKey: key.trim(), tmdbKey: tmdb.trim() });
+  async function saveTmdb() {
+    const key = tmdb.trim();
     setTesting(true);
     try {
-      const st = await seerr.status({ ...settings, seerrUrl, seerrApiKey: key.trim() });
-      // /status est public : on vérifie aussi que la clé API est acceptée
-      await seerr.requests({ ...settings, seerrUrl, seerrApiKey: key.trim() }, 1);
-      Alert.alert('Connecté ✅', `Seerr v${st.version}`);
+      await tmdbApi.trending({ ...settings, tmdbKey: key });
+      await update({ tmdbKey: key });
+      Alert.alert('TMDB OK ✅', 'La clé fonctionne.');
     } catch (e: any) {
-      Alert.alert('Échec de connexion', e?.message ?? String(e));
+      Alert.alert('Clé TMDB refusée', e?.message ?? String(e));
     } finally {
       setTesting(false);
     }
@@ -145,29 +139,51 @@ export default function SettingsScreen() {
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ padding: 16, paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
-        <Section title="Serveur Seerr">
-          <Field label="URL" value={url} onChangeText={setUrl} placeholder="https://seerr.mondomaine.fr" keyboardType="url" />
+        <Section title="TMDB">
           <Field
             label="Clé API"
-            value={key}
-            onChangeText={setKey}
-            placeholder="Seerr → Paramètres → Général"
-            secureTextEntry
-          />
-          <Field
-            label="Clé TMDB (optionnel)"
             value={tmdb}
             onChangeText={setTmdb}
-            placeholder="Clé v3 ou jeton v4"
+            placeholder="Clé v3 ou jeton de lecture v4"
             secureTextEntry
-            hint="Sert à relier les catalogues Stremio (IMDb) aux fiches Seerr. Sans clé, l'appli cherche par titre et année."
+            hint="Gratuite sur themoviedb.org → Paramètres → API. Sert à la recherche, aux fiches et à relier les catalogues Stremio."
           />
-          <Button title={dirty ? 'Enregistrer et tester' : 'Tester la connexion'} icon="flash-outline" onPress={saveAndTest} loading={testing} />
+          <Button title="Enregistrer et tester" icon="flash-outline" onPress={saveTmdb} loading={testing} disabled={!tmdb.trim()} />
         </Section>
+
+        <ArrSection
+          title="Radarr · Films"
+          placeholder="http://192.168.1.10:7878"
+          config={settings.radarr}
+          onSave={(radarr) => update({ radarr })}>
+          <Picker
+            label="Disponibilité minimale"
+            options={[
+              { value: 'announced', label: 'Annoncé' },
+              { value: 'inCinemas', label: 'Au cinéma' },
+              { value: 'released', label: 'Sorti' },
+            ]}
+            value={settings.radarr.minimumAvailability}
+            onChange={(v) => update({ radarr: { ...settings.radarr, minimumAvailability: v } })}
+          />
+        </ArrSection>
+
+        <ArrSection
+          title="Sonarr · Séries"
+          placeholder="http://192.168.1.10:8989"
+          config={settings.sonarr}
+          withLanguageProfile
+          onSave={(sonarr) => update({ sonarr })}>
+          <Toggle
+            label="Un dossier par saison"
+            value={settings.sonarr.seasonFolder}
+            onChange={(v) => update({ sonarr: { ...settings.sonarr, seasonFolder: v } })}
+          />
+        </ArrSection>
 
         <Section title="Accueil">
           <View style={styles.catRow}>
-            <Text style={styles.catName}>Ligne « Tendances » de Seerr</Text>
+            <Text style={styles.catName}>Ligne « Tendances » TMDB</Text>
             <Switch
               value={settings.showTrending}
               trackColor={{ true: C.accent, false: C.border }}

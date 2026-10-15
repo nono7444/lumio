@@ -28,8 +28,8 @@ export default function TabsLayout() {
       <Tabs.Screen name="index" options={{ title: 'Accueil', tabBarIcon: icon('home', 'home-outline') }} />
       <Tabs.Screen name="search" options={{ title: 'Recherche', tabBarIcon: icon('search', 'search-outline') }} />
       <Tabs.Screen
-        name="requests"
-        options={{ title: 'Demandes', tabBarIcon: icon('time', 'time-outline') }}
+        name="activity"
+        options={{ title: 'Activité', tabBarIcon: icon('cloud-download', 'cloud-download-outline') }}
       />
       <Tabs.Screen
         name="settings"

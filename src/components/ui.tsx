@@ -188,14 +188,18 @@ export function Section({ title, children }: { title: string; children: ReactNod
   );
 }
 
-export function SetupPrompt() {
+export function SetupPrompt({
+  title = 'Ajoute ta clé TMDB',
+  text = 'La recherche et les fiches passent par TMDB. Une clé gratuite suffit (themoviedb.org → Paramètres → API).',
+}: {
+  title?: string;
+  text?: string;
+}) {
   return (
     <View style={styles.setup}>
       <Ionicons name="link-outline" size={36} color={C.accent} />
-      <Text style={styles.setupTitle}>Connecte ton Seerr</Text>
-      <Text style={styles.setupText}>
-        Renseigne l'URL de ton serveur Seerr et ta clé API pour pouvoir chercher et demander des films et séries.
-      </Text>
+      <Text style={styles.setupTitle}>{title}</Text>
+      <Text style={styles.setupText}>{text}</Text>
       <Button title="Ouvrir les réglages" icon="settings-outline" onPress={() => router.push('/settings')} />
     </View>
   );

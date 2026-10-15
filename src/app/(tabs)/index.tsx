@@ -4,8 +4,9 @@ import { RefreshControl, ScrollView, Text, View } from 'react-native';
 import { PosterItem, Row } from '@/components/ui';
 import { C } from '@/constants/theme';
 import { openMedia, openStremioMeta } from '@/lib/navigation';
-import { mediaStatusLabel, seerr, tmdbImg, type SearchResult } from '@/lib/seerr';
-import { Addon, isSeerrConfigured, useSettings } from '@/lib/settings';
+import { Addon, hasTmdb, useSettings } from '@/lib/settings';
+import { itemTitle, itemYear, tmdb, tmdbImg, type MediaType } from '@/lib/tmdb';
+import { useLibrary } from '@/lib/use-library';
 import {
   catalogKey,
   fetchCatalog,
@@ -71,18 +72,22 @@ function AddonRows({ addon, nonce }: { addon: Addon; nonce: number }) {
 
 function TrendingRow({ nonce }: { nonce: number }) {
   const { settings } = useSettings();
-  const { data, error, loading } = useAsync(() => seerr.trending(settings), [settings.seerrUrl, settings.seerrApiKey, nonce]);
+  const badge = useLibrary();
+  const { data, error, loading } = useAsync(() => tmdb.trending(settings), [settings.tmdbKey, nonce]);
   const items: PosterItem[] = (data?.results ?? [])
-    .filter((r: SearchResult) => r.mediaType === 'movie' || r.mediaType === 'tv')
-    .map((r) => ({
-      key: `${r.mediaType}:${r.id}`,
-      title: r.title ?? r.name ?? '',
-      poster: tmdbImg(r.posterPath),
-      subtitle: (r.releaseDate || r.firstAirDate || '').slice(0, 4),
-      badge: mediaStatusLabel(r.mediaInfo?.status),
-      onPress: () => openMedia(r.mediaType as 'movie' | 'tv', r.id),
-    }));
-  return <Row title="Tendances" subtitle="Seerr" items={items} loading={loading} error={error} />;
+    .filter((r) => r.media_type === 'movie' || r.media_type === 'tv')
+    .map((r) => {
+      const type = r.media_type as MediaType;
+      return {
+        key: `${type}:${r.id}`,
+        title: itemTitle(r),
+        poster: tmdbImg(r.poster_path),
+        subtitle: itemYear(r),
+        badge: badge(type, r.id),
+        onPress: () => openMedia(type, r.id),
+      };
+    });
+  return <Row title="Tendances de la semaine" subtitle="TMDB" items={items} loading={loading} error={error} />;
 }
 
 export default function Home() {
@@ -101,14 +106,14 @@ export default function Home() {
       style={{ flex: 1, backgroundColor: C.bg }}
       contentContainerStyle={{ paddingTop: 12, paddingBottom: 40 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.accent} />}>
-      {settings.showTrending && isSeerrConfigured(settings) && <TrendingRow nonce={nonce} />}
+      {settings.showTrending && hasTmdb(settings) && <TrendingRow nonce={nonce} />}
       {settings.addons.map((a) => (
         <AddonRows key={a.base} addon={a} nonce={nonce} />
       ))}
-      {settings.addons.length === 0 && !isSeerrConfigured(settings) && (
+      {settings.addons.length === 0 && !hasTmdb(settings) && (
         <View style={{ padding: 24 }}>
           <Text style={{ color: C.textDim, textAlign: 'center' }}>
-            Ajoute un addon Stremio ou connecte Seerr dans les réglages pour remplir l'accueil.
+            Ajoute un addon Stremio ou ta clé TMDB dans les réglages pour remplir l'accueil.
           </Text>
         </View>
       )}

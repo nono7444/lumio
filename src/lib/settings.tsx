@@ -9,11 +9,31 @@ export type Addon = {
   hidden?: string[];
 };
 
+export type ArrConfig = {
+  url: string;
+  apiKey: string;
+  qualityProfileId?: number;
+  rootFolderPath?: string;
+  /** Sonarr v3 uniquement (ignoré par Sonarr v4) */
+  languageProfileId?: number;
+  /** Lance la recherche dès l'ajout */
+  searchOnAdd: boolean;
+};
+
+export type RadarrConfig = ArrConfig & {
+  minimumAvailability: 'announced' | 'inCinemas' | 'released';
+};
+
+export type SonarrConfig = ArrConfig & {
+  seasonFolder: boolean;
+};
+
 export type Settings = {
-  seerrUrl: string;
-  seerrApiKey: string;
-  /** Clé API v3 ou jeton v4 TMDB (optionnel, accélère la correspondance IMDb → TMDB) */
+  /** Clé API v3 ou jeton v4 TMDB (obligatoire : recherche + fiches) */
   tmdbKey: string;
+  language: string;
+  radarr: RadarrConfig;
+  sonarr: SonarrConfig;
   addons: Addon[];
   showTrending: boolean;
 };
@@ -24,14 +44,15 @@ export const DEFAULT_ADDON: Addon = {
 };
 
 const DEFAULTS: Settings = {
-  seerrUrl: '',
-  seerrApiKey: '',
   tmdbKey: '',
+  language: 'fr-FR',
+  radarr: { url: '', apiKey: '', searchOnAdd: true, minimumAvailability: 'released' },
+  sonarr: { url: '', apiKey: '', searchOnAdd: true, seasonFolder: true },
   addons: [DEFAULT_ADDON],
   showTrending: true,
 };
 
-const KEY = 'lumio-native:settings:v1';
+const KEY = 'lumio-native:settings:v2';
 
 type Ctx = {
   settings: Settings;
@@ -44,18 +65,24 @@ const SettingsContext = createContext<Ctx | null>(null);
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Settings>(DEFAULTS);
   const [ready, setReady] = useState(false);
+  const current = useRef(settings);
+  current.current = settings;
 
   useEffect(() => {
     AsyncStorage.getItem(KEY)
       .then((raw) => {
-        if (raw) setSettings({ ...DEFAULTS, ...JSON.parse(raw) });
+        if (!raw) return;
+        const saved = JSON.parse(raw) as Partial<Settings>;
+        setSettings({
+          ...DEFAULTS,
+          ...saved,
+          radarr: { ...DEFAULTS.radarr, ...saved.radarr },
+          sonarr: { ...DEFAULTS.sonarr, ...saved.sonarr },
+        });
       })
       .catch(() => {})
       .finally(() => setReady(true));
   }, []);
-
-  const current = useRef(settings);
-  current.current = settings;
 
   const update = useCallback(async (patch: Partial<Settings>) => {
     const next = { ...current.current, ...patch };
@@ -75,6 +102,8 @@ export function useSettings() {
   return ctx;
 }
 
-export function isSeerrConfigured(s: Settings) {
-  return Boolean(s.seerrUrl && s.seerrApiKey);
-}
+export const hasTmdb = (s: Settings) => Boolean(s.tmdbKey.trim());
+
+/** Prêt à ajouter : URL, clé, profil et dossier racine choisis. */
+export const arrReady = (c: ArrConfig) =>
+  Boolean(c.url && c.apiKey && c.qualityProfileId && c.rootFolderPath);

@@ -1,0 +1,185 @@
+import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useRef, useState } from 'react';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+
+import { SetupPrompt } from '@/components/ui';
+import { C, R } from '@/constants/theme';
+import { formatBytes, radarr, sonarr, type QueueItem } from '@/lib/arr';
+import { openMedia } from '@/lib/navigation';
+import { useSettings } from '@/lib/settings';
+
+type Row = QueueItem & { source: 'radarr' | 'sonarr' };
+
+const pad = (n: number) => String(n).padStart(2, '0');
+
+function stateOf(q: Row): { label: string; color: string } {
+  if (q.trackedDownloadStatus === 'warning' || q.trackedDownloadStatus === 'error' || q.errorMessage)
+    return { label: 'Problème', color: C.danger };
+  switch (q.trackedDownloadState ?? q.status) {
+    case 'importPending':
+    case 'importing':
+      return { label: 'Import', color: C.info };
+    case 'downloading':
+      return { label: 'Téléchargement', color: C.accent };
+    case 'paused':
+      return { label: 'En pause', color: C.textDim };
+    case 'queued':
+    case 'delay':
+      return { label: 'En file', color: C.warning };
+    case 'completed':
+      return { label: 'Terminé', color: C.success };
+    default:
+      return { label: q.status, color: C.textDim };
+  }
+}
+
+function QueueRow({ q }: { q: Row }) {
+  const done = q.size > 0 ? Math.max(0, Math.min(1, 1 - q.sizeleft / q.size)) : 0;
+  const st = stateOf(q);
+  const title = q.movie?.title ?? q.series?.title ?? q.title;
+  const sub = q.episode
+    ? `S${pad(q.episode.seasonNumber)}E${pad(q.episode.episodeNumber)}${q.episode.title ? ` · ${q.episode.title}` : ''}`
+    : q.movie?.year
+      ? String(q.movie.year)
+      : '';
+  const tmdbId = q.movie?.tmdbId ?? q.series?.tmdbId;
+  const problem = q.errorMessage ?? q.statusMessages?.flatMap((m) => m.messages)[0];
+
+  return (
+    <Pressable
+      disabled={!tmdbId}
+      onPress={() => tmdbId && openMedia(q.source === 'radarr' ? 'movie' : 'tv', tmdbId)}
+      style={({ pressed }) => [styles.row, { opacity: pressed ? 0.7 : 1 }]}>
+      <View style={styles.rowHead}>
+        <Ionicons name={q.source === 'radarr' ? 'film-outline' : 'tv-outline'} size={18} color={C.textDim} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title} numberOfLines={1}>
+            {title}
+          </Text>
+          {sub ? (
+            <Text style={styles.dim} numberOfLines={1}>
+              {sub}
+            </Text>
+          ) : null}
+        </View>
+        <Text style={[styles.state, { color: st.color }]}>{st.label}</Text>
+      </View>
+      <View style={styles.bar}>
+        <View style={[styles.barFill, { width: `${done * 100}%`, backgroundColor: st.color }]} />
+      </View>
+      <View style={styles.rowFoot}>
+        <Text style={styles.dim}>
+          {Math.round(done * 100)} % · {formatBytes(q.size - q.sizeleft)} / {formatBytes(q.size)}
+        </Text>
+        <Text style={styles.dim}>{q.timeleft ? q.timeleft.replace(/\.\d+$/, '') : (q.downloadClient ?? '')}</Text>
+      </View>
+      {problem ? (
+        <Text style={[styles.dim, { color: C.danger }]} numberOfLines={2}>
+          {problem}
+        </Text>
+      ) : null}
+    </Pressable>
+  );
+}
+
+export default function Activity() {
+  const { settings } = useSettings();
+  const [rows, setRows] = useState<Row[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState<string[]>([]);
+  const first = useRef(true);
+
+  const configured = Boolean(
+    (settings.radarr.url && settings.radarr.apiKey) || (settings.sonarr.url && settings.sonarr.apiKey)
+  );
+
+  const load = useCallback(
+    async (spinner = false) => {
+      if (!configured) return;
+      if (spinner) setLoading(true);
+      const errs: string[] = [];
+      const [r, s] = await Promise.all([
+        settings.radarr.url && settings.radarr.apiKey
+          ? radarr.queue(settings.radarr).catch((e) => (errs.push(`Radarr : ${e.message}`), { records: [] }))
+          : { records: [] },
+        settings.sonarr.url && settings.sonarr.apiKey
+          ? sonarr.queue(settings.sonarr).catch((e) => (errs.push(`Sonarr : ${e.message}`), { records: [] }))
+          : { records: [] },
+      ]);
+      setRows([
+        ...r.records.map((q) => ({ ...q, source: 'radarr' as const })),
+        ...s.records.map((q) => ({ ...q, source: 'sonarr' as const })),
+      ]);
+      setErrors(errs);
+      setLoading(false);
+    },
+    [configured, settings.radarr, settings.sonarr]
+  );
+
+  // Rafraîchit toutes les 8 s tant que l'onglet est affiché
+  useFocusEffect(
+    useCallback(() => {
+      load(first.current);
+      first.current = false;
+      const t = setInterval(() => load(false), 8000);
+      return () => clearInterval(t);
+    }, [load])
+  );
+
+  if (!configured)
+    return (
+      <SetupPrompt
+        title="Connecte Radarr et Sonarr"
+        text="Renseigne l'URL et la clé API de Radarr et/ou Sonarr pour suivre les téléchargements ici."
+      />
+    );
+
+  return (
+    <FlatList
+      style={{ flex: 1, backgroundColor: C.bg }}
+      data={rows}
+      keyExtractor={(q) => `${q.source}:${q.id}`}
+      renderItem={({ item }) => <QueueRow q={item} />}
+      contentContainerStyle={{ padding: 16, gap: 12 }}
+      refreshControl={<RefreshControl refreshing={loading} onRefresh={() => load(true)} tintColor={C.accent} />}
+      ListHeaderComponent={
+        errors.length ? (
+          <View style={{ gap: 4, marginBottom: 4 }}>
+            {errors.map((e) => (
+              <Text key={e} style={[styles.dim, { color: C.danger }]}>
+                {e}
+              </Text>
+            ))}
+          </View>
+        ) : null
+      }
+      ListEmptyComponent={
+        !loading ? (
+          <View style={{ alignItems: 'center', marginTop: 50, gap: 10 }}>
+            <Ionicons name="checkmark-done-outline" size={36} color={C.textFaint} />
+            <Text style={styles.dim}>Rien en cours de téléchargement.</Text>
+          </View>
+        ) : null
+      }
+    />
+  );
+}
+
+const styles = StyleSheet.create({
+  row: {
+    backgroundColor: C.surface,
+    borderRadius: R.lg,
+    padding: 14,
+    gap: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: C.border,
+  },
+  rowHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  rowFoot: { flexDirection: 'row', justifyContent: 'space-between' },
+  title: { color: C.text, fontSize: 15, fontWeight: '700' },
+  dim: { color: C.textDim, fontSize: 12 },
+  state: { fontSize: 12, fontWeight: '700' },
+  bar: { height: 6, borderRadius: 3, backgroundColor: C.surfaceHigh, overflow: 'hidden' },
+  barFill: { height: '100%', borderRadius: 3 },
+});

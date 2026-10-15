@@ -1,26 +1,37 @@
-# Lumio — client mobile Seerr + catalogues Stremio
+# Lumio — Radarr + Sonarr + catalogues Stremio dans ta poche
 
-Appli native iOS / Android (Expo, React Native) qui parle directement à ton serveur **Seerr / Jellyseerr / Overseerr**
-et affiche sur l'accueil les catalogues de n'importe quel **addon Stremio** (dernières sorties, tops, etc.).
+Appli native iOS / Android (Expo, React Native) qui :
+
+- cherche films et séries via **TMDB** ;
+- affiche sur l'accueil les catalogues de tes **addons Stremio** (dernières sorties, tops…) ;
+- envoie tout **directement à Radarr et Sonarr**, sans Seerr au milieu.
 
 ## Fonctionnalités
 
-- **Accueil** : une ligne par catalogue de chaque addon Stremio + la ligne « Tendances » de Seerr.
-  Cinemeta (catalogue officiel Stremio) est préinstallé.
-- **Recherche** films et séries via Seerr, avec badge de disponibilité (Disponible, Partiel, En cours, Demandé).
-- **Fiche** : affiche, synopsis, genres, note, bouton « Ouvrir dans Jellyfin » si dispo.
-- **Demandes** : film en un tap ; séries saison par saison ou tout d'un coup.
-- **Suivi** des demandes (statut de la demande + statut du média).
-- **Réglages** : URL + clé API Seerr avec test de connexion, clé TMDB optionnelle,
-  ajout / retrait / réordonnancement des addons, activation catalogue par catalogue.
+| Onglet | Ce qu'il fait |
+|---|---|
+| **Accueil** | Une ligne par catalogue de chaque addon Stremio, plus les tendances TMDB de la semaine |
+| **Recherche** | Recherche TMDB (Tout / Films / Séries) avec badge de bibliothèque : Disponible, Partiel, Surveillé |
+| **Fiche** | Film → « Ajouter à Radarr » ou « Relancer la recherche ». Série → choix des saisons, envoyées à Sonarr |
+| **Activité** | Files d'attente Radarr + Sonarr en direct : progression, temps restant, erreurs (rafraîchi toutes les 8 s) |
+| **Réglages** | TMDB, Radarr et Sonarr, accueil, addons Stremio |
 
-### Comment un élément Stremio devient une fiche Seerr
+### Configuration Radarr / Sonarr
 
-Les addons Stremio identifient les titres par leur id IMDb (`tt…`) ou `tmdb:…`. Lumio fait la correspondance :
+1. Colle l'URL (ex. `http://192.168.1.71:7878`) et la clé API (*Paramètres → Général*).
+2. Appuie sur **Connecter** : l'appli récupère tes profils de qualité et dossiers racine.
+3. Choisis le profil (ex. ton profil VF), le dossier racine, et si la recherche doit partir dès l'ajout.
+4. Côté Radarr, règle aussi la disponibilité minimale. Côté Sonarr, choisis si tu veux un dossier par saison.
 
-1. id `tmdb:` fourni par l'addon → utilisé directement ;
-2. id IMDb + clé TMDB renseignée → `/find` de l'API TMDB (instantané et fiable) ;
-3. sinon → recherche par titre + année dans Seerr.
+Pour les séries, si la série existe déjà dans Sonarr, l'appli active seulement la surveillance des saisons cochées et lance un `SeasonSearch` pour chacune.
+
+### Du catalogue Stremio à la fiche TMDB
+
+Les addons identifient les titres par IMDb (`tt…`) ou `tmdb:…`. Lumio passe par :
+
+1. l'id `tmdb:` s'il est fourni ;
+2. sinon `/find` TMDB à partir de l'id IMDb ;
+3. sinon une recherche par titre et année.
 
 ## Lancer en dev
 
@@ -31,29 +42,28 @@ npx expo run:android     # ou run:ios sur le Mac (Xcode requis)
 
 ## Build automatique (GitHub Actions)
 
-Le workflow `.github/workflows/build.yml` tourne à chaque push sur `main` :
+`.github/workflows/build.yml` tourne à chaque push sur `main` :
 
 | Job | Sortie | Installation |
 |---|---|---|
-| android | `lumio.apk` (artefact `lumio-android`) | Installe l'APK directement sur le téléphone |
-| ios | `lumio-unsigned.ipa` (artefact `lumio-ios`) | Resigne avec SideStore, AltStore ou Sideloadly (Apple ID gratuit = 7 jours) |
+| android | `lumio.apk` (artefact `lumio-android`) | Installation directe |
+| ios | `lumio-unsigned.ipa` (artefact `lumio-ios`) | Resigner avec SideStore, AltStore ou Sideloadly (Apple ID gratuit) |
 
-Pousse un tag `v1.0.0` pour publier automatiquement les deux fichiers dans une Release GitHub.
+Un tag `v*` publie les deux fichiers dans une Release GitHub. Aucun compte Expo ni compte développeur Apple n'est nécessaire.
 
-Aucun compte Expo ni compte développeur Apple n'est nécessaire.
+## Réseau
 
-## Réseau local
-
-Le trafic HTTP en clair est autorisé (Android `usesCleartextTraffic`, iOS ATS), donc tu peux pointer
-vers `http://192.168.x.x:5055` chez toi, ou vers ton domaine HTTPS de l'extérieur.
+Le HTTP en clair est autorisé (Android `usesCleartextTraffic`, iOS ATS). Ça marche donc avec une IP locale chez toi.
+Depuis l'extérieur, il faut que Radarr et Sonarr soient joignables : VPN, Tailscale ou reverse proxy **protégé**.
 
 ## Structure
 
 ```
-src/app/(tabs)/       Accueil, Recherche, Demandes, Réglages
-src/app/media/…       Fiche film / série
-src/lib/seerr.ts      Client API Seerr
-src/lib/stremio.ts    Client protocole addons Stremio
-src/lib/resolve.ts    Correspondance Stremio → TMDB
-src/lib/settings.tsx  Réglages persistés (AsyncStorage)
+src/app/(tabs)/            Accueil, Recherche, Activité, Réglages
+src/app/media/[type]/[id]  Fiche film / série
+src/lib/tmdb.ts            Client TMDB
+src/lib/arr.ts             Clients Radarr / Sonarr + index de bibliothèque
+src/lib/stremio.ts         Protocole addons Stremio
+src/lib/resolve.ts         Correspondance Stremio → TMDB
+src/lib/settings.tsx       Réglages persistés (AsyncStorage)
 ```

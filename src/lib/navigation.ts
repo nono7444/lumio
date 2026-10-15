@@ -2,17 +2,17 @@ import { router } from 'expo-router';
 import { Alert } from 'react-native';
 
 import { resolveMeta } from './resolve';
-import type { MediaType } from './seerr';
-import type { Settings } from './settings';
+import { hasTmdb, type Settings } from './settings';
 import type { StremioMeta } from './stremio';
+import type { MediaType } from './tmdb';
 
 export function openMedia(mediaType: MediaType, tmdbId: number) {
   router.push({ pathname: '/media/[type]/[id]', params: { type: mediaType, id: String(tmdbId) } });
 }
 
 export async function openStremioMeta(s: Settings, meta: StremioMeta) {
-  if (!s.seerrUrl || !s.seerrApiKey) {
-    Alert.alert('Seerr non configuré', 'Ajoute ton serveur Seerr dans les réglages pour voir la fiche et faire une demande.');
+  if (!hasTmdb(s)) {
+    Alert.alert('Clé TMDB manquante', 'Ajoute ta clé TMDB dans les réglages pour ouvrir les fiches.');
     return;
   }
   const r = await resolveMeta(s, meta);
