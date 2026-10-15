@@ -1,5 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { ReactNode, useState } from 'react';
 import {
@@ -16,6 +18,8 @@ import {
 
 import { C, POSTER_H, POSTER_W, R } from '@/constants/theme';
 
+export const tap = () => Haptics.selectionAsync().catch(() => {});
+
 export type PosterItem = {
   key: string;
   title: string;
@@ -30,9 +34,10 @@ export function PosterCard({ item, width = POSTER_W }: { item: PosterItem; width
   const height = Math.round(width * 1.5);
   return (
     <Pressable
-      style={({ pressed }) => [{ width, opacity: pressed ? 0.7 : 1 }]}
+      style={({ pressed }) => [{ width, transform: [{ scale: pressed ? 0.96 : 1 }] }]}
       onPress={async () => {
         if (busy) return;
+        tap();
         setBusy(true);
         try {
           await item.onPress();
@@ -42,14 +47,17 @@ export function PosterCard({ item, width = POSTER_W }: { item: PosterItem; width
       }}>
       <View style={[styles.poster, { width, height }]}>
         {item.poster ? (
-          <Image source={item.poster} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} />
+          <Image source={item.poster} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
         ) : (
           <View style={styles.posterFallback}>
-            <Ionicons name="film-outline" size={28} color={C.textFaint} />
+            <Text style={styles.posterFallbackText} numberOfLines={3}>
+              {item.title}
+            </Text>
           </View>
         )}
         {item.badge && (
-          <View style={[styles.badge, { backgroundColor: item.badge.color }]}>
+          <View style={styles.badge}>
+            <View style={[styles.badgeDot, { backgroundColor: item.badge.color }]} />
             <Text style={styles.badgeText}>{item.badge.label}</Text>
           </View>
         )}
@@ -71,6 +79,16 @@ export function PosterCard({ item, width = POSTER_W }: { item: PosterItem; width
   );
 }
 
+function SkeletonRow() {
+  return (
+    <View style={{ flexDirection: 'row', gap: 12, paddingHorizontal: 16 }}>
+      {[0, 1, 2, 3].map((i) => (
+        <View key={i} style={[styles.poster, { width: POSTER_W, height: POSTER_H, opacity: 0.6 - i * 0.12 }]} />
+      ))}
+    </View>
+  );
+}
+
 export function Row({
   title,
   subtitle,
@@ -84,20 +102,22 @@ export function Row({
   loading?: boolean;
   error?: string | null;
 }) {
+  if (!loading && !error && items.length === 0) return null;
   return (
-    <View style={{ marginBottom: 26 }}>
+    <View style={{ marginBottom: 28 }}>
       <View style={styles.rowHead}>
-        <Text style={styles.rowTitle}>{title}</Text>
-        {subtitle ? <Text style={styles.rowSub}>{subtitle}</Text> : null}
+        <View style={{ flex: 1 }}>
+          <Text style={styles.rowTitle} numberOfLines={1}>
+            {title}
+          </Text>
+          {subtitle ? <Text style={styles.rowSub}>{subtitle}</Text> : null}
+        </View>
+        {!loading && !error && <Ionicons name="chevron-forward" size={18} color={C.textFaint} />}
       </View>
       {loading ? (
-        <View style={[styles.rowPlaceholder]}>
-          <ActivityIndicator color={C.accent} />
-        </View>
+        <SkeletonRow />
       ) : error ? (
         <Text style={[styles.rowSub, { paddingHorizontal: 16 }]}>Erreur : {error}</Text>
-      ) : items.length === 0 ? (
-        <Text style={[styles.rowSub, { paddingHorizontal: 16 }]}>Aucun contenu.</Text>
       ) : (
         <FlatList
           horizontal
@@ -116,9 +136,19 @@ export function Row({
 
 export function Chip({ label, color }: { label: string; color: string }) {
   return (
-    <View style={[styles.chip, { borderColor: color }]}>
+    <View style={styles.chip}>
       <View style={[styles.dot, { backgroundColor: color }]} />
-      <Text style={[styles.chipText, { color }]}>{label}</Text>
+      <Text style={styles.chipText}>{label}</Text>
+    </View>
+  );
+}
+
+/** Pastille d'info neutre (année, durée, note…) */
+export function Pill({ children, icon }: { children: ReactNode; icon?: keyof typeof Ionicons.glyphMap }) {
+  return (
+    <View style={styles.pill}>
+      {icon && <Ionicons name={icon} size={12} color={C.text} />}
+      <Text style={styles.pillText}>{children}</Text>
     </View>
   );
 }
@@ -135,27 +165,38 @@ export function Button({
   title: string;
   onPress: () => void;
   icon?: keyof typeof Ionicons.glyphMap;
-  variant?: 'primary' | 'secondary' | 'danger';
+  /** primary : blanc plein · glass : verre dépoli · secondary : gris · danger */
+  variant?: 'primary' | 'secondary' | 'glass' | 'danger';
   loading?: boolean;
   disabled?: boolean;
   style?: ViewStyle;
 }) {
-  const bg = variant === 'primary' ? C.accent : variant === 'danger' ? 'rgba(239,91,91,0.15)' : C.surfaceHigh;
-  const fg = variant === 'danger' ? C.danger : C.text;
+  const bg =
+    variant === 'primary'
+      ? C.text
+      : variant === 'glass'
+        ? C.glass
+        : variant === 'danger'
+          ? 'rgba(255,69,58,0.15)'
+          : C.surfaceHigh;
+  const fg = variant === 'primary' ? '#000' : variant === 'danger' ? C.danger : C.text;
   return (
     <Pressable
       disabled={disabled || loading}
-      onPress={onPress}
+      onPress={() => {
+        tap();
+        onPress();
+      }}
       style={({ pressed }) => [
         styles.button,
-        { backgroundColor: bg, opacity: disabled ? 0.45 : pressed ? 0.8 : 1 },
+        { backgroundColor: bg, opacity: disabled ? 0.4 : 1, transform: [{ scale: pressed ? 0.97 : 1 }] },
         style,
       ]}>
       {loading ? (
         <ActivityIndicator color={fg} />
       ) : (
         <>
-          {icon && <Ionicons name={icon} size={18} color={fg} />}
+          {icon && <Ionicons name={icon} size={19} color={fg} />}
           <Text style={[styles.buttonText, { color: fg }]}>{title}</Text>
         </>
       )}
@@ -181,9 +222,19 @@ export function Field({ label, hint, ...props }: TextInputProps & { label: strin
 
 export function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <View style={styles.section}>
+    <View style={{ marginBottom: 22 }}>
       <Text style={styles.sectionTitle}>{title}</Text>
-      {children}
+      <View style={styles.section}>{children}</View>
+    </View>
+  );
+}
+
+/** En-tête de grand titre, aligné à gauche (style Apple TV / Nuvio). */
+export function ScreenTitle({ title, right }: { title: string; right?: ReactNode }) {
+  return (
+    <View style={styles.screenTitle}>
+      <Text style={styles.screenTitleText}>{title}</Text>
+      {right}
     </View>
   );
 }
@@ -197,7 +248,9 @@ export function SetupPrompt({
 }) {
   return (
     <View style={styles.setup}>
-      <Ionicons name="link-outline" size={36} color={C.accent} />
+      <View style={styles.setupIcon}>
+        <Ionicons name="key-outline" size={30} color={C.text} />
+      </View>
       <Text style={styles.setupTitle}>{title}</Text>
       <Text style={styles.setupText}>{text}</Text>
       <Button title="Ouvrir les réglages" icon="settings-outline" onPress={() => router.push('/settings')} />
@@ -205,74 +258,104 @@ export function SetupPrompt({
   );
 }
 
+/** Dégradé vers le noir, pour fondre un visuel dans le fond. */
+export function Fade({ height, top }: { height: number; top?: boolean }) {
+  return (
+    <LinearGradient
+      pointerEvents="none"
+      colors={top ? ['rgba(0,0,0,0.75)', 'rgba(0,0,0,0)'] : ['rgba(0,0,0,0)', 'rgba(0,0,0,0.65)', '#000']}
+      locations={top ? [0, 1] : [0, 0.55, 1]}
+      style={[{ position: 'absolute', left: 0, right: 0, height }, top ? { top: 0 } : { bottom: 0 }]}
+    />
+  );
+}
+
 const styles = StyleSheet.create({
-  poster: {
-    borderRadius: R.md,
-    overflow: 'hidden',
-    backgroundColor: C.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: C.border,
-  },
-  posterFallback: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  poster: { borderRadius: R.md, overflow: 'hidden', backgroundColor: C.surfaceHigh },
+  posterFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 10 },
+  posterFallbackText: { color: C.textDim, fontSize: 13, fontWeight: '700', textAlign: 'center' },
   posterBusy: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.55)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  posterTitle: { color: C.text, fontSize: 13, fontWeight: '600', marginTop: 7 },
-  posterSub: { color: C.textDim, fontSize: 12, marginTop: 1 },
-  badge: { position: 'absolute', top: 6, left: 6, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  posterTitle: { color: C.text, fontSize: 13, fontWeight: '600', marginTop: 8 },
+  posterSub: { color: C.textDim, fontSize: 12, marginTop: 2 },
+  badge: {
+    position: 'absolute',
+    top: 7,
+    left: 7,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+  },
+  badgeDot: { width: 6, height: 6, borderRadius: 3 },
   badgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
-  rowHead: { paddingHorizontal: 16, marginBottom: 10 },
-  rowTitle: { color: C.text, fontSize: 19, fontWeight: '700' },
+  rowHead: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, marginBottom: 12 },
+  rowTitle: { color: C.text, fontSize: 20, fontWeight: '800', letterSpacing: -0.3 },
   rowSub: { color: C.textDim, fontSize: 12, marginTop: 2 },
-  rowPlaceholder: { height: POSTER_H, alignItems: 'center', justifyContent: 'center' },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    borderWidth: 1,
     borderRadius: 999,
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 5,
     alignSelf: 'flex-start',
+    backgroundColor: C.glass,
   },
   dot: { width: 7, height: 7, borderRadius: 4 },
-  chipText: { fontSize: 12, fontWeight: '700' },
+  chipText: { fontSize: 12, fontWeight: '700', color: C.text },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: C.glass,
+  },
+  pillText: { color: C.text, fontSize: 12, fontWeight: '700' },
   button: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
     borderRadius: R.md,
-    paddingVertical: 13,
-    paddingHorizontal: 18,
-    minHeight: 48,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    minHeight: 50,
   },
-  buttonText: { fontSize: 15, fontWeight: '700' },
-  label: { color: C.textDim, fontSize: 13, fontWeight: '600', marginBottom: 6 },
+  buttonText: { fontSize: 16, fontWeight: '700' },
+  label: { color: C.textDim, fontSize: 13, fontWeight: '600', marginBottom: 7 },
   input: {
     backgroundColor: C.surfaceHigh,
     color: C.text,
-    borderRadius: R.sm,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
+    borderRadius: R.md,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
     fontSize: 15,
-    borderWidth: 1,
-    borderColor: C.border,
   },
-  hint: { color: C.textFaint, fontSize: 12, marginTop: 5 },
-  section: {
-    backgroundColor: C.surface,
-    borderRadius: R.lg,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: C.border,
+  hint: { color: C.textFaint, fontSize: 12, marginTop: 6, lineHeight: 17 },
+  section: { backgroundColor: C.surface, borderRadius: R.lg, padding: 16 },
+  sectionTitle: {
+    color: C.textDim,
+    fontSize: 13,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 10,
+    marginLeft: 4,
   },
-  sectionTitle: { color: C.text, fontSize: 17, fontWeight: '700', marginBottom: 14 },
-  setup: { alignItems: 'center', padding: 28, gap: 12 },
-  setupTitle: { color: C.text, fontSize: 20, fontWeight: '700' },
-  setupText: { color: C.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 6 },
+  screenTitle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12 },
+  screenTitleText: { color: C.text, fontSize: 32, fontWeight: '800', letterSpacing: -0.8 },
+  setup: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12, backgroundColor: C.bg },
+  setupIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: C.surfaceHigh, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  setupTitle: { color: C.text, fontSize: 22, fontWeight: '800' },
+  setupText: { color: C.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 8 },
 });

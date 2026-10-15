@@ -13,6 +13,17 @@ export type TmdbItem = {
   release_date?: string;
   first_air_date?: string;
   overview?: string;
+  vote_average?: number;
+  genre_ids?: number[];
+};
+
+/** Genres TMDB (films + séries), en français. */
+export const GENRES: Record<number, string> = {
+  28: 'Action', 12: 'Aventure', 16: 'Animation', 35: 'Comédie', 80: 'Crime', 99: 'Documentaire',
+  18: 'Drame', 10751: 'Famille', 14: 'Fantastique', 36: 'Histoire', 27: 'Horreur', 10402: 'Musique',
+  9648: 'Mystère', 10749: 'Romance', 878: 'Science-fiction', 10770: 'Téléfilm', 53: 'Thriller',
+  10752: 'Guerre', 37: 'Western', 10759: 'Action & Aventure', 10762: 'Enfants', 10763: 'Actualités',
+  10764: 'Téléréalité', 10765: 'SF & Fantastique', 10766: 'Feuilleton', 10767: 'Talk-show', 10768: 'Guerre & Politique',
 };
 
 export type TmdbMovie = {
@@ -27,6 +38,8 @@ export type TmdbMovie = {
   vote_average?: number;
   genres?: { id: number; name: string }[];
   imdb_id?: string | null;
+  images?: TmdbImages;
+  credits?: TmdbCredits;
 };
 
 export type TmdbTv = {
@@ -41,6 +54,15 @@ export type TmdbTv = {
   status?: string;
   seasons: { id: number; season_number: number; name: string; episode_count: number; air_date?: string | null }[];
   external_ids?: { tvdb_id?: number | null; imdb_id?: string | null };
+  images?: TmdbImages;
+  credits?: TmdbCredits;
+  number_of_episodes?: number;
+  episode_run_time?: number[];
+};
+
+export type TmdbImages = { logos?: { file_path: string; iso_639_1: string | null; aspect_ratio: number }[] };
+export type TmdbCredits = {
+  cast?: { id: number; name: string; character?: string; profile_path?: string | null }[];
 };
 
 export class TmdbError extends Error {}
@@ -90,16 +112,41 @@ export const tmdb = {
 
   trending: (s: Settings) => call<{ results: TmdbItem[] }>(s, '/trending/all/week'),
 
-  movie: (s: Settings, id: number) => cached(`movie:${id}`, () => call<TmdbMovie>(s, `/movie/${id}`)),
+  movie: (s: Settings, id: number) =>
+    cached(`movie:${id}`, () =>
+      call<TmdbMovie>(s, `/movie/${id}`, { append_to_response: 'images,credits', include_image_language: imgLangs(s) })
+    ),
 
   tv: (s: Settings, id: number) =>
-    cached(`tv:${id}`, () => call<TmdbTv>(s, `/tv/${id}`, { append_to_response: 'external_ids' })),
+    cached(`tv:${id}`, () =>
+      call<TmdbTv>(s, `/tv/${id}`, {
+        append_to_response: 'external_ids,images,credits',
+        include_image_language: imgLangs(s),
+      })
+    ),
+
+  /** Logo du titre (pour le hero), mis en cache. */
+  logo: (s: Settings, type: MediaType, id: number) =>
+    cached(`logo:${type}:${id}`, () =>
+      call<TmdbImages>(s, `/${type}/${id}/images`, { include_image_language: imgLangs(s) }).then((i) => pickLogo(s, i))
+    ),
 
   findImdb: (s: Settings, imdbId: string) =>
     call<{ movie_results: TmdbItem[]; tv_results: TmdbItem[] }>(s, `/find/${imdbId}`, { external_source: 'imdb_id' }),
 };
 
-export const tmdbImg = (path?: string | null, size: 'w185' | 'w342' | 'w500' | 'w780' | 'w1280' = 'w342') =>
+const imgLangs = (s: Settings) => `${(s.language || 'fr-FR').slice(0, 2)},en,null`;
+
+/** Choisit le logo dans la langue de l'utilisateur, sinon anglais, sinon le premier. */
+export function pickLogo(s: Settings, images?: TmdbImages): string | null {
+  const logos = images?.logos ?? [];
+  const lang = (s.language || 'fr-FR').slice(0, 2);
+  const best =
+    logos.find((l) => l.iso_639_1 === lang) ?? logos.find((l) => l.iso_639_1 === 'en') ?? logos[0];
+  return best?.file_path ?? null;
+}
+
+export const tmdbImg = (path?: string | null, size: 'w185' | 'w342' | 'w500' | 'w780' | 'w1280' | 'original' = 'w342') =>
   path ? `https://image.tmdb.org/t/p/${size}${path}` : undefined;
 
 export const itemTitle = (i: TmdbItem) => i.title ?? i.name ?? '';

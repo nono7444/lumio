@@ -14,8 +14,10 @@ import {
 } from 'react-native';
 
 import { ArrSection, Picker, Toggle } from '@/components/arr-section';
-import { Button, Field, Section } from '@/components/ui';
-import { C, R } from '@/constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { Button, Field, ScreenTitle, Section } from '@/components/ui';
+import { C, R, TAB_SPACE } from '@/constants/theme';
 import { Addon, DEFAULT_ADDON, useSettings } from '@/lib/settings';
 import { tmdb as tmdbApi } from '@/lib/tmdb';
 import {
@@ -62,7 +64,7 @@ function AddonCard({ addon, onChange, onRemove }: { addon: Addon; onChange: (a: 
                 </Text>
                 <Switch
                   value={!hidden.has(k)}
-                  trackColor={{ true: C.accent, false: C.border }}
+                  trackColor={{ true: C.success, false: C.border }}
                   onValueChange={(v) => {
                     const next = new Set(hidden);
                     if (v) next.delete(k);
@@ -85,6 +87,7 @@ function AddonCard({ addon, onChange, onRemove }: { addon: Addon; onChange: (a: 
 
 export default function SettingsScreen() {
   const { settings, update } = useSettings();
+  const insets = useSafeAreaInsets();
   const [tmdb, setTmdb] = useState(settings.tmdbKey);
   const [testing, setTesting] = useState(false);
   const [addonUrl, setAddonUrl] = useState('');
@@ -138,7 +141,10 @@ export default function SettingsScreen() {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ padding: 16, paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
+      <ScrollView style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ paddingTop: insets.top, paddingHorizontal: 16, paddingBottom: TAB_SPACE }} keyboardShouldPersistTaps="handled">
+        <View style={{ marginHorizontal: -16 }}>
+          <ScreenTitle title="Réglages" />
+        </View>
         <Section title="TMDB">
           <Field
             label="Clé API"
@@ -186,7 +192,7 @@ export default function SettingsScreen() {
             <Text style={styles.catName}>Ligne « Tendances » TMDB</Text>
             <Switch
               value={settings.showTrending}
-              trackColor={{ true: C.accent, false: C.border }}
+              trackColor={{ true: C.success, false: C.border }}
               onValueChange={(v) => update({ showTrending: v })}
             />
           </View>
@@ -234,7 +240,7 @@ export default function SettingsScreen() {
 
 const styles = StyleSheet.create({
   help: { color: C.textDim, fontSize: 13, lineHeight: 19, marginBottom: 12 },
-  addon: { backgroundColor: C.surfaceHigh, borderRadius: R.md, padding: 12, borderWidth: 1, borderColor: C.border },
+  addon: { backgroundColor: C.surfaceHigh, borderRadius: R.md, padding: 14 },
   addonHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   addonName: { color: C.text, fontSize: 15, fontWeight: '700' },
   addonUrl: { color: C.textFaint, fontSize: 12, marginTop: 2 },

@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,7 +15,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Button, Chip, SetupPrompt } from '@/components/ui';
+import { Button, Chip, Fade, Pill, SetupPrompt, tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
 import {
   formatBytes,
@@ -27,7 +28,7 @@ import {
   type SonarrSeries,
 } from '@/lib/arr';
 import { arrReady, hasTmdb, useSettings } from '@/lib/settings';
-import { tmdb, tmdbImg, type TmdbMovie, type TmdbTv } from '@/lib/tmdb';
+import { pickLogo, tmdb, tmdbImg, type TmdbMovie, type TmdbTv } from '@/lib/tmdb';
 
 type Details =
   | { kind: 'movie'; data: TmdbMovie; arr: RadarrMovie | null; arrError?: string }
@@ -124,17 +125,8 @@ export default function MediaScreen() {
   const title = details.kind === 'movie' ? details.data.title : details.data.name;
   const date = details.kind === 'movie' ? details.data.release_date : details.data.first_air_date;
   const state = details.arr ? (details.kind === 'movie' ? movieState(details.arr) : seriesState(details.arr)) : null;
-  const backdropH = Math.round(width * 0.62);
   const seasonsList = details.kind === 'tv' ? details.data.seasons.filter((s) => s.season_number > 0) : [];
 
-  const meta = [
-    date?.slice(0, 4),
-    details.kind === 'movie' && details.data.runtime ? `${details.data.runtime} min` : null,
-    details.kind === 'tv' ? `${seasonsList.length} saison(s)` : null,
-    d.vote_average ? `★ ${d.vote_average.toFixed(1)}` : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
 
   async function run(action: () => Promise<unknown>, success: string) {
     setBusy(true);
@@ -180,162 +172,233 @@ export default function MediaScreen() {
   }
 
   const movieFile = details.kind === 'movie' ? details.arr?.movieFile : undefined;
+  const logo = pickLogo(settings, d.images);
+  const heroH = Math.round(width * 1.2);
+  const cast = (d.credits?.cast ?? []).slice(0, 15);
+  const runtime =
+    details.kind === 'movie' ? details.data.runtime : details.data.episode_run_time?.[0];
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}>
-      <View style={{ height: backdropH }}>
-        {d.backdrop_path && (
-          <Image source={tmdbImg(d.backdrop_path, 'w1280')} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
-        )}
-        <View style={styles.backdropFade} />
-      </View>
-
-      <View style={styles.headRow}>
-        <View style={styles.poster}>
-          {d.poster_path && <Image source={tmdbImg(d.poster_path, 'w342')} style={StyleSheet.absoluteFill} contentFit="cover" />}
-        </View>
-        <View style={{ flex: 1, justifyContent: 'flex-end', gap: 6 }}>
-          <Text style={styles.title}>{title}</Text>
-          <Text style={styles.dim}>{meta}</Text>
-          {state && <Chip label={state.label} color={state.color} />}
-        </View>
-      </View>
-
-      <View style={{ paddingHorizontal: 16, gap: 18, marginTop: 18 }}>
-        {d.genres?.length ? <Text style={styles.dim}>{d.genres.map((g) => g.name).join(' · ')}</Text> : null}
-        {d.overview ? <Text style={styles.overview}>{d.overview}</Text> : null}
-
-        {/* ——— Bloc d'action *arr ——— */}
-        {!configured ? (
-          <View style={styles.notice}>
-            <Ionicons name="information-circle-outline" size={18} color={C.textDim} />
-            <Text style={[styles.dim, { flex: 1 }]}>Connecte {serviceName} dans les réglages pour l'ajouter.</Text>
-          </View>
-        ) : details.arrError ? (
-          <View style={styles.notice}>
-            <Ionicons name="warning-outline" size={18} color={C.danger} />
-            <Text style={[styles.dim, { flex: 1, color: C.danger }]}>
-              {serviceName} : {details.arrError}
-            </Text>
-          </View>
-        ) : !ready && !details.arr ? (
-          <View style={styles.notice}>
-            <Ionicons name="options-outline" size={18} color={C.warning} />
-            <Text style={[styles.dim, { flex: 1 }]}>Choisis un profil de qualité et un dossier racine pour {serviceName}.</Text>
-          </View>
-        ) : null}
-
-        {details.kind === 'movie' && configured && !details.arrError && (
-          <>
-            {!details.arr && ready && (
-              <Button title="Ajouter à Radarr" icon="add-circle-outline" onPress={addMovie} loading={busy} />
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}>
+        {/* ——— Hero ——— */}
+        <View style={{ height: heroH }}>
+          <Image
+            source={tmdbImg(d.backdrop_path ?? d.poster_path, 'w1280')}
+            style={StyleSheet.absoluteFill}
+            contentFit="cover"
+            transition={250}
+          />
+          <Fade height={heroH * 0.3} top />
+          <Fade height={heroH * 0.7} />
+          <View style={styles.heroContent}>
+            {logo ? (
+              <Image
+                source={tmdbImg(logo, 'w500')}
+                style={{ width: width * 0.7, height: 100 }}
+                contentFit="contain"
+                contentPosition="bottom"
+                transition={250}
+              />
+            ) : (
+              <Text style={styles.title}>{title}</Text>
             )}
-            {details.arr && !details.arr.hasFile && (
-              <Button title="Relancer la recherche" icon="refresh" variant="secondary" onPress={searchMovie} loading={busy} />
-            )}
-            {details.arr?.hasFile && (
-              <View style={styles.notice}>
-                <Ionicons name="checkmark-circle" size={18} color={C.success} />
-                <Text style={[styles.dim, { flex: 1 }]}>
-                  Dans ta bibliothèque
-                  {movieFile?.quality?.quality?.name ? ` · ${movieFile.quality.quality.name}` : ''}
-                  {movieFile?.languages?.length ? ` · ${movieFile.languages.map((l) => l.name).join(', ')}` : ''}
-                  {details.arr.sizeOnDisk ? ` · ${formatBytes(details.arr.sizeOnDisk)}` : ''}
-                </Text>
-              </View>
-            )}
-          </>
-        )}
-
-        {details.kind === 'tv' && (
-          <View style={styles.seasons}>
-            <Text style={styles.sectionTitle}>Saisons</Text>
-            {seasonsList.map((s) => {
-              const info = seasonInfo(details.arr, s.season_number);
-              const can = requestable.includes(s.season_number) && configured && !details.arrError && (ready || !!details.arr);
-              const on = selected.has(s.season_number);
-              return (
-                <Pressable
-                  key={s.id}
-                  disabled={!can}
-                  onPress={() => {
-                    const next = new Set(selected);
-                    if (on) next.delete(s.season_number);
-                    else next.add(s.season_number);
-                    setSelected(next);
-                  }}
-                  style={styles.seasonRow}>
-                  <Ionicons
-                    name={can ? (on ? 'checkbox' : 'square-outline') : info?.label ? 'checkmark-circle' : 'remove-circle-outline'}
-                    size={22}
-                    color={can ? (on ? C.accent : C.textDim) : (info?.color ?? C.textFaint)}
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.seasonName}>{s.name || `Saison ${s.season_number}`}</Text>
-                    <Text style={styles.dim}>
-                      {s.episode_count} épisodes{s.air_date ? ` · ${s.air_date.slice(0, 4)}` : ''}
-                    </Text>
-                  </View>
-                  {info?.label ? <Chip label={info.label} color={info.color} /> : null}
-                </Pressable>
-              );
-            })}
-            {configured && !details.arrError && (ready || details.arr) ? (
-              requestable.length > 0 ? (
-                <View style={{ gap: 10, marginTop: 12 }}>
-                  <Button
-                    title={selected.size ? `Envoyer ${selected.size} saison(s) à Sonarr` : 'Sélectionne des saisons'}
-                    icon="add-circle-outline"
-                    disabled={selected.size === 0}
-                    loading={busy && selected.size > 0}
-                    onPress={() => requestSeasons(false)}
-                  />
-                  <Button
-                    title={`Tout envoyer (${requestable.length})`}
-                    variant="secondary"
-                    onPress={() => requestSeasons(true)}
-                    disabled={busy}
-                  />
-                </View>
-              ) : (
-                <Text style={[styles.dim, { marginTop: 10 }]}>Toutes les saisons sont déjà surveillées ou complètes.</Text>
-              )
+            <View style={styles.pills}>
+              {date ? <Pill>{date.slice(0, 4)}</Pill> : null}
+              {runtime ? <Pill icon="time-outline">{`${runtime} min`}</Pill> : null}
+              {details.kind === 'tv' ? <Pill>{`${seasonsList.length} saison${seasonsList.length > 1 ? 's' : ''}`}</Pill> : null}
+              {d.vote_average ? <Pill icon="star">{d.vote_average.toFixed(1)}</Pill> : null}
+            </View>
+            {d.genres?.length ? (
+              <Text style={styles.genres}>{d.genres.slice(0, 3).map((g) => g.name).join('  •  ')}</Text>
             ) : null}
+            {state && <Chip label={state.label} color={state.color} />}
           </View>
-        )}
-      </View>
-    </ScrollView>
+        </View>
+
+        <View style={{ paddingHorizontal: 16, gap: 20, marginTop: 4 }}>
+          {/* ——— Action principale ——— */}
+          {!configured ? (
+            <Notice icon="information-circle-outline" text={`Connecte ${serviceName} dans les réglages pour l'ajouter.`} />
+          ) : details.arrError ? (
+            <Notice icon="warning-outline" color={C.danger} text={`${serviceName} : ${details.arrError}`} />
+          ) : !ready && !details.arr ? (
+            <Notice icon="options-outline" color={C.warning} text={`Choisis un profil de qualité et un dossier racine pour ${serviceName}.`} />
+          ) : null}
+
+          {details.kind === 'movie' && configured && !details.arrError && (
+            <>
+              {!details.arr && ready && <Button title="Ajouter à Radarr" icon="add" onPress={addMovie} loading={busy} />}
+              {details.arr && !details.arr.hasFile && (
+                <Button title="Relancer la recherche" icon="refresh" variant="glass" onPress={searchMovie} loading={busy} />
+              )}
+              {details.arr?.hasFile && (
+                <Notice
+                  icon="checkmark-circle"
+                  color={C.success}
+                  text={[
+                    'Dans ta bibliothèque',
+                    movieFile?.quality?.quality?.name,
+                    movieFile?.languages?.map((l) => l.name).join(', '),
+                    details.arr.sizeOnDisk ? formatBytes(details.arr.sizeOnDisk) : null,
+                  ]
+                    .filter(Boolean)
+                    .join('  •  ')}
+                />
+              )}
+            </>
+          )}
+
+          {details.kind === 'tv' && configured && !details.arrError && (ready || details.arr) && requestable.length > 0 && (
+            <Button
+              title={selected.size ? `Envoyer ${selected.size} saison${selected.size > 1 ? 's' : ''} à Sonarr` : `Tout envoyer à Sonarr (${requestable.length})`}
+              icon="add"
+              loading={busy}
+              onPress={() => requestSeasons(selected.size === 0)}
+            />
+          )}
+
+          {d.overview ? <Text style={styles.overview}>{d.overview}</Text> : null}
+
+          {/* ——— Saisons ——— */}
+          {details.kind === 'tv' && (
+            <View>
+              <Text style={styles.sectionTitle}>Saisons</Text>
+              <View style={styles.card}>
+                {seasonsList.map((s, idx) => {
+                  const info = seasonInfo(details.arr, s.season_number);
+                  const can =
+                    requestable.includes(s.season_number) && configured && !details.arrError && (ready || !!details.arr);
+                  const on = selected.has(s.season_number);
+                  return (
+                    <Pressable
+                      key={s.id}
+                      disabled={!can}
+                      onPress={() => {
+                        tap();
+                        const next = new Set(selected);
+                        if (on) next.delete(s.season_number);
+                        else next.add(s.season_number);
+                        setSelected(next);
+                      }}
+                      style={[styles.seasonRow, idx === seasonsList.length - 1 && { borderBottomWidth: 0 }]}>
+                      <Ionicons
+                        name={can ? (on ? 'checkmark-circle' : 'ellipse-outline') : info?.label ? 'checkmark-circle' : 'remove-circle-outline'}
+                        size={24}
+                        color={can ? (on ? C.text : C.textFaint) : (info?.color ?? C.textFaint)}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.seasonName}>{s.name || `Saison ${s.season_number}`}</Text>
+                        <Text style={styles.dim}>
+                          {s.episode_count} épisodes{s.air_date ? `  •  ${s.air_date.slice(0, 4)}` : ''}
+                        </Text>
+                      </View>
+                      {info?.label ? <Chip label={info.label} color={info.color} /> : null}
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {configured && !details.arrError && (ready || details.arr) && requestable.length === 0 ? (
+                <Text style={[styles.dim, { marginTop: 10 }]}>Toutes les saisons sont déjà surveillées ou complètes.</Text>
+              ) : null}
+            </View>
+          )}
+
+          {/* ——— Casting ——— */}
+          {cast.length > 0 && (
+            <View>
+              <Text style={styles.sectionTitle}>Casting</Text>
+              <FlatList
+                horizontal
+                data={cast}
+                keyExtractor={(c) => String(c.id)}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 14 }}
+                style={{ marginHorizontal: -16 }}
+                ListHeaderComponent={<View style={{ width: 2 }} />}
+                ListFooterComponent={<View style={{ width: 2 }} />}
+                renderItem={({ item: c }) => (
+                  <View style={styles.castItem}>
+                    <View style={styles.castPhoto}>
+                      {c.profile_path ? (
+                        <Image source={tmdbImg(c.profile_path, 'w185')} style={StyleSheet.absoluteFill} contentFit="cover" />
+                      ) : (
+                        <Ionicons name="person" size={28} color={C.textFaint} />
+                      )}
+                    </View>
+                    <Text style={styles.castName} numberOfLines={2}>
+                      {c.name}
+                    </Text>
+                    {c.character ? (
+                      <Text style={styles.castRole} numberOfLines={1}>
+                        {c.character}
+                      </Text>
+                    ) : null}
+                  </View>
+                )}
+              />
+            </View>
+          )}
+        </View>
+      </ScrollView>
+
+      {/* Bouton retour flottant */}
+      <Pressable onPress={() => router.back()} style={[styles.back, { top: insets.top + 8 }]} hitSlop={10}>
+        <Ionicons name="chevron-back" size={24} color={C.text} />
+      </Pressable>
+    </View>
+  );
+}
+
+function Notice({ icon, text, color = C.textDim }: { icon: keyof typeof Ionicons.glyphMap; text: string; color?: string }) {
+  return (
+    <View style={styles.notice}>
+      <Ionicons name={icon} size={20} color={color} />
+      <Text style={[styles.dim, { flex: 1, color: color === C.textDim ? C.textDim : C.text }]}>{text}</Text>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   center: { flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  backdropFade: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(11,13,18,0.45)' },
-  headRow: { flexDirection: 'row', gap: 16, paddingHorizontal: 16, marginTop: -70 },
-  poster: {
-    width: 110,
-    height: 165,
-    borderRadius: R.md,
-    overflow: 'hidden',
-    backgroundColor: C.surface,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  title: { color: C.text, fontSize: 24, fontWeight: '800' },
+  heroContent: { position: 'absolute', left: 20, right: 20, bottom: 12, alignItems: 'center', gap: 10 },
+  title: { color: C.text, fontSize: 34, fontWeight: '900', textAlign: 'center', letterSpacing: -0.8 },
+  pills: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 6 },
+  genres: { color: C.text, fontSize: 13, fontWeight: '600', opacity: 0.85 },
   dim: { color: C.textDim, fontSize: 13 },
-  overview: { color: C.text, fontSize: 15, lineHeight: 22, opacity: 0.9 },
-  notice: {
+  overview: { color: C.text, fontSize: 15, lineHeight: 23, opacity: 0.88 },
+  notice: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.surface, borderRadius: R.md, padding: 14 },
+  sectionTitle: { color: C.text, fontSize: 20, fontWeight: '800', marginBottom: 12, letterSpacing: -0.3 },
+  card: { backgroundColor: C.surface, borderRadius: R.lg, paddingHorizontal: 14 },
+  seasonRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    backgroundColor: C.surface,
-    borderRadius: R.md,
-    padding: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: C.border,
+    gap: 12,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: C.border,
   },
-  seasons: { backgroundColor: C.surface, borderRadius: R.lg, padding: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: C.border },
-  sectionTitle: { color: C.text, fontSize: 17, fontWeight: '700', marginBottom: 6 },
-  seasonRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
-  seasonName: { color: C.text, fontSize: 15, fontWeight: '600' },
+  seasonName: { color: C.text, fontSize: 15, fontWeight: '700' },
+  castItem: { width: 84, alignItems: 'center' },
+  castPhoto: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    overflow: 'hidden',
+    backgroundColor: C.surfaceHigh,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  castName: { color: C.text, fontSize: 12, fontWeight: '700', textAlign: 'center', marginTop: 8 },
+  castRole: { color: C.textDim, fontSize: 11, textAlign: 'center', marginTop: 2 },
+  back: {
+    position: 'absolute',
+    left: 14,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

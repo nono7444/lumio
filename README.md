@@ -1,5 +1,7 @@
 # Lumio — Radarr + Sonarr + catalogues Stremio dans ta poche
 
+Design sombre « cinéma » inspiré de Nuvio : hero plein écran avec logos TMDB, boutons blancs, barre d’onglets flottante en verre dépoli, fiches avec casting. Aucun code ni asset de Nuvio (GPL-3.0) n’est repris.
+
 Appli native iOS / Android (Expo, React Native) qui :
 
 - cherche films et séries via **TMDB** ;

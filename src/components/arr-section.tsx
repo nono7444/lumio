@@ -30,9 +30,9 @@ export function Picker<T extends string | number>({
             <Pressable
               key={String(o.value)}
               onPress={() => onChange(o.value)}
-              style={[styles.chip, on && { borderColor: C.accent, backgroundColor: C.accentSoft }]}>
-              {on && <Ionicons name="checkmark" size={14} color={C.accent} />}
-              <Text style={[styles.chipText, on && { color: C.text }]}>{o.label}</Text>
+              style={[styles.chip, on && { backgroundColor: C.text }]}>
+              {on && <Ionicons name="checkmark" size={14} color="#000" />}
+              <Text style={[styles.chipText, on && { color: '#000' }]}>{o.label}</Text>
               {o.hint ? <Text style={styles.chipHint}>{o.hint}</Text> : null}
             </Pressable>
           );
@@ -46,7 +46,7 @@ export function Toggle({ label, value, onChange }: { label: string; value: boole
   return (
     <View style={styles.toggle}>
       <Text style={styles.toggleLabel}>{label}</Text>
-      <Switch value={value} onValueChange={onChange} trackColor={{ true: C.accent, false: C.border }} />
+      <Switch value={value} onValueChange={onChange} trackColor={{ true: C.success, false: C.border }} />
     </View>
   );
 }
@@ -171,9 +171,7 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: R.sm,
-    borderWidth: 1,
-    borderColor: C.border,
+    borderRadius: 999,
     backgroundColor: C.surfaceHigh,
   },
   chipText: { color: C.textDim, fontSize: 14, fontWeight: '600' },

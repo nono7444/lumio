@@ -30,7 +30,7 @@ function Root() {
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen
         name="media/[type]/[id]"
-        options={{ title: '', headerTransparent: true, headerBackButtonDisplayMode: 'minimal' }}
+        options={{ headerShown: false, animation: 'fade_from_bottom' }}
       />
     </Stack>
   );

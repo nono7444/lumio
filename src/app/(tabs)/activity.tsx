@@ -3,8 +3,10 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
-import { SetupPrompt } from '@/components/ui';
-import { C, R } from '@/constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { ScreenTitle, SetupPrompt } from '@/components/ui';
+import { C, R, TAB_SPACE } from '@/constants/theme';
 import { formatBytes, radarr, sonarr, type QueueItem } from '@/lib/arr';
 import { openMedia } from '@/lib/navigation';
 import { useSettings } from '@/lib/settings';
@@ -85,6 +87,7 @@ function QueueRow({ q }: { q: Row }) {
 
 export default function Activity() {
   const { settings } = useSettings();
+  const insets = useSafeAreaInsets();
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
@@ -141,18 +144,17 @@ export default function Activity() {
       data={rows}
       keyExtractor={(q) => `${q.source}:${q.id}`}
       renderItem={({ item }) => <QueueRow q={item} />}
-      contentContainerStyle={{ padding: 16, gap: 12 }}
+      contentContainerStyle={{ paddingTop: insets.top, paddingHorizontal: 16, paddingBottom: TAB_SPACE, gap: 12 }}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => load(true)} tintColor={C.accent} />}
       ListHeaderComponent={
-        errors.length ? (
-          <View style={{ gap: 4, marginBottom: 4 }}>
-            {errors.map((e) => (
-              <Text key={e} style={[styles.dim, { color: C.danger }]}>
-                {e}
-              </Text>
-            ))}
-          </View>
-        ) : null
+        <View style={{ marginHorizontal: -16 }}>
+          <ScreenTitle title="Activité" />
+          {errors.map((e) => (
+            <Text key={e} style={[styles.dim, { color: C.danger, marginHorizontal: 16, marginBottom: 4 }]}>
+              {e}
+            </Text>
+          ))}
+        </View>
       }
       ListEmptyComponent={
         !loading ? (
@@ -170,10 +172,8 @@ const styles = StyleSheet.create({
   row: {
     backgroundColor: C.surface,
     borderRadius: R.lg,
-    padding: 14,
+    padding: 16,
     gap: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: C.border,
   },
   rowHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   rowFoot: { flexDirection: 'row', justifyContent: 'space-between' },

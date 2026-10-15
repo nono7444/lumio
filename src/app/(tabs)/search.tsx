@@ -11,8 +11,10 @@ import {
   View,
 } from 'react-native';
 
-import { PosterCard, SetupPrompt } from '@/components/ui';
-import { C, R } from '@/constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { PosterCard, ScreenTitle, SetupPrompt } from '@/components/ui';
+import { C, R, TAB_SPACE } from '@/constants/theme';
 import { openMedia } from '@/lib/navigation';
 import { hasTmdb, useSettings } from '@/lib/settings';
 import { itemTitle, itemYear, tmdb, tmdbImg, type MediaType, type TmdbItem } from '@/lib/tmdb';
@@ -28,6 +30,7 @@ const FILTERS: { value: Filter; label: string }[] = [
 export default function Search() {
   const { settings } = useSettings();
   const badge = useLibrary();
+  const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
@@ -73,7 +76,8 @@ export default function Search() {
   if (!hasTmdb(settings)) return <SetupPrompt />;
 
   return (
-    <View style={{ flex: 1, backgroundColor: C.bg }}>
+    <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
+      <ScreenTitle title="Recherche" />
       <View style={styles.searchBar}>
         <Ionicons name="search" size={18} color={C.textDim} />
         <TextInput
@@ -94,7 +98,7 @@ export default function Search() {
             key={f.value}
             onPress={() => setFilter(f.value)}
             style={[styles.filter, filter === f.value && styles.filterOn]}>
-            <Text style={[styles.filterText, filter === f.value && { color: C.text }]}>{f.label}</Text>
+            <Text style={[styles.filterText, filter === f.value && { color: '#000' }]}>{f.label}</Text>
           </Pressable>
         ))}
       </View>
@@ -108,7 +112,7 @@ export default function Search() {
         numColumns={cols}
         keyExtractor={(r) => `${r.media_type}:${r.id}`}
         keyboardDismissMode="on-drag"
-        contentContainerStyle={{ padding: 16, gap: 18 }}
+        contentContainerStyle={{ padding: 16, paddingBottom: TAB_SPACE, gap: 18 }}
         columnWrapperStyle={{ gap }}
         renderItem={({ item: r }) => {
           const type = r.media_type as MediaType;
@@ -136,18 +140,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    margin: 16,
-    marginBottom: 0,
+    marginHorizontal: 16,
     paddingHorizontal: 14,
     backgroundColor: C.surfaceHigh,
     borderRadius: R.md,
-    borderWidth: 1,
-    borderColor: C.border,
   },
   input: { flex: 1, color: C.text, fontSize: 16, paddingVertical: 12 },
   filters: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginTop: 12 },
-  filter: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999, backgroundColor: C.surface, borderWidth: 1, borderColor: C.border },
-  filterOn: { backgroundColor: C.accentSoft, borderColor: C.accent },
+  filter: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 999, backgroundColor: C.surfaceHigh },
+  filterOn: { backgroundColor: C.text },
   filterText: { color: C.textDim, fontSize: 13, fontWeight: '700' },
   msg: { color: C.textDim, textAlign: 'center', marginTop: 24 },
 });

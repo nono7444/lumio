@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshControl, ScrollView, Text, View } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { Hero, HeroTopBar } from '@/components/hero';
 
 import { PosterItem, Row } from '@/components/ui';
-import { C } from '@/constants/theme';
+import { C, TAB_SPACE } from '@/constants/theme';
 import { openMedia, openStremioMeta } from '@/lib/navigation';
 import { Addon, hasTmdb, useSettings } from '@/lib/settings';
 import { itemTitle, itemYear, tmdb, tmdbImg, type MediaType } from '@/lib/tmdb';
@@ -70,30 +74,35 @@ function AddonRows({ addon, nonce }: { addon: Addon; nonce: number }) {
   );
 }
 
-function TrendingRow({ nonce }: { nonce: number }) {
+function Trending({ nonce, part }: { nonce: number; part: 'hero' | 'row' }) {
   const { settings } = useSettings();
   const badge = useLibrary();
   const { data, error, loading } = useAsync(() => tmdb.trending(settings), [settings.tmdbKey, nonce]);
-  const items: PosterItem[] = (data?.results ?? [])
-    .filter((r) => r.media_type === 'movie' || r.media_type === 'tv')
-    .map((r) => {
-      const type = r.media_type as MediaType;
-      return {
-        key: `${type}:${r.id}`,
-        title: itemTitle(r),
-        poster: tmdbImg(r.poster_path),
-        subtitle: itemYear(r),
-        badge: badge(type, r.id),
-        onPress: () => openMedia(type, r.id),
-      };
-    });
-  return <Row title="Tendances de la semaine" subtitle="TMDB" items={items} loading={loading} error={error} />;
+  const all = (data?.results ?? []).filter((r) => (r.media_type === 'movie' || r.media_type === 'tv') && r.poster_path);
+
+  if (part === 'hero') return loading ? <View style={{ height: 420 }} /> : <Hero items={all.slice(0, 6)} badge={badge} />;
+
+  const items: PosterItem[] = all.slice(6).map((r) => {
+    const type = r.media_type as MediaType;
+    return {
+      key: `${type}:${r.id}`,
+      title: itemTitle(r),
+      poster: tmdbImg(r.poster_path),
+      subtitle: itemYear(r),
+      badge: badge(type, r.id),
+      onPress: () => openMedia(type, r.id),
+    };
+  });
+  return <Row title="Tendances de la semaine" items={items} loading={loading} error={error} />;
 }
 
 export default function Home() {
   const { settings } = useSettings();
+  const insets = useSafeAreaInsets();
   const [nonce, setNonce] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+  const withHero = settings.showTrending && hasTmdb(settings);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -102,21 +111,40 @@ export default function Home() {
   }, []);
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: C.bg }}
-      contentContainerStyle={{ paddingTop: 12, paddingBottom: 40 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.accent} />}>
-      {settings.showTrending && hasTmdb(settings) && <TrendingRow nonce={nonce} />}
-      {settings.addons.map((a) => (
-        <AddonRows key={a.base} addon={a} nonce={nonce} />
-      ))}
-      {settings.addons.length === 0 && !hasTmdb(settings) && (
-        <View style={{ padding: 24 }}>
-          <Text style={{ color: C.textDim, textAlign: 'center' }}>
-            Ajoute un addon Stremio ou ta clé TMDB dans les réglages pour remplir l'accueil.
-          </Text>
-        </View>
-      )}
-    </ScrollView>
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <StatusBar style="light" />
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingTop: withHero ? 0 : insets.top + 56, paddingBottom: TAB_SPACE }}
+        scrollEventThrottle={32}
+        onScroll={(e) => setScrolled(e.nativeEvent.contentOffset.y > 40)}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.text} progressViewOffset={insets.top} />
+        }>
+        {withHero && <Trending part="hero" nonce={nonce} />}
+        <View style={{ height: 20 }} />
+        {settings.addons.map((a) => (
+          <AddonRows key={a.base} addon={a} nonce={nonce} />
+        ))}
+        {withHero && <Trending part="row" nonce={nonce} />}
+        {settings.addons.length === 0 && !hasTmdb(settings) && (
+          <View style={{ padding: 24 }}>
+            <Text style={{ color: C.textDim, textAlign: 'center' }}>
+              Ajoute un addon Stremio ou ta clé TMDB dans les réglages pour remplir l'accueil.
+            </Text>
+          </View>
+        )}
+      </ScrollView>
+
+      {/* Barre du haut : transparente sur le hero, voile noir une fois qu'on a défilé */}
+      <View style={[styles.top, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: scrolled || !withHero ? 'rgba(0,0,0,0.88)' : 'transparent' }]} />
+        <HeroTopBar title="Lumio" />
+      </View>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  top: { position: 'absolute', top: 0, left: 0, right: 0, paddingBottom: 10 },
+});
