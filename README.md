@@ -100,12 +100,8 @@ Les addons identifient les titres par IMDb (`tt…`) ou `tmdb:…`. Lumio passe 
 
 ## Android TV
 
-Le même code est compilé pour Android TV avec le fork [react-native-tvos](https://github.com/react-native-tvos/react-native-tvos), dans le job `android-tv` de la CI :
-- Lumio apparaît dans le lanceur TV, avec sa bannière.
-- Tout ce qui est cliquable s'entoure d'un contour blanc quand on le sélectionne à la télécommande.
-- Dans le lecteur, gauche/droite fait ±10 s quand les contrôles sont masqués, la touche lecture/pause marche, et avance/retour rapide font ±30 s.
-
-L'APK est publié à chaque build : `https://github.com/nono7444/lumio/releases/latest/download/lumio-tv.apk`. Pour l'installer sur la TV, utilise l'appli *Downloader* et le code ou le lien ci-dessus, ou bien `adb install`.
+L'appli TV est **Lumio TV**, un fork de NuvioTV (GPL-3.0) : https://github.com/nono7444/lumio-tv
+Pour l'installer, ouvre `lumio.wawanono.lol/tv` dans Downloader : c'est un raccourci du serveur Lumio vers le dernier APK.
 
 ## Lancer en dev
 
