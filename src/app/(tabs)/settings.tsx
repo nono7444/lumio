@@ -11,12 +11,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Field, ScreenTitle, Section } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { CalendarSection, ChatSection, ThemeSection } from '@/components/extra-sections';
-import { DiagnosticSection } from '@/components/diagnostic-section';
 import { SeerrSection } from '@/components/seerr-section';
 import { ServerStatusSection } from '@/components/server-status';
 import { Addon, DEFAULT_ADDON, isManager, useSettings } from '@/lib/settings';
 import { RATING_SOURCES } from '@/lib/better-posters';
 import { logout as logoutJellyfin } from '@/lib/jellyfin';
+import { useServerRequests } from '@/lib/requests';
 import { tmdb as tmdbApi } from '@/lib/tmdb';
 import {
   catalogKey,
@@ -97,6 +97,7 @@ export default function SettingsScreen() {
   const { settings, update } = useSettings();
   const insets = useSafeAreaInsets();
   const manager = isManager(settings);
+  const serverReq = useServerRequests();
   const [tmdb, setTmdb] = useState(settings.tmdbKey);
   const [testing, setTesting] = useState(false);
   const [addonUrl, setAddonUrl] = useState('');
@@ -135,7 +136,7 @@ export default function SettingsScreen() {
       setAddonUrl('');
       Alert.alert(
         'Addon ajouté',
-        [browsable.length ? `${browsable.length} catalogue(s) sur l'accueil` : null, streams ? 'streams disponibles sur les fiches' : null]
+        [browsable.length ? `${browsable.length} catalogue(s) sur l'accueil` : null, null]
           .filter(Boolean)
           .join(' · ')
       );
@@ -194,7 +195,14 @@ export default function SettingsScreen() {
 
         <ChatSection />
 
-        <SeerrSection />
+        {serverReq && settings.jellyfin?.isAdmin !== false ? (
+          <Section title="Demandes">
+            <Text style={styles.help}>Qui peut demander quoi : validation automatique ou par toi, quotas de films et de saisons.</Text>
+            <Button title="Utilisateurs et droits" icon="people-outline" variant="secondary" onPress={() => router.push('/users')} />
+          </Section>
+        ) : null}
+
+        {serverReq === false ? <SeerrSection /> : null}
 
         <ThemeSection />
 
@@ -208,17 +216,6 @@ export default function SettingsScreen() {
             value={settings.player}
             onChange={(v) => update({ player: v as 'mpv' | 'native' })}
           />
-          {settings.chatUrl ? (
-            <Picker
-              label="Source du stream (titre absent de Jellyfin)"
-              options={[
-                { value: 'server', label: 'Lien rdt / AllDebrid d’abord', hint: 'la release choisie par Radarr / Sonarr' },
-                { value: 'addons', label: 'Addons Stremio d’abord', hint: 'le plus rapide' },
-              ]}
-              value={settings.streamSource}
-              onChange={(v) => update({ streamSource: v as 'addons' | 'server' })}
-            />
-          ) : null}
           <Toggle label="Enchaîner l'épisode suivant" value={settings.autoNext} onChange={(v) => update({ autoNext: v })} />
         </Section>
 
@@ -350,8 +347,6 @@ export default function SettingsScreen() {
             )}
           </View>
         </Section>
-
-        <DiagnosticSection />
 
         <Text style={styles.version}>Lumio · v{Constants.expoConfig?.version ?? '1.0.0'}</Text>
       </ScrollView>

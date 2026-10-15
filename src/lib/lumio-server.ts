@@ -1,4 +1,4 @@
-// Client du serveur Lumio : téléchargements pour tous, file d'attente, état des services.
+// Client du serveur Lumio : file d'attente, état des services (les demandes sont dans requests.ts).
 import type { QueueItem } from './arr';
 import { serverBase, serverCall } from './chat';
 import type { Settings } from './settings';
@@ -19,26 +19,8 @@ export type ServerStatus = {
   jellyfin?: ServiceStatus;
   radarr?: ServiceStatus;
   sonarr?: ServiceStatus;
-  alldebrid?: ServiceStatus & { premium?: boolean };
 };
 export type ServerHealth = { ok: boolean; version?: string; features?: string[]; radarr?: boolean; sonarr?: boolean };
-
-export type GrabResult =
-  | { needFolder: true; folders: ServerFolder[]; default: string | null }
-  | { needFolder?: false; added: boolean; message: string; title?: string; folder?: string };
-
-export type GrabBody = {
-  type: 'movie' | 'tv';
-  tmdbId: number;
-  tvdbId?: number;
-  seasons?: number[];
-  rootFolderPath?: string;
-  seriesType?: 'anime' | 'standard';
-  askFolder?: boolean;
-  title?: string;
-  year?: string;
-  poster?: string;
-};
 
 // Le /health est public : on le garde en cache pour savoir si le serveur gère les téléchargements
 let healthCache: { url: string; at: number; value: ServerHealth | null } | null = null;
@@ -60,42 +42,10 @@ export async function serverHealth(s: Settings, force = false): Promise<ServerHe
   return value;
 }
 
-/** Le serveur Lumio sait-il lancer des téléchargements (Radarr ou Sonarr configuré) ? */
-export async function serverCanGrab(s: Settings, type?: 'movie' | 'tv') {
-  const h = await serverHealth(s);
-  if (!h?.features?.includes('grab')) return false;
-  if (type === 'movie') return Boolean(h.radarr);
-  if (type === 'tv') return Boolean(h.sonarr);
-  return Boolean(h.radarr || h.sonarr);
-}
-
-export type DebridStream = {
-  status: 'ready' | 'downloading' | 'searching' | 'absent' | 'imported' | 'unsupported' | 'error';
-  url?: string;
-  filename?: string;
-  message?: string;
-  progress?: number | null;
-  release?: string;
-};
-
-/** Le serveur peut-il fournir le lien AllDebrid du torrent choisi par Radarr / Sonarr ? */
-export async function serverHasDebrid(s: Settings) {
-  const h = await serverHealth(s);
-  return Boolean(h?.features?.includes('debrid'));
-}
-
 export const lumio = {
-  stream: (s: Settings, q: { type: 'movie' | 'tv'; tmdbId: number; tvdbId?: number; season?: number; episode?: number }) => {
-    const p = new URLSearchParams({ type: q.type, tmdbId: String(q.tmdbId) });
-    if (q.tvdbId) p.set('tvdbId', String(q.tvdbId));
-    if (q.season != null) p.set('season', String(q.season));
-    if (q.episode != null) p.set('episode', String(q.episode));
-    return serverCall<DebridStream>(s, `/api/stream?${p}`);
-  },
   status: (s: Settings) => serverCall<ServerStatus>(s, '/api/status'),
   folders: (s: Settings, type: 'movie' | 'tv') =>
     serverCall<{ folders: ServerFolder[]; default: string | null }>(s, `/api/arr/folders?type=${type}`),
-  grab: (s: Settings, body: GrabBody) => serverCall<GrabResult>(s, '/api/grab', { method: 'POST', body: JSON.stringify(body) }),
   queue: (s: Settings) =>
     serverCall<{ records: (QueueItem & { source: 'radarr' | 'sonarr' })[]; errors: string[] }>(s, '/api/queue'),
   /** Admin : envoie la config Radarr / Sonarr au serveur (les clés restent sur le serveur). */
@@ -105,7 +55,6 @@ export const lumio = {
       body: JSON.stringify({
         radarr: s.radarr.url && s.radarr.apiKey ? s.radarr : undefined,
         sonarr: s.sonarr.url && s.sonarr.apiKey ? s.sonarr : undefined,
-        alldebrid: s.alldebridKey ? { apiKey: s.alldebridKey } : undefined,
       }),
     }).finally(() => {
       healthCache = null;

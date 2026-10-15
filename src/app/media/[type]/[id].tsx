@@ -20,9 +20,10 @@ import {
 } from '@/lib/arr';
 import { jf, type JfItem } from '@/lib/jellyfin';
 import { askFolder } from '@/components/folder-picker';
+import { RequestSection } from '@/components/request-section';
 import { RequestBlock } from '@/components/request-block';
-import { grab } from '@/lib/grab';
-import { serverCanGrab } from '@/lib/lumio-server';
+import { grab, mediaFlavor } from '@/lib/grab';
+import { useServerRequests } from '@/lib/requests';
 import { chat } from '@/lib/chat';
 import { arrReady, hasTmdb, isManager, useSettings } from '@/lib/settings';
 import { pickLogo, tmdb, tmdbImg, type TmdbMovie, type TmdbTv } from '@/lib/tmdb';
@@ -54,21 +55,16 @@ export default function MediaScreen() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [jfItem, setJfItem] = useState<JfItem | null>(null);
-  const [serverGrab, setServerGrab] = useState(false);
 
   const tmdbId = Number(id);
   const isTv = type === 'tv';
   const service = isTv ? settings.sonarr : settings.radarr;
   const serviceName = isTv ? 'Sonarr' : 'Radarr';
   const manager = isManager(settings);
-  const configured = manager && Boolean(service.url && service.apiKey);
+  // Serveur Lumio : demandes façon Seerr pour tout le monde (admin compris)
+  const serverReq = useServerRequests();
+  const configured = manager && serverReq === false && Boolean(service.url && service.apiKey);
   const ready = arrReady(service);
-
-  // Compte non-admin : le serveur Lumio peut-il lancer le téléchargement ?
-  useEffect(() => {
-    if (manager) return;
-    serverCanGrab(settings, isTv ? 'tv' : 'movie').then(setServerGrab);
-  }, [manager, settings, isTv]);
 
   const load = useCallback(async () => {
     try {
@@ -231,11 +227,11 @@ export default function MediaScreen() {
         </View>
 
         <View style={{ paddingHorizontal: 16, gap: 20, marginTop: 4 }}>
-          {/* ——— Lecture unifiée : Jellyfin si dispo, sinon streaming + téléchargement ——— */}
-          {(jfItem || (imdbId && settings.addons.length > 0)) && (
-            <View style={{ gap: 10 }}>
+          {/* ——— Lecture : uniquement depuis Jellyfin ——— */}
+          {jfItem ? (
+            <View style={{ flexDirection: 'row', gap: 10 }}>
               <Button
-                title={jfItem ? 'Lire' : details.kind === 'tv' ? 'Lire le premier épisode non vu' : 'Lire maintenant'}
+                title="Lire"
                 icon="play"
                 onPress={() =>
                   router.push({
@@ -243,45 +239,34 @@ export default function MediaScreen() {
                     params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title },
                   })
                 }
+                style={{ flex: 1.4 }}
               />
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                {imdbId && settings.addons.length > 0 ? (
-                  <Button
-                    title={details.kind === 'tv' ? 'Épisodes' : 'Sources'}
-                    icon={details.kind === 'tv' ? 'list' : 'layers-outline'}
-                    variant="glass"
-                    onPress={() =>
-                      router.push({
-                        pathname: '/streams',
-                        params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId, title, grab: '1' },
-                      })
-                    }
-                    style={{ flex: 1 }}
-                  />
-                ) : null}
-                {jfItem ? (
-                  <Button
-                    title="Jellyfin"
-                    icon="albums-outline"
-                    variant="glass"
-                    onPress={() => router.push({ pathname: '/jellyfin/[id]', params: { id: jfItem.Id } })}
-                    style={{ flex: 1 }}
-                  />
-                ) : null}
-              </View>
-              {!jfItem && (manager ? configured && (ready || details.arr) : serverGrab || settings.seerr?.url) ? (
-                <Text style={[styles.dim, { textAlign: 'center' }]}>
-                  {manager
-                    ? details.kind === 'movie'
-                      ? 'Pas encore sur Jellyfin : lecture en streaming, et le film part dans Radarr en même temps.'
-                      : 'Pas encore sur Jellyfin : lecture en streaming, et la série part dans Sonarr en même temps.'
-                    : serverGrab
-                      ? 'Pas encore sur Jellyfin : lecture en streaming, et le téléchargement se lance en même temps.'
-                      : 'Pas encore sur Jellyfin : lecture en streaming, et une demande est envoyée en même temps.'}
-                </Text>
-              ) : null}
+              <Button
+                title="Jellyfin"
+                icon="albums-outline"
+                variant="glass"
+                onPress={() => router.push({ pathname: '/jellyfin/[id]', params: { id: jfItem.Id } })}
+                style={{ flex: 1 }}
+              />
             </View>
-          )}
+          ) : null}
+
+          {/* ——— Demande façon Seerr (serveur Lumio) ——— */}
+          {serverReq ? (
+            <RequestSection
+              target={{
+                type: details.kind,
+                tmdbId,
+                tvdbId: details.kind === 'tv' ? details.data.external_ids?.tvdb_id : undefined,
+                title,
+                year: date?.slice(0, 4),
+                poster: tmdbImg(d.poster_path, 'w342'),
+                backdrop: tmdbImg(d.backdrop_path, 'w780'),
+                seasons: details.kind === 'tv' ? details.data.seasons : [],
+                flavor: mediaFlavor(details.data),
+              }}
+            />
+          ) : null}
 
           {/* ——— Proposer le titre dans le chat famille ——— */}
           {settings.chatUrl && settings.jellyfin ? (
@@ -313,26 +298,11 @@ export default function MediaScreen() {
             />
           ) : null}
 
-          {/* ——— Utilisateur non-admin : téléchargement via le serveur Lumio, sinon demande Seerr ——— */}
-          {!manager && !jfItem && (serverGrab ? (
-            <Button
-              title={details.kind === 'movie' ? 'Télécharger sur le serveur' : 'Télécharger la série'}
-              icon="cloud-download-outline"
-              variant="glass"
-              loading={busy}
-              onPress={() =>
-                run(
-                  () => grab(settings, { type: details.kind, tmdbId, allSeasons: true }, { chooseFolder: askFolder }),
-                  'Téléchargement lancé.'
-                )
-              }
-            />
-          ) : (
-            <RequestBlock type={details.kind} tmdbId={tmdbId} />
-          ))}
+          {/* ——— Sans serveur Lumio : demande Seerr pour les non-admins ——— */}
+          {serverReq === false && !manager && !jfItem ? <RequestBlock type={details.kind} tmdbId={tmdbId} /> : null}
 
           {/* ——— Action principale (admin) ——— */}
-          {!manager ? null : !configured ? (
+          {!manager || serverReq !== false ? null : !configured ? (
             <Notice icon="information-circle-outline" text={`Connecte ${serviceName} dans les réglages pour l'ajouter.`} />
           ) : details.arrError ? (
             <Notice icon="warning-outline" color={C.danger} text={`${serviceName} : ${details.arrError}`} />

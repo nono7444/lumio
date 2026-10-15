@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 
@@ -10,7 +10,9 @@ import { Requests } from '@/components/requests-list';
 import { ScreenTitle, SegChip, SetupPrompt } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { formatBytes, radarr, sonarr, type QueueItem } from '@/lib/arr';
-import { lumio, serverCanGrab } from '@/lib/lumio-server';
+import { ServerRequests } from '@/components/server-requests';
+import { lumio } from '@/lib/lumio-server';
+import { useServerRequests } from '@/lib/requests';
 import { openMedia } from '@/lib/navigation';
 import { isManager, useSettings } from '@/lib/settings';
 
@@ -207,23 +209,30 @@ export default function Activity() {
   const { settings } = useSettings();
   const manager = isManager(settings);
   const hasSeerr = Boolean(settings.seerr?.url);
-  const [viaServer, setViaServer] = useState(false);
-  const [tab, setTab] = useState<'downloads' | 'requests'>(manager ? 'downloads' : 'requests');
+  const serverReq = useServerRequests();
+  const [tab, setTab] = useState<'downloads' | 'requests'>('requests');
 
-  useEffect(() => {
-    if (manager) return;
-    serverCanGrab(settings).then((ok) => {
-      setViaServer(ok);
-      if (ok) setTab('downloads');
-    });
-  }, [manager, settings]);
+  // ——— Serveur Lumio : page Demandes façon Seerr + file de téléchargement ———
+  if (serverReq) {
+    const header = (
+      <View>
+        <ScreenTitle title="Demandes" />
+        <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 12 }}>
+          <SegChip label="Demandes" on={tab === 'requests'} onPress={() => setTab('requests')} />
+          <SegChip label="Téléchargements" on={tab === 'downloads'} onPress={() => setTab('downloads')} />
+        </View>
+      </View>
+    );
+    if (tab === 'downloads') return <Downloads header={header} viaServer />;
+    return <ServerRequests header={header} />;
+  }
 
-  const canDownloads = manager || viaServer;
-
+  // ——— Sans serveur Lumio : Radarr / Sonarr en direct (admin) et Seerr ———
+  const showTabs = manager && hasSeerr;
   const header = (
     <View>
       <ScreenTitle title="Activité" />
-      {canDownloads && hasSeerr && (
+      {showTabs && (
         <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 14 }}>
           <SegChip label="Téléchargements" on={tab === 'downloads'} onPress={() => setTab('downloads')} />
           <SegChip label="Demandes" on={tab === 'requests'} onPress={() => setTab('requests')} />
@@ -231,7 +240,6 @@ export default function Activity() {
       )}
     </View>
   );
-
-  if (canDownloads && (tab === 'downloads' || !hasSeerr)) return <Downloads header={header} viaServer={!manager} />;
+  if (manager && (tab === 'downloads' || !hasSeerr)) return <Downloads header={header} />;
   return <Requests header={header} admin={manager} />;
 }

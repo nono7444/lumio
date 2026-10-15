@@ -38,21 +38,6 @@ export function SeerrSection() {
     }
   }
 
-  async function invite() {
-    const q = new URLSearchParams();
-    if (settings.jellyfin?.url) q.set('jf', settings.jellyfin.url);
-    if (settings.seerr?.url) q.set('seerr', settings.seerr.url);
-    if (settings.chatUrl) q.set('chat', settings.chatUrl);
-    if (settings.tmdbKey) q.set('tmdb', settings.tmdbKey);
-    if (settings.addons.length) q.set('addons', settings.addons.map((a) => a.base).join('|'));
-    if (userName) q.set('name', userName);
-    const link = `lumio://invite?${q}`;
-    await Share.share({
-      message:
-        `Installe Lumio puis ouvre ce lien pour tout configurer automatiquement (connexion avec ton compte Jellyfin) :\n\n${link}`,
-    });
-  }
-
   return (
     <Section title="Demandes Seerr (facultatif)">
       <Text style={{ color: C.textDim, fontSize: 13, lineHeight: 19, marginBottom: 12 }}>
@@ -86,14 +71,37 @@ export function SeerrSection() {
         />
       )}
       <Button title="Connecter" icon="flash-outline" onPress={connect} loading={busy} disabled={!url.trim()} />
-      {manager && settings.jellyfin && (
-        <View style={{ marginTop: 10 }}>
-          <Button title="Inviter quelqu'un" icon="share-outline" variant="secondary" onPress={invite} />
-          <Text style={{ color: C.textFaint, fontSize: 12, marginTop: 6, lineHeight: 17 }}>
-            Le lien contient les adresses de tes serveurs, ta clé TMDB et tes addons, jamais tes clés Radarr ou Sonarr.
-          </Text>
-        </View>
-      )}
+      {!settings.chatUrl ? <InviteButton /> : null}
     </Section>
+  );
+}
+
+/** Lien d'invitation pour un proche (admin) : serveurs, clé TMDB, addons — jamais les clés Radarr/Sonarr. */
+export function InviteButton() {
+  const { settings } = useSettings();
+  const userName = settings.jellyfin?.userName;
+  async function invite() {
+    const q = new URLSearchParams();
+    if (settings.jellyfin?.url) q.set('jf', settings.jellyfin.url);
+    if (settings.seerr?.url) q.set('seerr', settings.seerr.url);
+    if (settings.chatUrl) q.set('chat', settings.chatUrl);
+    if (settings.tmdbKey) q.set('tmdb', settings.tmdbKey);
+    if (settings.addons.length) q.set('addons', settings.addons.map((a) => a.base).join('|'));
+    if (userName) q.set('name', userName);
+    const link = `lumio://invite?${q}`;
+    await Share.share({
+      message:
+        `Installe Lumio puis ouvre ce lien pour tout configurer automatiquement (connexion avec ton compte Jellyfin) :\n\n${link}`,
+    });
+  }
+
+  if (!isManager(settings) || !settings.jellyfin) return null;
+  return (
+    <View style={{ marginTop: 10 }}>
+      <Button title="Inviter quelqu'un" icon="share-outline" variant="secondary" onPress={invite} />
+      <Text style={{ color: C.textFaint, fontSize: 12, marginTop: 6, lineHeight: 17 }}>
+        Le lien contient les adresses de tes serveurs, ta clé TMDB et tes addons, jamais tes clés Radarr ou Sonarr.
+      </Text>
+    </View>
   );
 }

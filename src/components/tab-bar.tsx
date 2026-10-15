@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { tap } from '@/components/ui';
 import { C } from '@/constants/theme';
 import { useUnreadChat } from '@/lib/chat';
+import { usePendingRequests } from '@/lib/requests';
 import { orderTabs } from '@/lib/home-layout';
 import { useSeason } from '@/lib/seasons';
 import { useSettings } from '@/lib/settings';
@@ -21,7 +22,7 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   library: 'albums',
   calendar: 'calendar',
   chat: 'chatbubbles',
-  activity: 'cloud-download',
+  activity: 'file-tray-full',
 };
 
 // Libellés courts : seul l'onglet actif affiche le sien, à côté de l'icône
@@ -31,7 +32,7 @@ const SHORT: Record<string, string> = {
   library: 'Biblio',
   calendar: 'Agenda',
   chat: 'Chat',
-  activity: 'Activité',
+  activity: 'Demandes',
   settings: 'Profil',
 };
 
@@ -42,6 +43,7 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
   const season = useSeason();
   const activeColor = season?.accent ?? C.text;
   const unread = useUnreadChat();
+  const pending = usePendingRequests();
   const initial = (settings.jellyfin?.userName ?? 'L').slice(0, 1).toUpperCase();
 
   const visible = state.routes.filter((r) => {
@@ -103,7 +105,9 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
                   {short}
                 </Text>
               )}
-              {route.name === 'chat' && unread > 0 && <View style={[styles.unread, focused && { right: 8 }]} />}
+              {((route.name === 'chat' && unread > 0) || (route.name === 'activity' && pending > 0)) && (
+                <View style={[styles.unread, focused && { right: 8 }]} />
+              )}
             </Pressable>
           );
         })}

@@ -97,13 +97,6 @@ export function ServerStatusSection() {
     if (r || direct || viaServer?.radarr) out.push({ key: 'radarr', name: 'Radarr', icon: 'film-outline', status: r });
     if (so || direct || viaServer?.sonarr) out.push({ key: 'sonarr', name: 'Sonarr', icon: 'tv-outline', status: so });
     if (settings.chatUrl) out.push({ key: 'lumio', name: 'Serveur Lumio', icon: 'server-outline', status: lumioS });
-    if (viaServer?.alldebrid)
-      out.push({
-        key: 'alldebrid',
-        name: 'AllDebrid',
-        icon: 'flash-outline',
-        status: { ...viaServer.alldebrid, name: viaServer.alldebrid.premium === false ? 'compte non premium' : viaServer.alldebrid.name },
-      });
     if (settings.seerr?.url) out.push({ key: 'seerr', name: 'Seerr', icon: 'paper-plane-outline', status: seerrS });
 
     setRows(out);

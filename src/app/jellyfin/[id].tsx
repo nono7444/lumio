@@ -50,7 +50,7 @@ const SORTS = [
 function FolderGrid({ folder }: { folder: JfItem }) {
   const { settings } = useSettings();
   const insets = useSafeAreaInsets();
-  const { width, height: screenH } = useWindowDimensions();
+  const { width } = useWindowDimensions();
   const [sortIdx, setSortIdx] = useState(0);
   const [filter, setFilter] = useState('');
   const [genre, setGenre] = useState<string | null>(null);
@@ -191,8 +191,6 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
     jf.similar(settings, item.Id).then(setSimilar).catch(() => {});
   }, [settings, item.Id]);
 
-  const tmdbId = item.ProviderIds?.Tmdb;
-  const canStream = Boolean(tmdbId && settings.addons.length);
 
   async function toggleFav() {
     const next = !fav;
@@ -287,26 +285,6 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
               ) : null}
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" onPress={toggleFav} style={{ width: 54, paddingHorizontal: 0 }} />
-                {canStream && (
-                  <Button
-                    title="Épisodes manquants"
-                    icon="cloud-outline"
-                    variant="glass"
-                    onPress={() =>
-                      router.push({
-                        pathname: '/streams',
-                        params: {
-                          type: 'tv',
-                          tmdbId: String(tmdbId),
-                          imdb: item.ProviderIds?.Imdb ?? '',
-                          title: item.Name,
-                          grab: '1',
-                        },
-                      })
-                    }
-                    style={{ flex: 1 }}
-                  />
-                )}
               </View>
             </View>
           )}

@@ -80,10 +80,6 @@ export type Settings = {
   seasonTheme: string;
   /** Serveur du chat famille */
   chatUrl: string;
-  /** Source de stream essayée en premier quand le titre n'est pas sur Jellyfin */
-  streamSource: 'addons' | 'server';
-  /** Admin : clé AllDebrid envoyée au serveur Lumio (stream des téléchargements en cours) */
-  alldebridKey: string;
   /** Moteur de lecture : mpv (lit tout, MKV inclus) ou lecteur natif du téléphone */
   player: 'mpv' | 'native';
   /** Clé API v3 ou jeton v4 TMDB (obligatoire : recherche + fiches) */
@@ -117,8 +113,6 @@ const DEFAULTS: Settings = {
   calendarAddon: 'https://releasio-pearl.vercel.app/%7B%22posterSource%22%3A%22btttr%22%2C%22badge%22%3A%22bar%22%2C%22availability%22%3A%22all%22%2C%22titleMode%22%3A%22title%22%7D',
   seasonTheme: 'auto',
   chatUrl: '',
-  alldebridKey: '',
-  streamSource: 'server',
   tmdbKey: '',
   language: 'fr-FR',
   radarr: { url: '', apiKey: '', searchOnAdd: true, minimumAvailability: 'released' },

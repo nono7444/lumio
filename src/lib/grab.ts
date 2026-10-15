@@ -1,12 +1,10 @@
-// Lance le téléchargement d'un titre, en demandant le dossier (Films, Kids, Anime…) si le titre est nouveau :
-// - admin : directement dans Radarr / Sonarr ;
-// - autres comptes : via le serveur Lumio (les clés restent sur le serveur) ;
-// - sinon, demande Seerr.
+// Sans serveur Lumio : l'admin ajoute directement dans Radarr / Sonarr (avec choix du dossier),
+// les autres passent par une demande Seerr. Avec le serveur Lumio, tout passe par requests.ts.
 import { arr, invalidateLibrary, radarr, sonarr } from './arr';
-import { lumio, serverCanGrab, type ServerFolder } from './lumio-server';
+import type { ServerFolder } from './lumio-server';
 import { seerr } from './seerr';
 import { arrReady, isManager, type Settings } from './settings';
-import { tmdb, tmdbImg, type TmdbMovie, type TmdbTv } from './tmdb';
+import { tmdb, type TmdbMovie, type TmdbTv } from './tmdb';
 
 export type GrabTarget = { type: 'movie' | 'tv'; tmdbId: number; season?: number; seasons?: number[]; allSeasons?: boolean };
 
@@ -71,10 +69,7 @@ const isAnimeFolder = (p?: string | null) => Boolean(p && ANIME_RE.test(lastPart
 const SKIPPED = 'Pas de téléchargement : lecture en streaming seulement.';
 
 export async function grab(s: Settings, t: GrabTarget, opts: GrabOptions = {}): Promise<string | null> {
-  if (!isManager(s)) {
-    if (await serverCanGrab(s, t.type)) return grabViaServer(s, t, opts);
-    return request(s, t);
-  }
+  if (!isManager(s)) return request(s, t);
 
   if (t.type === 'movie') {
     if (!s.radarr.url || !s.radarr.apiKey) return null;
@@ -119,33 +114,6 @@ function wantedSeasons(tv: TmdbTv, t: GrabTarget) {
   if (t.seasons?.length) return t.seasons;
   if (t.allSeasons || !t.season) return all;
   return [t.season];
-}
-
-/** Compte non-admin : le serveur Lumio ajoute le titre dans Radarr / Sonarr. */
-async function grabViaServer(s: Settings, t: GrabTarget, opts: GrabOptions): Promise<string | null> {
-  const details = t.type === 'movie' ? await tmdb.movie(s, t.tmdbId) : await tmdb.tv(s, t.tmdbId);
-  const title = 'title' in details ? details.title : details.name;
-  const date = 'title' in details ? details.release_date : details.first_air_date;
-  const tvdbId = t.type === 'tv' ? ((details as TmdbTv).external_ids?.tvdb_id ?? undefined) : undefined;
-  if (t.type === 'tv' && !tvdbId) throw new Error('Pas d’identifiant TVDB sur TMDB : Sonarr ne peut pas l’ajouter.');
-  const body = {
-    type: t.type,
-    tmdbId: t.tmdbId,
-    title,
-    year: date?.slice(0, 4),
-    poster: tmdbImg(details.poster_path, 'w342'),
-    tvdbId,
-    seasons: t.type === 'tv' ? wantedSeasons(details as TmdbTv, t) : undefined,
-  };
-
-  let res = await lumio.grab(s, { ...body, askFolder: true });
-  if (res.needFolder) {
-    const folder = await pick(opts, t.type, details, res.folders, res.default);
-    if (folder === null) return opts.streaming ? SKIPPED : null;
-    res = await lumio.grab(s, { ...body, rootFolderPath: folder, seriesType: isAnimeFolder(folder) ? 'anime' : undefined });
-  }
-  if (res.needFolder) return null;
-  return res.message || null;
 }
 
 /** Demande Seerr (quand le serveur Lumio ne gère pas les téléchargements). */

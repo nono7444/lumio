@@ -107,7 +107,7 @@ export const TAB_LABELS: Record<string, string> = {
   library: 'Bibliothèque',
   calendar: 'Calendrier',
   chat: 'Chat',
-  activity: 'Activité',
+  activity: 'Demandes',
   settings: 'Profil',
 };
 

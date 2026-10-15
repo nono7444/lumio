@@ -225,7 +225,7 @@ export const sonarr = {
 
 // ——— Index de la bibliothèque (pour les badges) ———
 
-export type LibraryEntry = { state: 'available' | 'partial' | 'monitored' | 'missing'; label: string; color: string };
+export type LibraryEntry = { state: 'available' | 'partial' | 'monitored' | 'missing' | 'pending'; label: string; color: string };
 
 export function movieState(m: RadarrMovie): LibraryEntry {
   if (m.hasFile) return { state: 'available', label: 'Disponible', color: '#2FBF71' };

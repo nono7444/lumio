@@ -1,6 +1,11 @@
-// Serveur Lumio : chat familial + téléchargements Radarr/Sonarr pour tous + état des services.
+// Serveur Lumio : chat familial + demandes façon Seerr (Radarr / Sonarr) + état des services.
 // Sans dépendance. Authentification : le jeton Jellyfin de l'appli, vérifié auprès de ton serveur Jellyfin.
-// Les clés Radarr/Sonarr restent ici, jamais sur les téléphones.
+// Les clés Radarr / Sonarr restent ici, jamais sur les téléphones.
+//
+// Le fonctionnement des demandes reprend celui de Seerr (projet MIT) :
+// statuts de demande EN ATTENTE / APPROUVÉE / REFUSÉE / ÉCHEC / TERMINÉE,
+// statuts de média INCONNU / EN ATTENTE / EN COURS / PARTIELLEMENT DISPONIBLE / DISPONIBLE,
+// validation automatique par utilisateur, quotas, demandes saison par saison.
 'use strict';
 
 const http = require('http');
@@ -11,12 +16,17 @@ const crypto = require('crypto');
 const PORT = Number(process.env.PORT || 3456);
 const JELLYFIN_URL = (process.env.JELLYFIN_URL || 'http://jellyfin:8096').replace(/\/+$/, '');
 const DATA_DIR = process.env.DATA_DIR || '/data';
-const FILE = path.join(DATA_DIR, 'messages.json');
+const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
-const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
+const REQUESTS_FILE = path.join(DATA_DIR, 'requests.json');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '2.1.0';
+const VERSION = '3.0.0';
+
+// Mêmes valeurs que Seerr
+const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
+const MediaStatus = { UNKNOWN: 1, PENDING: 2, PROCESSING: 3, PARTIALLY_AVAILABLE: 4, AVAILABLE: 5 };
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -34,8 +44,20 @@ function writeJson(file, data) {
   fs.renameSync(tmp, file);
 }
 
-let messages = readJson(FILE, []);
-let history = readJson(HISTORY_FILE, []);
+let messages = readJson(MESSAGES_FILE, []);
+let config = readJson(CONFIG_FILE, {});
+let requests = readJson(REQUESTS_FILE, []);
+let userPrefs = readJson(USERS_FILE, {});
+
+const timers = {};
+function persist(file, getData) {
+  clearTimeout(timers[file]);
+  timers[file] = setTimeout(() => writeJson(file, getData()), 250);
+}
+const saveMessages = () => persist(MESSAGES_FILE, () => messages);
+const saveRequests = () => persist(REQUESTS_FILE, () => requests);
+const saveUsers = () => persist(USERS_FILE, () => userPrefs);
+const saveConfig = () => writeJson(CONFIG_FILE, config);
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -44,8 +66,7 @@ class HttpError extends Error {
   }
 }
 
-// ——— Config Radarr / Sonarr : envoyée depuis l'appli par un admin, ou par variables d'environnement ———
-let config = readJson(CONFIG_FILE, {});
+// ——— Config Radarr / Sonarr : envoyée depuis l'appli par un admin, ou variables d'environnement ———
 function arrConfig(kind) {
   const c = { ...(config[kind] || {}) };
   const env = kind.toUpperCase();
@@ -55,32 +76,70 @@ function arrConfig(kind) {
   return c.url && c.apiKey ? c : null;
 }
 const label = (kind) => (kind === 'radarr' ? 'Radarr' : 'Sonarr');
+const kindOf = (type) => (type === 'tv' ? 'sonarr' : 'radarr');
 
-let saveTimer = null;
-function save() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => writeJson(FILE, messages), 300);
+// Réglages généraux (comme « Paramètres → Utilisateurs » de Seerr)
+function settings() {
+  return {
+    defaultAutoApprove: config.defaultAutoApprove !== false,
+    defaultMovieQuotaLimit: Number(config.defaultMovieQuotaLimit) || 0,
+    defaultMovieQuotaDays: Number(config.defaultMovieQuotaDays) || 7,
+    defaultTvQuotaLimit: Number(config.defaultTvQuotaLimit) || 0,
+    defaultTvQuotaDays: Number(config.defaultTvQuotaDays) || 7,
+    usersSeeAllRequests: config.usersSeeAllRequests === true,
+  };
 }
 
-// ——— Vérification du jeton Jellyfin (mise en cache 10 min) ———
-const users = new Map();
+// ——— Vérification du jeton Jellyfin (cache 10 min) ———
+const sessions = new Map();
+
+function jfHeaders(token) {
+  return { Authorization: `MediaBrowser Client="LumioServer", Device="server", DeviceId="lumio-server", Version="${VERSION}", Token="${token}"` };
+}
 
 async function whoAmI(token) {
   if (!token) return null;
-  const hit = users.get(token);
+  const hit = sessions.get(token);
   if (hit && hit.until > Date.now()) return hit.user;
   try {
-    const res = await fetch(`${JELLYFIN_URL}/Users/Me`, {
-      headers: { Authorization: `MediaBrowser Client="LumioServer", Device="server", DeviceId="lumio-server", Version="${VERSION}", Token="${token}"` },
-    });
+    const res = await fetch(`${JELLYFIN_URL}/Users/Me`, { headers: jfHeaders(token) });
     if (!res.ok) return null;
     const me = await res.json();
-    const user = { id: me.Id, name: me.Name, admin: Boolean(me.Policy && me.Policy.IsAdministrator) };
-    users.set(token, { user, until: Date.now() + 10 * 60 * 1000 });
+    const user = { id: me.Id, name: me.Name, admin: Boolean(me.Policy && me.Policy.IsAdministrator), token };
+    sessions.set(token, { user, until: Date.now() + 10 * 60 * 1000 });
     return user;
   } catch {
     return null;
   }
+}
+
+/** Droits d'un utilisateur : l'admin Jellyfin a tous les droits. */
+function permissionsOf(user) {
+  const s = settings();
+  const p = userPrefs[user.id] || {};
+  return {
+    admin: user.admin,
+    autoApprove: user.admin || (p.autoApprove != null ? Boolean(p.autoApprove) : s.defaultAutoApprove),
+    movieQuotaLimit: user.admin ? 0 : p.movieQuotaLimit != null ? Number(p.movieQuotaLimit) : s.defaultMovieQuotaLimit,
+    movieQuotaDays: p.movieQuotaDays != null ? Number(p.movieQuotaDays) : s.defaultMovieQuotaDays,
+    tvQuotaLimit: user.admin ? 0 : p.tvQuotaLimit != null ? Number(p.tvQuotaLimit) : s.defaultTvQuotaLimit,
+    tvQuotaDays: p.tvQuotaDays != null ? Number(p.tvQuotaDays) : s.defaultTvQuotaDays,
+  };
+}
+
+/** Quota restant, compté comme Seerr : films = nombre de demandes, séries = nombre de saisons. */
+function quotaOf(user) {
+  const perm = permissionsOf(user);
+  const since = (days) => Date.now() - days * 86400000;
+  const mine = requests.filter((r) => r.requestedBy.id === user.id && r.status !== RequestStatus.DECLINED);
+  const movieUsed = mine.filter((r) => r.type === 'movie' && Date.parse(r.createdAt) > since(perm.movieQuotaDays)).length;
+  const tvUsed = mine
+    .filter((r) => r.type === 'tv' && Date.parse(r.createdAt) > since(perm.tvQuotaDays))
+    .reduce((n, r) => n + (r.seasons || []).length, 0);
+  return {
+    movie: { limit: perm.movieQuotaLimit, days: perm.movieQuotaDays, used: movieUsed, remaining: perm.movieQuotaLimit ? Math.max(0, perm.movieQuotaLimit - movieUsed) : null },
+    tv: { limit: perm.tvQuotaLimit, days: perm.tvQuotaDays, used: tvUsed, remaining: perm.tvQuotaLimit ? Math.max(0, perm.tvQuotaLimit - tvUsed) : null },
+  };
 }
 
 // ——— Appels Radarr / Sonarr ———
@@ -128,12 +187,10 @@ async function folders(kind) {
   };
 }
 
-async function qualityProfile(kind) {
-  const c = arrConfig(kind);
-  if (c.qualityProfileId) return c.qualityProfileId;
+async function profiles(kind) {
   const list = await arr(kind, '/qualityprofile');
-  if (!list.length) throw new HttpError(500, 'Aucun profil de qualité');
-  return list[0].id;
+  const c = arrConfig(kind);
+  return { profiles: list.map((p) => ({ id: p.id, name: p.name })), default: c.qualityProfileId || (list[0] && list[0].id) || null };
 }
 
 async function checkFolder(kind, wanted) {
@@ -145,84 +202,82 @@ async function checkFolder(kind, wanted) {
   return hit.path;
 }
 
-async function grabMovie(b) {
-  const tmdbId = Number(b.tmdbId);
-  if (!tmdbId) throw new HttpError(400, 'tmdbId manquant');
-  const existing = (await arr('radarr', `/movie?tmdbId=${tmdbId}`))[0];
-  if (existing) {
-    if (existing.hasFile) return { added: false, message: 'Ce film est déjà disponible.', title: existing.title };
-    if (!existing.monitored) {
-      await arr('radarr', `/movie/${existing.id}`, { method: 'PUT', body: JSON.stringify({ ...existing, monitored: true }) });
-    }
-    await arr('radarr', '/command', { method: 'POST', body: JSON.stringify({ name: 'MoviesSearch', movieIds: [existing.id] }) });
-    return { added: false, message: 'Déjà dans Radarr : recherche relancée.', title: existing.title };
+async function checkProfile(kind, wanted) {
+  const { profiles: list, default: def } = await profiles(kind);
+  if (!wanted) {
+    if (!def) throw new HttpError(500, 'Aucun profil de qualité');
+    return def;
   }
-  if (b.askFolder && !b.rootFolderPath) return { needFolder: true, ...(await folders('radarr')) };
-  const c = arrConfig('radarr');
-  const found = await arr('radarr', `/movie/lookup/tmdb?tmdbId=${tmdbId}`);
-  const rootFolderPath = await checkFolder('radarr', b.rootFolderPath);
-  const movie = await arr('radarr', '/movie', {
-    method: 'POST',
-    body: JSON.stringify({
-      ...found,
-      id: undefined,
-      qualityProfileId: await qualityProfile('radarr'),
-      rootFolderPath,
-      monitored: true,
-      minimumAvailability: c.minimumAvailability || 'released',
-      addOptions: { searchForMovie: c.searchOnAdd !== false, monitor: 'movieOnly' },
-    }),
-  });
-  return { added: true, message: `Ajouté dans ${rootFolderPath} : le film se télécharge.`, title: movie.title, folder: rootFolderPath };
+  if (!list.some((p) => p.id === Number(wanted))) throw new HttpError(400, 'Profil de qualité inconnu');
+  return Number(wanted);
 }
 
-async function grabSeries(b) {
-  const tvdbId = Number(b.tvdbId);
-  if (!tvdbId) throw new HttpError(400, 'tvdbId manquant');
-  const seasons = Array.isArray(b.seasons) ? b.seasons.map(Number).filter((n) => n > 0) : [];
+const isAnimeFolder = (p) => Boolean(p && /anim[eé]/i.test(String(p).replace(/\/+$/, '').split('/').pop() || ''));
+
+/** Envoie une demande approuvée à Radarr / Sonarr. */
+async function sendToArr(r) {
+  if (r.type === 'movie') {
+    const c = arrConfig('radarr');
+    const existing = (await arr('radarr', `/movie?tmdbId=${r.tmdbId}`))[0];
+    if (existing) {
+      if (existing.hasFile) return;
+      if (!existing.monitored) await arr('radarr', `/movie/${existing.id}`, { method: 'PUT', body: JSON.stringify({ ...existing, monitored: true }) });
+      await arr('radarr', '/command', { method: 'POST', body: JSON.stringify({ name: 'MoviesSearch', movieIds: [existing.id] }) });
+      return;
+    }
+    const found = await arr('radarr', `/movie/lookup/tmdb?tmdbId=${r.tmdbId}`);
+    r.rootFolderPath = await checkFolder('radarr', r.rootFolderPath);
+    r.qualityProfileId = await checkProfile('radarr', r.qualityProfileId);
+    await arr('radarr', '/movie', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...found,
+        id: undefined,
+        qualityProfileId: r.qualityProfileId,
+        rootFolderPath: r.rootFolderPath,
+        monitored: true,
+        minimumAvailability: c.minimumAvailability || 'released',
+        addOptions: { searchForMovie: c.searchOnAdd !== false, monitor: 'movieOnly' },
+      }),
+    });
+    return;
+  }
+
   const c = arrConfig('sonarr');
-  const existing = (await arr('sonarr', `/series?tvdbId=${tvdbId}`))[0];
+  if (!r.tvdbId) throw new HttpError(400, 'Identifiant TVDB manquant');
+  const seasons = (r.seasons || []).map(Number).filter((n) => n > 0);
+  const existing = (await arr('sonarr', `/series?tvdbId=${r.tvdbId}`))[0];
   if (existing) {
-    const wanted = seasons.length ? seasons : existing.seasons.filter((s) => s.seasonNumber > 0).map((s) => s.seasonNumber);
-    const missing = wanted.filter((n) => !(existing.seasons.find((s) => s.seasonNumber === n) || {}).monitored);
-    if (!missing.length) return { added: false, message: 'Déjà suivie par Sonarr.', title: existing.title };
+    const missing = seasons.filter((n) => !(existing.seasons.find((s) => s.seasonNumber === n) || {}).monitored);
+    if (!missing.length) return;
     const set = new Set(missing);
     await arr('sonarr', `/series/${existing.id}`, {
       method: 'PUT',
-      body: JSON.stringify({
-        ...existing,
-        monitored: true,
-        seasons: existing.seasons.map((s) => (set.has(s.seasonNumber) ? { ...s, monitored: true } : s)),
-      }),
+      body: JSON.stringify({ ...existing, monitored: true, seasons: existing.seasons.map((s) => (set.has(s.seasonNumber) ? { ...s, monitored: true } : s)) }),
     });
     if (c.searchOnAdd !== false) {
-      for (const n of missing) {
+      for (const n of missing)
         await arr('sonarr', '/command', { method: 'POST', body: JSON.stringify({ name: 'SeasonSearch', seriesId: existing.id, seasonNumber: n }) });
-      }
     }
-    return {
-      added: true,
-      message: missing.length === 1 ? `Saison ${missing[0]} envoyée à Sonarr.` : `${missing.length} saisons envoyées à Sonarr.`,
-      title: existing.title,
-    };
+    return;
   }
-  if (b.askFolder && !b.rootFolderPath) return { needFolder: true, ...(await folders('sonarr')) };
-  const list = await arr('sonarr', `/series/lookup?term=${encodeURIComponent(`tvdb:${tvdbId}`)}`);
+  const list = await arr('sonarr', `/series/lookup?term=${encodeURIComponent(`tvdb:${r.tvdbId}`)}`);
   const found = list && list[0];
   if (!found) throw new HttpError(404, 'Série introuvable dans Sonarr');
-  const rootFolderPath = await checkFolder('sonarr', b.rootFolderPath);
-  const wanted = new Set(seasons.length ? seasons : found.seasons.map((s) => s.seasonNumber).filter((n) => n > 0));
-  const series = await arr('sonarr', '/series', {
+  r.rootFolderPath = await checkFolder('sonarr', r.rootFolderPath);
+  r.qualityProfileId = await checkProfile('sonarr', r.qualityProfileId);
+  const wanted = new Set(seasons);
+  await arr('sonarr', '/series', {
     method: 'POST',
     body: JSON.stringify({
       ...found,
       id: undefined,
-      qualityProfileId: await qualityProfile('sonarr'),
+      qualityProfileId: r.qualityProfileId,
       ...(c.languageProfileId ? { languageProfileId: c.languageProfileId } : {}),
-      rootFolderPath,
+      rootFolderPath: r.rootFolderPath,
       seasonFolder: c.seasonFolder !== false,
       monitored: true,
-      seriesType: b.seriesType === 'anime' ? 'anime' : found.seriesType || 'standard',
+      seriesType: isAnimeFolder(r.rootFolderPath) ? 'anime' : found.seriesType || 'standard',
       seasons: found.seasons.map((s) => ({ seasonNumber: s.seasonNumber, monitored: wanted.has(s.seasonNumber) })),
       addOptions: {
         searchForMissingEpisodes: c.searchOnAdd !== false,
@@ -232,9 +287,119 @@ async function grabSeries(b) {
       },
     }),
   });
-  return { added: true, message: `Ajoutée dans ${rootFolderPath} : la série se télécharge.`, title: series.title, folder: rootFolderPath };
 }
 
+// ——— Bibliothèque Radarr / Sonarr (cache 60 s) pour les statuts ———
+let library = null;
+let libraryAt = 0;
+let libraryPending = null;
+
+async function loadLibrary(force = false) {
+  if (!force && library && Date.now() - libraryAt < 60_000) return library;
+  if (libraryPending) return libraryPending;
+  libraryPending = (async () => {
+    const [movies, series] = await Promise.all([
+      arrConfig('radarr') ? arr('radarr', '/movie').catch(() => null) : null,
+      arrConfig('sonarr') ? arr('sonarr', '/series').catch(() => null) : null,
+    ]);
+    const lib = { movies: new Map(), seriesByTvdb: new Map(), seriesByTmdb: new Map() };
+    for (const m of movies || []) lib.movies.set(m.tmdbId, { hasFile: Boolean(m.hasFile), monitored: Boolean(m.monitored) });
+    for (const s of series || []) {
+      const entry = {
+        tvdbId: s.tvdbId,
+        seasons: (s.seasons || []).map((x) => ({
+          seasonNumber: x.seasonNumber,
+          monitored: Boolean(x.monitored),
+          files: (x.statistics && x.statistics.episodeFileCount) || 0,
+          aired: (x.statistics && (x.statistics.totalEpisodeCount != null ? Math.min(x.statistics.totalEpisodeCount, x.statistics.episodeCount || x.statistics.totalEpisodeCount) : x.statistics.episodeCount)) || 0,
+        })),
+      };
+      lib.seriesByTvdb.set(s.tvdbId, entry);
+      if (s.tmdbId) lib.seriesByTmdb.set(s.tmdbId, entry);
+    }
+    library = lib;
+    libraryAt = Date.now();
+    return lib;
+  })().finally(() => {
+    libraryPending = null;
+  });
+  return libraryPending;
+}
+
+const activeReq = (r) => r.status === RequestStatus.PENDING || r.status === RequestStatus.APPROVED;
+
+function seasonArrStatus(entry, n) {
+  const s = entry && entry.seasons.find((x) => x.seasonNumber === n);
+  if (!s) return MediaStatus.UNKNOWN;
+  if (s.files > 0 && s.aired > 0 && s.files >= s.aired) return MediaStatus.AVAILABLE;
+  if (s.files > 0) return MediaStatus.PARTIALLY_AVAILABLE;
+  if (s.monitored) return MediaStatus.PROCESSING;
+  return MediaStatus.UNKNOWN;
+}
+
+/** Statut d'un média (et de ses saisons), comme la fiche Seerr. */
+function mediaStatus(lib, type, tmdbId, tvdbId, seasonNumbers) {
+  const reqs = requests.filter((r) => r.type === type && r.tmdbId === tmdbId);
+  if (type === 'movie') {
+    const m = lib.movies.get(tmdbId);
+    let status = MediaStatus.UNKNOWN;
+    if (m && m.hasFile) status = MediaStatus.AVAILABLE;
+    else if (reqs.some((r) => r.status === RequestStatus.PENDING)) status = MediaStatus.PENDING;
+    else if ((m && m.monitored) || reqs.some((r) => r.status === RequestStatus.APPROVED)) status = MediaStatus.PROCESSING;
+    return { status, seasons: [] };
+  }
+  const entry = (tvdbId && lib.seriesByTvdb.get(Number(tvdbId))) || lib.seriesByTmdb.get(tmdbId);
+  const nums = seasonNumbers && seasonNumbers.length ? seasonNumbers : entry ? entry.seasons.map((s) => s.seasonNumber).filter((n) => n > 0) : [];
+  const seasons = nums.map((n) => {
+    let st = seasonArrStatus(entry, n);
+    if (st === MediaStatus.UNKNOWN || st === MediaStatus.PROCESSING) {
+      const r = reqs.find((x) => activeReq(x) && (x.seasons || []).includes(n));
+      if (r && r.status === RequestStatus.PENDING && st === MediaStatus.UNKNOWN) st = MediaStatus.PENDING;
+      else if (r) st = MediaStatus.PROCESSING;
+    }
+    return { seasonNumber: n, status: st };
+  });
+  let status = MediaStatus.UNKNOWN;
+  if (seasons.length && seasons.every((s) => s.status === MediaStatus.AVAILABLE)) status = MediaStatus.AVAILABLE;
+  else if (seasons.some((s) => s.status === MediaStatus.AVAILABLE || s.status === MediaStatus.PARTIALLY_AVAILABLE)) status = MediaStatus.PARTIALLY_AVAILABLE;
+  else if (seasons.some((s) => s.status === MediaStatus.PROCESSING)) status = MediaStatus.PROCESSING;
+  else if (seasons.some((s) => s.status === MediaStatus.PENDING)) status = MediaStatus.PENDING;
+  return { status, seasons };
+}
+
+/** Une demande approuvée dont le média est arrivé passe à « Terminée ». */
+function refreshCompleted(lib) {
+  let changed = false;
+  for (const r of requests) {
+    if (r.status !== RequestStatus.APPROVED) continue;
+    let done = false;
+    if (r.type === 'movie') done = Boolean((lib.movies.get(r.tmdbId) || {}).hasFile);
+    else {
+      const entry = (r.tvdbId && lib.seriesByTvdb.get(Number(r.tvdbId))) || lib.seriesByTmdb.get(r.tmdbId);
+      done = Boolean(entry) && (r.seasons || []).every((n) => seasonArrStatus(entry, n) === MediaStatus.AVAILABLE);
+    }
+    if (done) {
+      r.status = RequestStatus.COMPLETED;
+      r.completedAt = new Date().toISOString();
+      changed = true;
+      postMessage(LUMIO_BOT, `🎉 Disponible dans Jellyfin (demandé par ${r.requestedBy.name})`, mediaOf(r), 'available');
+    }
+  }
+  if (changed) saveRequests();
+}
+
+// Vérifie régulièrement l'arrivée des médias demandés
+setInterval(() => {
+  if (!requests.some((r) => r.status === RequestStatus.APPROVED)) return;
+  loadLibrary(true).then(refreshCompleted).catch(() => {});
+}, 5 * 60 * 1000);
+
+function publicRequest(r, lib) {
+  const media = lib ? mediaStatus(lib, r.type, r.tmdbId, r.tvdbId, r.type === 'tv' ? r.seasons : undefined) : null;
+  return { ...r, mediaStatus: media ? media.status : MediaStatus.UNKNOWN, seasonStatuses: media ? media.seasons : [] };
+}
+
+// ——— File de téléchargement ———
 async function queue() {
   const out = [];
   const errors = [];
@@ -271,133 +436,6 @@ async function queue() {
   return { records: out, errors };
 }
 
-
-// ——— Stream via AllDebrid : le torrent choisi par Radarr/Sonarr (envoyé à rdt-client) est retrouvé dans AllDebrid ———
-const AD = process.env.ALLDEBRID_BASE || 'https://api.alldebrid.com';
-function debridKey() {
-  return process.env.ALLDEBRID_API_KEY || (config.alldebrid && config.alldebrid.apiKey) || '';
-}
-
-async function ad(path, params) {
-  const key = debridKey();
-  if (!key) throw new HttpError(503, 'Clé AllDebrid non configurée sur le serveur Lumio');
-  const body = new URLSearchParams();
-  for (const [k, v] of Object.entries(params || {})) {
-    if (Array.isArray(v)) v.forEach((x) => body.append(`${k}[]`, String(x)));
-    else if (v !== undefined) body.append(k, String(v));
-  }
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 20000);
-  try {
-    const res = await fetch(`${AD}${path}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-      body,
-      signal: ctrl.signal,
-    });
-    const json = await res.json().catch(() => null);
-    if (!json || json.status !== 'success') {
-      const err = json && json.error;
-      throw new HttpError(502, `AllDebrid : ${(err && (err.message || err.code)) || `HTTP ${res.status}`}`);
-    }
-    return json.data;
-  } catch (e) {
-    if (e instanceof HttpError) throw e;
-    throw new HttpError(502, e && e.name === 'AbortError' ? 'AllDebrid ne répond pas' : 'AllDebrid injoignable');
-  } finally {
-    clearTimeout(t);
-  }
-}
-
-const VIDEO_RE = /\.(mkv|mp4|m4v|avi|mov|ts|m2ts|webm|wmv)$/i;
-
-function flattenFiles(nodes, out = []) {
-  for (const n of nodes || []) {
-    if (n.e) flattenFiles(n.e, out);
-    else if (n.l) out.push({ name: n.n, size: n.s || 0, link: n.l });
-  }
-  return out;
-}
-
-function pickFile(files, season, episode) {
-  const videos = files.filter((f) => VIDEO_RE.test(f.name) && !/sample|extras?\b|trailer/i.test(f.name));
-  const pool = videos.length ? videos : files;
-  if (season != null && episode != null) {
-    const s = Number(season);
-    const e = Number(episode);
-    const re = new RegExp(`(s0?${s}[ ._-]?e0?${e}(?!\\d))|(\\b${s}x0?${e}(?!\\d))`, 'i');
-    const hit = pool.filter((f) => re.test(f.name)).sort((a, b) => b.size - a.size)[0];
-    if (hit) return hit;
-    if (pool.length > 1) return null;
-  }
-  return [...pool].sort((a, b) => b.size - a.size)[0] || null;
-}
-
-/** Torrent en cours pour ce titre dans la file Radarr / Sonarr (hash = downloadId). */
-async function queueTorrent(q) {
-  if (q.type === 'tv') {
-    const series = (await arr('sonarr', `/series?tvdbId=${Number(q.tvdbId)}`))[0];
-    if (!series) return { state: 'absent' };
-    const list = await arr('sonarr', `/queue?page=1&pageSize=200&seriesIds=${series.id}&includeEpisode=true`);
-    const recs = (list.records || []).filter((r) => r.seriesId === series.id && r.downloadId);
-    const ep = recs.find((r) => r.episode && r.episode.seasonNumber === Number(q.season) && r.episode.episodeNumber === Number(q.episode));
-    const sea = recs.find((r) => r.episode && r.episode.seasonNumber === Number(q.season));
-    const rec = ep || sea;
-    return rec ? { state: 'queued', hash: rec.downloadId, title: rec.title, protocol: rec.protocol } : { state: 'searching' };
-  }
-  const movie = (await arr('radarr', `/movie?tmdbId=${Number(q.tmdbId)}`))[0];
-  if (!movie) return { state: 'absent' };
-  if (movie.hasFile) return { state: 'imported' };
-  const list = await arr('radarr', `/queue?page=1&pageSize=200&movieIds=${movie.id}`);
-  const rec = (list.records || []).find((r) => r.movieId === movie.id && r.downloadId);
-  return rec ? { state: 'queued', hash: rec.downloadId, title: rec.title, protocol: rec.protocol } : { state: 'searching' };
-}
-
-const unlocked = new Map(); // hash:season:episode → { url, filename, until }
-
-async function debridStream(q) {
-  const cacheKey = `${q.type}:${q.tmdbId}:${q.tvdbId}:${q.season}:${q.episode}`;
-  const hit = unlocked.get(cacheKey);
-  if (hit && hit.until > Date.now()) return { status: 'ready', url: hit.url, filename: hit.filename };
-
-  const t = await queueTorrent(q);
-  if (t.state === 'absent') return { status: 'absent', message: 'Pas encore dans Radarr / Sonarr.' };
-  if (t.state === 'imported') return { status: 'imported', message: 'Déjà téléchargé : il arrive dans Jellyfin.' };
-  if (t.state === 'searching') return { status: 'searching', message: 'Recherche d’une release…' };
-  if (t.protocol && t.protocol !== 'torrent') return { status: 'unsupported', message: 'Release Usenet : pas de stream possible.' };
-  const hash = String(t.hash).toLowerCase();
-  if (!/^[a-f0-9]{40}$/.test(hash)) return { status: 'unsupported', message: 'Identifiant de torrent inconnu.' };
-
-  // AllDebrid renvoie le magnet déjà présent (ajouté par rdt-client) ou l'ajoute
-  const up = await ad('/v4/magnet/upload', { magnets: [hash] });
-  const m = up.magnets && up.magnets[0];
-  if (!m || m.error) throw new HttpError(502, `AllDebrid : ${(m && m.error && m.error.message) || 'magnet refusé'}`);
-  if (!m.ready) {
-    const st = await ad('/v4.1/magnet/status', { id: m.id }).catch(() => null);
-    const mag = st && (Array.isArray(st.magnets) ? st.magnets[0] : st.magnets);
-    const pct = mag && mag.size ? Math.round((mag.downloaded / mag.size) * 100) : null;
-    if (mag && mag.statusCode > 4) return { status: 'error', message: `AllDebrid : ${mag.status}` };
-    return { status: 'downloading', progress: pct, message: `AllDebrid prépare le fichier${pct != null ? ` (${pct} %)` : ''}…`, release: t.title };
-  }
-  const filesRes = await ad('/v4/magnet/files', { id: [m.id] });
-  const entry = filesRes.magnets && filesRes.magnets[0];
-  const file = pickFile(flattenFiles(entry && entry.files), q.type === 'tv' ? q.season : null, q.type === 'tv' ? q.episode : null);
-  if (!file) return { status: 'error', message: 'Épisode introuvable dans le torrent.' };
-  const un = await ad('/v4/link/unlock', { link: file.link });
-  let link = un.link;
-  if (!link && un.delayed) {
-    for (let i = 0; i < 6 && !link; i++) {
-      await new Promise((r) => setTimeout(r, 5000));
-      const d = await ad('/v4/link/delayed', { id: un.delayed });
-      if (d.status === 2) link = d.link;
-      if (d.status === 3) break;
-    }
-  }
-  if (!link) return { status: 'error', message: 'AllDebrid n’a pas pu générer le lien.' };
-  unlocked.set(cacheKey, { url: link, filename: file.name, until: Date.now() + 2 * 60 * 60 * 1000 });
-  return { status: 'ready', url: link, filename: un.filename || file.name, size: file.size, release: t.title };
-}
-
 // ——— État des services ———
 async function probe(url, headers) {
   const start = Date.now();
@@ -416,15 +454,7 @@ async function probe(url, headers) {
 }
 
 async function status() {
-  const out = { lumio: { ok: true, version: VERSION } };
-  if (debridKey()) {
-    try {
-      const u = await ad('/v4/user', {});
-      out.alldebrid = { ok: true, name: u.user && u.user.username, premium: Boolean(u.user && u.user.isPremium) };
-    } catch (e) {
-      out.alldebrid = { ok: false, error: String(e.message || e) };
-    }
-  }
+  const out = { lumio: { ok: true, version: VERSION, pending: requests.filter((r) => r.status === RequestStatus.PENDING).length } };
   const jf = await probe(`${JELLYFIN_URL}/System/Info/Public`);
   out.jellyfin = { ok: jf.ok, ms: jf.ms, error: jf.error, version: jf.body && jf.body.Version, name: jf.body && jf.body.ServerName };
   await Promise.all(
@@ -446,13 +476,48 @@ async function status() {
   return out;
 }
 
+// ——— Chat ———
+const LUMIO_BOT = { id: 'lumio', name: 'Lumio', admin: true };
+
+function cleanMedia(m) {
+  if (!m || typeof m !== 'object') return undefined;
+  const type = m.type === 'tv' ? 'tv' : 'movie';
+  const tmdbId = Number(m.tmdbId);
+  if (!tmdbId) return undefined;
+  return {
+    type,
+    tmdbId,
+    title: String(m.title || '').slice(0, 200),
+    year: m.year ? String(m.year).slice(0, 4) : undefined,
+    poster: typeof m.poster === 'string' && /^https:\/\//.test(m.poster) ? m.poster.slice(0, 500) : undefined,
+  };
+}
+const mediaOf = (r) => cleanMedia({ type: r.type, tmdbId: r.tmdbId, title: r.title, year: r.year, poster: r.poster });
+
+function postMessage(user, text, media, kind) {
+  const msg = {
+    id: `${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
+    userId: user.id,
+    userName: user.name,
+    admin: user.admin,
+    text,
+    media,
+    kind,
+    createdAt: new Date().toISOString(),
+  };
+  messages.push(msg);
+  if (messages.length > MAX_MESSAGES) messages = messages.slice(-MAX_MESSAGES);
+  saveMessages();
+  return msg;
+}
+
 // ——— HTTP ———
 function send(res, statusCode, body) {
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, X-Jellyfin-Token',
-    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
   });
   res.end(body === undefined ? '' : JSON.stringify(body));
 }
@@ -474,38 +539,97 @@ function readBody(req) {
   });
 }
 
-function cleanMedia(m) {
-  if (!m || typeof m !== 'object') return undefined;
-  const type = m.type === 'tv' ? 'tv' : 'movie';
-  const tmdbId = Number(m.tmdbId);
-  if (!tmdbId) return undefined;
-  return {
+const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o && o[k] !== undefined && o[k] !== '').map((k) => [k, o[k]]));
+const requireAdmin = (user) => {
+  if (!user.admin) throw new HttpError(403, 'réservé aux admins Jellyfin');
+};
+
+/** Crée une demande (POST /api/requests), avec les mêmes règles que Seerr. */
+async function createRequest(user, b) {
+  const type = b.type === 'tv' ? 'tv' : 'movie';
+  const tmdbId = Number(b.tmdbId);
+  if (!tmdbId) throw new HttpError(400, 'tmdbId manquant');
+  if (!arrConfig(kindOf(type))) throw new HttpError(503, `${label(kindOf(type))} n'est pas configuré sur le serveur Lumio`);
+  const perm = permissionsOf(user);
+  const quota = quotaOf(user);
+  const lib = await loadLibrary(true);
+  const existing = requests.filter((r) => r.type === type && r.tmdbId === tmdbId && activeReq(r));
+
+  let seasons = [];
+  if (type === 'movie') {
+    const m = lib.movies.get(tmdbId);
+    if (m && m.hasFile) throw new HttpError(409, 'Ce film est déjà disponible.');
+    if (existing.length) throw new HttpError(409, 'Ce film a déjà été demandé.');
+    if (quota.movie.remaining === 0) throw new HttpError(429, `Quota atteint : ${quota.movie.limit} film(s) tous les ${quota.movie.days} jours.`);
+  } else {
+    if (!Number(b.tvdbId)) throw new HttpError(400, 'Pas d’identifiant TVDB : Sonarr ne peut pas ajouter cette série.');
+    const wanted = (Array.isArray(b.seasons) ? b.seasons : []).map(Number).filter((n) => n > 0);
+    if (!wanted.length) throw new HttpError(400, 'Choisis au moins une saison.');
+    const st = mediaStatus(lib, 'tv', tmdbId, b.tvdbId, wanted);
+    // Saisons déjà disponibles ou déjà demandées : ignorées, comme dans Seerr
+    seasons = st.seasons.filter((s) => s.status === MediaStatus.UNKNOWN).map((s) => s.seasonNumber);
+    if (!seasons.length) throw new HttpError(409, 'Ces saisons sont déjà disponibles ou demandées.');
+    if (quota.tv.remaining != null && seasons.length > quota.tv.remaining)
+      throw new HttpError(429, `Quota atteint : il te reste ${quota.tv.remaining} saison(s) sur ${quota.tv.limit} tous les ${quota.tv.days} jours.`);
+  }
+
+  const r = {
+    id: `${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`,
     type,
     tmdbId,
-    title: String(m.title || '').slice(0, 200),
-    year: m.year ? String(m.year).slice(0, 4) : undefined,
-    poster: typeof m.poster === 'string' && /^https:\/\//.test(m.poster) ? m.poster.slice(0, 500) : undefined,
-  };
-}
-
-function postMessage(user, text, media, kind) {
-  const msg = {
-    id: `${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
-    userId: user.id,
-    userName: user.name,
-    admin: user.admin,
-    text,
-    media,
-    kind,
+    tvdbId: type === 'tv' ? Number(b.tvdbId) : undefined,
+    title: String(b.title || '').slice(0, 200),
+    year: b.year ? String(b.year).slice(0, 4) : undefined,
+    poster: typeof b.poster === 'string' && /^https:\/\//.test(b.poster) ? b.poster : undefined,
+    backdrop: typeof b.backdrop === 'string' && /^https:\/\//.test(b.backdrop) ? b.backdrop : undefined,
+    seasons: type === 'tv' ? seasons : undefined,
+    status: RequestStatus.PENDING,
+    requestedBy: { id: user.id, name: user.name },
     createdAt: new Date().toISOString(),
+    rootFolderPath: b.rootFolderPath || undefined,
+    qualityProfileId: user.admin && b.qualityProfileId ? Number(b.qualityProfileId) : undefined,
   };
-  messages.push(msg);
-  if (messages.length > MAX_MESSAGES) messages = messages.slice(-MAX_MESSAGES);
-  save();
-  return msg;
+
+  if (perm.autoApprove) {
+    r.status = RequestStatus.APPROVED;
+    r.modifiedBy = { id: user.id, name: user.name };
+    r.modifiedAt = r.createdAt;
+    try {
+      await sendToArr(r);
+    } catch (e) {
+      r.status = RequestStatus.FAILED;
+      r.error = String(e.message || e);
+    }
+  }
+  requests.unshift(r);
+  saveRequests();
+  library = null;
+
+  const what = type === 'tv' ? ` (${seasons.length > 1 ? `${seasons.length} saisons` : `saison ${seasons[0]}`})` : '';
+  if (r.status === RequestStatus.PENDING) postMessage(user, `📝 a demandé${what} · en attente de validation`, mediaOf(r), 'request');
+  else if (r.status === RequestStatus.APPROVED) postMessage(user, `📥 a demandé${what} · téléchargement lancé`, mediaOf(r), 'request');
+  return r;
 }
 
-const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o && o[k] !== undefined && o[k] !== '').map((k) => [k, o[k]]));
+async function approveRequest(admin, r, b) {
+  if (r.status !== RequestStatus.PENDING && r.status !== RequestStatus.FAILED) throw new HttpError(409, 'Cette demande n’est pas en attente.');
+  if (b.rootFolderPath) r.rootFolderPath = b.rootFolderPath;
+  if (b.qualityProfileId) r.qualityProfileId = Number(b.qualityProfileId);
+  r.modifiedBy = { id: admin.id, name: admin.name };
+  r.modifiedAt = new Date().toISOString();
+  try {
+    await sendToArr(r);
+    r.status = RequestStatus.APPROVED;
+    delete r.error;
+  } catch (e) {
+    r.status = RequestStatus.FAILED;
+    r.error = String(e.message || e);
+  }
+  saveRequests();
+  library = null;
+  if (r.status === RequestStatus.APPROVED) postMessage(admin, `✅ a validé la demande de ${r.requestedBy.name}`, mediaOf(r), 'approved');
+  return r;
+}
 
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') return send(res, 204);
@@ -516,7 +640,7 @@ const server = http.createServer(async (req, res) => {
       ok: true,
       version: VERSION,
       messages: messages.length,
-      features: ['chat', 'grab', 'status', ...(debridKey() ? ['debrid'] : [])],
+      features: ['chat', 'requests', 'status'],
       radarr: Boolean(arrConfig('radarr')),
       sonarr: Boolean(arrConfig('sonarr')),
     });
@@ -527,89 +651,204 @@ const server = http.createServer(async (req, res) => {
   if (!user) return send(res, 401, { error: 'jeton Jellyfin invalide' });
 
   try {
+    const p = url.pathname;
+    const q = url.searchParams;
+
+    // ——— Moi : droits et quotas ———
+    if (req.method === 'GET' && p === '/api/me') {
+      return send(res, 200, { id: user.id, name: user.name, admin: user.admin, permissions: permissionsOf(user), quota: quotaOf(user) });
+    }
+
     // ——— Chat ———
-    if (req.method === 'GET' && url.pathname === '/api/messages') {
-      const after = url.searchParams.get('after');
-      const limit = Math.min(200, Number(url.searchParams.get('limit')) || 100);
+    if (req.method === 'GET' && p === '/api/messages') {
+      const after = q.get('after');
+      const limit = Math.min(200, Number(q.get('limit')) || 100);
       let list = messages;
       if (after) {
         const idx = messages.findIndex((m) => m.id === after);
         list = idx >= 0 ? messages.slice(idx + 1) : messages;
       }
-      return send(res, 200, { me: user, messages: list.slice(-limit) });
+      const { token, ...me } = user;
+      return send(res, 200, { me, messages: list.slice(-limit) });
     }
-
-    if (req.method === 'GET' && url.pathname === '/api/latest') {
+    if (req.method === 'GET' && p === '/api/latest') {
       const last = messages[messages.length - 1];
       return send(res, 200, { id: last ? last.id : null, at: last ? last.createdAt : null, from: last ? last.userId : null });
     }
-
-    if (req.method === 'POST' && url.pathname === '/api/messages') {
+    if (req.method === 'POST' && p === '/api/messages') {
       const body = await readBody(req);
       const text = String(body.text || '').trim().slice(0, MAX_TEXT);
       const media = cleanMedia(body.media);
       if (!text && !media) return send(res, 400, { error: 'message vide' });
       return send(res, 201, postMessage(user, text, media));
     }
-
-    const del = url.pathname.match(/^\/api\/messages\/([\w-]+)$/);
-    if (req.method === 'DELETE' && del) {
-      const idx = messages.findIndex((m) => m.id === del[1]);
+    const delMsg = p.match(/^\/api\/messages\/([\w-]+)$/);
+    if (req.method === 'DELETE' && delMsg) {
+      const idx = messages.findIndex((m) => m.id === delMsg[1]);
       if (idx < 0) return send(res, 404, { error: 'introuvable' });
       if (messages[idx].userId !== user.id && !user.admin) return send(res, 403, { error: 'interdit' });
       messages.splice(idx, 1);
-      save();
+      saveMessages();
       return send(res, 204);
     }
 
-    // ——— Téléchargements (tous les comptes Jellyfin) ———
-    if (req.method === 'GET' && url.pathname === '/api/arr/folders') {
-      const kind = url.searchParams.get('type') === 'tv' ? 'sonarr' : 'radarr';
-      return send(res, 200, await folders(kind));
+    // ——— Statut d'un média (fiche) ———
+    if (req.method === 'GET' && p === '/api/media') {
+      const type = q.get('type') === 'tv' ? 'tv' : 'movie';
+      const tmdbId = Number(q.get('tmdbId'));
+      const seasons = (q.get('seasons') || '').split(',').map(Number).filter((n) => n > 0);
+      const lib = await loadLibrary().catch(() => ({ movies: new Map(), seriesByTvdb: new Map(), seriesByTmdb: new Map() }));
+      refreshCompleted(lib);
+      const st = mediaStatus(lib, type, tmdbId, q.get('tvdbId'), seasons);
+      const reqs = requests
+        .filter((r) => r.type === type && r.tmdbId === tmdbId && r.status !== RequestStatus.COMPLETED)
+        .map((r) => publicRequest(r, lib));
+      return send(res, 200, { ...st, requests: reqs });
     }
 
-    if (req.method === 'POST' && url.pathname === '/api/grab') {
-      const b = await readBody(req);
-      const isTv = b.type === 'tv';
-      const result = isTv ? await grabSeries(b) : await grabMovie(b);
-      const media = cleanMedia({ ...b, type: isTv ? 'tv' : 'movie' });
-      if (result.added) {
-        history.unshift({
-          at: new Date().toISOString(),
-          user: user.name,
-          type: isTv ? 'tv' : 'movie',
-          tmdbId: Number(b.tmdbId) || undefined,
-          title: result.title || (media && media.title),
-          folder: result.folder,
-        });
-        history = history.slice(0, 500);
-        writeJson(HISTORY_FILE, history);
-        if (media && b.announce !== false) postMessage(user, '📥 a lancé le téléchargement', media, 'grab');
+    // ——— Statuts pour les badges des affiches ———
+    if (req.method === 'GET' && p === '/api/library') {
+      const lib = await loadLibrary().catch(() => ({ movies: new Map(), seriesByTvdb: new Map(), seriesByTmdb: new Map() }));
+      const movies = {};
+      const series = {};
+      for (const [id, m] of lib.movies) movies[id] = m.hasFile ? MediaStatus.AVAILABLE : m.monitored ? MediaStatus.PROCESSING : MediaStatus.UNKNOWN;
+      for (const [id] of lib.seriesByTmdb) series[id] = mediaStatus(lib, 'tv', id, null, null).status;
+      for (const r of requests.filter(activeReq)) {
+        const target = r.type === 'movie' ? movies : series;
+        if (!target[r.tmdbId] || target[r.tmdbId] === MediaStatus.UNKNOWN)
+          target[r.tmdbId] = r.status === RequestStatus.PENDING ? MediaStatus.PENDING : MediaStatus.PROCESSING;
       }
-      return send(res, 200, result);
+      return send(res, 200, { movies, series });
     }
 
-    if (req.method === 'GET' && url.pathname === '/api/queue') return send(res, 200, await queue());
-
-    if (req.method === 'GET' && url.pathname === '/api/history') return send(res, 200, history.slice(0, 100));
-
-    if (req.method === 'GET' && url.pathname === '/api/status') return send(res, 200, await status());
-
-    if (req.method === 'GET' && url.pathname === '/api/stream') {
-      const q = Object.fromEntries(url.searchParams);
-      return send(res, 200, await debridStream(q));
+    // ——— Demandes ———
+    if (req.method === 'GET' && p === '/api/requests') {
+      const filter = q.get('filter') || 'all';
+      const take = Math.min(100, Number(q.get('take')) || 30);
+      const skip = Number(q.get('skip')) || 0;
+      const lib = await loadLibrary().catch(() => null);
+      if (lib) refreshCompleted(lib);
+      const seeAll = user.admin || settings().usersSeeAllRequests;
+      let list = requests.filter((r) => (seeAll && q.get('mine') !== '1') || r.requestedBy.id === user.id);
+      const by = {
+        all: () => true,
+        pending: (r) => r.status === RequestStatus.PENDING,
+        approved: (r) => r.status === RequestStatus.APPROVED || r.status === RequestStatus.COMPLETED,
+        processing: (r) => r.status === RequestStatus.APPROVED,
+        available: (r) => r.status === RequestStatus.COMPLETED,
+        declined: (r) => r.status === RequestStatus.DECLINED,
+        failed: (r) => r.status === RequestStatus.FAILED,
+      }[filter] || (() => true);
+      list = list.filter(by);
+      if (q.get('sort') === 'modified') list = [...list].sort((a, b) => Date.parse(b.modifiedAt || b.createdAt) - Date.parse(a.modifiedAt || a.createdAt));
+      const counts = {
+        pending: requests.filter((r) => r.status === RequestStatus.PENDING && (seeAll || r.requestedBy.id === user.id)).length,
+      };
+      return send(res, 200, { total: list.length, counts, results: list.slice(skip, skip + take).map((r) => publicRequest(r, lib)) });
     }
 
-    // ——— Admin : reçoit la config Radarr / Sonarr depuis l'appli ———
-    if (req.method === 'POST' && url.pathname === '/api/admin/arr') {
-      if (!user.admin) return send(res, 403, { error: 'réservé aux admins Jellyfin' });
+    if (req.method === 'POST' && p === '/api/requests') {
+      const r = await createRequest(user, await readBody(req));
+      return send(res, 201, publicRequest(r, await loadLibrary().catch(() => null)));
+    }
+
+    const one = p.match(/^\/api\/requests\/([\w-]+)(?:\/(approve|decline|retry))?$/);
+    if (one) {
+      const r = requests.find((x) => x.id === one[1]);
+      if (!r) return send(res, 404, { error: 'demande introuvable' });
+      const action = one[2];
+      if (req.method === 'POST' && (action === 'approve' || action === 'retry')) {
+        requireAdmin(user);
+        return send(res, 200, publicRequest(await approveRequest(user, r, await readBody(req)), await loadLibrary().catch(() => null)));
+      }
+      if (req.method === 'POST' && action === 'decline') {
+        requireAdmin(user);
+        const b = await readBody(req);
+        if (r.status !== RequestStatus.PENDING) return send(res, 409, { error: 'Cette demande n’est pas en attente.' });
+        r.status = RequestStatus.DECLINED;
+        r.reason = b.reason ? String(b.reason).slice(0, 300) : undefined;
+        r.modifiedBy = { id: user.id, name: user.name };
+        r.modifiedAt = new Date().toISOString();
+        saveRequests();
+        postMessage(user, `❌ a refusé la demande de ${r.requestedBy.name}${r.reason ? ` : ${r.reason}` : ''}`, mediaOf(r), 'declined');
+        return send(res, 200, publicRequest(r, null));
+      }
+      if (req.method === 'DELETE' && !action) {
+        // Comme Seerr : le demandeur peut annuler tant que c'est en attente ; l'admin peut tout supprimer
+        if (!user.admin && !(r.requestedBy.id === user.id && r.status === RequestStatus.PENDING))
+          return send(res, 403, { error: 'Seule une demande en attente peut être annulée.' });
+        requests = requests.filter((x) => x.id !== r.id);
+        saveRequests();
+        return send(res, 204);
+      }
+    }
+
+    // ——— Dossiers et profils (fenêtre de demande) ———
+    if (req.method === 'GET' && p === '/api/arr/folders') return send(res, 200, await folders(kindOf(q.get('type'))));
+    if (req.method === 'GET' && p === '/api/arr/options') {
+      const kind = kindOf(q.get('type'));
+      const [f, pr] = await Promise.all([folders(kind), user.admin ? profiles(kind) : null]);
+      return send(res, 200, { ...f, profiles: pr ? pr.profiles : [], defaultProfile: pr ? pr.default : null });
+    }
+
+    if (req.method === 'GET' && p === '/api/queue') return send(res, 200, await queue());
+    if (req.method === 'GET' && p === '/api/status') return send(res, 200, await status());
+
+    // ——— Admin : utilisateurs (droits, quotas) ———
+    if (req.method === 'GET' && p === '/api/admin/users') {
+      requireAdmin(user);
+      const r = await fetch(`${JELLYFIN_URL}/Users`, { headers: jfHeaders(user.token) });
+      if (!r.ok) throw new HttpError(502, `Jellyfin : HTTP ${r.status}`);
+      const list = await r.json();
+      return send(res, 200, {
+        settings: settings(),
+        users: list.map((u) => {
+          const fake = { id: u.Id, name: u.Name, admin: Boolean(u.Policy && u.Policy.IsAdministrator) };
+          return {
+            id: u.Id,
+            name: u.Name,
+            admin: fake.admin,
+            permissions: permissionsOf(fake),
+            custom: userPrefs[u.Id] || {},
+            quota: quotaOf(fake),
+            requestCount: requests.filter((x) => x.requestedBy.id === u.Id).length,
+          };
+        }),
+      });
+    }
+    const userEdit = p.match(/^\/api\/admin\/users\/([\w-]+)$/);
+    if (req.method === 'PUT' && userEdit) {
+      requireAdmin(user);
       const b = await readBody(req);
-      const next = { ...config };
-      if (b.radarr) next.radarr = pick(b.radarr, ['url', 'apiKey', 'qualityProfileId', 'rootFolderPath', 'minimumAvailability', 'searchOnAdd']);
-      if (b.sonarr) next.sonarr = pick(b.sonarr, ['url', 'apiKey', 'qualityProfileId', 'languageProfileId', 'rootFolderPath', 'seasonFolder', 'searchOnAdd']);
-      if (b.alldebrid && b.alldebrid.apiKey) next.alldebrid = { apiKey: String(b.alldebrid.apiKey).trim() };
-      config = next;
-      writeJson(CONFIG_FILE, config);
+      const cur = { ...(userPrefs[userEdit[1]] || {}) };
+      for (const k of ['autoApprove', 'movieQuotaLimit', 'movieQuotaDays', 'tvQuotaLimit', 'tvQuotaDays']) {
+        if (b[k] === null) delete cur[k];
+        else if (b[k] !== undefined) cur[k] = k === 'autoApprove' ? Boolean(b[k]) : Math.max(0, Number(b[k]) || 0);
+      }
+      userPrefs[userEdit[1]] = cur;
+      saveUsers();
+      return send(res, 200, cur);
+    }
+    if (req.method === 'PUT' && p === '/api/admin/settings') {
+      requireAdmin(user);
+      const b = await readBody(req);
+      if (b.defaultAutoApprove !== undefined) config.defaultAutoApprove = Boolean(b.defaultAutoApprove);
+      if (b.usersSeeAllRequests !== undefined) config.usersSeeAllRequests = Boolean(b.usersSeeAllRequests);
+      for (const k of ['defaultMovieQuotaLimit', 'defaultMovieQuotaDays', 'defaultTvQuotaLimit', 'defaultTvQuotaDays'])
+        if (b[k] !== undefined) config[k] = Math.max(0, Number(b[k]) || 0);
+      saveConfig();
+      return send(res, 200, settings());
+    }
+
+    // ——— Admin : config Radarr / Sonarr envoyée depuis l'appli ———
+    if (req.method === 'POST' && p === '/api/admin/arr') {
+      requireAdmin(user);
+      const b = await readBody(req);
+      if (b.radarr) config.radarr = pick(b.radarr, ['url', 'apiKey', 'qualityProfileId', 'rootFolderPath', 'minimumAvailability', 'searchOnAdd']);
+      if (b.sonarr) config.sonarr = pick(b.sonarr, ['url', 'apiKey', 'qualityProfileId', 'languageProfileId', 'rootFolderPath', 'seasonFolder', 'searchOnAdd']);
+      delete config.alldebrid;
+      saveConfig();
+      library = null;
       return send(res, 200, await status());
     }
 

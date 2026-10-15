@@ -3,11 +3,10 @@
 Petit serveur, en un seul fichier et sans dépendance, qui sert trois choses dans l'appli :
 
 - **Chat famille** : onglet Chat, et bouton « Proposer à la famille » sur les fiches.
-- **Téléchargements pour tous** : un compte Jellyfin normal peut lancer un film ou une série dans Radarr ou Sonarr, en choisissant le dossier (Films, Kids, Anime…). Les clés Radarr et Sonarr restent sur ce serveur, jamais sur les téléphones. Chaque ajout est annoncé dans le chat.
-- **Stream des téléchargements en cours** (facultatif, AllDebrid) : quand Radarr ou Sonarr envoie un torrent à rdt-client, le serveur retrouve ce torrent dans AllDebrid grâce à son hash, et donne le lien direct à l'appli pour qu'elle le lise tout de suite.
+- **Demandes façon Seerr** : statuts (en attente, approuvée, refusée, échec, disponible), demandes saison par saison, validation automatique ou par l'admin, quotas, choix du dossier (Films, Kids, Anime…). Les clés Radarr et Sonarr restent sur ce serveur, jamais sur les téléphones. Chaque demande, validation ou arrivée dans Jellyfin est annoncée dans le chat.
 - **État des serveurs** : Jellyfin, Radarr et Sonarr (en ligne ou non, version, espace disque, file d'attente).
 
-On se connecte avec son compte Jellyfin, sans mot de passe en plus. Les données sont dans `/data` : `messages.json`, `history.json` et `config.json`.
+On se connecte avec son compte Jellyfin, sans mot de passe en plus. Les données sont dans `/data` : `messages.json`, `requests.json`, `users.json` et `config.json`.
 
 ## Installation (docker-compose, dans `/data/` sur le serveur)
 
@@ -23,7 +22,6 @@ On se connecte avec son compte Jellyfin, sans mot de passe en plus. Les données
       # - RADARR_API_KEY=xxxx
       # - SONARR_URL=http://sonarr:8989
       # - SONARR_API_KEY=xxxx
-      # - ALLDEBRID_API_KEY=xxxx
     volumes:
       - ./lumio-server/data:/data
     ports:
@@ -42,16 +40,19 @@ Si Radarr, Sonarr et Jellyfin sont dans le même compose, utilise les noms des s
 | Méthode | Route | Rôle |
 |---|---|---|
 | GET | `/health` | État du serveur, sans authentification |
-| GET | `/api/status` | Jellyfin, Radarr, Sonarr : en ligne, version, disques, file |
-| GET | `/api/messages?after=<id>` | Messages du chat |
-| GET | `/api/latest` | Dernier message (pastille « non lu ») |
-| POST | `/api/messages` | `{ text, media?: { type, tmdbId, title, year, poster } }` |
-| DELETE | `/api/messages/:id` | Supprimer un message : l'auteur ou un admin |
-| GET | `/api/arr/folders?type=movie\|tv` | Dossiers racine disponibles |
-| POST | `/api/grab` | `{ type, tmdbId, tvdbId?, seasons?, rootFolderPath?, seriesType?, title, poster, askFolder? }`. Avec `askFolder` et sans dossier, le serveur renvoie `{ needFolder, folders }` si le titre est nouveau |
-| GET | `/api/stream?type=movie\|tv&tmdbId&tvdbId&season&episode` | Lien AllDebrid du torrent en cours (`status` : searching, downloading, ready…) |
-| GET | `/api/queue` | Téléchargements en cours |
-| GET | `/api/history` | Qui a lancé quoi |
-| POST | `/api/admin/arr` | Admin uniquement : `{ radarr: {url, apiKey, qualityProfileId…}, sonarr: {…} }` |
+| GET | `/api/me` | Droits et quotas de l'utilisateur |
+| GET | `/api/media?type&tmdbId&tvdbId&seasons` | Statut d'un média et de ses saisons, et demandes en cours |
+| GET | `/api/library` | Statuts pour les badges des affiches |
+| GET | `/api/requests?filter&take&skip&sort&mine` | Liste des demandes (filtres all, pending, processing, available, declined, failed) |
+| POST | `/api/requests` | `{ type, tmdbId, tvdbId?, seasons?, title, year, poster, backdrop, rootFolderPath?, qualityProfileId? }` |
+| POST | `/api/requests/:id/approve` · `/retry` | Admin : valider (dossier et profil facultatifs), réessayer |
+| POST | `/api/requests/:id/decline` | Admin : refuser `{ reason? }` |
+| DELETE | `/api/requests/:id` | Le demandeur (si en attente) ou l'admin |
+| GET | `/api/arr/options?type` | Dossiers racine, et profils de qualité pour l'admin |
+| GET | `/api/queue` · `/api/status` | Téléchargements en cours · état des services |
+| GET / PUT | `/api/admin/users` · `/api/admin/users/:id` | Admin : droits et quotas par utilisateur |
+| PUT | `/api/admin/settings` | Admin : validation automatique et quotas par défaut, visibilité des demandes |
+| POST | `/api/admin/arr` | Admin : config Radarr / Sonarr |
+| GET / POST / DELETE | `/api/messages`… | Chat |
 
 L'authentification passe par l'en-tête `X-Jellyfin-Token`. C'est le jeton de session Jellyfin, vérifié via `/Users/Me`.

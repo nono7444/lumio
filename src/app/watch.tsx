@@ -6,15 +6,11 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { askFolder } from '@/components/folder-picker';
-import { toast, Toasts } from '@/components/toast';
+import { Toasts } from '@/components/toast';
 import { Button, Fade } from '@/components/ui';
 import { C } from '@/constants/theme';
-import { grab } from '@/lib/grab';
-import { lumio, serverHasDebrid, type DebridStream } from '@/lib/lumio-server';
 import { useSettings } from '@/lib/settings';
 import { resolveWatch } from '@/lib/smart-play';
-import { bestStream, collectStreams } from '@/lib/streams';
 import { tmdb, tmdbImg } from '@/lib/tmdb';
 
 type Params = {
@@ -27,18 +23,16 @@ type Params = {
 };
 
 /**
- * Écran de transition du bouton « Lire » : trouve quoi lire (Jellyfin ou streaming),
- * lance le téléchargement si besoin, puis ouvre le lecteur.
+ * Écran de transition du bouton « Lire » : trouve quoi lire sur Jellyfin
+ * (le film, ou le premier épisode non vu), puis ouvre le lecteur.
  */
 export default function Watch() {
   const p = useLocalSearchParams<Params>();
   const { settings } = useSettings();
   const insets = useSafeAreaInsets();
-  const [step, setStep] = useState('Recherche dans ta bibliothèque…');
+  const [step] = useState('Recherche dans ta bibliothèque…');
   const [failure, setFailure] = useState<string | null>(null);
-  const [grabNote, setGrabNote] = useState<string | null>(null);
   const [backdrop, setBackdrop] = useState<string | undefined>();
-  const [ep, setEp] = useState<{ season?: number; episode?: number }>({});
   const cancelled = useRef(false);
 
   const tmdbId = Number(p.tmdbId);
@@ -78,132 +72,12 @@ export default function Watch() {
           return;
         }
 
-        // ——— Streaming + téléchargement en arrière-plan ———
-        setEp({ season: res.season, episode: res.episode });
-        // Série absente de Jellyfin : on la télécharge entièrement ; sinon juste la saison manquante
-        // Le lecteur attend que le dossier soit choisi (sinon il s'ouvrirait sous la fenêtre de choix)
-        let release: () => void = () => {};
-        const folderGate = new Promise<void>((r) => (release = r));
-        let grabDone = false;
-        const grabP = grab(
-          settings,
-          { type, tmdbId, season: res.season, allSeasons: type === 'tv' && !res.seriesInJellyfin },
-          {
-            streaming: true,
-            chooseFolder: async (c) => {
-              const f = await askFolder(c);
-              release();
-              return f;
-            },
-          }
-        )
-          .then((m) => {
-            setGrabNote(m);
-            if (m) toast(m);
-            return m;
-          })
-          .catch((e) => {
-            setGrabNote(`Téléchargement non lancé : ${e?.message ?? e}`);
-            toast(`Téléchargement non lancé : ${e?.message ?? e}`, 'error');
-            return null;
-          })
-          .finally(() => {
-            grabDone = true;
-            release();
-          });
-
-        type Best = { url: string; subtitle: string; headers?: Record<string, string> };
-        const errorsOut: string[] = [];
-
-        // Sources des addons Stremio
-        const fromAddons = async (): Promise<Best | null> => {
-          if (!imdb || !settings.addons.length) {
-            errorsOut.push(!imdb ? 'Identifiant IMDb introuvable pour ce titre.' : 'Aucun addon de streams configuré.');
-            return null;
-          }
-          setStep(type === 'tv' ? `Recherche d'une source pour S${res.season}E${res.episode}…` : 'Recherche de la meilleure source…');
-          const stremioId = type === 'tv' ? `${imdb}:${res.season}:${res.episode}` : imdb;
-          const { streams, errors } = await collectStreams(settings, type === 'tv' ? 'series' : 'movie', stremioId, { timeoutMs: 15000 });
-          const b = bestStream(streams);
-          if (b?.url)
-            return {
-              url: b.url,
-              subtitle: [b.quality, b.fr ? 'VF' : null, b.addon].filter(Boolean).join(' · '),
-              headers: b.behaviorHints?.proxyHeaders?.request,
-            };
-          errorsOut.push(errors.length ? errors.join('\n') : 'Aucune source lisible trouvée par tes addons.');
-          return null;
-        };
-
-        // Le torrent choisi par Radarr / Sonarr, via AllDebrid (serveur Lumio)
-        const fromServer = async (maxMs: number): Promise<Best | null> => {
-          if (!(await serverHasDebrid(settings))) return null;
-          await folderGate;
-          if (!grabDone) setStep('Ajout dans Radarr / Sonarr…');
-          await grabP;
-          const tvdbId = type === 'tv' ? ((details as any).external_ids?.tvdb_id ?? undefined) : undefined;
-          const started = Date.now();
-          let last: DebridStream | null = null;
-          while (!cancelled.current && Date.now() - started < maxMs) {
-            try {
-              last = await lumio.stream(settings, { type, tmdbId, tvdbId, season: res.season, episode: res.episode });
-            } catch (e: any) {
-              last = { status: 'error', message: e?.message ?? String(e) };
-            }
-            if (cancelled.current) return null;
-            if (last.status === 'ready' && last.url) break;
-            // « absent » juste après l'ajout : Radarr / Sonarr n'a pas encore enregistré le titre
-            if (['unsupported', 'error', 'imported'].includes(last.status)) break;
-            if (last.status === 'absent' && Date.now() - started > 30_000) break;
-            setStep(
-              last.status === 'downloading'
-                ? (last.message ?? 'AllDebrid prépare le fichier…')
-                : last.status === 'searching'
-                  ? `${type === 'movie' ? 'Radarr' : 'Sonarr'} cherche une release…`
-                  : (last.message ?? 'Patiente…')
-            );
-            await new Promise((r) => setTimeout(r, 4000));
-          }
-          if (last?.status === 'ready' && last.url) return { url: last.url, subtitle: ['AllDebrid', last.release].filter(Boolean).join(' · ') };
-          errorsOut.push(last?.message ? `Serveur : ${last.message}` : 'Serveur : pas de lien AllDebrid à temps.');
-          return null;
-        };
-
-        // Ordre choisi dans Profil → Lecture : serveur d'abord (2 min max, puis addons) ou addons d'abord
-        let best: Best | null = null;
-        if (settings.streamSource === 'server') {
-          best = await fromServer(2 * 60_000);
-          if (cancelled.current) return;
-          if (!best) best = await fromAddons();
-        } else {
-          best = await fromAddons();
-          if (cancelled.current) return;
-          if (!best) best = await fromServer(6 * 60_000);
-        }
-        if (cancelled.current) return;
-        const addonError = errorsOut.join('\n');
-
-        if (!best) throw new Error(addonError || 'Aucune source lisible.');
-        setStep('Lancement…');
-        await folderGate;
-        if (cancelled.current) return;
-
-        router.replace({
-          pathname: '/player',
-          params: {
-            kind: 'url',
-            uri: best.url,
-            title: type === 'tv' ? `${p.title} · S${res.season}E${res.episode}` : p.title,
-            subtitle: best.subtitle,
-            headers: best.headers ? JSON.stringify(best.headers) : undefined,
-            // Contexte pour l'épisode suivant
-            tmdbId: String(tmdbId),
-            imdb,
-            series: p.title,
-            season: res.season != null ? String(res.season) : undefined,
-            episode: res.episode != null ? String(res.episode) : undefined,
-          },
-        });
+        // ——— Pas (encore) sur Jellyfin ———
+        throw new Error(
+          type === 'tv' && res.season != null
+            ? `L’épisode S${res.season}E${res.episode} n’est pas encore sur ton serveur. Demande-le depuis la fiche.`
+            : 'Pas encore sur ton serveur. Demande-le depuis la fiche.'
+        );
       } catch (e: any) {
         if (!cancelled.current) setFailure(e?.message ?? String(e));
       }
@@ -228,32 +102,12 @@ export default function Watch() {
           <View style={{ alignItems: 'center', gap: 14, width: '100%', maxWidth: 420 }}>
             <Ionicons name="alert-circle-outline" size={40} color={C.text} />
             <Text style={styles.msg}>{failure}</Text>
-            {grabNote && <Text style={[styles.msg, { color: C.success }]}>{grabNote}</Text>}
-            <Button
-              title="Choisir une source"
-              icon="list"
-              onPress={() =>
-                router.replace({
-                  pathname: '/streams',
-                  params: {
-                    type,
-                    tmdbId: String(tmdbId),
-                    imdb: p.imdb ?? '',
-                    title: p.title,
-                    season: ep.season != null ? String(ep.season) : undefined,
-                    episode: ep.episode != null ? String(ep.episode) : undefined,
-                  },
-                })
-              }
-              style={{ alignSelf: 'stretch' }}
-            />
             <Button title="Fermer" variant="glass" onPress={() => router.back()} style={{ alignSelf: 'stretch' }} />
           </View>
         ) : (
           <>
             <ActivityIndicator size="large" color="#fff" />
             <Text style={styles.msg}>{step}</Text>
-            {grabNote && <Text style={[styles.msg, { color: C.success }]}>{grabNote}</Text>}
           </>
         )}
       </View>

@@ -33,7 +33,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="library" options={{ title: 'Bibliothèque', href: settings.jellyfin ? undefined : null }} />
       <Tabs.Screen name="calendar" options={{ title: 'Calendrier' }} />
       <Tabs.Screen name="chat" options={{ title: 'Chat', href: settings.jellyfin ? undefined : null }} />
-      <Tabs.Screen name="activity" options={{ title: 'Activité' }} />
+      <Tabs.Screen name="activity" options={{ title: 'Demandes' }} />
       <Tabs.Screen name="settings" options={{ title: 'Profil' }} />
     </Tabs>
   );

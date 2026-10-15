@@ -8,7 +8,7 @@ Appli native iOS / Android (Expo, React Native) qui :
 
 - cherche films et séries via **TMDB** ;
 - affiche sur l'accueil les catalogues de tes **addons Stremio** (dernières sorties, tops…) ;
-- envoie tout **directement à Radarr et Sonarr**, sans Seerr au milieu.
+- gère les **demandes de films et séries façon Seerr**, envoyées à Radarr et Sonarr par le serveur Lumio.
 
 ## Fonctionnalités
 
@@ -18,9 +18,9 @@ Appli native iOS / Android (Expo, React Native) qui :
 | **Accueil** | Hero TMDB, « Reprendre » Jellyfin, catalogues des addons Stremio, tendances |
 | **Bibliothèque** | Ta bibliothèque Jellyfin : reprendre, à suivre, ajouts récents, grilles triables, fiches films et séries avec épisodes |
 | **Recherche** | Recherche TMDB (Tout / Films / Séries) avec badges de bibliothèque |
-| **Fiche** | **Un seul bouton « Lire »** : Jellyfin si le titre ou l'épisode y est. Sinon, lecture immédiate de la meilleure source (VF d'abord) via tes addons Stremio, et le titre part en même temps dans Radarr / Sonarr. Pour une série : premier épisode non vu, et la série entière se télécharge |
+| **Fiche** | « Lire » depuis Jellyfin (pour une série : premier épisode non vu). Statut façon Seerr (Disponible, Partiellement disponible, En cours, En attente) et bouton **Demander** |
 | **Lecteur** | **mpv** par défaut : lit tout (MKV, HEVC, DTS, TrueHD, sous-titres ASS), contrôles maison, choix des pistes audio et sous-titres, vitesse, zoom, piste FR auto. Le lecteur natif reste disponible (Profil, rubrique Lecture), et on peut basculer de l'un à l'autre en cas d'échec |
-| **Activité** | Files Radarr + Sonarr en direct ; onglet **Demandes** (Seerr) avec validation / refus pour l'admin |
+| **Demandes** | Liste façon Seerr (filtres, statuts, demandeur), validation / refus par l'admin, et file de téléchargement |
 | **Réglages** | Jellyfin, affiches Better Posters, TMDB, Radarr, Sonarr, addons Stremio |
 
 ### Réglages qui survivent à une réinstallation
@@ -40,20 +40,29 @@ Le **thème de saison** (couleur d'accent, emoji, teinte du hero) suit la date. 
 
 Un petit serveur Docker sans dépendance, qui s'authentifie avec le compte Jellyfin : voir [`server/lumio`](server/lumio/README.md).
 - Onglet **Chat** pour les remarques et propositions, avec le bouton « Proposer à la famille » sur chaque fiche.
-- **Téléchargements pour les comptes non-admins**, sans Seerr : le serveur garde les clés Radarr et Sonarr (l'admin les envoie depuis Profil, rubrique Serveur Lumio). Chaque ajout est annoncé dans le chat.
+- **Demandes façon Seerr**. Le serveur garde les clés Radarr et Sonarr (l'admin les envoie depuis Profil, rubrique Serveur Lumio). Il gère aussi la validation automatique ou par l'admin, les quotas, les demandes saison par saison, et les annonces dans le chat (demande, validation, refus, « disponible »).
 - **État des serveurs** en haut de Profil : Jellyfin, Radarr, Sonarr, serveur Lumio et Seerr (en ligne ou non, version, latence, espace disque).
 
-### Choix du dossier
+### Fenêtre « Demander »
 
-Quand un titre part en téléchargement, l'appli demande le dossier racine de Radarr ou Sonarr (Films, Séries, Kids, Anime…) et en suggère un selon le genre : animation japonaise → Anime, animation ou famille → Kids. Dans un dossier « anime », Sonarr ajoute la série en type *anime*. Pendant un streaming, on peut aussi choisir de regarder sans télécharger.
+Comme sur Seerr :
+- Pour une série, on coche les saisons ; chaque saison affiche son statut (Disponible, En cours, En attente), et les saisons déjà disponibles ou demandées ne sont pas cochables.
+- Le quota restant s'affiche, ainsi que le message « devra être validée » si l'utilisateur n'a pas la validation automatique.
+- Dans les **Options**, l'appli propose le dossier racine le dossier racine de Radarr ou Sonarr (Films, Séries, Kids, Anime…) et en suggère un selon le genre : animation japonaise → Anime, animation ou famille → Kids. Dans un dossier « anime », Sonarr ajoute la série en type *anime*. 
 
 ### Chromecast
 
-Bouton Cast dans le lecteur. Pour Jellyfin, un profil Chromecast est envoyé au serveur : lecture directe en MP4/H.264, sinon transcodage HLS. Pour les streams des addons, le lien est envoyé tel quel : les MKV en HEVC ou DTS ne passent pas toujours.
+Bouton Cast dans le lecteur. Pour Jellyfin, un profil Chromecast est envoyé au serveur : lecture directe en MP4/H.264, sinon transcodage HLS.
 
 ### Utilisateurs non-admins et demandes
 
-Le rôle vient de Jellyfin (`Policy.IsAdministrator`). Un admin pilote Radarr et Sonarr directement. Les autres envoient des **demandes via Seerr / Jellyseerr** si le serveur Lumio n'est pas installé : connexion avec le même compte Jellyfin, et validation par l'admin dans l'onglet Activité.
+Le rôle vient de Jellyfin (`Policy.IsAdministrator`). Avec le serveur Lumio, l'admin règle dans Profil → **Utilisateurs et droits** :
+- la validation automatique, par défaut ou par utilisateur ;
+- les quotas (films et saisons sur N jours) ;
+- si chacun voit les demandes des autres.
+
+L'admin a le profil de qualité en plus dans les options.
+Sans serveur Lumio, l'admin pilote Radarr et Sonarr directement, et les autres passent par Seerr / Jellyseerr.
 Dans Profil, rubrique Demandes, **« Inviter quelqu'un »** génère un lien `lumio://invite?…` qui préremplit l'appli d'un proche : serveurs, clé TMDB et addons, jamais les clés Radarr ou Sonarr.
 
 ### Personnalisation
@@ -62,15 +71,11 @@ Bouton ⚙︎ en haut de l'accueil, ou Profil puis Personnalisation : ordre et v
 
 ### Épisode suivant
 
-À la fin d'un épisode, un compte à rebours de 8 s lance le suivant, depuis Jellyfin ou en streaming. Désactivable dans Profil, rubrique Lecture.
+À la fin d'un épisode, un compte à rebours de 8 s lance le suivant, depuis Jellyfin. Désactivable dans Profil, rubrique Lecture.
 
 ### Lecture Jellyfin
 
 L'appli envoie un profil d'appareil à `/Items/{id}/PlaybackInfo` : lecture directe quand le format est compatible, sinon transcodage HLS par le serveur. La progression est remontée (`/Sessions/Playing…`) : « Reprendre » marche aussi dans les autres clients Jellyfin.
-
-### Regarder pendant le téléchargement
-
-Ajoute un addon Stremio qui fournit des streams (ressource `stream`). Sur une fiche absente de Jellyfin, « Regarder maintenant » liste les sources lisibles (liens directs ou debrid), filtrables par FR / 4K / 1080p. En même temps, le film est ajouté à Radarr, ou la saison à Sonarr, et se télécharge en arrière-plan. Les sources torrent brutes (infoHash) ne sont pas lisibles dans l'appli.
 
 ### Affiches Better Posters
 

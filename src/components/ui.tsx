@@ -19,7 +19,7 @@ export type PosterItem = {
   /** Identifiants pour l'affiche Better Posters (sinon : poster) */
   ids?: PosterIds;
   subtitle?: string;
-  badge?: { label: string; color: string; state?: 'available' | 'partial' | 'monitored' | 'missing' } | null;
+  badge?: { label: string; color: string; state?: 'available' | 'partial' | 'monitored' | 'missing' | 'pending' } | null;
   onPress: () => void | Promise<void>;
 };
 
@@ -28,6 +28,7 @@ const BADGE_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
   partial: 'remove',
   monitored: 'time-outline',
   missing: 'eye-off-outline',
+  pending: 'hourglass-outline',
 };
 
 /** Pastille ronde en haut à droite de l'affiche (coche = dans ta bibliothèque). */
@@ -35,7 +36,7 @@ export function StatusBadge({ badge }: { badge: NonNullable<PosterItem['badge']>
   const icon = badge.state ? BADGE_ICON[badge.state] : 'checkmark';
   return (
     <View style={styles.badge} accessibilityLabel={badge.label}>
-      <Ionicons name={icon} size={13} color={badge.state === 'monitored' ? C.warning : '#fff'} />
+      <Ionicons name={icon} size={13} color={badge.state === 'monitored' || badge.state === 'pending' ? C.warning : '#fff'} />
     </View>
   );
 }
