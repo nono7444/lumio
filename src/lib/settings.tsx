@@ -34,7 +34,21 @@ export type JellyfinSession = {
   userId: string;
   userName: string;
   serverName?: string;
+  /** Admin Jellyfin : ajout direct Radarr/Sonarr. Sinon : demandes via Seerr */
+  isAdmin?: boolean;
 };
+
+export type SeerrConfig = {
+  url: string;
+  /** Clé API (admin uniquement, facultative : la session Jellyfin suffit) */
+  apiKey?: string;
+  userName?: string;
+};
+
+/** Rangée de l'accueil : ordre et visibilité choisis par l'utilisateur */
+export type HomeRow = { id: string; hidden?: boolean };
+/** Onglet de la barre du bas */
+export type TabPref = { name: string; hidden?: boolean };
 
 export type BetterPostersConfig = {
   enabled: boolean;
@@ -51,6 +65,11 @@ export type Settings = {
   /** L'utilisateur a choisi de continuer sans Jellyfin */
   skipJellyfin: boolean;
   betterPosters: BetterPostersConfig;
+  seerr: SeerrConfig | null;
+  homeLayout: HomeRow[];
+  tabsLayout: TabPref[];
+  /** Enchaîner automatiquement l'épisode suivant */
+  autoNext: boolean;
   /** Moteur de lecture : mpv (lit tout, MKV inclus) ou lecteur natif du téléphone */
   player: 'mpv' | 'native';
   /** Clé API v3 ou jeton v4 TMDB (obligatoire : recherche + fiches) */
@@ -76,6 +95,10 @@ const DEFAULTS: Settings = {
   skipJellyfin: false,
   betterPosters: { enabled: true, rating: true, genre: false, ratingSource: '' },
   player: 'mpv',
+  seerr: null,
+  homeLayout: [],
+  tabsLayout: [],
+  autoNext: true,
   tmdbKey: '',
   language: 'fr-FR',
   radarr: { url: '', apiKey: '', searchOnAdd: true, minimumAvailability: 'released' },
@@ -147,6 +170,9 @@ export function useSettings() {
 }
 
 export const hasTmdb = (s: Settings) => Boolean(s.tmdbKey.trim());
+
+/** Utilisateur qui peut piloter Radarr/Sonarr directement (admin Jellyfin, ou pas de Jellyfin du tout) */
+export const isManager = (s: Settings) => !s.jellyfin || s.jellyfin.isAdmin !== false;
 
 /** Prêt à ajouter : URL, clé, profil et dossier racine choisis. */
 export const arrReady = (c: ArrConfig) =>

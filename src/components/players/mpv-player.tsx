@@ -31,7 +31,7 @@ function trackLabel(t: TrackInfo) {
 }
 
 /** Lecteur mpv avec contrôles maison (lecture, barre de progression, pistes, vitesse, zoom). */
-export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onReady, onError, onClose }: PlayerProps) {
+export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onReady, onError, onClose, onEnded }: PlayerProps) {
   const insets = useSafeAreaInsets();
   const ref = useRef<ExpoMpvViewRef>(null);
   const [source, setSource] = useState<string | undefined>();
@@ -147,7 +147,7 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
         onError={({ nativeEvent }) => onError(nativeEvent.error || 'Lecture impossible')}
         onEnd={({ nativeEvent }) => {
           if (nativeEvent.reason === 'error') onError('Le fichier n’a pas pu être lu');
-          else if (nativeEvent.reason === 'ended') onClose();
+          else if (nativeEvent.reason === 'ended') onEnded();
         }}
       />
 

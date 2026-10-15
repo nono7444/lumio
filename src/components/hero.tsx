@@ -146,11 +146,24 @@ export function Hero({ items, badge }: { items: TmdbItem[]; badge: (t: MediaType
   );
 }
 
-export function HeroTopBar({ title }: { title: string }) {
+export function HeroTopBar({ title, onCustomize }: { title: string; onCustomize?: () => void }) {
   return (
     <View style={styles.topBar} pointerEvents="box-none">
       <Text style={styles.brand}>{title}</Text>
-      <Ionicons name="sparkles" size={18} color={C.text} />
+      {onCustomize ? (
+        <Pressable
+          onPress={() => {
+            tap();
+            onCustomize();
+          }}
+          hitSlop={10}
+          accessibilityLabel="Personnaliser l'accueil"
+          style={styles.topBtn}>
+          <Ionicons name="options-outline" size={20} color={C.text} />
+        </Pressable>
+      ) : (
+        <Ionicons name="sparkles" size={18} color={C.text} />
+      )}
     </View>
   );
 }
@@ -168,5 +181,6 @@ const styles = StyleSheet.create({
   pageDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.3)' },
   pageDotOn: { width: 18, backgroundColor: C.text },
   topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20 },
+  topBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
   brand: { color: C.text, fontSize: 26, fontWeight: '900', letterSpacing: -0.6 },
 });

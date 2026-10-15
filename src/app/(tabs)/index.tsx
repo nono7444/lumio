@@ -1,4 +1,4 @@
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -11,18 +11,11 @@ import { jf, type JfItem } from '@/lib/jellyfin';
 import { PosterItem, Row } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
 import { openMedia, openStremioMeta } from '@/lib/navigation';
+import { orderRows, useAvailableRows } from '@/lib/home-layout';
 import { Addon, hasTmdb, useSettings } from '@/lib/settings';
 import { itemTitle, itemYear, tmdb, tmdbImg, type MediaType } from '@/lib/tmdb';
 import { useLibrary } from '@/lib/use-library';
-import {
-  catalogKey,
-  fetchCatalog,
-  fetchManifest,
-  isBrowsable,
-  metaYear,
-  type StremioCatalog,
-  type StremioMeta,
-} from '@/lib/stremio';
+import { catalogKey, fetchCatalog, metaYear, type StremioCatalog, type StremioMeta } from '@/lib/stremio';
 
 const TYPE_LABEL: Record<string, string> = { movie: 'Films', series: 'Séries' };
 
@@ -64,24 +57,6 @@ function CatalogRow({ addon, catalog, nonce }: { addon: Addon; catalog: StremioC
   return <Row title={`${title} · ${type}`} subtitle={addon.name} items={items} loading={loading} error={error} />;
 }
 
-function AddonRows({ addon, nonce }: { addon: Addon; nonce: number }) {
-  const { data, error, loading } = useAsync(() => fetchManifest(addon.base), [addon.base]);
-  if (loading) return <Row title={addon.name} items={[]} loading />;
-  if (error || !data) return <Row title={addon.name} items={[]} error={error ?? 'manifest illisible'} />;
-
-  const catalogs = (data.catalogs ?? [])
-    .filter(isBrowsable)
-    .filter((c) => !addon.hidden?.includes(catalogKey(c)));
-
-  return (
-    <>
-      {catalogs.map((c) => (
-        <CatalogRow key={catalogKey(c)} addon={addon} catalog={c} nonce={nonce} />
-      ))}
-    </>
-  );
-}
-
 function Trending({ nonce, part }: { nonce: number; part: 'hero' | 'row' }) {
   const { settings } = useSettings();
   const badge = useLibrary();
@@ -105,17 +80,34 @@ function Trending({ nonce, part }: { nonce: number; part: 'hero' | 'row' }) {
   return <Row title="Tendances de la semaine" items={items} loading={loading} error={error} />;
 }
 
-function ContinueWatching({ nonce }: { nonce: number }) {
+function JfDynamicRow({ kind, view, nonce }: { kind: 'continue' | 'nextup' | 'favorites' | 'jf-latest'; view?: JfItem; nonce: number }) {
   const { settings } = useSettings();
   const [items, setItems] = useState<JfItem[]>([]);
   useFocusEffect(
     useCallback(() => {
       if (!settings.jellyfin) return;
-      jf.resume(settings).then(setItems).catch(() => {});
+      const p =
+        kind === 'continue'
+          ? jf.resume(settings)
+          : kind === 'nextup'
+            ? jf.nextUp(settings)
+            : kind === 'favorites'
+              ? jf.favorites(settings)
+              : jf.latest(settings, view!.Id);
+      p.then(setItems).catch(() => {});
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [settings.jellyfin, nonce])
+    }, [settings.jellyfin?.token, kind, view?.Id, nonce])
   );
-  return <JfRow title="Reprendre" items={items} wide />;
+  const title =
+    kind === 'continue' ? 'Reprendre' : kind === 'nextup' ? 'À suivre' : kind === 'favorites' ? 'Favoris' : `Ajouts récents · ${view?.Name ?? ''}`;
+  return (
+    <JfRow
+      title={title}
+      items={items}
+      wide={kind === 'continue' || kind === 'nextup'}
+      onSeeAll={kind === 'jf-latest' && view ? () => router.push({ pathname: '/jellyfin/[id]', params: { id: view.Id } }) : undefined}
+    />
+  );
 }
 
 export default function Home() {
@@ -124,7 +116,9 @@ export default function Home() {
   const [nonce, setNonce] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [scrolled, setScrolled] = useState(false);
-  const withHero = settings.showTrending && hasTmdb(settings);
+  const { rows } = useAvailableRows(nonce);
+  const ordered = orderRows(rows, settings.homeLayout).filter((r) => !r.hidden);
+  const withHero = settings.showTrending && ordered[0]?.kind === 'hero';
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -137,23 +131,39 @@ export default function Home() {
       <StatusBar style="light" />
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingTop: withHero ? 0 : insets.top + 56, paddingBottom: TAB_SPACE }}
+        contentContainerStyle={{ paddingTop: withHero ? 0 : insets.top + 60, paddingBottom: TAB_SPACE }}
         scrollEventThrottle={32}
         onScroll={(e) => setScrolled(e.nativeEvent.contentOffset.y > 40)}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.text} progressViewOffset={insets.top} />
         }>
-        {withHero && <Trending part="hero" nonce={nonce} />}
-        <View style={{ height: 20 }} />
-        {settings.jellyfin && <ContinueWatching nonce={nonce} />}
-        {settings.addons.map((a) => (
-          <AddonRows key={a.base} addon={a} nonce={nonce} />
-        ))}
-        {withHero && <Trending part="row" nonce={nonce} />}
-        {settings.addons.length === 0 && !hasTmdb(settings) && (
+        {ordered.map((r, idx) => {
+          const spacer = idx === 1 && withHero ? <View key="sp" style={{ height: 20 }} /> : null;
+          let el: React.ReactNode = null;
+          switch (r.kind) {
+            case 'hero':
+              el = settings.showTrending ? <Trending part="hero" nonce={nonce} /> : null;
+              break;
+            case 'trending':
+              el = <Trending part="row" nonce={nonce} />;
+              break;
+            case 'catalog':
+              el = r.addon && r.catalog ? <CatalogRow addon={r.addon} catalog={r.catalog} nonce={nonce} /> : null;
+              break;
+            default:
+              el = <JfDynamicRow kind={r.kind} view={r.view} nonce={nonce} />;
+          }
+          return (
+            <View key={r.id}>
+              {spacer}
+              {el}
+            </View>
+          );
+        })}
+        {settings.addons.length === 0 && !hasTmdb(settings) && !settings.jellyfin && (
           <View style={{ padding: 24 }}>
             <Text style={{ color: C.textDim, textAlign: 'center' }}>
-              Ajoute un addon Stremio ou ta clé TMDB dans les réglages pour remplir l'accueil.
+              Ajoute un addon Stremio ou ta clé TMDB dans Profil pour remplir l'accueil.
             </Text>
           </View>
         )}
@@ -162,7 +172,7 @@ export default function Home() {
       {/* Barre du haut : transparente sur le hero, voile noir une fois qu'on a défilé */}
       <View style={[styles.top, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
         <View style={[StyleSheet.absoluteFill, { backgroundColor: scrolled || !withHero ? 'rgba(0,0,0,0.88)' : 'transparent' }]} />
-        <HeroTopBar title="Lumio" />
+        <HeroTopBar title="Lumio" onCustomize={() => router.push('/customize')} />
       </View>
     </View>
   );

@@ -7,9 +7,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SegChip, tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
-import { invalidateLibrary, radarr, sonarr } from '@/lib/arr';
-import { arrReady, useSettings, type Settings } from '@/lib/settings';
-import { fetchManifest, fetchStreams, providesStreams, type StremioStream } from '@/lib/stremio';
+import { grab } from '@/lib/grab';
+import { useSettings } from '@/lib/settings';
+import { collectStreams, QUALITY_RANK, type Found } from '@/lib/streams';
 import { tmdb, tmdbImg } from '@/lib/tmdb';
 
 type Params = {
@@ -21,63 +21,6 @@ type Params = {
   episode?: string;
   grab?: string;
 };
-
-type Found = StremioStream & { addon: string; quality: string; sizeLabel?: string; fr: boolean; playable: boolean };
-
-// ——— Analyse des libellés de stream ———
-
-function quality(text: string) {
-  if (/2160p|\b4k\b|uhd/i.test(text)) return '4K';
-  if (/1080p/i.test(text)) return '1080p';
-  if (/720p/i.test(text)) return '720p';
-  if (/480p|\bsd\b/i.test(text)) return 'SD';
-  return '';
-}
-
-function sizeLabel(s: StremioStream, text: string) {
-  if (s.behaviorHints?.videoSize) {
-    const gb = s.behaviorHints.videoSize / 1024 ** 3;
-    return `${gb.toFixed(gb >= 10 ? 0 : 1)} Go`;
-  }
-  const m = text.match(/(\d+(?:[.,]\d+)?)\s?(GB|Go|MB|Mo)\b/i);
-  return m ? `${m[1].replace(',', '.')} ${/g/i.test(m[2]) ? 'Go' : 'Mo'}` : undefined;
-}
-
-const isFrench = (text: string) => /🇫🇷|\b(multi|vff|vfq|vf2?|vfi|french|truefrench|fr)\b/i.test(text);
-
-const QUALITY_RANK: Record<string, number> = { '4K': 0, '1080p': 1, '720p': 2, SD: 3, '': 4 };
-
-// ——— Lancement du téléchargement en parallèle ———
-
-async function grabInBackground(s: Settings, p: Params): Promise<string | null> {
-  const tmdbId = Number(p.tmdbId);
-  if (p.type === 'movie') {
-    if (!s.radarr.url || !s.radarr.apiKey) return null;
-    const existing = await radarr.byTmdb(s.radarr, tmdbId);
-    if (existing) return existing.hasFile ? null : 'Déjà dans Radarr, le téléchargement suit son cours.';
-    if (!arrReady(s.radarr)) return null;
-    await radarr.add(s.radarr, tmdbId);
-    invalidateLibrary();
-    return 'Ajouté à Radarr : le film se télécharge en arrière-plan.';
-  }
-  const season = Number(p.season);
-  if (!season || !s.sonarr.url || !s.sonarr.apiKey) return null;
-  const tv = await tmdb.tv(s, tmdbId);
-  const tvdb = tv.external_ids?.tvdb_id;
-  if (!tvdb) return null;
-  const existing = await sonarr.byTvdb(s.sonarr, tvdb);
-  if (existing) {
-    const se = existing.seasons.find((x) => x.seasonNumber === season);
-    if (se?.monitored) return null;
-    await sonarr.monitorSeasons(s.sonarr, existing, [season]);
-    invalidateLibrary();
-    return `Saison ${season} envoyée à Sonarr : elle se télécharge en arrière-plan.`;
-  }
-  if (!arrReady(s.sonarr)) return null;
-  await sonarr.add(s.sonarr, tvdb, [season]);
-  invalidateLibrary();
-  return `Série ajoutée à Sonarr (saison ${season}) : téléchargement en arrière-plan.`;
-}
 
 // ——— Choix de l'épisode (séries) ———
 
@@ -178,40 +121,24 @@ export default function Streams() {
     let alive = true;
     setStreams([]);
     setErrors([]);
-    setPending(settings.addons.length);
-    settings.addons.forEach(async (a) => {
-      try {
-        const m = await fetchManifest(a.base);
-        if (!providesStreams(m, stremioType, stremioId)) return;
-        const list = await fetchStreams(a.base, stremioType, stremioId);
+    setPending(1);
+    collectStreams(settings, stremioType, stremioId, { onPartial: (list) => alive && setStreams(list) }).then(
+      ({ streams: all, errors: errs }) => {
         if (!alive) return;
-        const mapped: Found[] = list.map((s) => {
-          const text = `${s.name ?? ''} ${s.title ?? ''} ${s.description ?? ''} ${s.behaviorHints?.filename ?? ''}`;
-          return {
-            ...s,
-            addon: m.name,
-            quality: quality(text),
-            sizeLabel: sizeLabel(s, text),
-            fr: isFrench(text),
-            playable: Boolean(s.url),
-          };
-        });
-        setStreams((prev) => [...prev, ...mapped]);
-      } catch (e: any) {
-        if (alive) setErrors((prev) => [...prev, `${a.name} : ${e?.message ?? e}`]);
-      } finally {
-        if (alive) setPending((n) => n - 1);
+        setStreams(all);
+        setErrors(errs);
+        setPending(0);
       }
-    });
+    );
     return () => {
       alive = false;
     };
-  }, [ready, p.imdb, stremioType, stremioId, settings.addons]);
+  }, [ready, p.imdb, stremioType, stremioId, settings]);
 
   // Lance le téléchargement dans Radarr / Sonarr pendant qu'on regarde
   useEffect(() => {
     if (p.grab !== '1' || !ready) return;
-    grabInBackground(settings, { ...p, season: season != null ? String(season) : undefined })
+    grab(settings, { type: p.type === 'tv' ? 'tv' : 'movie', tmdbId: Number(p.tmdbId), season: season ?? undefined })
       .then(setGrabNote)
       .catch((e) => setGrabNote(`Téléchargement non lancé : ${e?.message ?? e}`));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -239,6 +166,11 @@ export default function Streams() {
         title: p.title,
         subtitle,
         headers: s.behaviorHints?.proxyHeaders?.request ? JSON.stringify(s.behaviorHints.proxyHeaders.request) : undefined,
+        tmdbId: p.tmdbId,
+        imdb: p.imdb,
+        series: p.title,
+        season: isSeries && season != null ? String(season) : undefined,
+        episode: isSeries && episode != null ? String(episode) : undefined,
       },
     });
   }

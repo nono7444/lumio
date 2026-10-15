@@ -1,11 +1,26 @@
 import { Redirect, Tabs } from 'expo-router';
+import { useEffect } from 'react';
 
 import { FloatingTabBar } from '@/components/tab-bar';
 import { C } from '@/constants/theme';
+import { fetchIsAdmin } from '@/lib/jellyfin';
 import { useSettings } from '@/lib/settings';
 
 export default function TabsLayout() {
-  const { settings } = useSettings();
+  const { settings, update } = useSettings();
+
+  // Rôle Jellyfin rafraîchi à chaque lancement (un admin peut retirer ou donner les droits)
+  useEffect(() => {
+    if (!settings.jellyfin) return;
+    fetchIsAdmin(settings)
+      .then((isAdmin) => {
+        if (settings.jellyfin && settings.jellyfin.isAdmin !== isAdmin)
+          update({ jellyfin: { ...settings.jellyfin, isAdmin } });
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.jellyfin?.token]);
+
   // Premier lancement : écran de connexion Jellyfin (on peut le passer)
   if (!settings.jellyfin && !settings.skipJellyfin) return <Redirect href="/login" />;
 

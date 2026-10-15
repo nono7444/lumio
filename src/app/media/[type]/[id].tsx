@@ -27,9 +27,9 @@ import {
   type RadarrMovie,
   type SonarrSeries,
 } from '@/lib/arr';
-import { playJellyfin } from '@/components/jf-cards';
 import { jf, type JfItem } from '@/lib/jellyfin';
-import { arrReady, hasTmdb, useSettings } from '@/lib/settings';
+import { RequestBlock } from '@/components/request-block';
+import { arrReady, hasTmdb, isManager, useSettings } from '@/lib/settings';
 import { pickLogo, tmdb, tmdbImg, type TmdbMovie, type TmdbTv } from '@/lib/tmdb';
 
 type Details =
@@ -64,7 +64,8 @@ export default function MediaScreen() {
   const isTv = type === 'tv';
   const service = isTv ? settings.sonarr : settings.radarr;
   const serviceName = isTv ? 'Sonarr' : 'Radarr';
-  const configured = Boolean(service.url && service.apiKey);
+  const manager = isManager(settings);
+  const configured = manager && Boolean(service.url && service.apiKey);
   const ready = arrReady(service);
 
   const load = useCallback(async () => {
@@ -223,39 +224,61 @@ export default function MediaScreen() {
         </View>
 
         <View style={{ paddingHorizontal: 16, gap: 20, marginTop: 4 }}>
-          {/* ——— Lecture ——— */}
-          {jfItem ? (
-            <Button
-              title={jfItem.Type === 'Series' ? 'Voir dans Jellyfin' : 'Lire'}
-              icon="play"
-              onPress={() =>
-                jfItem.Type === 'Series'
-                  ? router.push({ pathname: '/jellyfin/[id]', params: { id: jfItem.Id } })
-                  : playJellyfin(jfItem)
-              }
-            />
-          ) : imdbId && settings.addons.length > 0 ? (
-            <Button
-              title={details.kind === 'tv' ? 'Regarder un épisode maintenant' : 'Regarder maintenant'}
-              icon="play"
-              onPress={() =>
-                router.push({
-                  pathname: '/streams',
-                  params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId, title, grab: '1' },
-                })
-              }
-            />
-          ) : null}
-          {!jfItem && imdbId && settings.addons.length > 0 && configured && (ready || details.arr) ? (
-            <Text style={[styles.dim, { marginTop: -10, textAlign: 'center' }]}>
-              {details.kind === 'movie'
-                ? 'Le film est aussi envoyé à Radarr et se télécharge pendant que tu regardes.'
-                : 'La saison choisie est aussi envoyée à Sonarr pendant que tu regardes.'}
-            </Text>
-          ) : null}
+          {/* ——— Lecture unifiée : Jellyfin si dispo, sinon streaming + téléchargement ——— */}
+          {(jfItem || (imdbId && settings.addons.length > 0)) && (
+            <View style={{ gap: 10 }}>
+              <Button
+                title={jfItem ? 'Lire' : details.kind === 'tv' ? 'Lire le premier épisode non vu' : 'Lire maintenant'}
+                icon="play"
+                onPress={() =>
+                  router.push({
+                    pathname: '/watch',
+                    params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title },
+                  })
+                }
+              />
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                {imdbId && settings.addons.length > 0 ? (
+                  <Button
+                    title={details.kind === 'tv' ? 'Épisodes' : 'Sources'}
+                    icon={details.kind === 'tv' ? 'list' : 'layers-outline'}
+                    variant="glass"
+                    onPress={() =>
+                      router.push({
+                        pathname: '/streams',
+                        params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId, title, grab: '1' },
+                      })
+                    }
+                    style={{ flex: 1 }}
+                  />
+                ) : null}
+                {jfItem ? (
+                  <Button
+                    title="Jellyfin"
+                    icon="albums-outline"
+                    variant="glass"
+                    onPress={() => router.push({ pathname: '/jellyfin/[id]', params: { id: jfItem.Id } })}
+                    style={{ flex: 1 }}
+                  />
+                ) : null}
+              </View>
+              {!jfItem && (manager ? configured && (ready || details.arr) : settings.seerr?.url) ? (
+                <Text style={[styles.dim, { textAlign: 'center' }]}>
+                  {manager
+                    ? details.kind === 'movie'
+                      ? 'Pas encore sur Jellyfin : lecture en streaming, et le film part dans Radarr en même temps.'
+                      : 'Pas encore sur Jellyfin : lecture en streaming, et la série part dans Sonarr en même temps.'
+                    : 'Pas encore sur Jellyfin : lecture en streaming, et une demande est envoyée en même temps.'}
+                </Text>
+              ) : null}
+            </View>
+          )}
 
-          {/* ——— Action principale ——— */}
-          {!configured ? (
+          {/* ——— Utilisateur non-admin : demandes Seerr ——— */}
+          {!manager && !jfItem && <RequestBlock type={details.kind} tmdbId={tmdbId} />}
+
+          {/* ——— Action principale (admin) ——— */}
+          {!manager ? null : !configured ? (
             <Notice icon="information-circle-outline" text={`Connecte ${serviceName} dans les réglages pour l'ajouter.`} />
           ) : details.arrError ? (
             <Notice icon="warning-outline" color={C.danger} text={`${serviceName} : ${details.arrError}`} />

@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { tap } from '@/components/ui';
 import { C } from '@/constants/theme';
+import { orderTabs } from '@/lib/home-layout';
 import { useSettings } from '@/lib/settings';
 
 type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>>[0];
@@ -24,10 +25,15 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
   const { settings } = useSettings();
   const initial = (settings.jellyfin?.userName ?? 'L').slice(0, 1).toUpperCase();
 
-  const routes = state.routes.filter((r) => {
+  const visible = state.routes.filter((r) => {
     const opts = descriptors[r.key].options as { href?: string | null };
     return opts.href !== null;
   });
+  const order = orderTabs(
+    visible.map((r) => r.name),
+    settings.tabsLayout
+  );
+  const routes = order.map((n) => visible.find((r) => r.name === n)!).filter(Boolean);
 
   return (
     <View pointerEvents="box-none" style={[styles.wrap, { bottom: Math.max(insets.bottom, 12) }]}>

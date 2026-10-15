@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import {
   ActivityIndicator,
@@ -17,12 +17,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
 import { login, serverInfo } from '@/lib/jellyfin';
+import { seerr } from '@/lib/seerr';
 import { useSettings } from '@/lib/settings';
 
 export default function Login() {
   const { settings, update } = useSettings();
   const insets = useSafeAreaInsets();
-  const [url, setUrl] = useState(settings.jellyfin?.url ?? '');
+  const params = useLocalSearchParams<{ url?: string }>();
+  const [url, setUrl] = useState(params.url ?? settings.jellyfin?.url ?? '');
   const [server, setServer] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [user, setUser] = useState('');
@@ -55,7 +57,17 @@ export default function Login() {
     setError(null);
     try {
       const session = await login(url, user.trim(), pass, settings.deviceId);
-      await update({ jellyfin: session, skipJellyfin: false });
+      // Serveur de demandes (Seerr) : même identifiants Jellyfin
+      let seerrCfg = settings.seerr;
+      if (seerrCfg?.url) {
+        try {
+          const me = await seerr.login(seerrCfg.url, user.trim(), pass);
+          seerrCfg = { ...seerrCfg, userName: me.displayName ?? me.jellyfinUsername ?? user.trim() };
+        } catch {
+          // Non bloquant : l'utilisateur pourra se reconnecter depuis Profil
+        }
+      }
+      await update({ jellyfin: session, skipJellyfin: false, seerr: seerrCfg });
       router.replace('/');
     } catch (e: any) {
       setError(e?.message ?? String(e));

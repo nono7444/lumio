@@ -5,11 +5,12 @@ import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'rea
 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ScreenTitle, SetupPrompt } from '@/components/ui';
+import { Requests } from '@/components/requests-list';
+import { ScreenTitle, SegChip, SetupPrompt } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { formatBytes, radarr, sonarr, type QueueItem } from '@/lib/arr';
 import { openMedia } from '@/lib/navigation';
-import { useSettings } from '@/lib/settings';
+import { isManager, useSettings } from '@/lib/settings';
 
 type Row = QueueItem & { source: 'radarr' | 'sonarr' };
 
@@ -85,7 +86,7 @@ function QueueRow({ q }: { q: Row }) {
   );
 }
 
-export default function Activity() {
+function Downloads({ header }: { header: React.ReactNode }) {
   const { settings } = useSettings();
   const insets = useSafeAreaInsets();
   const [rows, setRows] = useState<Row[]>([]);
@@ -132,10 +133,13 @@ export default function Activity() {
 
   if (!configured)
     return (
-      <SetupPrompt
-        title="Connecte Radarr et Sonarr"
-        text="Renseigne l'URL et la clé API de Radarr et/ou Sonarr pour suivre les téléchargements ici."
-      />
+      <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
+        {header}
+        <SetupPrompt
+          title="Connecte Radarr et Sonarr"
+          text="Renseigne l'URL et la clé API de Radarr et/ou Sonarr pour suivre les téléchargements ici."
+        />
+      </View>
     );
 
   return (
@@ -148,7 +152,7 @@ export default function Activity() {
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => load(true)} tintColor={C.accent} />}
       ListHeaderComponent={
         <View style={{ marginHorizontal: -16 }}>
-          <ScreenTitle title="Activité" />
+          {header}
           {errors.map((e) => (
             <Text key={e} style={[styles.dim, { color: C.danger, marginHorizontal: 16, marginBottom: 4 }]}>
               {e}
@@ -183,3 +187,25 @@ const styles = StyleSheet.create({
   bar: { height: 6, borderRadius: 3, backgroundColor: C.surfaceHigh, overflow: 'hidden' },
   barFill: { height: '100%', borderRadius: 3 },
 });
+
+export default function Activity() {
+  const { settings } = useSettings();
+  const manager = isManager(settings);
+  const hasSeerr = Boolean(settings.seerr?.url);
+  const [tab, setTab] = useState<'downloads' | 'requests'>(manager ? 'downloads' : 'requests');
+
+  const header = (
+    <View>
+      <ScreenTitle title="Activité" />
+      {manager && hasSeerr && (
+        <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 14 }}>
+          <SegChip label="Téléchargements" on={tab === 'downloads'} onPress={() => setTab('downloads')} />
+          <SegChip label="Demandes" on={tab === 'requests'} onPress={() => setTab('requests')} />
+        </View>
+      )}
+    </View>
+  );
+
+  if (manager && tab === 'downloads') return <Downloads header={header} />;
+  return <Requests header={header} admin={manager} />;
+}

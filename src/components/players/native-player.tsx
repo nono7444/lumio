@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { PlayerProps } from './types';
 
 /** Lecteur natif du téléphone (AVPlayer / ExoPlayer) avec ses contrôles système. */
-export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, onTime, onReady, onError, onClose }: PlayerProps) {
+export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, onTime, onReady, onError, onClose, onEnded }: PlayerProps) {
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const seeked = useRef(false);
@@ -43,6 +43,8 @@ export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, on
     } else if (status === 'loading') setLoading(true);
     else if (status === 'error') onError(error?.message ?? 'Lecture impossible');
   });
+
+  useEventListener(player, 'playToEnd', () => onEnded());
 
   useEventListener(player, 'timeUpdate', ({ currentTime }) => onTime(currentTime, !player.playing));
 

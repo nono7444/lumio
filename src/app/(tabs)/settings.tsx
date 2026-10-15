@@ -19,7 +19,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button, Field, ScreenTitle, Section } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
-import { Addon, DEFAULT_ADDON, useSettings } from '@/lib/settings';
+import { SeerrSection } from '@/components/seerr-section';
+import { Addon, DEFAULT_ADDON, isManager, useSettings } from '@/lib/settings';
 import { RATING_SOURCES } from '@/lib/better-posters';
 import { logout as logoutJellyfin } from '@/lib/jellyfin';
 import { tmdb as tmdbApi } from '@/lib/tmdb';
@@ -101,6 +102,7 @@ function AddonCard({ addon, onChange, onRemove }: { addon: Addon; onChange: (a: 
 export default function SettingsScreen() {
   const { settings, update } = useSettings();
   const insets = useSafeAreaInsets();
+  const manager = isManager(settings);
   const [tmdb, setTmdb] = useState(settings.tmdbKey);
   const [testing, setTesting] = useState(false);
   const [addonUrl, setAddonUrl] = useState('');
@@ -174,8 +176,8 @@ export default function SettingsScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.addonName}>{settings.jellyfin.userName}</Text>
                   <Text style={styles.addonUrl} numberOfLines={1}>
-                    {settings.jellyfin.serverName ? `${settings.jellyfin.serverName} · ` : ''}
-                    {settings.jellyfin.url}
+                    {settings.jellyfin.isAdmin === false ? 'Utilisateur' : 'Administrateur'}
+                    {settings.jellyfin.serverName ? ` · ${settings.jellyfin.serverName}` : ''}
                   </Text>
                 </View>
               </View>
@@ -195,6 +197,8 @@ export default function SettingsScreen() {
           )}
         </Section>
 
+        <SeerrSection />
+
         <Section title="Lecture">
           <Picker
             label="Lecteur vidéo"
@@ -205,6 +209,11 @@ export default function SettingsScreen() {
             value={settings.player}
             onChange={(v) => update({ player: v as 'mpv' | 'native' })}
           />
+          <Toggle label="Enchaîner l'épisode suivant" value={settings.autoNext} onChange={(v) => update({ autoNext: v })} />
+        </Section>
+
+        <Section title="Personnalisation">
+          <Button title="Accueil et onglets" icon="options-outline" variant="secondary" onPress={() => router.push('/customize')} />
         </Section>
 
         <Section title="Affiches">
@@ -251,6 +260,8 @@ export default function SettingsScreen() {
           <Button title="Enregistrer et tester" icon="flash-outline" onPress={saveTmdb} loading={testing} disabled={!tmdb.trim()} />
         </Section>
 
+        {manager && (
+        <>
         <ArrSection
           title="Radarr · Films"
           placeholder="http://192.168.1.10:7878"
@@ -280,6 +291,8 @@ export default function SettingsScreen() {
             onChange={(v) => update({ sonarr: { ...settings.sonarr, seasonFolder: v } })}
           />
         </ArrSection>
+        </>
+        )}
 
         <Section title="Accueil">
           <View style={styles.catRow}>

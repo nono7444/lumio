@@ -9,12 +9,13 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { JfPosterCard, playJellyfin } from '@/components/jf-cards';
+import { JfPosterCard, JfRow, playJellyfin } from '@/components/jf-cards';
 import { Button, Fade, Pill, SegChip, tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
 import {
@@ -41,6 +42,13 @@ function BackButton() {
 
 // ——— Grille d'une bibliothèque ———
 
+const FILTERS = [
+  { label: 'Tous', value: '' },
+  { label: 'Non vus', value: 'IsUnplayed' },
+  { label: 'Vus', value: 'IsPlayed' },
+  { label: 'Favoris', value: 'IsFavorite' },
+];
+
 const SORTS = [
   { label: 'Récents', sort: 'DateCreated', order: 'Descending' as const },
   { label: 'A-Z', sort: 'SortName', order: 'Ascending' as const },
@@ -53,6 +61,11 @@ function FolderGrid({ folder }: { folder: JfItem }) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const [sortIdx, setSortIdx] = useState(0);
+  const [filter, setFilter] = useState('');
+  const [genre, setGenre] = useState<string | null>(null);
+  const [genres, setGenres] = useState<string[]>([]);
+  const [query, setQuery] = useState('');
+  const [search, setSearch] = useState('');
   const [items, setItems] = useState<JfItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -76,6 +89,9 @@ function FolderGrid({ folder }: { folder: JfItem }) {
           order: s.order,
           start: reset ? 0 : items.length,
           limit: 60,
+          filters: filter || undefined,
+          genres: genre ?? undefined,
+          search: search || undefined,
         });
         setTotal(res.TotalRecordCount);
         setItems((prev) => (reset ? res.Items : [...prev, ...res.Items]));
@@ -84,13 +100,26 @@ function FolderGrid({ folder }: { folder: JfItem }) {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [settings, folder.Id, sortIdx, items.length, types]
+    [settings, folder.Id, sortIdx, items.length, types, filter, genre, search]
   );
 
   useEffect(() => {
     loadPage(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortIdx]);
+  }, [sortIdx, filter, genre, search]);
+
+  // Genres de cette bibliothèque
+  useEffect(() => {
+    jf.genres(settings, folder.Id)
+      .then((g) => setGenres(g.map((x) => x.Name)))
+      .catch(() => {});
+  }, [settings, folder.Id]);
+
+  // Recherche avec un léger délai de frappe
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(query.trim()), 350);
+    return () => clearTimeout(t);
+  }, [query]);
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -112,6 +141,38 @@ function FolderGrid({ folder }: { folder: JfItem }) {
                 <SegChip key={s.label} label={s.label} on={i === sortIdx} onPress={() => setSortIdx(i)} />
               ))}
             </View>
+            <View style={styles.searchBar}>
+              <Ionicons name="search" size={16} color={C.textDim} />
+              <TextInput
+                value={query}
+                onChangeText={setQuery}
+                placeholder={`Rechercher dans ${folder.Name}`}
+                placeholderTextColor={C.textFaint}
+                style={styles.searchInput}
+                autoCorrect={false}
+                clearButtonMode="while-editing"
+              />
+            </View>
+            <View style={[styles.sorts, { marginTop: 4 }]}>
+              {FILTERS.map((f) => (
+                <SegChip key={f.label} label={f.label} on={filter === f.value} onPress={() => setFilter(f.value)} />
+              ))}
+            </View>
+            {genres.length > 0 && (
+              <FlatList
+                horizontal
+                data={genres}
+                keyExtractor={(g) => g}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 8 }}
+                style={{ marginTop: 8, marginHorizontal: -16, flexGrow: 0 }}
+                ListHeaderComponent={<View style={{ width: 8 }} />}
+                ListFooterComponent={<View style={{ width: 8 }} />}
+                renderItem={({ item: g }) => (
+                  <SegChip label={g} on={genre === g} onPress={() => setGenre(genre === g ? null : g)} />
+                )}
+              />
+            )}
           </View>
         }
         ListFooterComponent={loading ? <ActivityIndicator color={C.text} style={{ margin: 20 }} /> : null}
@@ -132,6 +193,21 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
   const [season, setSeason] = useState<string | null>(null);
   const [episodes, setEpisodes] = useState<JfItem[]>([]);
   const [loadingEps, setLoadingEps] = useState(false);
+  const [similar, setSimilar] = useState<JfItem[]>([]);
+  const [fav, setFav] = useState(Boolean(item.UserData?.IsFavorite));
+
+  useEffect(() => {
+    jf.similar(settings, item.Id).then(setSimilar).catch(() => {});
+  }, [settings, item.Id]);
+
+  const tmdbId = item.ProviderIds?.Tmdb;
+  const canStream = Boolean(tmdbId && settings.addons.length);
+
+  async function toggleFav() {
+    const next = !fav;
+    setFav(next);
+    await jf.setFavorite(settings, item.Id, next).catch(() => setFav(!next));
+  }
 
   const isSeries = item.Type === 'Series';
   const heroH = Math.round(width * 1.2);
@@ -195,6 +271,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                 {resumeAt > 30 && (
                   <Button title="Depuis le début" icon="refresh" variant="glass" onPress={() => playJellyfin(item, true)} style={{ flex: 1 }} />
                 )}
+                <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" onPress={toggleFav} style={{ width: 54, paddingHorizontal: 0 }} />
                 <Button
                   title={item.UserData?.Played ? 'Vu' : 'Marquer vu'}
                   icon={item.UserData?.Played ? 'checkmark-circle' : 'checkmark-circle-outline'}
@@ -207,13 +284,40 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                 />
               </View>
             </View>
-          ) : nextEpisode ? (
-            <Button
-              title={`Lire S${nextEpisode.ParentIndexNumber}E${nextEpisode.IndexNumber}`}
-              icon="play"
-              onPress={() => playJellyfin(nextEpisode)}
-            />
-          ) : null}
+          ) : (
+            <View style={{ gap: 10 }}>
+              {nextEpisode ? (
+                <Button
+                  title={`Lire S${nextEpisode.ParentIndexNumber}E${nextEpisode.IndexNumber}`}
+                  icon="play"
+                  onPress={() => playJellyfin(nextEpisode)}
+                />
+              ) : null}
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" onPress={toggleFav} style={{ width: 54, paddingHorizontal: 0 }} />
+                {canStream && (
+                  <Button
+                    title="Épisodes manquants"
+                    icon="cloud-outline"
+                    variant="glass"
+                    onPress={() =>
+                      router.push({
+                        pathname: '/streams',
+                        params: {
+                          type: 'tv',
+                          tmdbId: String(tmdbId),
+                          imdb: item.ProviderIds?.Imdb ?? '',
+                          title: item.Name,
+                          grab: '1',
+                        },
+                      })
+                    }
+                    style={{ flex: 1 }}
+                  />
+                )}
+              </View>
+            </View>
+          )}
 
           {item.Overview ? <Text style={styles.overview}>{item.Overview}</Text> : null}
 
@@ -273,6 +377,12 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                   })}
                 </View>
               )}
+            </View>
+          )}
+
+          {similar.length > 0 && (
+            <View style={{ marginHorizontal: -16 }}>
+              <JfRow title="Dans le même genre" items={similar} />
             </View>
           )}
 
@@ -364,6 +474,16 @@ const styles = StyleSheet.create({
   },
   screenTitle: { color: C.text, fontSize: 30, fontWeight: '800', letterSpacing: -0.8 },
   dim: { color: C.textDim, fontSize: 13 },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: C.surfaceHigh,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    marginTop: 8,
+  },
+  searchInput: { flex: 1, color: C.text, fontSize: 15, paddingVertical: 10 },
   sorts: { flexDirection: 'row', gap: 8, marginTop: 14, marginBottom: 6, flexWrap: 'wrap' },
   sort: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: C.surfaceHigh },
   sortText: { color: C.textDim, fontSize: 13, fontWeight: '700' },

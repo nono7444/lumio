@@ -130,7 +130,22 @@ export async function login(url: string, username: string, password: string, dev
     '/Users/AuthenticateByName',
     { method: 'POST', body: JSON.stringify({ Username: username, Pw: password }) }
   );
-  return { url: base, token: res.AccessToken, userId: res.User.Id, userName: res.User.Name, serverName: info.ServerName };
+  const user = res.User as { Id: string; Name: string; Policy?: { IsAdministrator?: boolean } };
+  return {
+    url: base,
+    token: res.AccessToken,
+    userId: user.Id,
+    userName: user.Name,
+    serverName: info.ServerName,
+    isAdmin: Boolean(user.Policy?.IsAdministrator),
+  };
+}
+
+/** Rafraîchit le rôle (admin ou non) de l'utilisateur connecté. */
+export async function fetchIsAdmin(s: Settings) {
+  const { get } = api(s);
+  const me = await get<{ Policy?: { IsAdministrator?: boolean } }>('/Users/Me');
+  return Boolean(me.Policy?.IsAdministrator);
 }
 
 export async function logout(s: Settings) {
@@ -178,7 +193,17 @@ export const jf = {
 
   items: (
     s: Settings,
-    opts: { parentId?: string; types?: string; sort?: string; order?: 'Ascending' | 'Descending'; start?: number; limit?: number; search?: string }
+    opts: {
+      parentId?: string;
+      types?: string;
+      sort?: string;
+      order?: 'Ascending' | 'Descending';
+      start?: number;
+      limit?: number;
+      search?: string;
+      filters?: string;
+      genres?: string;
+    }
   ) => {
     const { j, get } = api(s);
     const q = new URLSearchParams({
@@ -193,6 +218,8 @@ export const jf = {
     if (opts.parentId) q.set('ParentId', opts.parentId);
     if (opts.types) q.set('IncludeItemTypes', opts.types);
     if (opts.search) q.set('SearchTerm', opts.search);
+    if (opts.filters) q.set('Filters', opts.filters);
+    if (opts.genres) q.set('Genres', opts.genres);
     return get<{ Items: JfItem[]; TotalRecordCount: number }>(`/Users/${j.userId}/Items?${q}`);
   },
 
@@ -229,6 +256,49 @@ export const jf = {
       (imdbId ? Items.find((i) => i.ProviderIds?.Imdb === imdbId) : undefined) ??
       null
     );
+  },
+
+  genres: (s: Settings, parentId?: string) => {
+    const { j, get } = api(s);
+    return get<{ Items: { Id: string; Name: string }[] }>(
+      `/Genres?UserId=${j.userId}&SortBy=SortName${parentId ? `&ParentId=${parentId}` : ''}`
+    ).then((r) => r.Items);
+  },
+
+  similar: (s: Settings, id: string) => {
+    const { j, get } = api(s);
+    return get<{ Items: JfItem[] }>(`/Items/${id}/Similar?UserId=${j.userId}&Limit=15&Fields=${FIELDS}`).then((r) => r.Items);
+  },
+
+  favorites: (s: Settings) =>
+    jf.items(s, { types: 'Movie,Series', filters: 'IsFavorite', sort: 'DateCreated', order: 'Descending', limit: 30 }).then((r) => r.Items),
+
+  setFavorite: (s: Settings, id: string, fav: boolean) => {
+    const { j } = api(s);
+    return call(j.url, s.deviceId, j.token, `/Users/${j.userId}/FavoriteItems/${id}`, { method: fav ? 'POST' : 'DELETE' });
+  },
+
+  /** Prochain épisode à regarder pour une série (Jellyfin « À suivre »). */
+  nextUpForSeries: (s: Settings, seriesId: string) => {
+    const { j, get } = api(s);
+    return get<{ Items: JfItem[] }>(`/Shows/NextUp?UserId=${j.userId}&SeriesId=${seriesId}&Limit=1&Fields=${FIELDS}`).then(
+      (r) => r.Items[0] ?? null
+    );
+  },
+
+  allEpisodes: (s: Settings, seriesId: string) => {
+    const { j, get } = api(s);
+    return get<{ Items: JfItem[] }>(`/Shows/${seriesId}/Episodes?UserId=${j.userId}&Fields=${FIELDS}`).then((r) => r.Items);
+  },
+
+  /** Épisode qui suit celui-ci dans la série. */
+  nextEpisode: async (s: Settings, episode: JfItem) => {
+    if (!episode.SeriesId) return null;
+    const { j, get } = api(s);
+    const r = await get<{ Items: JfItem[] }>(
+      `/Shows/${episode.SeriesId}/Episodes?UserId=${j.userId}&StartItemId=${episode.Id}&Limit=2&Fields=${FIELDS}`
+    );
+    return r.Items.find((e) => e.Id !== episode.Id) ?? null;
   },
 
   setPlayed: (s: Settings, id: string, played: boolean) => {

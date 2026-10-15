@@ -11,7 +11,8 @@ import { MpvPlayer } from '@/components/players/mpv-player';
 import { NativePlayer } from '@/components/players/native-player';
 import { Button } from '@/components/ui';
 import { C } from '@/constants/theme';
-import { getPlayback, playback, type PlaybackTarget } from '@/lib/jellyfin';
+import { getPlayback, jf, playback, type PlaybackTarget } from '@/lib/jellyfin';
+import { tmdbNextEpisode } from '@/lib/smart-play';
 import { useSettings } from '@/lib/settings';
 
 type Params = {
@@ -22,7 +23,17 @@ type Params = {
   title?: string;
   subtitle?: string;
   start?: string;
+  // Contexte d'une série en streaming (pour l'épisode suivant)
+  tmdbId?: string;
+  imdb?: string;
+  series?: string;
+  season?: string;
+  episode?: string;
 };
+
+type NextUp = { label: string; go: () => void };
+
+const NEXT_DELAY = 8;
 
 type Source = { uri: string; headers?: Record<string, string>; isHls: boolean };
 
@@ -47,6 +58,8 @@ export default function Player() {
   const [source, setSource] = useState<Source | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [nextUp, setNextUp] = useState<NextUp | null>(null);
+  const [countdown, setCountdown] = useState(NEXT_DELAY);
 
   const target = useRef<PlaybackTarget | null>(null);
   const position = useRef(0);
@@ -113,6 +126,69 @@ export default function Player() {
     if (target.current) playback.start(settings, { target: target.current, positionSeconds: pos });
   };
 
+  // ——— Épisode suivant ———
+  async function findNext(): Promise<NextUp | null> {
+    if (!settings.autoNext) return null;
+    if (p.kind === 'jellyfin' && p.itemId) {
+      const cur = await jf.item(settings, p.itemId).catch(() => null);
+      if (cur?.Type !== 'Episode') return null;
+      const nxt = await jf.nextEpisode(settings, cur).catch(() => null);
+      if (!nxt) return null;
+      return {
+        label: `S${nxt.ParentIndexNumber}E${nxt.IndexNumber} · ${nxt.Name}`,
+        go: () =>
+          router.replace({
+            pathname: '/player',
+            params: {
+              kind: 'jellyfin',
+              itemId: nxt.Id,
+              title: `${nxt.SeriesName ?? ''} · S${nxt.ParentIndexNumber}E${nxt.IndexNumber}`,
+              subtitle: nxt.Name,
+              start: '0',
+            },
+          }),
+      };
+    }
+    if (p.tmdbId && p.season && p.episode) {
+      const nxt = await tmdbNextEpisode(settings, Number(p.tmdbId), Number(p.season), Number(p.episode)).catch(() => null);
+      if (!nxt) return null;
+      return {
+        label: `S${nxt.season}E${nxt.episode}`,
+        go: () =>
+          router.replace({
+            pathname: '/watch',
+            params: {
+              type: 'tv',
+              tmdbId: p.tmdbId!,
+              imdb: p.imdb,
+              title: p.series ?? p.title ?? '',
+              season: String(nxt.season),
+              episode: String(nxt.episode),
+            },
+          }),
+      };
+    }
+    return null;
+  }
+
+  const onEnded = async () => {
+    const n = await findNext();
+    if (n) {
+      setCountdown(NEXT_DELAY);
+      setNextUp(n);
+    } else router.back();
+  };
+
+  useEffect(() => {
+    if (!nextUp) return;
+    if (countdown <= 0) {
+      nextUp.go();
+      return;
+    }
+    const t = setTimeout(() => setCountdown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [nextUp, countdown]);
+
   const resumeFrom = Math.max(position.current, startAt);
   const other = engine === 'mpv' ? 'native' : 'mpv';
 
@@ -134,6 +210,7 @@ export default function Player() {
             onReady={onReady}
             onError={setError}
             onClose={() => router.back()}
+            onEnded={onEnded}
           />
         ) : (
           <NativePlayer
@@ -148,6 +225,7 @@ export default function Player() {
             onReady={onReady}
             onError={setError}
             onClose={() => router.back()}
+            onEnded={onEnded}
           />
         )
       ) : !error ? (
@@ -184,6 +262,21 @@ export default function Player() {
         </View>
       )}
 
+      {nextUp && (
+        <View style={styles.nextWrap}>
+          <View style={styles.next}>
+            <Text style={styles.nextLabel}>Épisode suivant dans {countdown} s</Text>
+            <Text style={styles.nextTitle} numberOfLines={2}>
+              {nextUp.label}
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+              <Button title="Lire" icon="play" onPress={nextUp.go} style={{ flex: 1 }} />
+              <Button title="Fermer" variant="glass" onPress={() => router.back()} style={{ flex: 1 }} />
+            </View>
+          </View>
+        </View>
+      )}
+
       {(!source || error) && (
         <Pressable onPress={() => router.back()} hitSlop={12} style={[styles.close, { top: insets.top + 8, left: insets.left + 12 }]}>
           <Ionicons name="close" size={24} color="#fff" />
@@ -199,6 +292,10 @@ const styles = StyleSheet.create({
   loadingTitle: { color: '#fff', fontSize: 15, fontWeight: '700', marginTop: 6 },
   errorTitle: { color: C.text, fontSize: 20, fontWeight: '800' },
   errorText: { color: C.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  nextWrap: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  next: { backgroundColor: '#161618', borderRadius: 20, padding: 20, width: '100%', maxWidth: 420 },
+  nextLabel: { color: C.textDim, fontSize: 13, fontWeight: '600' },
+  nextTitle: { color: C.text, fontSize: 18, fontWeight: '800', marginTop: 4 },
   close: {
     position: 'absolute',
     width: 40,

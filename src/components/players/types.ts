@@ -11,6 +11,8 @@ export type PlayerProps = {
   onReady: (positionSeconds: number) => void;
   onError: (message: string) => void;
   onClose: () => void;
+  /** Fin naturelle de la vidéo (pour l'épisode suivant) */
+  onEnded: () => void;
 };
 
 export function formatTime(sec: number) {

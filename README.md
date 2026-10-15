@@ -18,10 +18,23 @@ Appli native iOS / Android (Expo, React Native) qui :
 | **Accueil** | Hero TMDB, « Reprendre » Jellyfin, catalogues des addons Stremio, tendances |
 | **Bibliothèque** | Ta bibliothèque Jellyfin : reprendre, à suivre, ajouts récents, grilles triables, fiches films et séries avec épisodes |
 | **Recherche** | Recherche TMDB (Tout / Films / Séries) avec badges de bibliothèque |
-| **Fiche** | « Lire » si le titre est sur Jellyfin. Sinon « Regarder maintenant » via tes addons Stremio, et le titre part en parallèle dans Radarr ou Sonarr |
+| **Fiche** | **Un seul bouton « Lire »** : Jellyfin si le titre ou l'épisode y est. Sinon, lecture immédiate de la meilleure source (VF d'abord) via tes addons Stremio, et le titre part en même temps dans Radarr / Sonarr. Pour une série : premier épisode non vu, et la série entière se télécharge |
 | **Lecteur** | **mpv** par défaut : lit tout (MKV, HEVC, DTS, TrueHD, sous-titres ASS), contrôles maison, choix des pistes audio et sous-titres, vitesse, zoom, piste FR auto. Le lecteur natif reste disponible (Profil, rubrique Lecture), et on peut basculer de l'un à l'autre en cas d'échec |
-| **Activité** | Files Radarr + Sonarr en direct |
+| **Activité** | Files Radarr + Sonarr en direct ; onglet **Demandes** (Seerr) avec validation / refus pour l'admin |
 | **Réglages** | Jellyfin, affiches Better Posters, TMDB, Radarr, Sonarr, addons Stremio |
+
+### Utilisateurs non-admins et demandes
+
+Le rôle vient de Jellyfin (`Policy.IsAdministrator`). Un admin pilote Radarr et Sonarr directement. Les autres envoient des **demandes via Seerr / Jellyseerr** : connexion avec le même compte Jellyfin, et validation par l'admin dans l'onglet Activité.
+Dans Profil, rubrique Demandes, **« Inviter quelqu'un »** génère un lien `lumio://invite?…` qui préremplit l'appli d'un proche : serveurs, clé TMDB et addons, jamais les clés Radarr ou Sonarr.
+
+### Personnalisation
+
+Bouton ⚙︎ en haut de l'accueil, ou Profil puis Personnalisation : ordre et visibilité de chaque rangée (Reprendre, À suivre, catalogues, ajouts récents, favoris, tendances) et des onglets.
+
+### Épisode suivant
+
+À la fin d'un épisode, un compte à rebours de 8 s lance le suivant, depuis Jellyfin ou en streaming. Désactivable dans Profil, rubrique Lecture.
 
 ### Lecture Jellyfin
 
