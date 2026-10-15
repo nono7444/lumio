@@ -645,6 +645,12 @@ const server = http.createServer(async (req, res) => {
       sonarr: Boolean(arrConfig('sonarr')),
     });
 
+  // Raccourci pour installer l'appli TV : taper « lumio.tondomaine/tv » dans Downloader
+  if (url.pathname === '/tv' || url.pathname === '/tv.apk') {
+    res.writeHead(302, { Location: process.env.TV_APK_URL || 'https://github.com/nono7444/lumio/releases/latest/download/lumio-tv.apk' });
+    return res.end();
+  }
+
   if (!url.pathname.startsWith('/api/')) return send(res, 404, { error: 'introuvable' });
 
   const user = await whoAmI(req.headers['x-jellyfin-token']);
