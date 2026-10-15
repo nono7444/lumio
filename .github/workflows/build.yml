@@ -33,6 +33,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Numéro de version (1.0.<n° de build>) pour la détection des mises à jour
+        run: |
+          node -e "const f='app.json';const a=require('./'+f);a.expo.version='1.0.${{ github.run_number }}';a.expo.ios=a.expo.ios||{};a.expo.ios.buildNumber='${{ github.run_number }}';require('fs').writeFileSync(f,JSON.stringify(a,null,2))"
+          grep -n '"version"\|buildNumber' app.json
       - name: Génère le projet iOS
         run: npx expo prebuild --platform ios --no-install --clean
       - name: Installe les pods
@@ -68,9 +72,14 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
+      - name: Source AltStore / FlareStore (mises à jour automatiques)
+        run: node scripts/make-source.mjs "1.0.${{ github.run_number }}" "build-${{ github.run_number }}" lumio-unsigned.ipa
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('build-{0}', github.run_number) }}
@@ -78,6 +87,9 @@ jobs:
           target_commitish: ${{ github.sha }}
           make_latest: true
           body: |
-            iPhone : télécharge lumio-unsigned.ipa puis installe-le avec Sideloadly ou SideStore.
+            Lumio 1.0.${{ github.run_number }}
+            iPhone : télécharge lumio-unsigned.ipa puis installe-le avec Sideloadly, SideStore ou FlareStore.
+            Source pour mises à jour automatiques : https://github.com/${{ github.repository }}/releases/latest/download/altstore.json
           files: |
             lumio-unsigned.ipa
+            altstore.json
