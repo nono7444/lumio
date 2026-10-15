@@ -5,7 +5,7 @@ import { Picker } from '@/components/arr-section';
 import { Button, Field, Section } from '@/components/ui';
 import { C } from '@/constants/theme';
 import { chat } from '@/lib/chat';
-import { lumio } from '@/lib/lumio-server';
+import { lumio, useServerArr } from '@/lib/lumio-server';
 import { InviteButton } from '@/components/seerr-section';
 import { SEASONS, seasonAt } from '@/lib/seasons';
 import { isManager, useSettings } from '@/lib/settings';
@@ -40,6 +40,7 @@ export function ChatSection() {
   const [busy, setBusy] = useState(false);
   const [pushing, setPushing] = useState(false);
   const manager = isManager(settings);
+  const serverArr = useServerArr();
   const hasArr = Boolean((settings.radarr.url && settings.radarr.apiKey) || (settings.sonarr.url && settings.sonarr.apiKey));
   return (
     <Section title="Serveur Lumio">
@@ -76,7 +77,7 @@ export function ChatSection() {
           }
         }}
       />
-      {manager && settings.chatUrl && settings.jellyfin ? (
+      {manager && settings.chatUrl && settings.jellyfin && serverArr === false ? (
         <View style={{ marginTop: 10 }}>
           <Button
             title="Envoyer la config au serveur"

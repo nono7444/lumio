@@ -1,7 +1,9 @@
 // Client du serveur Lumio : file d'attente, état des services (les demandes sont dans requests.ts).
 import type { QueueItem } from './arr';
 import { serverBase, serverCall } from './chat';
-import type { Settings } from './settings';
+import { useEffect, useState } from 'react';
+
+import { useSettings, type Settings } from './settings';
 
 export type ServerFolder = { path: string; freeSpace?: number; accessible?: boolean };
 export type ServiceStatus = {
@@ -60,3 +62,17 @@ export const lumio = {
       healthCache = null;
     }),
 };
+
+/** true quand Radarr ET Sonarr sont configurés sur le serveur Lumio (les clés n'ont alors plus rien à faire dans l'appli). */
+export function useServerArr() {
+  const { settings } = useSettings();
+  const [ok, setOk] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    serverHealth(settings).then((h) => alive && setOk(Boolean(h?.radarr && h?.sonarr)));
+    return () => {
+      alive = false;
+    };
+  }, [settings.chatUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+  return ok;
+}
