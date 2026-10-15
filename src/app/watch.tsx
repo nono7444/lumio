@@ -112,39 +112,45 @@ export default function Watch() {
             release();
           });
 
-        // 1) Sources des addons Stremio
-        let best: { url: string; subtitle: string; headers?: Record<string, string> } | null = null;
-        let addonError = '';
-        if (imdb && settings.addons.length) {
+        type Best = { url: string; subtitle: string; headers?: Record<string, string> };
+        const errorsOut: string[] = [];
+
+        // Sources des addons Stremio
+        const fromAddons = async (): Promise<Best | null> => {
+          if (!imdb || !settings.addons.length) {
+            errorsOut.push(!imdb ? 'Identifiant IMDb introuvable pour ce titre.' : 'Aucun addon de streams configuré.');
+            return null;
+          }
           setStep(type === 'tv' ? `Recherche d'une source pour S${res.season}E${res.episode}…` : 'Recherche de la meilleure source…');
           const stremioId = type === 'tv' ? `${imdb}:${res.season}:${res.episode}` : imdb;
           const { streams, errors } = await collectStreams(settings, type === 'tv' ? 'series' : 'movie', stremioId, { timeoutMs: 15000 });
-          if (cancelled.current) return;
           const b = bestStream(streams);
           if (b?.url)
-            best = {
+            return {
               url: b.url,
               subtitle: [b.quality, b.fr ? 'VF' : null, b.addon].filter(Boolean).join(' · '),
               headers: b.behaviorHints?.proxyHeaders?.request,
             };
-          else addonError = errors.length ? errors.join('\n') : 'Aucune source lisible trouvée par tes addons.';
-        } else addonError = !imdb ? 'Identifiant IMDb introuvable pour ce titre.' : 'Aucun addon de streams configuré.';
+          errorsOut.push(errors.length ? errors.join('\n') : 'Aucune source lisible trouvée par tes addons.');
+          return null;
+        };
 
-        // 2) Sinon : le torrent choisi par Radarr / Sonarr, via AllDebrid (serveur Lumio)
-        if (!best && (await serverHasDebrid(settings))) {
+        // Le torrent choisi par Radarr / Sonarr, via AllDebrid (serveur Lumio)
+        const fromServer = async (maxMs: number): Promise<Best | null> => {
+          if (!(await serverHasDebrid(settings))) return null;
           await folderGate;
           if (!grabDone) setStep('Ajout dans Radarr / Sonarr…');
           await grabP;
           const tvdbId = type === 'tv' ? ((details as any).external_ids?.tvdb_id ?? undefined) : undefined;
           const started = Date.now();
           let last: DebridStream | null = null;
-          while (!cancelled.current && Date.now() - started < 6 * 60_000) {
+          while (!cancelled.current && Date.now() - started < maxMs) {
             try {
               last = await lumio.stream(settings, { type, tmdbId, tvdbId, season: res.season, episode: res.episode });
             } catch (e: any) {
               last = { status: 'error', message: e?.message ?? String(e) };
             }
-            if (cancelled.current) return;
+            if (cancelled.current) return null;
             if (last.status === 'ready' && last.url) break;
             // « absent » juste après l'ajout : Radarr / Sonarr n'a pas encore enregistré le titre
             if (['unsupported', 'error', 'imported'].includes(last.status)) break;
@@ -158,10 +164,24 @@ export default function Watch() {
             );
             await new Promise((r) => setTimeout(r, 4000));
           }
+          if (last?.status === 'ready' && last.url) return { url: last.url, subtitle: ['AllDebrid', last.release].filter(Boolean).join(' · ') };
+          errorsOut.push(last?.message ? `Serveur : ${last.message}` : 'Serveur : pas de lien AllDebrid à temps.');
+          return null;
+        };
+
+        // Ordre choisi dans Profil → Lecture : serveur d'abord (2 min max, puis addons) ou addons d'abord
+        let best: Best | null = null;
+        if (settings.streamSource === 'server') {
+          best = await fromServer(2 * 60_000);
           if (cancelled.current) return;
-          if (last?.status === 'ready' && last.url) best = { url: last.url, subtitle: ['AllDebrid', last.release].filter(Boolean).join(' · ') };
-          else addonError = [addonError, last?.message ? `Serveur : ${last.message}` : 'Serveur : pas de lien AllDebrid à temps.'].filter(Boolean).join('\n');
+          if (!best) best = await fromAddons();
+        } else {
+          best = await fromAddons();
+          if (cancelled.current) return;
+          if (!best) best = await fromServer(6 * 60_000);
         }
+        if (cancelled.current) return;
+        const addonError = errorsOut.join('\n');
 
         if (!best) throw new Error(addonError || 'Aucune source lisible.');
         setStep('Lancement…');

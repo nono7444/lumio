@@ -80,6 +80,8 @@ export type Settings = {
   seasonTheme: string;
   /** Serveur du chat famille */
   chatUrl: string;
+  /** Source de stream essayée en premier quand le titre n'est pas sur Jellyfin */
+  streamSource: 'addons' | 'server';
   /** Admin : clé AllDebrid envoyée au serveur Lumio (stream des téléchargements en cours) */
   alldebridKey: string;
   /** Moteur de lecture : mpv (lit tout, MKV inclus) ou lecteur natif du téléphone */
@@ -116,6 +118,7 @@ const DEFAULTS: Settings = {
   seasonTheme: 'auto',
   chatUrl: '',
   alldebridKey: '',
+  streamSource: 'addons',
   tmdbKey: '',
   language: 'fr-FR',
   radarr: { url: '', apiKey: '', searchOnAdd: true, minimumAvailability: 'released' },
