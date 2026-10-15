@@ -7,6 +7,8 @@ import { useSettings, type Settings } from './settings';
 export type ChatMedia = { type: 'movie' | 'tv'; tmdbId: number; title: string; year?: string; poster?: string };
 export type ChatMessage = {
   id: string;
+  /** 'grab' : annonce automatique d'un téléchargement */
+  kind?: string;
   userId: string;
   userName: string;
   admin?: boolean;
@@ -16,16 +18,17 @@ export type ChatMessage = {
 };
 export type ChatMe = { id: string; name: string; admin: boolean };
 
-const base = (u: string) => {
+export const serverBase = (u: string) => {
   let url = u.trim().replace(/\/+$/, '');
   if (url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
   return url;
 };
 
-async function call<T>(s: Settings, path: string, init?: RequestInit): Promise<T> {
-  if (!s.chatUrl) throw new Error('Chat non configuré');
-  if (!s.jellyfin) throw new Error('Connecte-toi à Jellyfin pour utiliser le chat');
-  const res = await fetch(`${base(s.chatUrl)}${path}`, {
+/** Appel authentifié (jeton Jellyfin) au serveur Lumio : chat, téléchargements, état. */
+export async function serverCall<T>(s: Settings, path: string, init?: RequestInit): Promise<T> {
+  if (!s.chatUrl) throw new Error('Serveur Lumio non configuré (Profil → Serveur Lumio)');
+  if (!s.jellyfin) throw new Error('Connecte-toi à Jellyfin pour utiliser le serveur Lumio');
+  const res = await fetch(`${serverBase(s.chatUrl)}${path}`, {
     ...init,
     headers: {
       Accept: 'application/json',
@@ -47,12 +50,12 @@ async function call<T>(s: Settings, path: string, init?: RequestInit): Promise<T
 
 export const chat = {
   list: (s: Settings, after?: string) =>
-    call<{ me: ChatMe; messages: ChatMessage[] }>(s, `/api/messages${after ? `?after=${encodeURIComponent(after)}` : ''}`),
-  latest: (s: Settings) => call<{ id: string | null; from: string | null }>(s, '/api/latest'),
+    serverCall<{ me: ChatMe; messages: ChatMessage[] }>(s, `/api/messages${after ? `?after=${encodeURIComponent(after)}` : ''}`),
+  latest: (s: Settings) => serverCall<{ id: string | null; from: string | null }>(s, '/api/latest'),
   send: (s: Settings, text: string, media?: ChatMedia) =>
-    call<ChatMessage>(s, '/api/messages', { method: 'POST', body: JSON.stringify({ text, media }) }),
-  remove: (s: Settings, id: string) => call(s, `/api/messages/${id}`, { method: 'DELETE' }),
-  health: (url: string) => fetch(`${base(url)}/health`).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))),
+    serverCall<ChatMessage>(s, '/api/messages', { method: 'POST', body: JSON.stringify({ text, media }) }),
+  remove: (s: Settings, id: string) => serverCall(s, `/api/messages/${id}`, { method: 'DELETE' }),
+  health: (url: string) => fetch(`${serverBase(url)}/health`).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))),
 };
 
 // ——— Pastille « non lu » ———

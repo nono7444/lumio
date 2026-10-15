@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import type { Tabs } from 'expo-router';
 import type { ComponentProps } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { LayoutAnimation, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { tap } from '@/components/ui';
@@ -23,7 +23,18 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   activity: 'cloud-download',
 };
 
-/** Barre d'onglets flottante en pilule, à la façon de Nuvio. */
+// Libellés courts : seul l'onglet actif affiche le sien, à côté de l'icône
+const SHORT: Record<string, string> = {
+  index: 'Accueil',
+  search: 'Recherche',
+  library: 'Biblio',
+  calendar: 'Agenda',
+  chat: 'Chat',
+  activity: 'Activité',
+  settings: 'Profil',
+};
+
+/** Barre d'onglets flottante en pilule : icônes seules, l'onglet actif s'élargit avec son nom. */
 export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) {
   const insets = useSafeAreaInsets();
   const { settings } = useSettings();
@@ -53,7 +64,9 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
           const focused = state.routes[state.index]?.key === route.key;
           const { options } = descriptors[route.key];
           const label = typeof options.title === 'string' ? options.title : route.name;
+          const short = SHORT[route.name] ?? label;
           const isProfile = route.name === 'settings';
+          const color = focused ? activeColor : C.textDim;
           return (
             <Pressable
               key={route.key}
@@ -64,25 +77,32 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
                 const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
                 if (!focused && !event.defaultPrevented) {
                   tap();
+                  LayoutAnimation.configureNext(LayoutAnimation.create(220, 'easeInEaseOut', 'scaleX'));
                   navigation.navigate(route.name, route.params);
                 }
               }}
-              style={[styles.item, focused && (season ? { backgroundColor: season.tint } : styles.itemOn)]}>
+              style={[
+                styles.item,
+                focused && styles.itemFocused,
+                focused && (season ? { backgroundColor: season.tint } : styles.itemOn),
+              ]}>
               {isProfile ? (
-                <View style={[styles.avatar, focused && { borderColor: C.text }]}>
+                <View style={[styles.avatar, focused && { borderColor: activeColor }]}>
                   <Text style={styles.avatarText}>{initial}</Text>
                 </View>
               ) : (
                 <Ionicons
                   name={(focused ? ICONS[route.name] : `${ICONS[route.name]}-outline`) as keyof typeof Ionicons.glyphMap}
-                  size={22}
-                  color={focused ? activeColor : C.textDim}
+                  size={23}
+                  color={color}
                 />
               )}
-              {route.name === 'chat' && unread > 0 && <View style={styles.unread} />}
-              <Text style={[styles.label, { color: focused ? activeColor : C.textDim }]} numberOfLines={1}>
-                {label}
-              </Text>
+              {focused && (
+                <Text style={[styles.label, { color }]} numberOfLines={1}>
+                  {short}
+                </Text>
+              )}
+              {route.name === 'chat' && unread > 0 && <View style={[styles.unread, focused && { right: 8 }]} />}
             </Pressable>
           );
         })}
@@ -97,17 +117,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignSelf: 'stretch',
     maxWidth: 520,
-    height: 66,
-    borderRadius: 33,
-    padding: 5,
+    height: 62,
+    borderRadius: 31,
+    padding: 6,
+    gap: 2,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.14)',
   },
-  item: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3, borderRadius: 28 },
-  itemOn: { backgroundColor: 'rgba(255,255,255,0.10)' },
-  label: { fontSize: 10, fontWeight: '600' },
-  unread: { position: 'absolute', top: 9, right: '30%', width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF453A' },
+  item: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 25, minWidth: 38 },
+  itemFocused: { flex: 2.6, paddingHorizontal: 10 },
+  itemOn: { backgroundColor: 'rgba(255,255,255,0.13)' },
+  label: { fontSize: 13, fontWeight: '700', letterSpacing: -0.2, flexShrink: 1 },
+  unread: { position: 'absolute', top: 10, right: '22%', width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF453A' },
   avatar: {
     width: 24,
     height: 24,

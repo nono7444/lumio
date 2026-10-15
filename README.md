@@ -36,13 +36,24 @@ Onglet des sorties numériques à venir (films et séries), alimenté par l'addo
 Par défaut, l'accueil montre : un hero des nouveautés du serveur, la **sélection de la période** (🎃 Halloween : films d'horreur, du plus récent au plus ancien, sur ton serveur et à découvrir ; 🎄 Noël, 💘 Saint-Valentin, 🐣 printemps, ☀️ été), puis les **derniers ajouts de chaque bibliothèque Jellyfin** (Films, Séries, Kids, Anime…). Le reste s'active depuis ⚙︎.
 Le **thème de saison** (couleur d'accent, emoji, teinte du hero) suit la date. On peut le forcer ou le désactiver dans Profil, rubrique Thème.
 
-### Chat famille
+### Serveur Lumio : chat famille et téléchargements pour tous
 
-Onglet **Chat** pour les remarques et propositions, avec le bouton « Proposer à la famille » sur chaque fiche. Il faut un petit serveur Docker sans dépendance, qui s'authentifie avec le compte Jellyfin : voir [`server/chat`](server/chat/README.md).
+Un petit serveur Docker sans dépendance, qui s'authentifie avec le compte Jellyfin : voir [`server/lumio`](server/lumio/README.md).
+- Onglet **Chat** pour les remarques et propositions, avec le bouton « Proposer à la famille » sur chaque fiche.
+- **Téléchargements pour les comptes non-admins**, sans Seerr : le serveur garde les clés Radarr et Sonarr (l'admin les envoie depuis Profil, rubrique Serveur Lumio). Chaque ajout est annoncé dans le chat.
+- **État des serveurs** en haut de Profil : Jellyfin, Radarr, Sonarr, serveur Lumio et Seerr (en ligne ou non, version, latence, espace disque).
+
+### Choix du dossier
+
+Quand un titre part en téléchargement, l'appli demande le dossier racine de Radarr ou Sonarr (Films, Séries, Kids, Anime…) et en suggère un selon le genre : animation japonaise → Anime, animation ou famille → Kids. Dans un dossier « anime », Sonarr ajoute la série en type *anime*. Pendant un streaming, on peut aussi choisir de regarder sans télécharger.
+
+### Chromecast
+
+Bouton Cast dans le lecteur. Pour Jellyfin, un profil Chromecast est envoyé au serveur : lecture directe en MP4/H.264, sinon transcodage HLS. Pour les streams des addons, le lien est envoyé tel quel : les MKV en HEVC ou DTS ne passent pas toujours.
 
 ### Utilisateurs non-admins et demandes
 
-Le rôle vient de Jellyfin (`Policy.IsAdministrator`). Un admin pilote Radarr et Sonarr directement. Les autres envoient des **demandes via Seerr / Jellyseerr** : connexion avec le même compte Jellyfin, et validation par l'admin dans l'onglet Activité.
+Le rôle vient de Jellyfin (`Policy.IsAdministrator`). Un admin pilote Radarr et Sonarr directement. Les autres envoient des **demandes via Seerr / Jellyseerr** si le serveur Lumio n'est pas installé : connexion avec le même compte Jellyfin, et validation par l'admin dans l'onglet Activité.
 Dans Profil, rubrique Demandes, **« Inviter quelqu'un »** génère un lien `lumio://invite?…` qui préremplit l'appli d'un proche : serveurs, clé TMDB et addons, jamais les clés Radarr ou Sonarr.
 
 ### Personnalisation

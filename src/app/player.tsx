@@ -7,11 +7,12 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { CastIcon, CastingScreen, guessContentType, useCasting } from '@/components/players/cast';
 import { MpvPlayer } from '@/components/players/mpv-player';
 import { NativePlayer } from '@/components/players/native-player';
 import { Button } from '@/components/ui';
 import { C } from '@/constants/theme';
-import { getPlayback, jf, playback, type PlaybackTarget } from '@/lib/jellyfin';
+import { getPlayback, jf, jfImage, playback, type PlaybackTarget } from '@/lib/jellyfin';
 import { tmdbNextEpisode } from '@/lib/smart-play';
 import { useSettings } from '@/lib/settings';
 
@@ -65,6 +66,8 @@ export default function Player() {
   const position = useRef(0);
   const lastReport = useRef(0);
   const startAt = Number(p.start ?? 0) || 0;
+  const { client: castClient, deviceName } = useCasting();
+  const casting = Boolean(castClient);
 
   // Rotation libre dans le lecteur, retour en portrait à la sortie
   useEffect(() => {
@@ -192,11 +195,40 @@ export default function Player() {
   const resumeFrom = Math.max(position.current, startAt);
   const other = engine === 'mpv' ? 'native' : 'mpv';
 
+  // Média à envoyer au Chromecast : Jellyfin avec un profil compatible (transcodage si besoin), sinon le lien direct
+  const castMedia = async () => {
+    if (p.kind === 'jellyfin' && p.itemId) {
+      const t = await getPlayback(settings, p.itemId, position.current, 'cast');
+      if (target.current) playback.stop(settings, { target: target.current, positionSeconds: position.current });
+      target.current = t;
+      playback.start(settings, { target: t, positionSeconds: position.current });
+      return {
+        uri: t.uri,
+        contentType: guessContentType(t.uri, t.isHls),
+        title: p.title,
+        subtitle: p.subtitle,
+        image: jfImage(settings, p.itemId, 'Primary', { maxWidth: 600 }),
+      };
+    }
+    if (!source) throw new Error('Aucune source');
+    return { uri: source.uri, contentType: guessContentType(source.uri, source.isHls), title: p.title, subtitle: p.subtitle };
+  };
+  const castBtn = <CastIcon />;
+
   return (
     <View style={styles.root}>
       <StatusBar hidden />
 
-      {source && !error ? (
+      {casting && (source || p.kind === 'jellyfin') ? (
+        <CastingScreen
+          media={castMedia}
+          startAt={resumeFrom}
+          deviceName={deviceName}
+          onPosition={onTime}
+          onEnded={onEnded}
+          onClose={() => router.back()}
+        />
+      ) : source && !error ? (
         engine === 'mpv' ? (
           <MpvPlayer
             key={`mpv-${attempt}`}
@@ -211,6 +243,7 @@ export default function Player() {
             onError={setError}
             onClose={() => router.back()}
             onEnded={onEnded}
+            extra={castBtn}
           />
         ) : (
           <NativePlayer
@@ -226,6 +259,7 @@ export default function Player() {
             onError={setError}
             onClose={() => router.back()}
             onEnded={onEnded}
+            extra={castBtn}
           />
         )
       ) : !error ? (

@@ -17,7 +17,7 @@
           "NSAllowsArbitraryLoads": true,
           "NSAllowsLocalNetworking": true
         },
-        "NSLocalNetworkUsageDescription": "Lumio se connecte à Jellyfin, Radarr et Sonarr sur ton réseau local.",
+        "NSLocalNetworkUsageDescription": "Lumio se connecte à Jellyfin, Radarr et Sonarr sur ton réseau local, et cherche les Chromecast pour diffuser sur la TV.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -64,7 +64,14 @@
         }
       ],
       "expo-mpv",
-      "expo-screen-orientation"
+      "expo-screen-orientation",
+      [
+        "react-native-google-cast",
+        {
+          "iosStartDiscoveryAfterFirstTapOnCastButton": true,
+          "expandedController": true
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

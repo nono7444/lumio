@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { askFolder } from '@/components/folder-picker';
 import { Button, Fade } from '@/components/ui';
 import { C } from '@/constants/theme';
 import { grab } from '@/lib/grab';
@@ -77,9 +78,24 @@ export default function Watch() {
         // ——— Streaming + téléchargement en arrière-plan ———
         setEp({ season: res.season, episode: res.episode });
         // Série absente de Jellyfin : on la télécharge entièrement ; sinon juste la saison manquante
-        grab(settings, { type, tmdbId, season: res.season, allSeasons: type === 'tv' && !res.seriesInJellyfin })
+        // Le lecteur attend que le dossier soit choisi (sinon il s'ouvrirait sous la fenêtre de choix)
+        let release: () => void = () => {};
+        const folderGate = new Promise<void>((r) => (release = r));
+        grab(
+          settings,
+          { type, tmdbId, season: res.season, allSeasons: type === 'tv' && !res.seriesInJellyfin },
+          {
+            streaming: true,
+            chooseFolder: async (c) => {
+              const f = await askFolder(c);
+              release();
+              return f;
+            },
+          }
+        )
           .then(setGrabNote)
-          .catch((e) => setGrabNote(`Téléchargement non lancé : ${e?.message ?? e}`));
+          .catch((e) => setGrabNote(`Téléchargement non lancé : ${e?.message ?? e}`))
+          .finally(release);
 
         if (!imdb) throw new Error('Identifiant IMDb introuvable pour ce titre : impossible de chercher des sources.');
         if (!settings.addons.length) throw new Error('Aucun addon de streams configuré (Profil → Addons Stremio).');
@@ -90,6 +106,9 @@ export default function Watch() {
         if (cancelled.current) return;
         const best = bestStream(streams);
         if (!best?.url) throw new Error(errors.length ? errors.join('\n') : 'Aucune source lisible trouvée par tes addons.');
+        setStep('Lancement…');
+        await folderGate;
+        if (cancelled.current) return;
 
         router.replace({
           pathname: '/player',

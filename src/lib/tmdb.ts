@@ -37,6 +37,7 @@ export type TmdbMovie = {
   runtime?: number;
   vote_average?: number;
   genres?: { id: number; name: string }[];
+  original_language?: string;
   imdb_id?: string | null;
   images?: TmdbImages;
   credits?: TmdbCredits;
@@ -51,6 +52,8 @@ export type TmdbTv = {
   first_air_date?: string;
   vote_average?: number;
   genres?: { id: number; name: string }[];
+  original_language?: string;
+  origin_country?: string[];
   status?: string;
   seasons: { id: number; season_number: number; name: string; episode_count: number; air_date?: string | null }[];
   external_ids?: { tvdb_id?: number | null; imdb_id?: string | null };

@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { PlayerProps } from './types';
 
 /** Lecteur natif du téléphone (AVPlayer / ExoPlayer) avec ses contrôles système. */
-export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, onTime, onReady, onError, onClose, onEnded }: PlayerProps) {
+export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, onTime, onReady, onError, onClose, onEnded, extra }: PlayerProps) {
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const seeked = useRef(false);
@@ -66,6 +66,7 @@ export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, on
       <Pressable onPress={onClose} hitSlop={12} style={[styles.close, { top: insets.top + 8, left: insets.left + 12 }]}>
         <Ionicons name="close" size={24} color="#fff" />
       </Pressable>
+      {extra ? <View style={{ position: 'absolute', top: insets.top + 8, right: insets.right + 12 }}>{extra}</View> : null}
     </View>
   );
 }

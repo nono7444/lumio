@@ -117,6 +117,9 @@ export const arr = {
     call<QualityProfile[]>(c, '/languageprofile').catch(() => [] as QualityProfile[]),
 };
 
+/** Choix faits au moment de l'ajout (dossier racine, type de série). */
+export type AddOverrides = { rootFolderPath?: string; seriesType?: 'anime' | 'standard' };
+
 // ——— Radarr ———
 
 export const radarr = {
@@ -129,7 +132,7 @@ export const radarr = {
 
   lookup: (c: RadarrConfig, tmdbId: number) => call<RadarrMovie>(c, `/movie/lookup/tmdb?tmdbId=${tmdbId}`),
 
-  add: async (c: RadarrConfig, tmdbId: number) => {
+  add: async (c: RadarrConfig, tmdbId: number, o: AddOverrides = {}) => {
     const found = await radarr.lookup(c, tmdbId);
     return call<RadarrMovie>(c, '/movie', {
       method: 'POST',
@@ -137,7 +140,7 @@ export const radarr = {
         ...found,
         id: undefined,
         qualityProfileId: c.qualityProfileId,
-        rootFolderPath: c.rootFolderPath,
+        rootFolderPath: o.rootFolderPath ?? c.rootFolderPath,
         monitored: true,
         minimumAvailability: c.minimumAvailability,
         addOptions: { searchForMovie: c.searchOnAdd, monitor: 'movieOnly' },
@@ -169,7 +172,7 @@ export const sonarr = {
   },
 
   /** Ajoute la série en ne surveillant que les saisons demandées. */
-  add: async (c: SonarrConfig, tvdbId: number, seasons: number[]) => {
+  add: async (c: SonarrConfig, tvdbId: number, seasons: number[], o: AddOverrides = {}) => {
     const found = await sonarr.lookup(c, tvdbId);
     const wanted = new Set(seasons);
     return call<SonarrSeries>(c, '/series', {
@@ -179,8 +182,9 @@ export const sonarr = {
         id: undefined,
         qualityProfileId: c.qualityProfileId,
         ...(c.languageProfileId ? { languageProfileId: c.languageProfileId } : {}),
-        rootFolderPath: c.rootFolderPath,
+        rootFolderPath: o.rootFolderPath ?? c.rootFolderPath,
         seasonFolder: c.seasonFolder,
+        ...(o.seriesType ? { seriesType: o.seriesType } : {}),
         monitored: true,
         seasons: found.seasons.map((s) => ({ seasonNumber: s.seasonNumber, monitored: wanted.has(s.seasonNumber) })),
         addOptions: {

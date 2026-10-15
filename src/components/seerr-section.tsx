@@ -54,7 +54,7 @@ export function SeerrSection() {
   }
 
   return (
-    <Section title="Demandes (Seerr)">
+    <Section title="Demandes Seerr (facultatif)">
       <Text style={{ color: C.textDim, fontSize: 13, lineHeight: 19, marginBottom: 12 }}>
         {manager
           ? 'Les utilisateurs non-admins envoient leurs demandes à Seerr ; tu les valides dans l’onglet Activité.'

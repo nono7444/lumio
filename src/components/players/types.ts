@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 export type PlayerProps = {
   uri: string;
   headers?: Record<string, string>;
@@ -13,6 +15,8 @@ export type PlayerProps = {
   onClose: () => void;
   /** Fin naturelle de la vidéo (pour l'épisode suivant) */
   onEnded: () => void;
+  /** Bouton(s) en plus dans la barre du haut (ex. Cast) */
+  extra?: ReactNode;
 };
 
 export function formatTime(sec: number) {

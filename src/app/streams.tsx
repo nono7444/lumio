@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { askFolder } from '@/components/folder-picker';
 import { SegChip, tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
 import { grab } from '@/lib/grab';
@@ -138,7 +139,11 @@ export default function Streams() {
   // Lance le téléchargement dans Radarr / Sonarr pendant qu'on regarde
   useEffect(() => {
     if (p.grab !== '1' || !ready) return;
-    grab(settings, { type: p.type === 'tv' ? 'tv' : 'movie', tmdbId: Number(p.tmdbId), season: season ?? undefined })
+    grab(
+      settings,
+      { type: p.type === 'tv' ? 'tv' : 'movie', tmdbId: Number(p.tmdbId), season: season ?? undefined },
+      { streaming: true, chooseFolder: askFolder }
+    )
       .then(setGrabNote)
       .catch((e) => setGrabNote(`Téléchargement non lancé : ${e?.message ?? e}`));
     // eslint-disable-next-line react-hooks/exhaustive-deps

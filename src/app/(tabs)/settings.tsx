@@ -21,6 +21,7 @@ import { Button, Field, ScreenTitle, Section } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { CalendarSection, ChatSection, ThemeSection } from '@/components/extra-sections';
 import { SeerrSection } from '@/components/seerr-section';
+import { ServerStatusSection } from '@/components/server-status';
 import { Addon, DEFAULT_ADDON, isManager, useSettings } from '@/lib/settings';
 import { RATING_SOURCES } from '@/lib/better-posters';
 import { logout as logoutJellyfin } from '@/lib/jellyfin';
@@ -167,6 +168,7 @@ export default function SettingsScreen() {
         <View style={{ marginHorizontal: -16 }}>
           <ScreenTitle title="Profil" />
         </View>
+        <ServerStatusSection />
         <Section title="Jellyfin">
           {settings.jellyfin ? (
             <View style={{ gap: 12 }}>
@@ -198,9 +200,9 @@ export default function SettingsScreen() {
           )}
         </Section>
 
-        <SeerrSection />
-
         <ChatSection />
+
+        <SeerrSection />
 
         <ThemeSection />
 

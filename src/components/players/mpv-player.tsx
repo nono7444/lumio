@@ -31,7 +31,7 @@ function trackLabel(t: TrackInfo) {
 }
 
 /** Lecteur mpv avec contrôles maison (lecture, barre de progression, pistes, vitesse, zoom). */
-export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onReady, onError, onClose, onEnded }: PlayerProps) {
+export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onReady, onError, onClose, onEnded, extra }: PlayerProps) {
   const insets = useSafeAreaInsets();
   const ref = useRef<ExpoMpvViewRef>(null);
   const [source, setSource] = useState<string | undefined>();
@@ -179,6 +179,7 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
                 </Text>
               ) : null}
             </View>
+            {extra}
             <Pressable
               onPress={() => {
                 tap();

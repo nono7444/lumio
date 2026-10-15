@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,6 +9,7 @@ import { Requests } from '@/components/requests-list';
 import { ScreenTitle, SegChip, SetupPrompt } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { formatBytes, radarr, sonarr, type QueueItem } from '@/lib/arr';
+import { lumio, serverCanGrab } from '@/lib/lumio-server';
 import { openMedia } from '@/lib/navigation';
 import { isManager, useSettings } from '@/lib/settings';
 
@@ -86,7 +87,7 @@ function QueueRow({ q }: { q: Row }) {
   );
 }
 
-function Downloads({ header }: { header: React.ReactNode }) {
+function Downloads({ header, viaServer }: { header: React.ReactNode; viaServer?: boolean }) {
   const { settings } = useSettings();
   const insets = useSafeAreaInsets();
   const [rows, setRows] = useState<Row[]>([]);
@@ -94,14 +95,26 @@ function Downloads({ header }: { header: React.ReactNode }) {
   const [errors, setErrors] = useState<string[]>([]);
   const first = useRef(true);
 
-  const configured = Boolean(
-    (settings.radarr.url && settings.radarr.apiKey) || (settings.sonarr.url && settings.sonarr.apiKey)
-  );
+  const configured =
+    viaServer ||
+    Boolean((settings.radarr.url && settings.radarr.apiKey) || (settings.sonarr.url && settings.sonarr.apiKey));
 
   const load = useCallback(
     async (spinner = false) => {
       if (!configured) return;
       if (spinner) setLoading(true);
+      // Compte non-admin : la file vient du serveur Lumio
+      if (viaServer) {
+        try {
+          const q = await lumio.queue(settings);
+          setRows(q.records);
+          setErrors(q.errors);
+        } catch (e: any) {
+          setErrors([e?.message ?? String(e)]);
+        }
+        setLoading(false);
+        return;
+      }
       const errs: string[] = [];
       const [r, s] = await Promise.all([
         settings.radarr.url && settings.radarr.apiKey
@@ -118,7 +131,8 @@ function Downloads({ header }: { header: React.ReactNode }) {
       setErrors(errs);
       setLoading(false);
     },
-    [configured, settings.radarr, settings.sonarr]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [configured, viaServer, settings.radarr, settings.sonarr, settings.chatUrl, settings.jellyfin?.token]
   );
 
   // Rafraîchit toutes les 8 s tant que l'onglet est affiché
@@ -192,12 +206,23 @@ export default function Activity() {
   const { settings } = useSettings();
   const manager = isManager(settings);
   const hasSeerr = Boolean(settings.seerr?.url);
+  const [viaServer, setViaServer] = useState(false);
   const [tab, setTab] = useState<'downloads' | 'requests'>(manager ? 'downloads' : 'requests');
+
+  useEffect(() => {
+    if (manager) return;
+    serverCanGrab(settings).then((ok) => {
+      setViaServer(ok);
+      if (ok) setTab('downloads');
+    });
+  }, [manager, settings]);
+
+  const canDownloads = manager || viaServer;
 
   const header = (
     <View>
       <ScreenTitle title="Activité" />
-      {manager && hasSeerr && (
+      {canDownloads && hasSeerr && (
         <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 14 }}>
           <SegChip label="Téléchargements" on={tab === 'downloads'} onPress={() => setTab('downloads')} />
           <SegChip label="Demandes" on={tab === 'requests'} onPress={() => setTab('requests')} />
@@ -206,6 +231,6 @@ export default function Activity() {
     </View>
   );
 
-  if (manager && tab === 'downloads') return <Downloads header={header} />;
+  if (canDownloads && (tab === 'downloads' || !hasSeerr)) return <Downloads header={header} viaServer={!manager} />;
   return <Requests header={header} admin={manager} />;
 }

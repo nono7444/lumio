@@ -28,7 +28,10 @@ import {
   type SonarrSeries,
 } from '@/lib/arr';
 import { jf, type JfItem } from '@/lib/jellyfin';
+import { askFolder } from '@/components/folder-picker';
 import { RequestBlock } from '@/components/request-block';
+import { grab } from '@/lib/grab';
+import { serverCanGrab } from '@/lib/lumio-server';
 import { chat } from '@/lib/chat';
 import { arrReady, hasTmdb, isManager, useSettings } from '@/lib/settings';
 import { pickLogo, tmdb, tmdbImg, type TmdbMovie, type TmdbTv } from '@/lib/tmdb';
@@ -60,6 +63,7 @@ export default function MediaScreen() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [jfItem, setJfItem] = useState<JfItem | null>(null);
+  const [serverGrab, setServerGrab] = useState(false);
 
   const tmdbId = Number(id);
   const isTv = type === 'tv';
@@ -68,6 +72,12 @@ export default function MediaScreen() {
   const manager = isManager(settings);
   const configured = manager && Boolean(service.url && service.apiKey);
   const ready = arrReady(service);
+
+  // Compte non-admin : le serveur Lumio peut-il lancer le téléchargement ?
+  useEffect(() => {
+    if (manager) return;
+    serverCanGrab(settings, isTv ? 'tv' : 'movie').then(setServerGrab);
+  }, [manager, settings, isTv]);
 
   const load = useCallback(async () => {
     try {
@@ -138,9 +148,11 @@ export default function MediaScreen() {
   async function run(action: () => Promise<unknown>, success: string) {
     setBusy(true);
     try {
-      await action();
+      const res = await action();
+      // grab() renvoie null quand on a annulé le choix du dossier
+      if (res === null) return;
       invalidateLibrary();
-      Alert.alert('C’est parti 🚀', success);
+      Alert.alert('C’est parti 🚀', typeof res === 'string' ? res : success);
       setSelected(new Set());
       await load();
     } catch (e: any) {
@@ -152,7 +164,7 @@ export default function MediaScreen() {
 
   function addMovie() {
     run(
-      () => radarr.add(settings.radarr, tmdbId),
+      () => grab(settings, { type: 'movie', tmdbId }, { chooseFolder: askFolder }),
       `« ${title} » ajouté à Radarr${settings.radarr.searchOnAdd ? ', recherche lancée.' : '.'}`
     );
   }
@@ -173,7 +185,9 @@ export default function MediaScreen() {
       () =>
         existing
           ? sonarr.monitorSeasons(settings.sonarr, existing, seasons)
-          : sonarr.add(settings.sonarr, tvdb!, seasons),
+          : tvdb
+            ? grab(settings, { type: 'tv', tmdbId, seasons }, { chooseFolder: askFolder })
+            : Promise.reject(new Error('Pas d’identifiant TVDB')),
       `${seasons.length} saison(s) de « ${title} » envoyée(s) à Sonarr.`
     );
   }
@@ -263,13 +277,15 @@ export default function MediaScreen() {
                   />
                 ) : null}
               </View>
-              {!jfItem && (manager ? configured && (ready || details.arr) : settings.seerr?.url) ? (
+              {!jfItem && (manager ? configured && (ready || details.arr) : serverGrab || settings.seerr?.url) ? (
                 <Text style={[styles.dim, { textAlign: 'center' }]}>
                   {manager
                     ? details.kind === 'movie'
                       ? 'Pas encore sur Jellyfin : lecture en streaming, et le film part dans Radarr en même temps.'
                       : 'Pas encore sur Jellyfin : lecture en streaming, et la série part dans Sonarr en même temps.'
-                    : 'Pas encore sur Jellyfin : lecture en streaming, et une demande est envoyée en même temps.'}
+                    : serverGrab
+                      ? 'Pas encore sur Jellyfin : lecture en streaming, et le téléchargement se lance en même temps.'
+                      : 'Pas encore sur Jellyfin : lecture en streaming, et une demande est envoyée en même temps.'}
                 </Text>
               ) : null}
             </View>
@@ -305,8 +321,23 @@ export default function MediaScreen() {
             />
           ) : null}
 
-          {/* ——— Utilisateur non-admin : demandes Seerr ——— */}
-          {!manager && !jfItem && <RequestBlock type={details.kind} tmdbId={tmdbId} />}
+          {/* ——— Utilisateur non-admin : téléchargement via le serveur Lumio, sinon demande Seerr ——— */}
+          {!manager && !jfItem && (serverGrab ? (
+            <Button
+              title={details.kind === 'movie' ? 'Télécharger sur le serveur' : 'Télécharger la série'}
+              icon="cloud-download-outline"
+              variant="glass"
+              loading={busy}
+              onPress={() =>
+                run(
+                  () => grab(settings, { type: details.kind, tmdbId, allSeasons: true }, { chooseFolder: askFolder }),
+                  'Téléchargement lancé.'
+                )
+              }
+            />
+          ) : (
+            <RequestBlock type={details.kind} tmdbId={tmdbId} />
+          ))}
 
           {/* ——— Action principale (admin) ——— */}
           {!manager ? null : !configured ? (

@@ -4,6 +4,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 
+import { FolderPickerHost } from '@/components/folder-picker';
 import { C } from '@/constants/theme';
 import { SettingsProvider, useSettings } from '@/lib/settings';
 
@@ -48,6 +49,7 @@ export default function RootLayout() {
       <SettingsProvider>
         <StatusBar style="light" />
         <Root />
+        <FolderPickerHost />
       </SettingsProvider>
     </ThemeProvider>
   );
