@@ -1,56 +1,59 @@
-# Welcome to your Expo app 👋
+# Lumio — client mobile Seerr + catalogues Stremio
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Appli native iOS / Android (Expo, React Native) qui parle directement à ton serveur **Seerr / Jellyseerr / Overseerr**
+et affiche sur l'accueil les catalogues de n'importe quel **addon Stremio** (dernières sorties, tops, etc.).
 
-## Get started
+## Fonctionnalités
 
-1. Install dependencies
+- **Accueil** : une ligne par catalogue de chaque addon Stremio + la ligne « Tendances » de Seerr.
+  Cinemeta (catalogue officiel Stremio) est préinstallé.
+- **Recherche** films et séries via Seerr, avec badge de disponibilité (Disponible, Partiel, En cours, Demandé).
+- **Fiche** : affiche, synopsis, genres, note, bouton « Ouvrir dans Jellyfin » si dispo.
+- **Demandes** : film en un tap ; séries saison par saison ou tout d'un coup.
+- **Suivi** des demandes (statut de la demande + statut du média).
+- **Réglages** : URL + clé API Seerr avec test de connexion, clé TMDB optionnelle,
+  ajout / retrait / réordonnancement des addons, activation catalogue par catalogue.
 
-   ```bash
-   npm install
-   ```
+### Comment un élément Stremio devient une fiche Seerr
 
-2. Start the app
+Les addons Stremio identifient les titres par leur id IMDb (`tt…`) ou `tmdb:…`. Lumio fait la correspondance :
 
-   ```bash
-   npx expo start
-   ```
+1. id `tmdb:` fourni par l'addon → utilisé directement ;
+2. id IMDb + clé TMDB renseignée → `/find` de l'API TMDB (instantané et fiable) ;
+3. sinon → recherche par titre + année dans Seerr.
 
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Lancer en dev
 
 ```bash
-npm run reset-project
+npm install
+npx expo run:android     # ou run:ios sur le Mac (Xcode requis)
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## Build automatique (GitHub Actions)
 
-### Other setup steps
+Le workflow `.github/workflows/build.yml` tourne à chaque push sur `main` :
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+| Job | Sortie | Installation |
+|---|---|---|
+| android | `lumio.apk` (artefact `lumio-android`) | Installe l'APK directement sur le téléphone |
+| ios | `lumio-unsigned.ipa` (artefact `lumio-ios`) | Resigne avec SideStore, AltStore ou Sideloadly (Apple ID gratuit = 7 jours) |
 
-## Learn more
+Pousse un tag `v1.0.0` pour publier automatiquement les deux fichiers dans une Release GitHub.
 
-To learn more about developing your project with Expo, look at the following resources:
+Aucun compte Expo ni compte développeur Apple n'est nécessaire.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Réseau local
 
-## Join the community
+Le trafic HTTP en clair est autorisé (Android `usesCleartextTraffic`, iOS ATS), donc tu peux pointer
+vers `http://192.168.x.x:5055` chez toi, ou vers ton domaine HTTPS de l'extérieur.
 
-Join our community of developers creating universal apps.
+## Structure
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```
+src/app/(tabs)/       Accueil, Recherche, Demandes, Réglages
+src/app/media/…       Fiche film / série
+src/lib/seerr.ts      Client API Seerr
+src/lib/stremio.ts    Client protocole addons Stremio
+src/lib/resolve.ts    Correspondance Stremio → TMDB
+src/lib/settings.tsx  Réglages persistés (AsyncStorage)
+```
