@@ -42,6 +42,7 @@ export function SeerrSection() {
     const q = new URLSearchParams();
     if (settings.jellyfin?.url) q.set('jf', settings.jellyfin.url);
     if (settings.seerr?.url) q.set('seerr', settings.seerr.url);
+    if (settings.chatUrl) q.set('chat', settings.chatUrl);
     if (settings.tmdbKey) q.set('tmdb', settings.tmdbKey);
     if (settings.addons.length) q.set('addons', settings.addons.map((a) => a.base).join('|'));
     if (userName) q.set('name', userName);

@@ -4,9 +4,10 @@ import { StatusBar } from 'expo-status-bar';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Hero, HeroTopBar } from '@/components/hero';
-import { JfRow } from '@/components/jf-cards';
-import { jf, type JfItem } from '@/lib/jellyfin';
+import { Hero, heroFromTmdb, HeroTopBar, type HeroItem } from '@/components/hero';
+import { JfRow, openJellyfin, playJellyfin } from '@/components/jf-cards';
+import { jf, jfImage, jfLogo, type JfItem } from '@/lib/jellyfin';
+import { useSeason } from '@/lib/seasons';
 
 import { PosterItem, Row } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
@@ -63,7 +64,13 @@ function Trending({ nonce, part }: { nonce: number; part: 'hero' | 'row' }) {
   const { data, error, loading } = useAsync(() => tmdb.trending(settings), [settings.tmdbKey, nonce]);
   const all = (data?.results ?? []).filter((r) => (r.media_type === 'movie' || r.media_type === 'tv') && r.poster_path);
 
-  if (part === 'hero') return loading ? <View style={{ height: 420 }} /> : <Hero items={all.slice(0, 6)} badge={badge} />;
+  const season = useSeason();
+  if (part === 'hero')
+    return loading ? (
+      <View style={{ height: 420 }} />
+    ) : (
+      <Hero items={all.slice(0, 6).map((r) => heroFromTmdb(r, badge(r.media_type as MediaType, r.id)))} season={season} />
+    );
 
   const items: PosterItem[] = all.slice(6).map((r) => {
     const type = r.media_type as MediaType;
@@ -78,6 +85,127 @@ function Trending({ nonce, part }: { nonce: number; part: 'hero' | 'row' }) {
     };
   });
   return <Row title="Tendances de la semaine" items={items} loading={loading} error={error} />;
+}
+
+/** Hero alimenté par les derniers ajouts du serveur Jellyfin. */
+function JfHero({ nonce }: { nonce: number }) {
+  const { settings } = useSettings();
+  const season = useSeason();
+  const [items, setItems] = useState<HeroItem[] | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    jf.items(settings, { types: 'Movie,Series', sort: 'DateCreated', order: 'Descending', limit: 14 })
+      .then(({ Items }) => {
+        if (!alive) return;
+        const withArt = Items.filter((i) => i.ImageTags?.Primary).slice(0, 7);
+        setItems(
+          withArt.map((i) => {
+            const tmdbId = i.ProviderIds?.Tmdb ? Number(i.ProviderIds.Tmdb) : undefined;
+            return {
+              key: i.Id,
+              title: i.Name,
+              posterUrl: jfImage(settings, i.Id, 'Primary', { tag: i.ImageTags?.Primary, maxHeight: 1200 }),
+              logoUrl: jfLogo(settings, i),
+              tmdb: tmdbId ? { type: i.Type === 'Movie' ? 'movie' : 'tv', id: tmdbId } : undefined,
+              genres: (i.Genres ?? []).slice(0, 3),
+              meta: [i.Type === 'Movie' ? 'Film' : 'Série', i.ProductionYear, i.CommunityRating ? `★ ${i.CommunityRating.toFixed(1)}` : null]
+                .filter(Boolean)
+                .join('  •  '),
+              badge: { state: 'available', label: 'Nouveau sur ton serveur', color: C.success },
+              primary: { label: 'Lire', icon: 'play', onPress: () => (i.Type === 'Movie' ? playJellyfin(i) : openJellyfin(i)) },
+              onOpen: () => openJellyfin(i),
+            } as HeroItem;
+          })
+        );
+      })
+      .catch(() => alive && setItems([]));
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.jellyfin?.token, nonce]);
+
+  if (items === null) return <View style={{ height: 420 }} />;
+  return <Hero items={items} season={season} />;
+}
+
+/** Sélection de saison tirée du serveur Jellyfin (ex. films d'horreur pour Halloween), du plus récent au plus ancien. */
+function SeasonJfRow({ nonce }: { nonce: number }) {
+  const { settings } = useSettings();
+  const season = useSeason();
+  const [items, setItems] = useState<JfItem[]>([]);
+
+  useEffect(() => {
+    if (!season || !settings.jellyfin) return;
+    let alive = true;
+    (async () => {
+      let found: JfItem[] = [];
+      if (season.jfGenre) {
+        const genres = (await jf.genres(settings).catch(() => [])).map((g) => g.Name).filter((n) => season.jfGenre!.test(n));
+        if (genres.length) {
+          const r = await jf.items(settings, {
+            types: 'Movie,Series',
+            genres: genres.join('|'),
+            sort: 'PremiereDate,ProductionYear,SortName',
+            order: 'Descending',
+            limit: 40,
+          });
+          found = r.Items;
+        }
+      }
+      if (season.jfSearch) {
+        const res = await Promise.all(
+          season.jfSearch.map((q) => jf.items(settings, { types: 'Movie,Series', search: q, limit: 20 }).catch(() => ({ Items: [] as JfItem[] })))
+        );
+        const seen = new Set(found.map((i) => i.Id));
+        for (const r of res) for (const i of r.Items) if (!seen.has(i.Id)) (seen.add(i.Id), found.push(i));
+        found.sort((a, b) => (b.ProductionYear ?? 0) - (a.ProductionYear ?? 0));
+      }
+      if (alive) setItems(found);
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [season?.id, settings.jellyfin?.token, nonce]);
+
+  if (!season) return null;
+  return <JfRow title={`${season.emoji} ${season.name} · Sur ton serveur`} items={items} accent={season.accent} />;
+}
+
+/** Sélection de saison à découvrir (TMDB), du plus récent au plus ancien. */
+function SeasonTmdbRow({ nonce }: { nonce: number }) {
+  const { settings } = useSettings();
+  const season = useSeason();
+  const badge = useLibrary();
+  const { data, loading, error } = useAsync(async () => {
+    if (!season) return [];
+    const pages = await Promise.all(
+      [1, 2].map((page) => tmdb.discover(settings, 'movie', { genres: season.tmdbGenres, keyword: season.tmdbKeyword, page }))
+    );
+    return pages.flatMap((p) => p.results).filter((r) => r.poster_path);
+  }, [season?.id, settings.tmdbKey, nonce]);
+  if (!season) return null;
+  const items: PosterItem[] = (data ?? []).map((r) => ({
+    key: `movie:${r.id}`,
+    title: itemTitle(r),
+    poster: tmdbImg(r.poster_path),
+    ids: { tmdb: r.id, type: 'movie' },
+    subtitle: itemYear(r),
+    badge: badge('movie', r.id),
+    onPress: () => openMedia('movie', r.id),
+  }));
+  return (
+    <Row
+      title={`${season.emoji} ${season.name} · À découvrir`}
+      subtitle={season.tagline}
+      items={items}
+      loading={loading}
+      error={error}
+      accent={season.accent}
+    />
+  );
 }
 
 function JfDynamicRow({ kind, view, nonce }: { kind: 'continue' | 'nextup' | 'favorites' | 'jf-latest'; view?: JfItem; nonce: number }) {
@@ -99,7 +227,7 @@ function JfDynamicRow({ kind, view, nonce }: { kind: 'continue' | 'nextup' | 'fa
     }, [settings.jellyfin?.token, kind, view?.Id, nonce])
   );
   const title =
-    kind === 'continue' ? 'Reprendre' : kind === 'nextup' ? 'À suivre' : kind === 'favorites' ? 'Favoris' : `Ajouts récents · ${view?.Name ?? ''}`;
+    kind === 'continue' ? 'Reprendre' : kind === 'nextup' ? 'À suivre' : kind === 'favorites' ? 'Favoris' : `Derniers ajouts · ${view?.Name ?? ''}`;
   return (
     <JfRow
       title={title}
@@ -118,7 +246,8 @@ export default function Home() {
   const [scrolled, setScrolled] = useState(false);
   const { rows } = useAvailableRows(nonce);
   const ordered = orderRows(rows, settings.homeLayout).filter((r) => !r.hidden);
-  const withHero = settings.showTrending && ordered[0]?.kind === 'hero';
+  const withHero = ordered[0]?.kind === 'hero';
+  const season = useSeason();
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -142,7 +271,13 @@ export default function Home() {
           let el: React.ReactNode = null;
           switch (r.kind) {
             case 'hero':
-              el = settings.showTrending ? <Trending part="hero" nonce={nonce} /> : null;
+              el = settings.jellyfin ? <JfHero nonce={nonce} /> : <Trending part="hero" nonce={nonce} />;
+              break;
+            case 'season-jf':
+              el = <SeasonJfRow nonce={nonce} />;
+              break;
+            case 'season-tmdb':
+              el = <SeasonTmdbRow nonce={nonce} />;
               break;
             case 'trending':
               el = <Trending part="row" nonce={nonce} />;
@@ -151,7 +286,7 @@ export default function Home() {
               el = r.addon && r.catalog ? <CatalogRow addon={r.addon} catalog={r.catalog} nonce={nonce} /> : null;
               break;
             default:
-              el = <JfDynamicRow kind={r.kind} view={r.view} nonce={nonce} />;
+              el = <JfDynamicRow kind={r.kind as 'continue' | 'nextup' | 'favorites' | 'jf-latest'} view={r.view} nonce={nonce} />;
           }
           return (
             <View key={r.id}>
@@ -172,7 +307,7 @@ export default function Home() {
       {/* Barre du haut : transparente sur le hero, voile noir une fois qu'on a défilé */}
       <View style={[styles.top, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
         <View style={[StyleSheet.absoluteFill, { backgroundColor: scrolled || !withHero ? 'rgba(0,0,0,0.88)' : 'transparent' }]} />
-        <HeroTopBar title="Lumio" onCustomize={() => router.push('/customize')} />
+        <HeroTopBar title="Lumio" season={season} onCustomize={() => router.push('/customize')} />
       </View>
     </View>
   );

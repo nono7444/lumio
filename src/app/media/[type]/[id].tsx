@@ -29,6 +29,7 @@ import {
 } from '@/lib/arr';
 import { jf, type JfItem } from '@/lib/jellyfin';
 import { RequestBlock } from '@/components/request-block';
+import { chat } from '@/lib/chat';
 import { arrReady, hasTmdb, isManager, useSettings } from '@/lib/settings';
 import { pickLogo, tmdb, tmdbImg, type TmdbMovie, type TmdbTv } from '@/lib/tmdb';
 
@@ -273,6 +274,36 @@ export default function MediaScreen() {
               ) : null}
             </View>
           )}
+
+          {/* ——— Proposer le titre dans le chat famille ——— */}
+          {settings.chatUrl && settings.jellyfin ? (
+            <Button
+              title="Proposer à la famille"
+              icon="chatbubbles-outline"
+              variant="secondary"
+              onPress={() =>
+                Alert.prompt
+                  ? Alert.prompt('Proposer dans le chat', 'Un petit mot (facultatif) ?', async (msg) => {
+                      try {
+                        await chat.send(settings, msg ?? '', {
+                          type: details.kind,
+                          tmdbId,
+                          title,
+                          year: date?.slice(0, 4),
+                          poster: tmdbImg(d.poster_path, 'w342'),
+                        });
+                        Alert.alert('Proposé ✅', 'Ta proposition est dans le chat.');
+                      } catch (e: any) {
+                        Alert.alert('Envoi impossible', e?.message ?? String(e));
+                      }
+                    })
+                  : chat
+                      .send(settings, '', { type: details.kind, tmdbId, title, year: date?.slice(0, 4), poster: tmdbImg(d.poster_path, 'w342') })
+                      .then(() => Alert.alert('Proposé ✅', 'Ta proposition est dans le chat.'))
+                      .catch((e) => Alert.alert('Envoi impossible', e?.message ?? String(e)))
+              }
+            />
+          ) : null}
 
           {/* ——— Utilisateur non-admin : demandes Seerr ——— */}
           {!manager && !jfItem && <RequestBlock type={details.kind} tmdbId={tmdbId} />}

@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createContext, ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
+import { loadFromJellyfin, loadFromKeychain, saveToJellyfin, saveToKeychain } from './backup';
+
 export type Addon = {
   /** URL de base, sans /manifest.json final */
   base: string;
@@ -70,6 +72,12 @@ export type Settings = {
   tabsLayout: TabPref[];
   /** Enchaîner automatiquement l'épisode suivant */
   autoNext: boolean;
+  /** Addon Stremio des sorties numériques (onglet Calendrier) */
+  calendarAddon: string;
+  /** Thème saisonnier : 'auto' (selon la date), 'off', ou un thème forcé */
+  seasonTheme: string;
+  /** Serveur du chat famille */
+  chatUrl: string;
   /** Moteur de lecture : mpv (lit tout, MKV inclus) ou lecteur natif du téléphone */
   player: 'mpv' | 'native';
   /** Clé API v3 ou jeton v4 TMDB (obligatoire : recherche + fiches) */
@@ -99,6 +107,9 @@ const DEFAULTS: Settings = {
   homeLayout: [],
   tabsLayout: [],
   autoNext: true,
+  calendarAddon: 'https://releasio-pearl.vercel.app/%7B%22posterSource%22%3A%22btttr%22%2C%22badge%22%3A%22bar%22%2C%22availability%22%3A%22all%22%2C%22titleMode%22%3A%22title%22%7D',
+  seasonTheme: 'auto',
+  chatUrl: '',
   tmdbKey: '',
   language: 'fr-FR',
   radarr: { url: '', apiKey: '', searchOnAdd: true, minimumAvailability: 'released' },
@@ -108,6 +119,30 @@ const DEFAULTS: Settings = {
 };
 
 const KEY = 'lumio-native:settings:v2';
+
+function mergeSettings(saved: Partial<Settings>): Settings {
+  return {
+    ...DEFAULTS,
+    ...saved,
+    radarr: { ...DEFAULTS.radarr, ...saved.radarr },
+    sonarr: { ...DEFAULTS.sonarr, ...saved.sonarr },
+    betterPosters: { ...DEFAULTS.betterPosters, ...saved.betterPosters },
+  };
+}
+
+/** Garde uniquement les réglages locaux réellement renseignés (pour ne pas écraser ceux du serveur par des vides). */
+function stripEmpty(s: Settings): Partial<Settings> {
+  const out: Partial<Settings> = {};
+  for (const [k, v] of Object.entries(s) as [keyof Settings, unknown][]) {
+    if (v === '' || v == null) continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    if (k === 'radarr' || k === 'sonarr') {
+      if (!(v as { url?: string }).url) continue;
+    }
+    (out as Record<string, unknown>)[k] = v;
+  }
+  return out;
+}
 
 type Ctx = {
   settings: Settings;
@@ -123,40 +158,65 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const current = useRef(settings);
   current.current = settings;
 
+  const keychainTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cloudTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
-    AsyncStorage.getItem(KEY)
-      .then((raw) => {
-        if (!raw) return;
-        const saved = JSON.parse(raw) as Partial<Settings>;
-        const merged: Settings = {
-          ...DEFAULTS,
-          ...saved,
-          radarr: { ...DEFAULTS.radarr, ...saved.radarr },
-          sonarr: { ...DEFAULTS.sonarr, ...saved.sonarr },
-          betterPosters: { ...DEFAULTS.betterPosters, ...saved.betterPosters },
-        };
+    (async () => {
+      let saved: Partial<Settings> | null = null;
+      try {
+        const raw = await AsyncStorage.getItem(KEY);
+        if (raw) saved = JSON.parse(raw);
+      } catch {}
+      // Appli réinstallée : on récupère la copie du trousseau iOS
+      if (!saved) saved = await loadFromKeychain();
+      if (saved) {
+        const merged = mergeSettings(saved);
         current.current = merged;
         setSettings(merged);
-      })
-      .catch(() => {})
-      .finally(() => {
-        // Identifiant d'appareil généré une fois pour toutes
-        if (!current.current.deviceId) {
-          const next = { ...current.current, deviceId: newDeviceId() };
-          current.current = next;
-          setSettings(next);
-          AsyncStorage.setItem(KEY, JSON.stringify(next)).catch(() => {});
-        }
-        setReady(true);
-      });
+      }
+      // Identifiant d'appareil généré une fois pour toutes
+      if (!current.current.deviceId) {
+        const next = { ...current.current, deviceId: newDeviceId() };
+        current.current = next;
+        setSettings(next);
+      }
+      AsyncStorage.setItem(KEY, JSON.stringify(current.current)).catch(() => {});
+      setReady(true);
+    })();
   }, []);
 
-  const update = useCallback(async (patch: Partial<Settings>) => {
-    const next = { ...current.current, ...patch };
-    current.current = next;
-    setSettings(next);
-    await AsyncStorage.setItem(KEY, JSON.stringify(next));
+  const persist = useCallback((next: Settings, cloud: boolean) => {
+    const json = JSON.stringify(next);
+    AsyncStorage.setItem(KEY, json).catch(() => {});
+    if (keychainTimer.current) clearTimeout(keychainTimer.current);
+    keychainTimer.current = setTimeout(() => saveToKeychain(json), 800);
+    if (cloud && next.jellyfin) {
+      if (cloudTimer.current) clearTimeout(cloudTimer.current);
+      cloudTimer.current = setTimeout(() => saveToJellyfin(next), 3000);
+    }
   }, []);
+
+  const update = useCallback(
+    async (patch: Partial<Settings>) => {
+      const prev = current.current;
+      let next = { ...prev, ...patch };
+      // Nouvelle connexion Jellyfin : on restaure les réglages enregistrés sur le serveur
+      if (patch.jellyfin && patch.jellyfin.token !== prev.jellyfin?.token) {
+        const cloud = await loadFromJellyfin(next);
+        if (cloud) {
+          // Appli neuve (rien de configuré) : le serveur fait foi ; sinon les réglages locaux priment
+          const fresh = !prev.tmdbKey && !prev.radarr.url && !prev.sonarr.url && !prev.seerr;
+          const base = fresh ? cloud : { ...cloud, ...stripEmpty(next) };
+          next = { ...mergeSettings(base), jellyfin: next.jellyfin, deviceId: next.deviceId, skipJellyfin: false };
+        }
+      }
+      current.current = next;
+      setSettings(next);
+      persist(next, true);
+    },
+    [persist]
+  );
 
   return (
     <SettingsContext.Provider value={{ settings, ready, update }}>{children}</SettingsContext.Provider>

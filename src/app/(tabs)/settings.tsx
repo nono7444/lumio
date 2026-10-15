@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button, Field, ScreenTitle, Section } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
+import { CalendarSection, ChatSection, ThemeSection } from '@/components/extra-sections';
 import { SeerrSection } from '@/components/seerr-section';
 import { Addon, DEFAULT_ADDON, isManager, useSettings } from '@/lib/settings';
 import { RATING_SOURCES } from '@/lib/better-posters';
@@ -199,6 +200,10 @@ export default function SettingsScreen() {
 
         <SeerrSection />
 
+        <ChatSection />
+
+        <ThemeSection />
+
         <Section title="Lecture">
           <Picker
             label="Lecteur vidéo"
@@ -247,6 +252,8 @@ export default function SettingsScreen() {
             </>
           )}
         </Section>
+
+        <CalendarSection />
 
         <Section title="TMDB">
           <Field

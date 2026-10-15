@@ -7,7 +7,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { tap } from '@/components/ui';
 import { C } from '@/constants/theme';
+import { useUnreadChat } from '@/lib/chat';
 import { orderTabs } from '@/lib/home-layout';
+import { useSeason } from '@/lib/seasons';
 import { useSettings } from '@/lib/settings';
 
 type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>>[0];
@@ -16,6 +18,8 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   index: 'home',
   search: 'search',
   library: 'albums',
+  calendar: 'calendar',
+  chat: 'chatbubbles',
   activity: 'cloud-download',
 };
 
@@ -23,6 +27,9 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
 export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) {
   const insets = useSafeAreaInsets();
   const { settings } = useSettings();
+  const season = useSeason();
+  const activeColor = season?.accent ?? C.text;
+  const unread = useUnreadChat();
   const initial = (settings.jellyfin?.userName ?? 'L').slice(0, 1).toUpperCase();
 
   const visible = state.routes.filter((r) => {
@@ -60,7 +67,7 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
                   navigation.navigate(route.name, route.params);
                 }
               }}
-              style={[styles.item, focused && styles.itemOn]}>
+              style={[styles.item, focused && (season ? { backgroundColor: season.tint } : styles.itemOn)]}>
               {isProfile ? (
                 <View style={[styles.avatar, focused && { borderColor: C.text }]}>
                   <Text style={styles.avatarText}>{initial}</Text>
@@ -69,10 +76,11 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
                 <Ionicons
                   name={(focused ? ICONS[route.name] : `${ICONS[route.name]}-outline`) as keyof typeof Ionicons.glyphMap}
                   size={22}
-                  color={focused ? C.text : C.textDim}
+                  color={focused ? activeColor : C.textDim}
                 />
               )}
-              <Text style={[styles.label, { color: focused ? C.text : C.textDim }]} numberOfLines={1}>
+              {route.name === 'chat' && unread > 0 && <View style={styles.unread} />}
+              <Text style={[styles.label, { color: focused ? activeColor : C.textDim }]} numberOfLines={1}>
                 {label}
               </Text>
             </Pressable>
@@ -98,7 +106,8 @@ const styles = StyleSheet.create({
   },
   item: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3, borderRadius: 28 },
   itemOn: { backgroundColor: 'rgba(255,255,255,0.10)' },
-  label: { fontSize: 10.5, fontWeight: '600' },
+  label: { fontSize: 10, fontWeight: '600' },
+  unread: { position: 'absolute', top: 9, right: '30%', width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF453A' },
   avatar: {
     width: 24,
     height: 24,

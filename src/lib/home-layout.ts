@@ -2,10 +2,11 @@
 import { useEffect, useState } from 'react';
 
 import { jf, type JfItem } from './jellyfin';
+import { useSeason } from './seasons';
 import { hasTmdb, useSettings, type Addon, type HomeRow, type Settings, type TabPref } from './settings';
 import { catalogKey, fetchManifest, isBrowsable, type StremioCatalog } from './stremio';
 
-export type RowKind = 'hero' | 'continue' | 'nextup' | 'favorites' | 'trending' | 'jf-latest' | 'catalog';
+export type RowKind = 'hero' | 'season-jf' | 'season-tmdb' | 'continue' | 'nextup' | 'favorites' | 'trending' | 'jf-latest' | 'catalog';
 
 export type RowDef = {
   id: string;
@@ -19,11 +20,12 @@ export type RowDef = {
 const TYPE_LABEL: Record<string, string> = { movie: 'Films', series: 'Séries' };
 const VIEW_LABEL: Record<string, string> = { movies: 'Films', tvshows: 'Séries', boxsets: 'Collections' };
 
-/** Rangées masquées tant que l'utilisateur ne les a pas activées. */
-const HIDDEN_BY_DEFAULT: RowKind[] = ['favorites', 'jf-latest'];
+/** Par défaut, l'accueil montre le hero, les sélections de saison et les derniers ajouts Jellyfin. */
+const HIDDEN_BY_DEFAULT: RowKind[] = ['continue', 'nextup', 'favorites', 'catalog', 'trending'];
 
 export function useAvailableRows(nonce = 0) {
   const { settings } = useSettings();
+  const season = useSeason();
   const [rows, setRows] = useState<RowDef[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -31,8 +33,27 @@ export function useAvailableRows(nonce = 0) {
     let alive = true;
     (async () => {
       const out: RowDef[] = [];
-      if (hasTmdb(settings)) out.push({ id: 'hero', label: 'À la une (TMDB)', kind: 'hero' });
-      if (settings.jellyfin) out.push({ id: 'continue', label: 'Reprendre', kind: 'continue' });
+      if (hasTmdb(settings) || settings.jellyfin) out.push({ id: 'hero', label: 'À la une', kind: 'hero' });
+
+      // Sélections de la période en cours (Halloween, Noël…)
+      if (season) {
+        if (settings.jellyfin) out.push({ id: 'season-jf', label: `${season.emoji} ${season.name} · Sur ton serveur`, kind: 'season-jf' });
+        if (hasTmdb(settings)) out.push({ id: 'season-tmdb', label: `${season.emoji} ${season.name} · À découvrir`, kind: 'season-tmdb' });
+      }
+
+      if (settings.jellyfin) {
+        const views = await jf.views(settings).catch(() => [] as JfItem[]);
+        for (const v of views)
+          out.push({
+            id: `jf-latest:${v.Id}`,
+            label: `Derniers ajouts · ${v.Name || VIEW_LABEL[v.CollectionType ?? '']}`,
+            kind: 'jf-latest',
+            view: v,
+          });
+        out.push({ id: 'continue', label: 'Reprendre', kind: 'continue' });
+        out.push({ id: 'nextup', label: 'À suivre', kind: 'nextup' });
+        out.push({ id: 'favorites', label: 'Favoris Jellyfin', kind: 'favorites' });
+      }
 
       const manifests = await Promise.all(settings.addons.map((a) => fetchManifest(a.base).catch(() => null)));
       settings.addons.forEach((addon, i) => {
@@ -50,18 +71,6 @@ export function useAvailableRows(nonce = 0) {
         }
       });
 
-      if (settings.jellyfin) {
-        out.push({ id: 'nextup', label: 'À suivre', kind: 'nextup' });
-        out.push({ id: 'favorites', label: 'Favoris Jellyfin', kind: 'favorites' });
-        const views = await jf.views(settings).catch(() => [] as JfItem[]);
-        for (const v of views)
-          out.push({
-            id: `jf-latest:${v.Id}`,
-            label: `Ajouts récents · ${VIEW_LABEL[v.CollectionType ?? ''] ?? v.Name}`,
-            kind: 'jf-latest',
-            view: v,
-          });
-      }
       if (hasTmdb(settings)) out.push({ id: 'trending', label: 'Tendances de la semaine', kind: 'trending' });
       if (alive) {
         setRows(out);
@@ -72,7 +81,7 @@ export function useAvailableRows(nonce = 0) {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.addons, settings.jellyfin?.token, settings.tmdbKey, nonce]);
+  }, [settings.addons, settings.jellyfin?.token, settings.tmdbKey, season?.id, nonce]);
 
   return { rows, loading };
 }
@@ -96,12 +105,14 @@ export const TAB_LABELS: Record<string, string> = {
   index: 'Accueil',
   search: 'Recherche',
   library: 'Bibliothèque',
+  calendar: 'Calendrier',
+  chat: 'Chat',
   activity: 'Activité',
   settings: 'Profil',
 };
 
 /** Onglets déplaçables / masquables (Accueil et Profil restent toujours visibles). */
-export const MOVABLE_TABS = ['search', 'library', 'activity'];
+export const MOVABLE_TABS = ['search', 'library', 'calendar', 'chat', 'activity'];
 
 export function orderTabs(names: string[], prefs: TabPref[]) {
   const pos = new Map(prefs.map((t, i) => [t.name, i]));

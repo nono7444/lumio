@@ -1,4 +1,4 @@
-name: Build Lumio
+name: Build Lumio (iOS)
 
 # Lance le build à chaque push sur main, à chaque tag v*, ou à la main depuis l'onglet Actions.
 on:
@@ -22,33 +22,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-
-  android:
-    needs: check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-      - uses: gradle/actions/setup-gradle@v4
-      - run: npm ci
-      - name: Génère le projet Android
-        run: npx expo prebuild --platform android --no-install --clean
-      - name: Compile l'APK (release, signé avec la clé de debug)
-        working-directory: android
-        run: ./gradlew assembleRelease --no-daemon
-      - name: Renomme l'APK
-        run: cp android/app/build/outputs/apk/release/app-release.apk lumio.apk
-      - uses: actions/upload-artifact@v4
-        with:
-          name: lumio-android
-          path: lumio.apk
 
   ios:
     needs: check
@@ -90,7 +63,7 @@ jobs:
   # Publie une Release à chaque build de main : liens de téléchargement directs, sans connexion
   release:
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
-    needs: [android, ios]
+    needs: [ios]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -106,7 +79,5 @@ jobs:
           make_latest: true
           body: |
             iPhone : télécharge lumio-unsigned.ipa puis installe-le avec Sideloadly ou SideStore.
-            Android : télécharge lumio.apk et ouvre-le.
           files: |
-            lumio.apk
             lumio-unsigned.ipa

@@ -23,6 +23,23 @@ Appli native iOS / Android (Expo, React Native) qui :
 | **Activité** | Files Radarr + Sonarr en direct ; onglet **Demandes** (Seerr) avec validation / refus pour l'admin |
 | **Réglages** | Jellyfin, affiches Better Posters, TMDB, Radarr, Sonarr, addons Stremio |
 
+### Réglages qui survivent à une réinstallation
+
+Les réglages sont copiés dans le **trousseau iOS**, qui n'est pas effacé quand on supprime l'appli, et dans les **préférences Jellyfin** de l'utilisateur (`/DisplayPreferences/lumio`). Après une réinstallation, tout revient tout seul. Sur un nouvel appareil, tout revient dès la connexion Jellyfin.
+
+### Calendrier
+
+Onglet des sorties numériques à venir (films et séries), alimenté par l'addon *Digital Releases* (Releasio). Cet addon n'a pas de champ date : la date est lue dans l'URL de l'affiche (`?d=JJ/MM/AA`), sinon dans la description (« Sortie numérique : … (15 octobre 2026) »).
+
+### Accueil et périodes
+
+Par défaut, l'accueil montre : un hero des nouveautés du serveur, la **sélection de la période** (🎃 Halloween : films d'horreur, du plus récent au plus ancien, sur ton serveur et à découvrir ; 🎄 Noël, 💘 Saint-Valentin, 🐣 printemps, ☀️ été), puis les **derniers ajouts de chaque bibliothèque Jellyfin** (Films, Séries, Kids, Anime…). Le reste s'active depuis ⚙︎.
+Le **thème de saison** (couleur d'accent, emoji, teinte du hero) suit la date. On peut le forcer ou le désactiver dans Profil, rubrique Thème.
+
+### Chat famille
+
+Onglet **Chat** pour les remarques et propositions, avec le bouton « Proposer à la famille » sur chaque fiche. Il faut un petit serveur Docker sans dépendance, qui s'authentifie avec le compte Jellyfin : voir [`server/chat`](server/chat/README.md).
+
 ### Utilisateurs non-admins et demandes
 
 Le rôle vient de Jellyfin (`Policy.IsAdministrator`). Un admin pilote Radarr et Sonarr directement. Les autres envoient des **demandes via Seerr / Jellyseerr** : connexion avec le même compte Jellyfin, et validation par l'admin dans l'onglet Activité.

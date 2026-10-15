@@ -11,7 +11,7 @@ import { normalizeAddonUrl } from '@/lib/stremio';
  * Préremplit l'appli d'un proche (serveurs, clé TMDB, addons), sans jamais partager les clés Radarr/Sonarr.
  */
 export default function Invite() {
-  const p = useLocalSearchParams<{ jf?: string; seerr?: string; tmdb?: string; addons?: string; name?: string }>();
+  const p = useLocalSearchParams<{ jf?: string; seerr?: string; chat?: string; tmdb?: string; addons?: string; name?: string }>();
   const { settings, update } = useSettings();
 
   useEffect(() => {
@@ -25,6 +25,7 @@ export default function Invite() {
         addons,
         tmdbKey: p.tmdb || settings.tmdbKey,
         seerr: p.seerr ? { url: p.seerr } : settings.seerr,
+        chatUrl: p.chat || settings.chatUrl,
         // Nouvelle invitation : on repasse par l'écran de connexion
         jellyfin: p.jf && settings.jellyfin?.url !== p.jf ? null : settings.jellyfin,
         skipJellyfin: false,

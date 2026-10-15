@@ -112,6 +112,21 @@ export const tmdb = {
 
   trending: (s: Settings) => call<{ results: TmdbItem[] }>(s, '/trending/all/week'),
 
+  /** Découverte filtrée (genres / mot-clé), du plus récent au plus ancien. */
+  discover: (s: Settings, type: MediaType, opts: { genres?: number[]; keyword?: number; page?: number }) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const dateKey = type === 'movie' ? 'primary_release_date' : 'first_air_date';
+    return call<{ results: TmdbItem[] }>(s, `/discover/${type}`, {
+      sort_by: `${dateKey}.desc`,
+      [`${dateKey}.lte`]: today,
+      'vote_count.gte': 80,
+      include_adult: 'false',
+      page: opts.page ?? 1,
+      ...(opts.genres?.length ? { with_genres: opts.genres.join(',') } : {}),
+      ...(opts.keyword ? { with_keywords: String(opts.keyword) } : {}),
+    }).then((r) => ({ results: r.results.map((i) => ({ ...i, media_type: type })) }));
+  },
+
   movie: (s: Settings, id: number) =>
     cached(`movie:${id}`, () =>
       call<TmdbMovie>(s, `/movie/${id}`, { append_to_response: 'images,credits', include_image_language: imgLangs(s) })

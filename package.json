@@ -21,6 +21,7 @@
     "expo-mpv": "^0.1.13",
     "expo-router": "~57.0.27",
     "expo-screen-orientation": "~57.0.3",
+    "expo-secure-store": "~57.0.4",
     "expo-splash-screen": "~57.0.10",
     "expo-status-bar": "~57.0.1",
     "expo-symbols": "~57.0.3",

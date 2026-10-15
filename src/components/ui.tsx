@@ -135,19 +135,22 @@ export function Row({
   items,
   loading,
   error,
+  accent,
 }: {
   title: string;
   subtitle?: string;
   items: PosterItem[];
   loading?: boolean;
   error?: string | null;
+  /** Couleur de thème (sélections de saison) */
+  accent?: string;
 }) {
   if (!loading && !error && items.length === 0) return null;
   return (
     <View style={{ marginBottom: 28 }}>
       <View style={styles.rowHead}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.rowTitle} numberOfLines={1}>
+          <Text style={[styles.rowTitle, accent ? { color: accent } : null]} numberOfLines={1}>
             {title}
           </Text>
           {subtitle ? <Text style={styles.rowSub}>{subtitle}</Text> : null}

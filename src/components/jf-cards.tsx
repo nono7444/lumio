@@ -135,17 +135,21 @@ export function JfRow({
   items,
   wide,
   onSeeAll,
+  accent,
 }: {
   title: string;
   items: JfItem[];
   wide?: boolean;
   onSeeAll?: () => void;
+  accent?: string;
 }) {
   if (!items.length) return null;
   return (
     <View style={{ marginBottom: 28 }}>
       <Pressable style={styles.rowHead} onPress={onSeeAll} disabled={!onSeeAll}>
-        <Text style={styles.rowTitle}>{title}</Text>
+        <Text style={[styles.rowTitle, accent ? { color: accent } : null]} numberOfLines={1}>
+          {title}
+        </Text>
         {onSeeAll && (
           <View style={styles.rowMore}>
             <Ionicons name="chevron-forward" size={15} color={C.textDim} />
