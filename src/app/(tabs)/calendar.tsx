@@ -1,16 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  RefreshControl,
-  SectionList,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, FlatList, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native';
+import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ScreenTitle, SegChip, tap } from '@/components/ui';

@@ -2,17 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
-} from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { FocusPressable as Pressable } from '@/components/tv';
 
 import { ArrSection, Picker, Toggle } from '@/components/arr-section';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';

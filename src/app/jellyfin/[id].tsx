@@ -2,17 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { ActivityIndicator, FlatList, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { JfPosterCard, JfRow, playJellyfin } from '@/components/jf-cards';
@@ -59,7 +50,7 @@ const SORTS = [
 function FolderGrid({ folder }: { folder: JfItem }) {
   const { settings } = useSettings();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height: screenH } = useWindowDimensions();
   const [sortIdx, setSortIdx] = useState(0);
   const [filter, setFilter] = useState('');
   const [genre, setGenre] = useState<string | null>(null);
@@ -187,7 +178,7 @@ function FolderGrid({ folder }: { folder: JfItem }) {
 
 function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
   const { settings } = useSettings();
-  const { width } = useWindowDimensions();
+  const { width, height: screenH } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [seasons, setSeasons] = useState<JfItem[]>([]);
   const [season, setSeason] = useState<string | null>(null);
@@ -210,7 +201,8 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
   }
 
   const isSeries = item.Type === 'Series';
-  const heroH = Math.round(width * 1.2);
+  // Sur TV (paysage), le hero ne dépasse pas l'écran
+  const heroH = Math.min(Math.round(width * 1.2), Math.round(screenH * 0.85));
   const logo = jfLogo(settings, item);
   const resumeAt = ticksToSeconds(item.UserData?.PlaybackPositionTicks);
   const cast = (item.People ?? []).filter((p) => p.Type === 'Actor').slice(0, 15);

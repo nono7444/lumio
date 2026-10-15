@@ -2,7 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { askFolder } from '@/components/folder-picker';

@@ -1,7 +1,8 @@
 // Google Cast (Chromecast, TV Android / Google TV) : bouton + écran « Lecture sur la TV ».
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { FocusPressable as Pressable } from '@/components/tv';
 import GoogleCast, { CastButton, MediaPlayerState, useCastDevice, useMediaStatus, useRemoteMediaClient, useStreamPosition } from 'react-native-google-cast';
 
 import { Button } from '@/components/ui';

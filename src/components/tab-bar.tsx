@@ -2,7 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import type { Tabs } from 'expo-router';
 import type { ComponentProps } from 'react';
-import { LayoutAnimation, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { LayoutAnimation, Platform, StyleSheet, Text, View } from 'react-native';
+import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { tap } from '@/components/ui';

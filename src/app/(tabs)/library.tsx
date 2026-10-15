@@ -2,7 +2,8 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { JfRow } from '@/components/jf-cards';

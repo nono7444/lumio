@@ -1,15 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { FocusPressable as Pressable } from '@/components/tv';
 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 

@@ -2,7 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button, Chip, SegChip, tap } from '@/components/ui';

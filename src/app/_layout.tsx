@@ -3,6 +3,7 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
+import { Platform } from 'react-native';
 
 import { FolderPickerHost } from '@/components/folder-picker';
 import { Toasts } from '@/components/toast';
@@ -21,7 +22,7 @@ function Root() {
   useEffect(() => {
     if (ready) SplashScreen.hideAsync().catch(() => {});
     // Portrait partout, sauf le lecteur qui déverrouille la rotation
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    if (!Platform.isTV) ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
   }, [ready]);
   if (!ready) return null;
 

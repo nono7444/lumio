@@ -1,7 +1,8 @@
 // Petits messages éphémères (ex. résultat d'un téléchargement lancé pendant qu'on regarde).
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { C } from '@/constants/theme';

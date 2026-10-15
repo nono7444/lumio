@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useEffect, useRef, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { FlatList, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { FocusPressable as Pressable } from '@/components/tv';
 
 import { Button, Fade, tap } from '@/components/ui';
 import { C } from '@/constants/theme';

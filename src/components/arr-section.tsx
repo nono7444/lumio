@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, StyleSheet, Switch, Text, View } from 'react-native';
+import { FocusPressable as Pressable } from '@/components/tv';
 
 import { Button, Field, Section } from '@/components/ui';
 import { C, R } from '@/constants/theme';

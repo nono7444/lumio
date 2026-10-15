@@ -1,7 +1,8 @@
 // Choix du dossier de téléchargement (Films, Kids, Anime…) au moment d'ajouter un titre.
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { tap } from '@/components/ui';

@@ -4,17 +4,8 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { ReactNode, useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  TextInputProps,
-  View,
-  ViewStyle,
-} from 'react-native';
+import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
+import { FocusPressable as Pressable } from '@/components/tv';
 
 import { C, POSTER_H, POSTER_W, R } from '@/constants/theme';
 import { useBetterPoster, type PosterIds } from '@/lib/better-posters';

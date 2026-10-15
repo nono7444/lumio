@@ -2,7 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEventListener } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { PlayerProps } from './types';

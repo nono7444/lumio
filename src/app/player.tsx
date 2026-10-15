@@ -4,7 +4,8 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, StyleSheet, Text, View } from 'react-native';
+import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CastIcon, CastingScreen, guessContentType, useCasting } from '@/components/players/cast';
@@ -72,6 +73,7 @@ export default function Player() {
 
   // Rotation libre dans le lecteur, retour en portrait à la sortie
   useEffect(() => {
+    if (Platform.isTV) return;
     ScreenOrientation.unlockAsync().catch(() => {});
     return () => {
       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
@@ -214,7 +216,7 @@ export default function Player() {
     if (!source) throw new Error('Aucune source');
     return { uri: source.uri, contentType: guessContentType(source.uri, source.isHls), title: p.title, subtitle: p.subtitle };
   };
-  const castBtn = <CastIcon />;
+  const castBtn = Platform.isTV ? undefined : <CastIcon />;
 
   return (
     <View style={styles.root}>

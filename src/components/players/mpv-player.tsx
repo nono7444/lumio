@@ -1,16 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ExpoMpvView, type ExpoMpvViewRef, type TrackInfo } from 'expo-mpv';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-  type GestureResponderEvent,
-  type LayoutChangeEvent,
-} from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View, type GestureResponderEvent, type LayoutChangeEvent } from 'react-native';
+import { FocusPressable as Pressable, IS_TV, useTVRemote } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { tap } from '@/components/ui';
@@ -108,6 +100,24 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
     bump();
   };
 
+  // Télécommande (Android TV) : gauche/droite = ±10 s quand les contrôles sont masqués
+  useTVRemote((evt) => {
+    const t = evt?.eventType;
+    if (!t || t === 'focus' || t === 'blur') return;
+    if (t === 'playPause') {
+      setPaused((p) => !p);
+      bump();
+      return;
+    }
+    if (t === 'fastForward') return seekBy(30);
+    if (t === 'rewind') return seekBy(-30);
+    if (!visible && !sheet) {
+      if (t === 'left') return seekBy(-10);
+      if (t === 'right') return seekBy(10);
+    }
+    bump();
+  });
+
   async function openTracks() {
     tap();
     try {
@@ -152,7 +162,7 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
       />
 
       {/* Zone de tap : affiche / masque les contrôles, double-tap sur les côtés = ±10 s */}
-      <Pressable style={StyleSheet.absoluteFill} onPress={() => (visible ? setVisible(false) : bump())} />
+      <Pressable focusRing={false} style={StyleSheet.absoluteFill} onPress={() => (visible ? setVisible(false) : bump())} />
 
       {(state === 'loading' || state === 'buffering') && (
         <View style={styles.center} pointerEvents="none">
@@ -219,6 +229,7 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
                 setPaused((p) => !p);
               }}
               hitSlop={16}
+              {...(IS_TV ? ({ hasTVPreferredFocus: true } as object) : {})}
               style={styles.play}>
               <Ionicons name={paused ? 'play' : 'pause'} size={40} color="#000" style={paused ? { marginLeft: 4 } : undefined} />
             </Pressable>
