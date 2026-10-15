@@ -195,6 +195,18 @@ export default function SettingsScreen() {
           )}
         </Section>
 
+        <Section title="Lecture">
+          <Picker
+            label="Lecteur vidéo"
+            options={[
+              { value: 'mpv', label: 'mpv (recommandé)', hint: 'lit tout, MKV inclus' },
+              { value: 'native', label: 'Natif', hint: 'AirPlay' },
+            ]}
+            value={settings.player}
+            onChange={(v) => update({ player: v as 'mpv' | 'native' })}
+          />
+        </Section>
+
         <Section title="Affiches">
           <Toggle
             label="Better Posters (note et tags sur les affiches)"

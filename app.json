@@ -50,6 +50,9 @@
         {
           "android": {
             "usesCleartextTraffic": true
+          },
+          "ios": {
+            "deploymentTarget": "16.4"
           }
         }
       ],
@@ -60,6 +63,7 @@
           "supportsPictureInPicture": true
         }
       ],
+      "expo-mpv",
       "expo-screen-orientation"
     ],
     "experiments": {

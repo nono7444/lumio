@@ -282,7 +282,8 @@ export function jfLogo(s: Settings, i: JfItem) {
  * Profil de l'appareil envoyé à Jellyfin : ce que le lecteur natif sait lire directement.
  * Le reste est transcodé en HLS par le serveur.
  */
-function deviceProfile() {
+function deviceProfile(engine: 'mpv' | 'native') {
+  if (engine === 'mpv') return MPV_PROFILE;
   const android = Platform.OS === 'android';
   return {
     Name: 'Lumio',
@@ -323,6 +324,42 @@ function deviceProfile() {
   };
 }
 
+/** mpv (FFmpeg) lit pratiquement tout : lecture directe de quasiment tous les fichiers. */
+const MPV_PROFILE = {
+  Name: 'Lumio mpv',
+  MaxStreamingBitrate: 200_000_000,
+  MaxStaticBitrate: 200_000_000,
+  MusicStreamingTranscodingBitrate: 384_000,
+  DirectPlayProfiles: [
+    {
+      Container: 'mkv,mp4,m4v,mov,avi,webm,ts,m2ts,mpegts,wmv,flv,ogm,ogv,3gp',
+      Type: 'Video',
+      VideoCodec: 'h264,hevc,h265,av1,vp8,vp9,mpeg2video,mpeg4,msmpeg4v3,vc1,wmv3',
+      AudioCodec: 'aac,ac3,eac3,dts,truehd,mlp,flac,alac,mp3,mp2,opus,vorbis,pcm_s16le,pcm_s24le,wmav2',
+    },
+  ],
+  TranscodingProfiles: [
+    {
+      Container: 'ts',
+      Type: 'Video',
+      Protocol: 'hls',
+      VideoCodec: 'h264,hevc',
+      AudioCodec: 'aac,ac3,eac3',
+      Context: 'Streaming',
+      MaxAudioChannels: '8',
+      MinSegments: 1,
+      BreakOnNonKeyFrames: true,
+    },
+  ],
+  ContainerProfiles: [],
+  CodecProfiles: [],
+  // Sous-titres intégrés lus par mpv (libass) : aucun incrustage côté serveur
+  SubtitleProfiles: ['ass', 'ssa', 'subrip', 'srt', 'vtt', 'webvtt', 'pgssub', 'dvdsub', 'dvbsub', 'mov_text'].flatMap((f) => [
+    { Format: f, Method: 'Embed' },
+    { Format: f, Method: 'External' },
+  ]),
+};
+
 export type PlaybackTarget = {
   uri: string;
   isHls: boolean;
@@ -332,11 +369,11 @@ export type PlaybackTarget = {
   playMethod: 'DirectPlay' | 'DirectStream' | 'Transcode';
 };
 
-export async function getPlayback(s: Settings, itemId: string, startSeconds = 0): Promise<PlaybackTarget> {
+export async function getPlayback(s: Settings, itemId: string, startSeconds = 0, engine: 'mpv' | 'native' = 'mpv'): Promise<PlaybackTarget> {
   const { j, post } = api(s);
   const info = await post<{ MediaSources: JfMediaSource[]; PlaySessionId?: string }>(
     `/Items/${itemId}/PlaybackInfo?UserId=${j.userId}&StartTimeTicks=${Math.round(startSeconds * TICKS_PER_SECOND)}&AutoOpenLiveStream=true`,
-    { DeviceProfile: deviceProfile(), UserId: j.userId, MaxStreamingBitrate: 120_000_000 }
+    { DeviceProfile: deviceProfile(engine), UserId: j.userId, MaxStreamingBitrate: 120_000_000 }
   );
   const src = info.MediaSources?.[0];
   if (!src) throw new JellyfinError('Aucune source vidéo pour cet élément');

@@ -51,6 +51,8 @@ export type Settings = {
   /** L'utilisateur a choisi de continuer sans Jellyfin */
   skipJellyfin: boolean;
   betterPosters: BetterPostersConfig;
+  /** Moteur de lecture : mpv (lit tout, MKV inclus) ou lecteur natif du téléphone */
+  player: 'mpv' | 'native';
   /** Clé API v3 ou jeton v4 TMDB (obligatoire : recherche + fiches) */
   tmdbKey: string;
   language: string;
@@ -73,6 +75,7 @@ const DEFAULTS: Settings = {
   jellyfin: null,
   skipJellyfin: false,
   betterPosters: { enabled: true, rating: true, genre: false, ratingSource: '' },
+  player: 'mpv',
   tmdbKey: '',
   language: 'fr-FR',
   radarr: { url: '', apiKey: '', searchOnAdd: true, minimumAvailability: 'released' },

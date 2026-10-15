@@ -1,6 +1,8 @@
 # Lumio — Radarr + Sonarr + catalogues Stremio dans ta poche
 
-Design sombre « cinéma » inspiré de Nuvio : hero plein écran avec logos TMDB, boutons blancs, barre d’onglets flottante en verre dépoli, fiches avec casting. Aucun code ni asset de Nuvio (GPL-3.0) n’est repris.
+Design sombre « cinéma » inspiré de Nuvio : hero plein écran avec logos TMDB, boutons blancs, barre d’onglets flottante en verre dépoli, fiches avec casting. Lecture via **mpv** (comme Nuvio) grâce au module [expo-mpv](https://github.com/lonzzi/expo-mpv).
+
+**Licence : GPL-3.0** (imposée par mpv / expo-mpv). Le code source reste public.
 
 Appli native iOS / Android (Expo, React Native) qui :
 
@@ -17,7 +19,7 @@ Appli native iOS / Android (Expo, React Native) qui :
 | **Bibliothèque** | Ta bibliothèque Jellyfin : reprendre, à suivre, ajouts récents, grilles triables, fiches films et séries avec épisodes |
 | **Recherche** | Recherche TMDB (Tout / Films / Séries) avec badges de bibliothèque |
 | **Fiche** | « Lire » si le titre est sur Jellyfin. Sinon « Regarder maintenant » via tes addons Stremio, et le titre part en parallèle dans Radarr ou Sonarr |
-| **Lecteur** | Lecteur intégré (expo-video) : HLS ou lecture directe Jellyfin, reprise, suivi de progression, Picture-in-Picture, rotation. En cas de format illisible : bouton VLC ou Infuse |
+| **Lecteur** | **mpv** par défaut : lit tout (MKV, HEVC, DTS, TrueHD, sous-titres ASS), contrôles maison, choix des pistes audio et sous-titres, vitesse, zoom, piste FR auto. Le lecteur natif reste disponible (Profil, rubrique Lecture), et on peut basculer de l'un à l'autre en cas d'échec |
 | **Activité** | Files Radarr + Sonarr en direct |
 | **Réglages** | Jellyfin, affiches Better Posters, TMDB, Radarr, Sonarr, addons Stremio |
 
