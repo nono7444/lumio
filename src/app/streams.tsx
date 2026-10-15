@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { tap } from '@/components/ui';
+import { SegChip, tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
 import { invalidateLibrary, radarr, sonarr } from '@/lib/arr';
 import { arrReady, useSettings, type Settings } from '@/lib/settings';
@@ -114,16 +114,7 @@ function EpisodePicker({ tmdbId, onPick }: { tmdbId: number; onPick: (season: nu
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ gap: 8, paddingHorizontal: 16 }}
         style={{ marginBottom: 14, flexGrow: 0 }}
-        renderItem={({ item: n }) => (
-          <Pressable
-            onPress={() => {
-              tap();
-              setSeason(n);
-            }}
-            style={[styles.chip, n === season && styles.chipOn]}>
-            <Text style={[styles.chipText, n === season && { color: '#000' }]}>Saison {n}</Text>
-          </Pressable>
-        )}
+        renderItem={({ item: n }) => <SegChip label={`Saison ${n}`} on={n === season} onPress={() => setSeason(n)} />}
       />
       {loading ? (
         <ActivityIndicator color={C.text} style={{ margin: 30 }} />
@@ -304,15 +295,7 @@ export default function Streams() {
               )}
               <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                 {FILTERS.map((f) => (
-                  <Pressable
-                    key={f}
-                    onPress={() => {
-                      tap();
-                      setFilter(f);
-                    }}
-                    style={[styles.chip, f === filter && styles.chipOn]}>
-                    <Text style={[styles.chipText, f === filter && { color: '#000' }]}>{f}</Text>
-                  </Pressable>
+                  <SegChip key={f} label={f} on={f === filter} onPress={() => setFilter(f)} />
                 ))}
               </View>
               {pending > 0 && (

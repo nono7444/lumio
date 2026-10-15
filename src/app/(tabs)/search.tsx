@@ -13,7 +13,7 @@ import {
 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PosterCard, ScreenTitle, SetupPrompt } from '@/components/ui';
+import { PosterCard, ScreenTitle, SegChip, SetupPrompt } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { openMedia } from '@/lib/navigation';
 import { hasTmdb, useSettings } from '@/lib/settings';
@@ -94,12 +94,7 @@ export default function Search() {
       </View>
       <View style={styles.filters}>
         {FILTERS.map((f) => (
-          <Pressable
-            key={f.value}
-            onPress={() => setFilter(f.value)}
-            style={[styles.filter, filter === f.value && styles.filterOn]}>
-            <Text style={[styles.filterText, filter === f.value && { color: '#000' }]}>{f.label}</Text>
-          </Pressable>
+          <SegChip key={f.value} label={f.label} on={filter === f.value} onPress={() => setFilter(f.value)} />
         ))}
       </View>
       {error ? <Text style={styles.msg}>Erreur : {error}</Text> : null}

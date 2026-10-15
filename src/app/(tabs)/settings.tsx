@@ -162,7 +162,7 @@ export default function SettingsScreen() {
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ paddingTop: insets.top, paddingHorizontal: 16, paddingBottom: TAB_SPACE }} keyboardShouldPersistTaps="handled">
         <View style={{ marginHorizontal: -16 }}>
-          <ScreenTitle title="Réglages" />
+          <ScreenTitle title="Profil" />
         </View>
         <Section title="Jellyfin">
           {settings.jellyfin ? (

@@ -28,9 +28,41 @@ export type PosterItem = {
   /** Identifiants pour l'affiche Better Posters (sinon : poster) */
   ids?: PosterIds;
   subtitle?: string;
-  badge?: { label: string; color: string } | null;
+  badge?: { label: string; color: string; state?: 'available' | 'partial' | 'monitored' | 'missing' } | null;
   onPress: () => void | Promise<void>;
 };
+
+const BADGE_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
+  available: 'checkmark',
+  partial: 'remove',
+  monitored: 'time-outline',
+  missing: 'eye-off-outline',
+};
+
+/** Pastille ronde en haut à droite de l'affiche (coche = dans ta bibliothèque). */
+export function StatusBadge({ badge }: { badge: NonNullable<PosterItem['badge']> }) {
+  const icon = badge.state ? BADGE_ICON[badge.state] : 'checkmark';
+  return (
+    <View style={styles.badge} accessibilityLabel={badge.label}>
+      <Ionicons name={icon} size={13} color={badge.state === 'monitored' ? C.warning : '#fff'} />
+    </View>
+  );
+}
+
+/** Chip de filtre façon Nuvio : sélectionnée = contour clair. */
+export function SegChip({ label, on, onPress, icon }: { label: string; on: boolean; onPress: () => void; icon?: keyof typeof Ionicons.glyphMap }) {
+  return (
+    <Pressable
+      onPress={() => {
+        tap();
+        onPress();
+      }}
+      style={[styles.seg, on && styles.segOn]}>
+      <Text style={[styles.segText, on && { color: C.text }]}>{label}</Text>
+      {icon && <Ionicons name={icon} size={13} color={on ? C.text : C.textDim} />}
+    </Pressable>
+  );
+}
 
 export function PosterCard({ item, width = POSTER_W }: { item: PosterItem; width?: number }) {
   const [busy, setBusy] = useState(false);
@@ -68,12 +100,7 @@ export function PosterCard({ item, width = POSTER_W }: { item: PosterItem; width
             </Text>
           </View>
         )}
-        {item.badge && (
-          <View style={styles.badge}>
-            <View style={[styles.badgeDot, { backgroundColor: item.badge.color }]} />
-            <Text style={styles.badgeText}>{item.badge.label}</Text>
-          </View>
-        )}
+        {item.badge && <StatusBadge badge={item.badge} />}
         {busy && (
           <View style={styles.posterBusy}>
             <ActivityIndicator color="#fff" />
@@ -125,7 +152,11 @@ export function Row({
           </Text>
           {subtitle ? <Text style={styles.rowSub}>{subtitle}</Text> : null}
         </View>
-        {!loading && !error && <Ionicons name="chevron-forward" size={18} color={C.textFaint} />}
+          {!loading && !error && (
+          <View style={styles.rowMore}>
+            <Ionicons name="chevron-forward" size={15} color={C.textDim} />
+          </View>
+        )}
       </View>
       {loading ? (
         <SkeletonRow />
@@ -284,7 +315,13 @@ export function Fade({ height, top }: { height: number; top?: boolean }) {
 }
 
 const styles = StyleSheet.create({
-  poster: { borderRadius: R.md, overflow: 'hidden', backgroundColor: C.surfaceHigh },
+  poster: {
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: C.surfaceHigh,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
+  },
   posterFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 10 },
   posterFallbackText: { color: C.textDim, fontSize: 13, fontWeight: '700', textAlign: 'center' },
   posterBusy: {
@@ -293,24 +330,44 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  posterTitle: { color: C.text, fontSize: 13, fontWeight: '600', marginTop: 8 },
-  posterSub: { color: C.textDim, fontSize: 12, marginTop: 2 },
+  posterTitle: { color: C.text, fontSize: 14, fontWeight: '500', marginTop: 8 },
+  posterSub: { color: C.textDim, fontSize: 12, marginTop: 3, letterSpacing: 0.3 },
   badge: {
     position: 'absolute',
     top: 7,
-    left: 7,
+    right: 7,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.9)',
+  },
+  rowHead: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, marginBottom: 12 },
+  rowTitle: { color: C.text, fontSize: 19, fontWeight: '700', letterSpacing: -0.2 },
+  rowMore: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: C.surfaceHigh,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  seg: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
     borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    backgroundColor: 'rgba(0,0,0,0.72)',
+    backgroundColor: C.surfaceHigh,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
-  badgeDot: { width: 6, height: 6, borderRadius: 3 },
-  badgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
-  rowHead: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, marginBottom: 12 },
-  rowTitle: { color: C.text, fontSize: 20, fontWeight: '800', letterSpacing: -0.3 },
+  segOn: { borderColor: 'rgba(255,255,255,0.7)', backgroundColor: 'rgba(255,255,255,0.06)' },
+  segText: { color: C.textDim, fontSize: 13, fontWeight: '600' },
   rowSub: { color: C.textDim, fontSize: 12, marginTop: 2 },
   chip: {
     flexDirection: 'row',

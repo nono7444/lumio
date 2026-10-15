@@ -15,7 +15,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { JfPosterCard, playJellyfin } from '@/components/jf-cards';
-import { Button, Fade, Pill, tap } from '@/components/ui';
+import { Button, Fade, Pill, SegChip, tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
 import {
   formatRuntime,
@@ -109,15 +109,7 @@ function FolderGrid({ folder }: { folder: JfItem }) {
             <Text style={styles.dim}>{total} titres</Text>
             <View style={styles.sorts}>
               {SORTS.map((s, i) => (
-                <Pressable
-                  key={s.label}
-                  onPress={() => {
-                    tap();
-                    setSortIdx(i);
-                  }}
-                  style={[styles.sort, i === sortIdx && { backgroundColor: C.text }]}>
-                  <Text style={[styles.sortText, i === sortIdx && { color: '#000' }]}>{s.label}</Text>
-                </Pressable>
+                <SegChip key={s.label} label={s.label} on={i === sortIdx} onPress={() => setSortIdx(i)} />
               ))}
             </View>
           </View>
@@ -234,16 +226,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ gap: 8 }}
                 style={{ marginBottom: 14 }}
-                renderItem={({ item: s }) => (
-                  <Pressable
-                    onPress={() => {
-                      tap();
-                      setSeason(s.Id);
-                    }}
-                    style={[styles.sort, s.Id === season && { backgroundColor: C.text }]}>
-                    <Text style={[styles.sortText, s.Id === season && { color: '#000' }]}>{s.Name}</Text>
-                  </Pressable>
-                )}
+                renderItem={({ item: s }) => <SegChip label={s.Name} on={s.Id === season} onPress={() => setSeason(s.Id)} />}
               />
               {loadingEps ? (
                 <ActivityIndicator color={C.text} style={{ marginVertical: 20 }} />

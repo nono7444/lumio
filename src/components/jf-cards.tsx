@@ -73,7 +73,7 @@ export function JfPosterCard({ item, width = POSTER_W }: { item: JfItem; width?:
         )}
         {item.UserData?.Played && (
           <View style={styles.played}>
-            <Ionicons name="checkmark" size={12} color="#000" />
+            <Ionicons name="checkmark" size={13} color="#fff" />
           </View>
         )}
         {!!unplayed && !item.UserData?.Played && (
@@ -146,7 +146,11 @@ export function JfRow({
     <View style={{ marginBottom: 28 }}>
       <Pressable style={styles.rowHead} onPress={onSeeAll} disabled={!onSeeAll}>
         <Text style={styles.rowTitle}>{title}</Text>
-        {onSeeAll && <Ionicons name="chevron-forward" size={18} color={C.textFaint} />}
+        {onSeeAll && (
+          <View style={styles.rowMore}>
+            <Ionicons name="chevron-forward" size={15} color={C.textDim} />
+          </View>
+        )}
       </Pressable>
       <FlatList
         horizontal
@@ -161,20 +165,29 @@ export function JfRow({
 }
 
 const styles = StyleSheet.create({
-  poster: { borderRadius: R.md, overflow: 'hidden', backgroundColor: C.surfaceHigh, justifyContent: 'center' },
+  poster: {
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: C.surfaceHigh,
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
+  },
   fallback: { color: C.textDim, fontSize: 13, fontWeight: '700', textAlign: 'center', padding: 10 },
-  title: { color: C.text, fontSize: 13, fontWeight: '600', marginTop: 8 },
-  sub: { color: C.textDim, fontSize: 12, marginTop: 2 },
+  title: { color: C.text, fontSize: 14, fontWeight: '500', marginTop: 8 },
+  sub: { color: C.textDim, fontSize: 12, marginTop: 3, letterSpacing: 0.3 },
   barTrack: { position: 'absolute', left: 8, right: 8, bottom: 8, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.25)' },
   barFill: { height: 4, borderRadius: 2, backgroundColor: C.text },
   played: {
     position: 'absolute',
     top: 7,
     right: 7,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: C.text,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.9)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -204,5 +217,6 @@ const styles = StyleSheet.create({
     paddingLeft: 2,
   },
   rowHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 12 },
-  rowTitle: { color: C.text, fontSize: 20, fontWeight: '800', letterSpacing: -0.3 },
+  rowTitle: { color: C.text, fontSize: 19, fontWeight: '700', letterSpacing: -0.2 },
+  rowMore: { width: 30, height: 30, borderRadius: 15, backgroundColor: C.surfaceHigh, alignItems: 'center', justifyContent: 'center' },
 });

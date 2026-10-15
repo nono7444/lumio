@@ -30,9 +30,9 @@ export function Picker<T extends string | number>({
             <Pressable
               key={String(o.value)}
               onPress={() => onChange(o.value)}
-              style={[styles.chip, on && { backgroundColor: C.text }]}>
-              {on && <Ionicons name="checkmark" size={14} color="#000" />}
-              <Text style={[styles.chipText, on && { color: '#000' }]}>{o.label}</Text>
+              style={[styles.chip, on && { borderColor: 'rgba(255,255,255,0.7)', backgroundColor: 'rgba(255,255,255,0.06)' }]}>
+              {on && <Ionicons name="checkmark" size={14} color={C.text} />}
+              <Text style={[styles.chipText, on && { color: C.text }]}>{o.label}</Text>
               {o.hint ? <Text style={styles.chipHint}>{o.hint}</Text> : null}
             </Pressable>
           );
@@ -173,6 +173,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 999,
     backgroundColor: C.surfaceHigh,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
   chipText: { color: C.textDim, fontSize: 14, fontWeight: '600' },
   chipHint: { color: C.textFaint, fontSize: 12 },
