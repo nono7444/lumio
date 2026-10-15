@@ -212,8 +212,8 @@ export default function SettingsScreen() {
             <Picker
               label="Source du stream (titre absent de Jellyfin)"
               options={[
+                { value: 'server', label: 'Lien rdt / AllDebrid d’abord', hint: 'la release choisie par Radarr / Sonarr' },
                 { value: 'addons', label: 'Addons Stremio d’abord', hint: 'le plus rapide' },
-                { value: 'server', label: 'Serveur (AllDebrid) d’abord', hint: 'la release choisie par Radarr / Sonarr' },
               ]}
               value={settings.streamSource}
               onChange={(v) => update({ streamSource: v as 'addons' | 'server' })}

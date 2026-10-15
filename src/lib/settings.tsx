@@ -118,7 +118,7 @@ const DEFAULTS: Settings = {
   seasonTheme: 'auto',
   chatUrl: '',
   alldebridKey: '',
-  streamSource: 'addons',
+  streamSource: 'server',
   tmdbKey: '',
   language: 'fr-FR',
   radarr: { url: '', apiKey: '', searchOnAdd: true, minimumAvailability: 'released' },
