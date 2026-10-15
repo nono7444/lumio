@@ -22,7 +22,7 @@ const REQUESTS_FILE = path.join(DATA_DIR, 'requests.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.0.0';
+const VERSION = '3.1.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -544,12 +544,70 @@ const requireAdmin = (user) => {
   if (!user.admin) throw new HttpError(403, 'réservé aux admins Jellyfin');
 };
 
+// ——— Identifiants : l'appli TV peut n'avoir que l'IMDb (catalogues Stremio) ———
+const idCache = new Map();
+async function resolveIds(type, b) {
+  const tmdbId = Number(b.tmdbId) || 0;
+  const tvdbId = Number(b.tvdbId) || 0;
+  const imdbId = typeof b.imdbId === 'string' && /^tt\d+$/.test(b.imdbId) ? b.imdbId : '';
+  if (type === 'movie') {
+    if (tmdbId) return { tmdbId };
+    if (!imdbId) throw new HttpError(400, 'Identifiant TMDB ou IMDb manquant');
+    const key = `movie:${imdbId}`;
+    if (!idCache.has(key)) {
+      const m = await arr('radarr', `/movie/lookup/imdb?imdbId=${imdbId}`);
+      const found = Array.isArray(m) ? m[0] : m;
+      if (!found || !found.tmdbId) throw new HttpError(404, 'Film introuvable dans Radarr');
+      idCache.set(key, { tmdbId: found.tmdbId, title: found.title, year: found.year, poster: posterOf(found) });
+    }
+    return idCache.get(key);
+  }
+  if (tmdbId && tvdbId) return { tmdbId, tvdbId };
+  const key = `tv:${tmdbId || imdbId}`;
+  if (!idCache.has(key)) {
+    let found = null;
+    for (const term of [tmdbId ? `tmdb:${tmdbId}` : null, imdbId ? `imdb:${imdbId}` : null].filter(Boolean)) {
+      const list = await arr('sonarr', `/series/lookup?term=${encodeURIComponent(term)}`).catch(() => []);
+      if (list && list[0] && list[0].tvdbId) {
+        found = list[0];
+        break;
+      }
+    }
+    if (!found) throw new HttpError(404, 'Série introuvable dans Sonarr');
+    idCache.set(key, {
+      tmdbId: tmdbId || found.tmdbId,
+      tvdbId: found.tvdbId,
+      title: found.title,
+      year: found.year,
+      poster: posterOf(found),
+      seasons: (found.seasons || []).map((x) => x.seasonNumber).filter((n) => n > 0),
+    });
+  }
+  const r = idCache.get(key);
+  if (!r.tmdbId) throw new HttpError(404, 'Pas d’identifiant TMDB pour cette série');
+  return r;
+}
+function posterOf(item) {
+  const img = (item.images || []).find((i) => i.coverType === 'poster');
+  const url = img && (img.remoteUrl || img.url);
+  return url && /^https:\/\//.test(url) ? url : undefined;
+}
+
 /** Crée une demande (POST /api/requests), avec les mêmes règles que Seerr. */
 async function createRequest(user, b) {
   const type = b.type === 'tv' ? 'tv' : 'movie';
-  const tmdbId = Number(b.tmdbId);
-  if (!tmdbId) throw new HttpError(400, 'tmdbId manquant');
   if (!arrConfig(kindOf(type))) throw new HttpError(503, `${label(kindOf(type))} n'est pas configuré sur le serveur Lumio`);
+  const ids = await resolveIds(type, b);
+  const tmdbId = ids.tmdbId;
+  b = {
+    ...b,
+    tmdbId,
+    tvdbId: ids.tvdbId || b.tvdbId,
+    title: b.title || ids.title,
+    year: b.year || (ids.year ? String(ids.year) : undefined),
+    poster: b.poster || ids.poster,
+    seasons: Array.isArray(b.seasons) && b.seasons.length ? b.seasons : ids.seasons,
+  };
   const perm = permissionsOf(user);
   const quota = quotaOf(user);
   const lib = await loadLibrary(true);
@@ -647,7 +705,7 @@ const server = http.createServer(async (req, res) => {
 
   // Raccourci pour installer l'appli TV : taper « lumio.tondomaine/tv » dans Downloader
   if (url.pathname === '/tv' || url.pathname === '/tv.apk') {
-    res.writeHead(302, { Location: process.env.TV_APK_URL || 'https://github.com/nono7444/lumio/releases/latest/download/lumio-tv.apk' });
+    res.writeHead(302, { Location: process.env.TV_APK_URL || 'https://github.com/nono7444/lumio-tv/releases/latest/download/lumio-tv.apk' });
     return res.end();
   }
 
@@ -701,15 +759,17 @@ const server = http.createServer(async (req, res) => {
     // ——— Statut d'un média (fiche) ———
     if (req.method === 'GET' && p === '/api/media') {
       const type = q.get('type') === 'tv' ? 'tv' : 'movie';
-      const tmdbId = Number(q.get('tmdbId'));
-      const seasons = (q.get('seasons') || '').split(',').map(Number).filter((n) => n > 0);
+      const ids = await resolveIds(type, { tmdbId: q.get('tmdbId'), tvdbId: q.get('tvdbId'), imdbId: q.get('imdbId') });
+      const tmdbId = ids.tmdbId;
+      let seasons = (q.get('seasons') || '').split(',').map(Number).filter((n) => n > 0);
+      if (!seasons.length && ids.seasons) seasons = ids.seasons;
       const lib = await loadLibrary().catch(() => ({ movies: new Map(), seriesByTvdb: new Map(), seriesByTmdb: new Map() }));
       refreshCompleted(lib);
-      const st = mediaStatus(lib, type, tmdbId, q.get('tvdbId'), seasons);
+      const st = mediaStatus(lib, type, tmdbId, ids.tvdbId || q.get('tvdbId'), seasons);
       const reqs = requests
         .filter((r) => r.type === type && r.tmdbId === tmdbId && r.status !== RequestStatus.COMPLETED)
         .map((r) => publicRequest(r, lib));
-      return send(res, 200, { ...st, requests: reqs });
+      return send(res, 200, { ...st, tmdbId, tvdbId: ids.tvdbId, requests: reqs });
     }
 
     // ——— Statuts pour les badges des affiches ———
