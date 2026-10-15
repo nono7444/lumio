@@ -3,18 +3,21 @@
     "name": "Lumio",
     "slug": "lumio-native",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "lumio",
     "userInterfaceStyle": "dark",
-    "backgroundColor": "#0B0D12",
+    "backgroundColor": "#000000",
     "ios": {
       "icon": "./assets/expo.icon",
       "bundleIdentifier": "lol.wawanono.lumio",
       "supportsTablet": true,
       "infoPlist": {
-        "NSAppTransportSecurity": { "NSAllowsArbitraryLoads": true, "NSAllowsLocalNetworking": true },
-        "NSLocalNetworkUsageDescription": "Lumio se connecte à ton serveur Seerr sur le réseau local.",
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSAllowsLocalNetworking": true
+        },
+        "NSLocalNetworkUsageDescription": "Lumio se connecte à Jellyfin, Radarr et Sonarr sur ton réseau local.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -45,9 +48,19 @@
       [
         "expo-build-properties",
         {
-          "android": { "usesCleartextTraffic": true }
+          "android": {
+            "usesCleartextTraffic": true
+          }
         }
-      ]
+      ],
+      [
+        "expo-video",
+        {
+          "supportsBackgroundPlayback": true,
+          "supportsPictureInPicture": true
+        }
+      ],
+      "expo-screen-orientation"
     ],
     "experiments": {
       "typedRoutes": true,

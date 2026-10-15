@@ -10,13 +10,28 @@ Appli native iOS / Android (Expo, React Native) qui :
 
 ## Fonctionnalités
 
-| Onglet | Ce qu'il fait |
+| Écran | Ce qu'il fait |
 |---|---|
-| **Accueil** | Une ligne par catalogue de chaque addon Stremio, plus les tendances TMDB de la semaine |
-| **Recherche** | Recherche TMDB (Tout / Films / Séries) avec badge de bibliothèque : Disponible, Partiel, Surveillé |
-| **Fiche** | Film → « Ajouter à Radarr » ou « Relancer la recherche ». Série → choix des saisons, envoyées à Sonarr |
-| **Activité** | Files d'attente Radarr + Sonarr en direct : progression, temps restant, erreurs (rafraîchi toutes les 8 s) |
-| **Réglages** | TMDB, Radarr et Sonarr, accueil, addons Stremio |
+| **Connexion** | Login Jellyfin (URL + utilisateur + mot de passe, via l'API). Passable : « Continuer sans Jellyfin » |
+| **Accueil** | Hero TMDB, « Reprendre » Jellyfin, catalogues des addons Stremio, tendances |
+| **Bibliothèque** | Ta bibliothèque Jellyfin : reprendre, à suivre, ajouts récents, grilles triables, fiches films et séries avec épisodes |
+| **Recherche** | Recherche TMDB (Tout / Films / Séries) avec badges de bibliothèque |
+| **Fiche** | « Lire » si le titre est sur Jellyfin. Sinon « Regarder maintenant » via tes addons Stremio, et le titre part en parallèle dans Radarr ou Sonarr |
+| **Lecteur** | Lecteur intégré (expo-video) : HLS ou lecture directe Jellyfin, reprise, suivi de progression, Picture-in-Picture, rotation. En cas de format illisible : bouton VLC ou Infuse |
+| **Activité** | Files Radarr + Sonarr en direct |
+| **Réglages** | Jellyfin, affiches Better Posters, TMDB, Radarr, Sonarr, addons Stremio |
+
+### Lecture Jellyfin
+
+L'appli envoie un profil d'appareil à `/Items/{id}/PlaybackInfo` : lecture directe quand le format est compatible, sinon transcodage HLS par le serveur. La progression est remontée (`/Sessions/Playing…`) : « Reprendre » marche aussi dans les autres clients Jellyfin.
+
+### Regarder pendant le téléchargement
+
+Ajoute un addon Stremio qui fournit des streams (ressource `stream`). Sur une fiche absente de Jellyfin, « Regarder maintenant » liste les sources lisibles (liens directs ou debrid), filtrables par FR / 4K / 1080p. En même temps, le film est ajouté à Radarr, ou la saison à Sonarr, et se télécharge en arrière-plan. Les sources torrent brutes (infoHash) ne sont pas lisibles dans l'appli.
+
+### Affiches Better Posters
+
+Affiches btttr.cc avec note et tags, à partir de l'id IMDb (récupéré via TMDB si besoin). Le style se règle dans Réglages, rubrique Affiches. En cas d'échec, l'appli revient à l'affiche TMDB.
 
 ### Configuration Radarr / Sonarr
 

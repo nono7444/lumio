@@ -131,6 +131,16 @@ export const tmdb = {
       call<TmdbImages>(s, `/${type}/${id}/images`, { include_image_language: imgLangs(s) }).then((i) => pickLogo(s, i))
     ),
 
+  season: (s: Settings, tvId: number, n: number) =>
+    cached(`season:${tvId}:${n}`, () =>
+      call<{
+        episodes: { id: number; episode_number: number; name: string; overview?: string; still_path?: string | null; air_date?: string | null; runtime?: number | null }[];
+      }>(s, `/tv/${tvId}/season/${n}`)
+    ),
+
+  externalIds: (s: Settings, type: MediaType, id: number) =>
+    cached(`ext:${type}:${id}`, () => call<{ imdb_id?: string | null; tvdb_id?: number | null }>(s, `/${type}/${id}/external_ids`)),
+
   findImdb: (s: Settings, imdbId: string) =>
     call<{ movie_results: TmdbItem[]; tv_results: TmdbItem[] }>(s, `/find/${imdbId}`, { external_source: 'imdb_id' }),
 };

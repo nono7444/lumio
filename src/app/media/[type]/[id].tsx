@@ -27,6 +27,8 @@ import {
   type RadarrMovie,
   type SonarrSeries,
 } from '@/lib/arr';
+import { playJellyfin } from '@/components/jf-cards';
+import { jf, type JfItem } from '@/lib/jellyfin';
 import { arrReady, hasTmdb, useSettings } from '@/lib/settings';
 import { pickLogo, tmdb, tmdbImg, type TmdbMovie, type TmdbTv } from '@/lib/tmdb';
 
@@ -56,6 +58,7 @@ export default function MediaScreen() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [jfItem, setJfItem] = useState<JfItem | null>(null);
 
   const tmdbId = Number(id);
   const isTv = type === 'tv';
@@ -77,6 +80,7 @@ export default function MediaScreen() {
           else arrItem = await sonarr.byTvdb(settings.sonarr, tvdb).catch((e) => ((arrError = e.message), null));
         }
         setDetails({ kind: 'tv', data, arr: arrItem, arrError });
+        jf.findByTmdb(settings, 'tv', tmdbId, data.name, data.external_ids?.imdb_id).then(setJfItem).catch(() => {});
       } else {
         const data = await tmdb.movie(settings, tmdbId);
         let arrError: string | undefined;
@@ -84,6 +88,7 @@ export default function MediaScreen() {
           ? await radarr.byTmdb(settings.radarr, tmdbId).catch((e) => ((arrError = e.message), null))
           : null;
         setDetails({ kind: 'movie', data, arr: arrItem, arrError });
+        jf.findByTmdb(settings, 'movie', tmdbId, data.title, data.imdb_id).then(setJfItem).catch(() => {});
       }
     } catch (e: any) {
       setError(e?.message ?? String(e));
@@ -172,6 +177,7 @@ export default function MediaScreen() {
   }
 
   const movieFile = details.kind === 'movie' ? details.arr?.movieFile : undefined;
+  const imdbId = details.kind === 'movie' ? details.data.imdb_id : details.data.external_ids?.imdb_id;
   const logo = pickLogo(settings, d.images);
   const heroH = Math.round(width * 1.2);
   const cast = (d.credits?.cast ?? []).slice(0, 15);
@@ -217,6 +223,37 @@ export default function MediaScreen() {
         </View>
 
         <View style={{ paddingHorizontal: 16, gap: 20, marginTop: 4 }}>
+          {/* ——— Lecture ——— */}
+          {jfItem ? (
+            <Button
+              title={jfItem.Type === 'Series' ? 'Voir dans Jellyfin' : 'Lire'}
+              icon="play"
+              onPress={() =>
+                jfItem.Type === 'Series'
+                  ? router.push({ pathname: '/jellyfin/[id]', params: { id: jfItem.Id } })
+                  : playJellyfin(jfItem)
+              }
+            />
+          ) : imdbId && settings.addons.length > 0 ? (
+            <Button
+              title={details.kind === 'tv' ? 'Regarder un épisode maintenant' : 'Regarder maintenant'}
+              icon="play"
+              onPress={() =>
+                router.push({
+                  pathname: '/streams',
+                  params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId, title, grab: '1' },
+                })
+              }
+            />
+          ) : null}
+          {!jfItem && imdbId && settings.addons.length > 0 && configured && (ready || details.arr) ? (
+            <Text style={[styles.dim, { marginTop: -10, textAlign: 'center' }]}>
+              {details.kind === 'movie'
+                ? 'Le film est aussi envoyé à Radarr et se télécharge pendant que tu regardes.'
+                : 'La saison choisie est aussi envoyée à Sonarr pendant que tu regardes.'}
+            </Text>
+          ) : null}
+
           {/* ——— Action principale ——— */}
           {!configured ? (
             <Notice icon="information-circle-outline" text={`Connecte ${serviceName} dans les réglages pour l'ajouter.`} />

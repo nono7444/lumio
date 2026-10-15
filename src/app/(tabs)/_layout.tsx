@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
-import { Tabs } from 'expo-router';
+import { Redirect, Tabs } from 'expo-router';
 import { Platform, StyleSheet, type ColorValue } from 'react-native';
 
 import { C } from '@/constants/theme';
+import { useSettings } from '@/lib/settings';
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
@@ -14,6 +15,10 @@ const icon =
   );
 
 export default function TabsLayout() {
+  const { settings } = useSettings();
+  // Premier lancement : écran de connexion Jellyfin (on peut le passer)
+  if (!settings.jellyfin && !settings.skipJellyfin) return <Redirect href="/login" />;
+
   return (
     <Tabs
       screenOptions={{
@@ -35,6 +40,14 @@ export default function TabsLayout() {
           ) : null,
       }}>
       <Tabs.Screen name="index" options={{ title: 'Accueil', tabBarIcon: icon('home', 'home-outline') }} />
+      <Tabs.Screen
+        name="library"
+        options={{
+          title: 'Bibliothèque',
+          tabBarIcon: icon('albums', 'albums-outline'),
+          href: settings.jellyfin ? undefined : null,
+        }}
+      />
       <Tabs.Screen name="search" options={{ title: 'Recherche', tabBarIcon: icon('search', 'search-outline') }} />
       <Tabs.Screen
         name="activity"

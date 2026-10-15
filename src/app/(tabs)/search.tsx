@@ -123,6 +123,7 @@ export default function Search() {
                 key: `${type}:${r.id}`,
                 title: itemTitle(r),
                 poster: tmdbImg(r.poster_path),
+                ids: { tmdb: r.id, type },
                 subtitle: `${type === 'movie' ? 'Film' : 'Série'}${itemYear(r) ? ` · ${itemYear(r)}` : ''}`,
                 badge: badge(type, r.id),
                 onPress: () => openMedia(type, r.id),

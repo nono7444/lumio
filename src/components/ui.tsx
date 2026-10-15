@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 
 import { C, POSTER_H, POSTER_W, R } from '@/constants/theme';
+import { useBetterPoster, type PosterIds } from '@/lib/better-posters';
 
 export const tap = () => Haptics.selectionAsync().catch(() => {});
 
@@ -24,6 +25,8 @@ export type PosterItem = {
   key: string;
   title: string;
   poster?: string;
+  /** Identifiants pour l'affiche Better Posters (sinon : poster) */
+  ids?: PosterIds;
   subtitle?: string;
   badge?: { label: string; color: string } | null;
   onPress: () => void | Promise<void>;
@@ -31,6 +34,9 @@ export type PosterItem = {
 
 export function PosterCard({ item, width = POSTER_W }: { item: PosterItem; width?: number }) {
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const better = useBetterPoster(item.ids);
+  const src = better && !failed ? better : item.poster;
   const height = Math.round(width * 1.5);
   return (
     <Pressable
@@ -46,8 +52,15 @@ export function PosterCard({ item, width = POSTER_W }: { item: PosterItem; width
         }
       }}>
       <View style={[styles.poster, { width, height }]}>
-        {item.poster ? (
-          <Image source={item.poster} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
+        {src ? (
+          <Image
+            source={src}
+            style={StyleSheet.absoluteFill}
+            contentFit="cover"
+            transition={200}
+            recyclingKey={item.key}
+            onError={() => better && setFailed(true)}
+          />
         ) : (
           <View style={styles.posterFallback}>
             <Text style={styles.posterFallbackText} numberOfLines={3}>

@@ -1,9 +1,12 @@
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Hero, HeroTopBar } from '@/components/hero';
+import { JfRow } from '@/components/jf-cards';
+import { jf, type JfItem } from '@/lib/jellyfin';
 
 import { PosterItem, Row } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
@@ -47,6 +50,11 @@ function CatalogRow({ addon, catalog, nonce }: { addon: Addon; catalog: StremioC
     key: `${m.type}:${m.id}`,
     title: m.name,
     poster: m.poster,
+    ids: {
+      imdb: m.id.match(/^tt\d+/)?.[0] ?? m.imdb_id,
+      tmdb: m.id.startsWith('tmdb:') ? Number(m.id.slice(5)) : m.moviedb_id ? Number(m.moviedb_id) : undefined,
+      type: m.type === 'movie' ? 'movie' : 'tv',
+    },
     subtitle: metaYear(m)?.toString(),
     onPress: () => openStremioMeta(settings, m),
   }));
@@ -88,12 +96,26 @@ function Trending({ nonce, part }: { nonce: number; part: 'hero' | 'row' }) {
       key: `${type}:${r.id}`,
       title: itemTitle(r),
       poster: tmdbImg(r.poster_path),
+      ids: { tmdb: r.id, type },
       subtitle: itemYear(r),
       badge: badge(type, r.id),
       onPress: () => openMedia(type, r.id),
     };
   });
   return <Row title="Tendances de la semaine" items={items} loading={loading} error={error} />;
+}
+
+function ContinueWatching({ nonce }: { nonce: number }) {
+  const { settings } = useSettings();
+  const [items, setItems] = useState<JfItem[]>([]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!settings.jellyfin) return;
+      jf.resume(settings).then(setItems).catch(() => {});
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [settings.jellyfin, nonce])
+  );
+  return <JfRow title="Reprendre" items={items} wide />;
 }
 
 export default function Home() {
@@ -123,6 +145,7 @@ export default function Home() {
         }>
         {withHero && <Trending part="hero" nonce={nonce} />}
         <View style={{ height: 20 }} />
+        {settings.jellyfin && <ContinueWatching nonce={nonce} />}
         {settings.addons.map((a) => (
           <AddonRows key={a.base} addon={a} nonce={nonce} />
         ))}

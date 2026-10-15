@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
+import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   Alert,
@@ -19,12 +20,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Field, ScreenTitle, Section } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { Addon, DEFAULT_ADDON, useSettings } from '@/lib/settings';
+import { RATING_SOURCES } from '@/lib/better-posters';
+import { logout as logoutJellyfin } from '@/lib/jellyfin';
 import { tmdb as tmdbApi } from '@/lib/tmdb';
 import {
   catalogKey,
   fetchManifest,
+  hasResource,
   isBrowsable,
-  normalizeAddonUrl,
+  resolveAddon,
   type StremioManifest,
 } from '@/lib/stremio';
 
@@ -48,7 +52,16 @@ function AddonCard({ addon, onChange, onRemove }: { addon: Addon; onChange: (a: 
         <View style={{ flex: 1 }}>
           <Text style={styles.addonName}>{addon.name}</Text>
           <Text style={styles.addonUrl} numberOfLines={1}>
-            {err ? `Erreur : ${err}` : `${catalogs.length - [...hidden].filter((h) => catalogs.some((c) => catalogKey(c) === h)).length}/${catalogs.length} catalogues affichés`}
+            {err
+              ? `Erreur : ${err}`
+              : [
+                  catalogs.length
+                    ? `${catalogs.length - [...hidden].filter((h) => catalogs.some((c) => catalogKey(c) === h)).length}/${catalogs.length} catalogues`
+                    : null,
+                  manifest && hasResource(manifest, 'stream') ? 'Streams' : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ') || '…'}
           </Text>
         </View>
         <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={C.textDim} />
@@ -109,23 +122,29 @@ export default function SettingsScreen() {
 
   async function addAddon() {
     if (!addonUrl.trim()) return;
-    const base = normalizeAddonUrl(addonUrl);
-    if (settings.addons.some((a) => a.base === base)) {
-      Alert.alert('Déjà ajouté', 'Cet addon est déjà dans ta liste.');
-      return;
-    }
     setAdding(true);
     try {
-      const m = await fetchManifest(base);
+      const { base, manifest: m } = await resolveAddon(addonUrl);
+      if (settings.addons.some((a) => a.base === base)) {
+        Alert.alert('Déjà ajouté', 'Cet addon est déjà dans ta liste.');
+        return;
+      }
       const browsable = (m.catalogs ?? []).filter(isBrowsable);
-      if (browsable.length === 0) {
-        Alert.alert('Aucun catalogue', `« ${m.name} » ne propose pas de catalogue affichable sur l'accueil.`);
+      const streams = hasResource(m, 'stream');
+      if (browsable.length === 0 && !streams) {
+        Alert.alert('Addon non pris en charge', `« ${m.name} » ne propose ni catalogue ni stream.`);
         return;
       }
       await update({ addons: [...settings.addons, { base, name: m.name }] });
       setAddonUrl('');
+      Alert.alert(
+        'Addon ajouté',
+        [browsable.length ? `${browsable.length} catalogue(s) sur l'accueil` : null, streams ? 'streams disponibles sur les fiches' : null]
+          .filter(Boolean)
+          .join(' · ')
+      );
     } catch (e: any) {
-      Alert.alert('Addon invalide', `Impossible de lire le manifest : ${e?.message ?? e}`);
+      Alert.alert('Addon introuvable', `Impossible de lire le manifest (${e?.message ?? e}).`);
     } finally {
       setAdding(false);
     }
@@ -145,6 +164,69 @@ export default function SettingsScreen() {
         <View style={{ marginHorizontal: -16 }}>
           <ScreenTitle title="Réglages" />
         </View>
+        <Section title="Jellyfin">
+          {settings.jellyfin ? (
+            <View style={{ gap: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>{settings.jellyfin.userName.slice(0, 1).toUpperCase()}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.addonName}>{settings.jellyfin.userName}</Text>
+                  <Text style={styles.addonUrl} numberOfLines={1}>
+                    {settings.jellyfin.serverName ? `${settings.jellyfin.serverName} · ` : ''}
+                    {settings.jellyfin.url}
+                  </Text>
+                </View>
+              </View>
+              <Button
+                title="Se déconnecter"
+                icon="log-out-outline"
+                variant="danger"
+                onPress={async () => {
+                  await logoutJellyfin(settings);
+                  await update({ jellyfin: null, skipJellyfin: false });
+                  router.replace('/login');
+                }}
+              />
+            </View>
+          ) : (
+            <Button title="Se connecter à Jellyfin" icon="log-in-outline" onPress={() => router.push('/login')} />
+          )}
+        </Section>
+
+        <Section title="Affiches">
+          <Toggle
+            label="Better Posters (note et tags sur les affiches)"
+            value={settings.betterPosters.enabled}
+            onChange={(v) => update({ betterPosters: { ...settings.betterPosters, enabled: v } })}
+          />
+          {settings.betterPosters.enabled && (
+            <>
+              <Toggle
+                label="Afficher la note"
+                value={settings.betterPosters.rating}
+                onChange={(v) => update({ betterPosters: { ...settings.betterPosters, rating: v } })}
+              />
+              <Toggle
+                label="Afficher le genre"
+                value={settings.betterPosters.genre}
+                onChange={(v) => update({ betterPosters: { ...settings.betterPosters, genre: v } })}
+              />
+              {settings.betterPosters.rating && (
+                <View style={{ marginTop: 8 }}>
+                  <Picker
+                    label="Source de la note"
+                    options={RATING_SOURCES}
+                    value={settings.betterPosters.ratingSource}
+                    onChange={(v) => update({ betterPosters: { ...settings.betterPosters, ratingSource: v } })}
+                  />
+                </View>
+              )}
+            </>
+          )}
+        </Section>
+
         <Section title="TMDB">
           <Field
             label="Clé API"
@@ -248,4 +330,6 @@ const styles = StyleSheet.create({
   catName: { color: C.text, fontSize: 14, flex: 1 },
   order: { justifyContent: 'center', gap: 6 },
   version: { color: C.textFaint, textAlign: 'center', fontSize: 12, marginTop: 10 },
+  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.text, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { color: '#000', fontSize: 18, fontWeight: '800' },
 });

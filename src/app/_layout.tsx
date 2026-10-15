@@ -1,4 +1,5 @@
 import { DarkTheme, Stack, ThemeProvider } from 'expo-router';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -17,21 +18,23 @@ function Root() {
   const { ready } = useSettings();
   useEffect(() => {
     if (ready) SplashScreen.hideAsync().catch(() => {});
+    // Portrait partout, sauf le lecteur qui déverrouille la rotation
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
   }, [ready]);
   if (!ready) return null;
 
   return (
     <Stack
       screenOptions={{
-        headerStyle: { backgroundColor: C.bg },
-        headerTintColor: C.text,
+        headerShown: false,
         contentStyle: { backgroundColor: C.bg },
       }}>
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen
-        name="media/[type]/[id]"
-        options={{ headerShown: false, animation: 'fade_from_bottom' }}
-      />
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="login" options={{ animation: 'fade' }} />
+      <Stack.Screen name="media/[type]/[id]" options={{ animation: 'fade_from_bottom' }} />
+      <Stack.Screen name="jellyfin/[id]" options={{ animation: 'fade_from_bottom' }} />
+      <Stack.Screen name="streams" options={{ presentation: 'modal' }} />
+      <Stack.Screen name="player" options={{ animation: 'fade', presentation: 'fullScreenModal', gestureEnabled: false }} />
     </Stack>
   );
 }

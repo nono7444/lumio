@@ -28,7 +28,29 @@ export type SonarrConfig = ArrConfig & {
   seasonFolder: boolean;
 };
 
+export type JellyfinSession = {
+  url: string;
+  token: string;
+  userId: string;
+  userName: string;
+  serverName?: string;
+};
+
+export type BetterPostersConfig = {
+  enabled: boolean;
+  rating: boolean;
+  genre: boolean;
+  /** '' = moyenne, sinon IM, TM, RT, MC, TR, LB */
+  ratingSource: string;
+};
+
 export type Settings = {
+  /** Identifiant d'appareil stable, envoyé à Jellyfin */
+  deviceId: string;
+  jellyfin: JellyfinSession | null;
+  /** L'utilisateur a choisi de continuer sans Jellyfin */
+  skipJellyfin: boolean;
+  betterPosters: BetterPostersConfig;
   /** Clé API v3 ou jeton v4 TMDB (obligatoire : recherche + fiches) */
   tmdbKey: string;
   language: string;
@@ -43,7 +65,14 @@ export const DEFAULT_ADDON: Addon = {
   name: 'Cinemeta',
 };
 
+const newDeviceId = () =>
+  'lumio-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+
 const DEFAULTS: Settings = {
+  deviceId: '',
+  jellyfin: null,
+  skipJellyfin: false,
+  betterPosters: { enabled: true, rating: true, genre: false, ratingSource: '' },
   tmdbKey: '',
   language: 'fr-FR',
   radarr: { url: '', apiKey: '', searchOnAdd: true, minimumAvailability: 'released' },
@@ -73,15 +102,27 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       .then((raw) => {
         if (!raw) return;
         const saved = JSON.parse(raw) as Partial<Settings>;
-        setSettings({
+        const merged: Settings = {
           ...DEFAULTS,
           ...saved,
           radarr: { ...DEFAULTS.radarr, ...saved.radarr },
           sonarr: { ...DEFAULTS.sonarr, ...saved.sonarr },
-        });
+          betterPosters: { ...DEFAULTS.betterPosters, ...saved.betterPosters },
+        };
+        current.current = merged;
+        setSettings(merged);
       })
       .catch(() => {})
-      .finally(() => setReady(true));
+      .finally(() => {
+        // Identifiant d'appareil généré une fois pour toutes
+        if (!current.current.deviceId) {
+          const next = { ...current.current, deviceId: newDeviceId() };
+          current.current = next;
+          setSettings(next);
+          AsyncStorage.setItem(KEY, JSON.stringify(next)).catch(() => {});
+        }
+        setReady(true);
+      });
   }, []);
 
   const update = useCallback(async (patch: Partial<Settings>) => {
