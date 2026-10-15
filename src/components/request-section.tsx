@@ -8,6 +8,7 @@ import { toast } from '@/components/toast';
 import { Button } from '@/components/ui';
 import { C, R } from '@/constants/theme';
 import {
+  downloadLabel,
   MediaStatus,
   mediaStatusLabel,
   RequestStatus,
@@ -102,6 +103,15 @@ export function RequestSection({ target, onChange }: { target: RequestTarget; on
           <Text style={[styles.statusText, { color: lab.color }]}>{lab.label}</Text>
         </View>
       ) : null}
+
+      {/* Suivi des demandes approuvées : recherche, téléchargement, blocage dans Radarr / Sonarr */}
+      {(media?.requests ?? [])
+        .filter((r) => r.status === RequestStatus.APPROVED && downloadLabel(r))
+        .map((r) => (
+          <Text key={`dl-${r.id}`} style={[styles.text, { color: downloadLabel(r)!.color, fontWeight: '700', textAlign: 'center' }]}>
+            {downloadLabel(r)!.text}
+          </Text>
+        ))}
 
       {/* Demandes en attente (ou en échec) : l'admin valide ici, le demandeur peut annuler */}
       {pendingReqs.map((r) => {

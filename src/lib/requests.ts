@@ -32,6 +32,8 @@ export type Req = {
   error?: string;
   mediaStatus: number;
   seasonStatuses: { seasonNumber: number; status: number }[];
+  /** Suivi dans Radarr / Sonarr pour une demande approuvée */
+  download?: { state: 'searching' | 'downloading' | 'importing' | 'warning'; progress?: number | null; message?: string; release?: string; count?: number };
 };
 
 export type MediaInfo = { status: number; seasons: { seasonNumber: number; status: number }[]; requests: Req[] };
@@ -219,4 +221,21 @@ export function usePendingRequests() {
     };
   }, [admin, settings.chatUrl, settings.jellyfin?.token]); // eslint-disable-line react-hooks/exhaustive-deps
   return n;
+}
+
+/** Ligne de suivi d'une demande approuvée (recherche, téléchargement, blocage). */
+export function downloadLabel(r: Req): { text: string; color: string } | null {
+  const d = r.download;
+  if (!d) return null;
+  const app = r.type === 'movie' ? 'Radarr' : 'Sonarr';
+  switch (d.state) {
+    case 'warning':
+      return { text: `⚠️ À vérifier dans ${app} : ${d.message ?? 'intervention manuelle nécessaire'}`, color: '#FF9F0A' };
+    case 'importing':
+      return { text: `Import dans ${app}…`, color: '#64D2FF' };
+    case 'downloading':
+      return { text: `Téléchargement${d.progress != null ? ` ${d.progress} %` : '…'}${d.count && d.count > 1 ? ` · ${d.count} épisodes` : ''}`, color: '#3D8BFF' };
+    default:
+      return { text: `${app} cherche une release…`, color: '#8E8E93' };
+  }
 }

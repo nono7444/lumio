@@ -22,7 +22,7 @@ const REQUESTS_FILE = path.join(DATA_DIR, 'requests.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.1.0';
+const VERSION = '3.2.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -317,6 +317,7 @@ async function loadLibrary(force = false) {
       lib.seriesByTvdb.set(s.tvdbId, entry);
       if (s.tmdbId) lib.seriesByTmdb.set(s.tmdbId, entry);
     }
+    lib.queue = await queueIndex().catch(() => ({ movies: new Map(), series: new Map() }));
     library = lib;
     libraryAt = Date.now();
     return lib;
@@ -392,11 +393,68 @@ function refreshCompleted(lib) {
 setInterval(() => {
   if (!requests.some((r) => r.status === RequestStatus.APPROVED)) return;
   loadLibrary(true).then(refreshCompleted).catch(() => {});
-}, 5 * 60 * 1000);
+}, 2 * 60 * 1000);
+
+/** État du téléchargement dans la file Radarr / Sonarr (pour voir ce qui bloque). */
+function trackOf(rec) {
+  const state = rec.trackedDownloadState || rec.status;
+  const problem = rec.trackedDownloadStatus === 'warning' || rec.trackedDownloadStatus === 'error' || state === 'importBlocked' || state === 'failedPending' || state === 'failed' || Boolean(rec.errorMessage);
+  const messages = [rec.errorMessage, ...((rec.statusMessages || []).flatMap((m) => m.messages || []))].filter(Boolean);
+  const progress = rec.size > 0 ? Math.round((1 - rec.sizeleft / rec.size) * 100) : null;
+  return {
+    state: problem ? 'warning' : state === 'importPending' || state === 'importing' ? 'importing' : 'downloading',
+    progress,
+    message: problem ? messages[0] || 'Intervention manuelle nécessaire dans ' + (rec.movie ? 'Radarr' : 'Sonarr') : undefined,
+    release: rec.title,
+  };
+}
+
+async function queueIndex() {
+  const out = { movies: new Map(), series: new Map() };
+  const [rq, sq] = await Promise.all([
+    arrConfig('radarr') ? arr('radarr', '/queue?page=1&pageSize=200&includeMovie=true').catch(() => null) : null,
+    arrConfig('sonarr') ? arr('sonarr', '/queue?page=1&pageSize=500&includeSeries=true&includeEpisode=true').catch(() => null) : null,
+  ]);
+  for (const r of (rq && rq.records) || []) if (r.movie) out.movies.set(r.movie.tmdbId, trackOf(r));
+  for (const r of (sq && sq.records) || []) {
+    if (!r.series) continue;
+    const list = out.series.get(r.series.tvdbId) || [];
+    list.push({ season: r.episode ? r.episode.seasonNumber : null, ...trackOf(r) });
+    out.series.set(r.series.tvdbId, list);
+  }
+  return out;
+}
+
+function downloadOf(r, lib) {
+  if (!lib || !lib.queue || r.status !== RequestStatus.APPROVED) return undefined;
+  if (r.type === 'movie') {
+    const t = lib.queue.movies.get(r.tmdbId);
+    if (t) return t;
+  } else {
+    const items = (lib.queue.series.get(Number(r.tvdbId)) || []).filter((x) => x.season == null || (r.seasons || []).includes(x.season));
+    if (items.length) {
+      const bad = items.find((x) => x.state === 'warning');
+      if (bad) return bad;
+      const avg = items.filter((x) => x.progress != null);
+      return {
+        state: items.some((x) => x.state === 'downloading') ? 'downloading' : 'importing',
+        progress: avg.length ? Math.round(avg.reduce((n, x) => n + x.progress, 0) / avg.length) : null,
+        count: items.length,
+      };
+    }
+  }
+  // Approuvée mais rien dans la file : Radarr / Sonarr cherche encore une release
+  return { state: 'searching' };
+}
 
 function publicRequest(r, lib) {
   const media = lib ? mediaStatus(lib, r.type, r.tmdbId, r.tvdbId, r.type === 'tv' ? r.seasons : undefined) : null;
-  return { ...r, mediaStatus: media ? media.status : MediaStatus.UNKNOWN, seasonStatuses: media ? media.seasons : [] };
+  return {
+    ...r,
+    mediaStatus: media ? media.status : MediaStatus.UNKNOWN,
+    seasonStatuses: media ? media.seasons : [],
+    download: downloadOf(r, lib),
+  };
 }
 
 // ——— File de téléchargement ———

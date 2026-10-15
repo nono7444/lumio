@@ -12,6 +12,7 @@ import { Button, SegChip, tap } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { openMedia } from '@/lib/navigation';
 import {
+  downloadLabel,
   mediaStatusLabel,
   RequestStatus,
   requestStatusLabel,
@@ -119,6 +120,11 @@ function RequestCard({ r, admin, meId, onChanged }: { r: Req; admin: boolean; me
             <Text style={styles.meta}>
               {r.status === RequestStatus.DECLINED ? 'Refusé' : 'Validé'} par <Text style={styles.metaStrong}>{r.modifiedBy.name}</Text>
               {r.modifiedAt ? ` ${timeAgo(r.modifiedAt)}` : ''}
+            </Text>
+          ) : null}
+          {downloadLabel(r) ? (
+            <Text style={[styles.meta, { color: downloadLabel(r)!.color, fontWeight: '700' }]} numberOfLines={3}>
+              {downloadLabel(r)!.text}
             </Text>
           ) : null}
           {r.reason ? <Text style={[styles.meta, { color: C.danger }]}>Raison : {r.reason}</Text> : null}
