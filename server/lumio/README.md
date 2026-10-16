@@ -54,6 +54,10 @@ Si Radarr, Sonarr et Jellyfin sont dans le même compose, utilise les noms des s
 | DELETE | `/api/requests/:id` | Le demandeur (si en attente) ou l'admin |
 | GET | `/api/arr/options?type` | Dossiers racine, et profils de qualité pour l'admin |
 | GET | `/api/queue` · `/api/status` | Téléchargements en cours · état des services |
+| GET | `/status/public` | Sans jeton, pour le widget iOS : en ligne / hors ligne et compteurs (aucun titre) |
+| GET / POST | `/api/ideas` | Mode développeur : idées et bugs proposés par la famille (notification à l'admin) |
+| POST | `/api/ideas/:id/vote` | Voter (ou retirer son vote) |
+| PUT / DELETE | `/api/ideas/:id` | Admin : statut (`new`, `planned`, `sent`, `done`, `rejected`) et réponse · suppression (auteur ou admin) |
 | GET / PUT | `/api/admin/users` · `/api/admin/users/:id` | Admin : droits et quotas par utilisateur |
 | PUT | `/api/admin/settings` | Admin : validation automatique et quotas par défaut, visibilité des demandes |
 | POST | `/hooks/approve` · `/hooks/decline` | Boutons des notifications (lien signé HMAC) |

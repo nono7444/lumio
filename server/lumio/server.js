@@ -20,6 +20,7 @@ const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 const REQUESTS_FILE = path.join(DATA_DIR, 'requests.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
 const VERSION = '3.3.0';
@@ -48,6 +49,7 @@ let messages = readJson(MESSAGES_FILE, []);
 let config = readJson(CONFIG_FILE, {});
 let requests = readJson(REQUESTS_FILE, []);
 let userPrefs = readJson(USERS_FILE, {});
+let ideas = readJson(IDEAS_FILE, []);
 
 const timers = {};
 function persist(file, getData) {
@@ -57,6 +59,7 @@ function persist(file, getData) {
 const saveMessages = () => persist(MESSAGES_FILE, () => messages);
 const saveRequests = () => persist(REQUESTS_FILE, () => requests);
 const saveUsers = () => persist(USERS_FILE, () => userPrefs);
+const saveIdeas = () => persist(IDEAS_FILE, () => ideas);
 const saveConfig = () => writeJson(CONFIG_FILE, config);
 
 class HttpError extends Error {
@@ -582,6 +585,11 @@ async function status() {
 
 let publicStatusCache = null;
 
+function publicIdea(i, user) {
+  const { votes, ...rest } = i;
+  return { ...rest, votes: votes.length, voted: votes.includes(user.id), mine: i.createdBy.id === user.id };
+}
+
 // ——— Chat ———
 const LUMIO_BOT = { id: 'lumio', name: 'Lumio', admin: true };
 // Anciennes annonces automatiques (demandes, validations…) : masquées, le chat sert juste à discuter
@@ -806,7 +814,7 @@ const server = http.createServer(async (req, res) => {
       ok: true,
       version: VERSION,
       messages: messages.length,
-      features: ['chat', 'requests', 'status'],
+      features: ['chat', 'requests', 'status', 'ideas'],
       radarr: Boolean(arrConfig('radarr')),
       sonarr: Boolean(arrConfig('sonarr')),
     });
@@ -911,6 +919,64 @@ const server = http.createServer(async (req, res) => {
       if (messages[idx].userId !== user.id && !user.admin) return send(res, 403, { error: 'interdit' });
       messages.splice(idx, 1);
       saveMessages();
+      return send(res, 204);
+    }
+
+    // ——— Mode développeur : idées de fonctionnalités et bugs proposés par la famille ———
+    if (req.method === 'GET' && p === '/api/ideas') {
+      return send(res, 200, { ideas: ideas.map((i) => publicIdea(i, user)) });
+    }
+    if (req.method === 'POST' && p === '/api/ideas') {
+      const b = await readBody(req);
+      const title = String(b.title || '').trim().slice(0, 120);
+      if (!title) return send(res, 400, { error: 'titre manquant' });
+      const idea = {
+        id: `${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
+        kind: b.kind === 'bug' ? 'bug' : 'feature',
+        title,
+        details: String(b.details || '').trim().slice(0, 4000),
+        status: 'new',
+        createdBy: { id: user.id, name: user.name },
+        createdAt: new Date().toISOString(),
+        votes: [user.id],
+      };
+      ideas.unshift(idea);
+      saveIdeas();
+      if (!user.admin)
+        notify({
+          title: `${idea.kind === 'bug' ? 'Bug signalé' : 'Nouvelle idée'} · ${user.name}`,
+          message: `${idea.title}${idea.details ? `\n${idea.details.slice(0, 200)}` : ''}`,
+          tags: [idea.kind === 'bug' ? 'bug' : 'bulb'],
+          click: 'lumio://ideas',
+        });
+      return send(res, 201, publicIdea(idea, user));
+    }
+    const ideaVote = p.match(/^\/api\/ideas\/([\w-]+)\/vote$/);
+    if (req.method === 'POST' && ideaVote) {
+      const idea = ideas.find((i) => i.id === ideaVote[1]);
+      if (!idea) return send(res, 404, { error: 'introuvable' });
+      idea.votes = idea.votes.includes(user.id) ? idea.votes.filter((v) => v !== user.id) : [...idea.votes, user.id];
+      saveIdeas();
+      return send(res, 200, publicIdea(idea, user));
+    }
+    const ideaOne = p.match(/^\/api\/ideas\/([\w-]+)$/);
+    if (req.method === 'PUT' && ideaOne) {
+      requireAdmin(user);
+      const idea = ideas.find((i) => i.id === ideaOne[1]);
+      if (!idea) return send(res, 404, { error: 'introuvable' });
+      const b = await readBody(req);
+      if (['new', 'planned', 'sent', 'done', 'rejected'].includes(b.status)) idea.status = b.status;
+      if (typeof b.note === 'string') idea.note = b.note.trim().slice(0, 1000);
+      idea.updatedAt = new Date().toISOString();
+      saveIdeas();
+      return send(res, 200, publicIdea(idea, user));
+    }
+    if (req.method === 'DELETE' && ideaOne) {
+      const idx = ideas.findIndex((i) => i.id === ideaOne[1]);
+      if (idx < 0) return send(res, 404, { error: 'introuvable' });
+      if (ideas[idx].createdBy.id !== user.id && !user.admin) return send(res, 403, { error: 'interdit' });
+      ideas.splice(idx, 1);
+      saveIdeas();
       return send(res, 204);
     }
 

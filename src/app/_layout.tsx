@@ -40,6 +40,7 @@ function Root() {
       <Stack.Screen name="jellyfin/[id]" options={{ animation: 'fade_from_bottom' }} />
       <Stack.Screen name="customize" options={{ presentation: 'modal' }} />
       <Stack.Screen name="users" options={{ presentation: 'modal' }} />
+      <Stack.Screen name="ideas" options={{ presentation: 'modal' }} />
       <Stack.Screen name="invite" options={{ animation: 'fade' }} />
       <Stack.Screen name="watch" options={{ animation: 'fade', presentation: 'fullScreenModal' }} />
       <Stack.Screen name="player" options={{ animation: 'fade', presentation: 'fullScreenModal', gestureEnabled: false }} />

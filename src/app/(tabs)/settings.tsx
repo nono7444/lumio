@@ -213,6 +213,15 @@ export default function SettingsScreen() {
           </Section>
         ) : null}
 
+        {serverReq ? (
+          <Section title="Mode développeur">
+            <Text style={styles.help}>
+              Propose une idée ou signale un bug. L’admin la reçoit en notification et peut la faire développer par Claude.
+            </Text>
+            <Button title="Idées & bugs" icon="bulb-outline" variant="secondary" onPress={() => router.push('/ideas')} />
+          </Section>
+        ) : null}
+
         {serverReq === false ? <SeerrSection /> : null}
 
         <ThemeSection />
