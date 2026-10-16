@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.26 — 16 octobre 2026
+
 - Live TV : quand une chaîne d'un addon Stremio a plusieurs sources, le lecteur passe automatiquement à la suivante si l'une ne marche pas.
 - Live TV : le lecteur se présente comme VLC auprès des serveurs IPTV (certains refusent les autres lecteurs).
 
