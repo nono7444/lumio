@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.29 — 16 octobre 2026
+
 - Nouvelle appli Android (téléphone) : APK publié à chaque version (lumio.wawanono.lol/android), mise à jour proposée dans l'appli.
 - « Inviter quelqu'un » partage maintenant une page web cliquable partout, qui explique l'installation (Android ou iPhone) et configure l'appli.
 - Serveur Lumio 3.5.0 : raccourci /android et page /invite.
