@@ -162,14 +162,36 @@ export function forgetChannels(src: LiveSource) {
 type Stream = { url?: string; name?: string; title?: string; behaviorHints?: { proxyHeaders?: { request?: Record<string, string> } } };
 
 /** Lien de lecture d'une chaîne (pour un addon Stremio, demandé à l'addon). */
-export async function channelStream(ch: Channel): Promise<{ uri: string; headers?: Record<string, string> }> {
-  if (ch.url) return { uri: ch.url, headers: ch.headers };
+export type LiveStream = { uri: string; headers?: Record<string, string>; label?: string };
+
+/**
+ * Liens de lecture d'une chaîne, du meilleur au moins bon. Pour un addon Stremio, toutes ses sources
+ * (le lecteur passe à la suivante si l'une ne marche pas).
+ */
+export async function channelStreams(ch: Channel): Promise<LiveStream[]> {
+  if (ch.url) return [{ uri: ch.url, headers: ch.headers }];
   if (!ch.stremio) throw new Error('Chaîne sans lien');
   const { base, type, id } = ch.stremio;
-  const r = await getJson<{ streams?: Stream[] }>(`${base}/stream/${type}/${encodeURIComponent(id)}.json`, 20000);
-  const s = (r.streams ?? []).find((x) => x.url);
-  if (!s?.url) throw new Error('Aucun flux disponible pour cette chaîne');
-  return { uri: s.url, headers: s.behaviorHints?.proxyHeaders?.request };
+  const encoded = `${base}/stream/${type}/${encodeURIComponent(id)}.json`;
+  const raw = `${base}/stream/${type}/${id}.json`;
+  let r: { streams?: Stream[] };
+  try {
+    r = await getJson<{ streams?: Stream[] }>(encoded, 20000);
+    if (!r.streams?.length && raw !== encoded) r = await getJson<{ streams?: Stream[] }>(raw, 20000);
+  } catch (e) {
+    if (raw === encoded) throw e;
+    r = await getJson<{ streams?: Stream[] }>(raw, 20000);
+  }
+  const seen = new Set<string>();
+  const out: LiveStream[] = [];
+  for (const s of r.streams ?? []) {
+    if (!s.url || !/^https?:\/\//i.test(s.url) || seen.has(s.url)) continue;
+    seen.add(s.url);
+    const h = s.behaviorHints?.proxyHeaders?.request;
+    out.push({ uri: s.url, headers: h && Object.keys(h).length ? h : undefined, label: [s.name, s.title].filter(Boolean).join(' · ').replace(/\s+/g, ' ').slice(0, 80) || undefined });
+  }
+  if (!out.length) throw new Error('Aucun flux disponible pour cette chaîne');
+  return out;
 }
 
 /** Vérifie une source avant de l'ajouter ; renvoie son nom et le nombre de chaînes. */

@@ -10,7 +10,7 @@ import { toast } from '@/components/toast';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { Button, ScreenTitle, SegChip, tap } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
-import { channelStream, loadChannels, type Channel } from '@/lib/live';
+import { channelStreams, loadChannels, type Channel } from '@/lib/live';
 import { useSettings } from '@/lib/settings';
 
 const FAV = '★ Favoris';
@@ -93,10 +93,18 @@ export default function Live() {
     tap();
     setOpening(ch.key);
     try {
-      const s = await channelStream(ch);
+      const [first, ...rest] = await channelStreams(ch);
       router.push({
         pathname: '/player',
-        params: { kind: 'url', uri: s.uri, title: ch.name, subtitle: ch.group ?? 'En direct', headers: s.headers ? JSON.stringify(s.headers) : undefined },
+        params: {
+          kind: 'url',
+          uri: first.uri,
+          title: ch.name,
+          subtitle: first.label ?? ch.group ?? 'En direct',
+          headers: first.headers ? JSON.stringify(first.headers) : undefined,
+          // Autres sources de la chaîne : le lecteur essaie la suivante si celle-ci ne marche pas
+          alts: rest.length ? JSON.stringify(rest.slice(0, 15)) : undefined,
+        },
       });
     } catch (e: any) {
       toast(e?.message ?? String(e), 'error');

@@ -24,6 +24,8 @@ type Params = {
   itemId?: string;
   uri?: string;
   headers?: string;
+  /** Autres sources (JSON [{uri, headers, label}]) essayées une par une si la lecture échoue */
+  alts?: string;
   title?: string;
   subtitle?: string;
   start?: string;
@@ -64,6 +66,21 @@ export default function Player() {
   const [source, setSource] = useState<Source | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  // Liste des sources directes : la principale puis les alternatives
+  const [altIdx, setAltIdx] = useState(0);
+  const sources = useRef<{ uri: string; headers?: Record<string, string>; label?: string }[] | null>(null);
+  if (sources.current == null && p.uri) {
+    let main: Record<string, string> | undefined;
+    try {
+      main = p.headers ? JSON.parse(p.headers) : undefined;
+    } catch {}
+    let alts: { uri: string; headers?: Record<string, string>; label?: string }[] = [];
+    try {
+      alts = p.alts ? JSON.parse(p.alts) : [];
+    } catch {}
+    sources.current = [{ uri: p.uri, headers: main }, ...alts];
+  }
+  const sourceCount = sources.current?.length ?? 0;
   const [nextUp, setNextUp] = useState<NextUp | null>(null);
   const [countdown, setCountdown] = useState(NEXT_DELAY);
 
@@ -101,12 +118,9 @@ export default function Player() {
           if (cancelled) return;
           target.current = t;
           setSource({ uri: t.uri, isHls: t.isHls });
-        } else if (p.uri) {
-          let headers: Record<string, string> | undefined;
-          try {
-            headers = p.headers ? JSON.parse(p.headers) : undefined;
-          } catch {}
-          setSource({ uri: p.uri, headers, isHls: /\.m3u8(\?|$)/i.test(p.uri) });
+        } else if (sources.current?.length) {
+          const cur = sources.current[Math.min(altIdx, sources.current.length - 1)];
+          setSource({ uri: cur.uri, headers: cur.headers, isHls: /\.m3u8(\?|$)/i.test(cur.uri) });
         } else {
           throw new Error('Aucune source à lire');
         }
@@ -118,7 +132,16 @@ export default function Player() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, attempt, quality]);
+  }, [engine, attempt, quality, altIdx]);
+
+  // Erreur de lecture : on passe à la source suivante s'il y en a une, sinon on affiche l'erreur
+  const onPlayError = (msg: string) => {
+    if (p.kind !== 'jellyfin' && altIdx < sourceCount - 1) {
+      setAltIdx((i) => i + 1);
+      return;
+    }
+    setError(msg);
+  };
 
   // Fin de lecture signalée à Jellyfin à la fermeture
   useEffect(() => {
@@ -136,7 +159,20 @@ export default function Player() {
     playback.progress(settings, { target: target.current, positionSeconds: pos, isPaused: paused });
   };
 
+  // Chaîne en direct avec plusieurs sources : si rien ne démarre en 20 s, on essaie la suivante
+  const ready = useRef(false);
+  useEffect(() => {
+    ready.current = false;
+    if (!source || p.kind === 'jellyfin' || altIdx >= sourceCount - 1) return;
+    const t = setTimeout(() => {
+      if (!ready.current) setAltIdx((i) => i + 1);
+    }, 20000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source]);
+
   const onReady = (pos: number) => {
+    ready.current = true;
     position.current = pos;
     if (target.current) playback.start(settings, { target: target.current, positionSeconds: pos });
   };
@@ -262,7 +298,7 @@ export default function Player() {
             startAt={resumeFrom}
             onTime={onTime}
             onReady={onReady}
-            onError={setError}
+            onError={onPlayError}
             onClose={() => router.back()}
             onEnded={onEnded}
             extra={castBtn}
@@ -278,7 +314,7 @@ export default function Player() {
             startAt={resumeFrom}
             onTime={onTime}
             onReady={onReady}
-            onError={setError}
+            onError={onPlayError}
             onClose={() => router.back()}
             onEnded={onEnded}
             extra={castBtn}
@@ -296,6 +332,11 @@ export default function Player() {
           <Ionicons name="alert-circle-outline" size={42} color={C.text} />
           <Text style={styles.errorTitle}>Lecture impossible</Text>
           <Text style={styles.errorText}>{error}</Text>
+          {sourceCount > 1 ? (
+            <Text style={styles.errorText}>
+              {sourceCount} sources essayées, aucune ne fonctionne pour le moment.
+            </Text>
+          ) : null}
           <View style={{ gap: 10, alignSelf: 'stretch', marginTop: 16, maxWidth: 420, width: '100%', alignItems: 'stretch' }}>
             <Button
               title={`Essayer avec le lecteur ${other === 'mpv' ? 'mpv' : 'natif'}`}
@@ -305,7 +346,15 @@ export default function Player() {
                 setEngine(other);
               }}
             />
-            <Button title="Réessayer" icon="refresh" variant="glass" onPress={() => setAttempt((a) => a + 1)} />
+            <Button
+              title="Réessayer"
+              icon="refresh"
+              variant="glass"
+              onPress={() => {
+                setAltIdx(0);
+                setAttempt((a) => a + 1);
+              }}
+            />
             {source?.uri ? (
               <>
                 <Button title="Ouvrir dans VLC" icon="open-outline" variant="glass" onPress={() => openExternal('vlc', source.uri)} />

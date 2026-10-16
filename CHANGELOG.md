@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Live TV : quand une chaîne d'un addon Stremio a plusieurs sources, le lecteur passe automatiquement à la suivante si l'une ne marche pas.
+
 ## 1.0.24 — 16 octobre 2026
 
 - Nouvel onglet Live TV : ajoute ta liste IPTV (lien M3U ou compte Xtream Codes) ou un addon Stremio de chaînes ; groupes, recherche et favoris (appui long).
