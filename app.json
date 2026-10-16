@@ -14,8 +14,7 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSAppTransportSecurity": {
-          "NSAllowsArbitraryLoads": true,
-          "NSAllowsLocalNetworking": true
+          "NSAllowsArbitraryLoads": true
         },
         "NSLocalNetworkUsageDescription": "Lumio se connecte à Jellyfin, Radarr et Sonarr sur ton réseau local, et cherche les Chromecast pour diffuser sur la TV.",
         "ITSAppUsesNonExemptEncryption": false
