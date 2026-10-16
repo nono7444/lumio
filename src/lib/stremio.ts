@@ -138,7 +138,7 @@ export function providesStreams(m: StremioManifest, type: string, id: string) {
   return true;
 }
 
-async function getJson<T>(url: string, timeoutMs = 15000): Promise<T> {
+export async function getJson<T>(url: string, timeoutMs = 15000): Promise<T> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {

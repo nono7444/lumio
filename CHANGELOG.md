@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Nouvel onglet Live TV : ajoute ta liste IPTV (lien M3U ou compte Xtream Codes) ou un addon Stremio de chaînes ; groupes, recherche et favoris (appui long).
+- Admin : « En cours de lecture » dans Profil, pour voir qui regarde quoi, où il en est, sur quel appareil, et si le serveur convertit la vidéo.
+
 ## 1.0.23 — 16 octobre 2026
 
 - Fiche d'un film : le bouton Demander devient une barre de téléchargement en direct (pourcentage), puis « Lire » dès que le film est dans Jellyfin.

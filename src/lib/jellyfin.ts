@@ -190,7 +190,40 @@ function providerIndex(s: Settings) {
   return map;
 }
 
+export type JfSession = {
+  Id: string;
+  UserId?: string;
+  UserName?: string;
+  Client?: string;
+  DeviceName?: string;
+  RemoteEndPoint?: string;
+  LastActivityDate?: string;
+  NowPlayingItem?: JfItem & {
+    SeriesName?: string;
+    ParentIndexNumber?: number;
+    IndexNumber?: number;
+    RunTimeTicks?: number;
+    SeriesPrimaryImageTag?: string;
+    ProductionYear?: number;
+  };
+  PlayState?: { PositionTicks?: number; IsPaused?: boolean; PlayMethod?: 'DirectPlay' | 'DirectStream' | 'Transcode' };
+  TranscodingInfo?: {
+    VideoCodec?: string;
+    AudioCodec?: string;
+    Bitrate?: number;
+    Height?: number;
+    IsVideoDirect?: boolean;
+    IsAudioDirect?: boolean;
+    CompletionPercentage?: number;
+    TranscodeReasons?: string[];
+    HardwareAccelerationType?: string;
+  };
+};
+
 export const jf = {
+  /** Admin : sessions actives du serveur (qui regarde quoi). */
+  sessions: (s: Settings) => api(s).get<JfSession[]>('/Sessions?ActiveWithinSeconds=900'),
+
   /** Oublie l'index des titres (après un téléchargement terminé, pour voir le nouveau film). */
   invalidateIndex: () => {
     providerCache = null;

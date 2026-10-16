@@ -91,6 +91,18 @@ export type Settings = {
   sonarr: SonarrConfig;
   addons: Addon[];
   showTrending: boolean;
+  /** Sources Live TV : listes IPTV (M3U, Xtream) et addons Stremio de chaînes */
+  liveSources: LiveSource[];
+  /** Chaînes favorites (clés « source:chaîne ») */
+  liveFavorites: string[];
+};
+
+export type LiveSource = {
+  id: string;
+  name: string;
+  kind: 'm3u' | 'stremio';
+  /** Lien de la liste M3U, ou adresse de l'addon Stremio */
+  url: string;
 };
 
 export const DEFAULT_ADDON: Addon = {
@@ -122,6 +134,8 @@ const DEFAULTS: Settings = {
   sonarr: { url: '', apiKey: '', searchOnAdd: true, seasonFolder: true },
   addons: [DEFAULT_ADDON],
   showTrending: true,
+  liveSources: [],
+  liveFavorites: [],
 };
 
 const KEY = 'lumio-native:settings:v2';

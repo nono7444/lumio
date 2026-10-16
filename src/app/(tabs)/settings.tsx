@@ -11,6 +11,7 @@ import { Button, Field, ScreenTitle, Section } from '@/components/ui';
 import { ADDONS_ENABLED } from '@/constants/features';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { AppVersionSection } from '@/components/app-version';
+import { NowPlayingEntry } from '@/components/now-playing-entry';
 import { useAppUpdate } from '@/lib/app-update';
 import { ChatSection, ThemeSection } from '@/components/extra-sections';
 import { SeerrSection } from '@/components/seerr-section';
@@ -175,6 +176,7 @@ export default function SettingsScreen() {
           <ScreenTitle title="Profil" />
         </View>
         {appUpdate ? <AppVersionSection /> : null}
+        <NowPlayingEntry />
         <ServerStatusSection />
         <Section title="Jellyfin">
           {settings.jellyfin ? (

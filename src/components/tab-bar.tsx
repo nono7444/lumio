@@ -22,6 +22,7 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   search: 'search',
   library: 'albums',
   calendar: 'calendar',
+  live: 'tv',
   chat: 'chatbubbles',
   activity: 'file-tray-full',
 };
@@ -32,6 +33,7 @@ const SHORT: Record<string, string> = {
   search: 'Recherche',
   library: 'Biblio',
   calendar: 'Agenda',
+  live: 'Live',
   chat: 'Chat',
   activity: 'Demandes',
   settings: 'Profil',
@@ -89,6 +91,8 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
               style={[
                 styles.item,
                 focused && styles.itemFocused,
+                // Beaucoup d'onglets : l'onglet actif s'élargit un peu moins pour que tout tienne
+                focused && routes.length > 7 && { flex: 2, paddingHorizontal: 6 },
                 focused && (season ? { backgroundColor: season.tint } : styles.itemOn),
               ]}>
               {isProfile ? (

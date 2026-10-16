@@ -108,6 +108,7 @@ export const TAB_LABELS: Record<string, string> = {
   index: 'Accueil',
   search: 'Recherche',
   library: 'Bibliothèque',
+  live: 'Live TV',
   calendar: 'Calendrier',
   chat: 'Chat',
   activity: 'Demandes',
@@ -115,7 +116,7 @@ export const TAB_LABELS: Record<string, string> = {
 };
 
 /** Onglets déplaçables / masquables (Accueil et Profil restent toujours visibles). */
-export const MOVABLE_TABS = ['search', 'library', 'calendar', 'chat', 'activity'];
+export const MOVABLE_TABS = ['search', 'library', 'live', 'calendar', 'chat', 'activity'];
 
 export function orderTabs(names: string[], prefs: TabPref[]) {
   const pos = new Map(prefs.map((t, i) => [t.name, i]));
