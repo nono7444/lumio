@@ -207,8 +207,8 @@ export default function SettingsScreen() {
 
         {serverReq && settings.jellyfin?.isAdmin !== false ? (
           <Section title="Demandes">
-            <Text style={styles.help}>Qui peut demander quoi : validation automatique ou par toi, quotas de films et de saisons.</Text>
-            <Button title="Utilisateurs et droits" icon="people-outline" variant="secondary" onPress={() => router.push('/users')} />
+            <Text style={styles.help}>Notifications push des demandes, validation automatique ou par toi, quotas de films et de saisons.</Text>
+            <Button title="Utilisateurs, droits et notifications" icon="people-outline" variant="secondary" onPress={() => router.push('/users')} />
           </Section>
         ) : null}
 

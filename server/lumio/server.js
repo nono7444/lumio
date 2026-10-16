@@ -22,7 +22,7 @@ const REQUESTS_FILE = path.join(DATA_DIR, 'requests.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.2.0';
+const VERSION = '3.3.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -81,6 +81,10 @@ const kindOf = (type) => (type === 'tv' ? 'sonarr' : 'radarr');
 // Réglages généraux (comme « Paramètres → Utilisateurs » de Seerr)
 function settings() {
   return {
+    ntfyTopic: ntfyTopic(),
+    ntfyServer: NTFY_SERVER,
+    ntfyEnabled: config.ntfyEnabled !== false,
+    publicUrl: publicUrl() || null,
     defaultAutoApprove: config.defaultAutoApprove !== false,
     defaultMovieQuotaLimit: Number(config.defaultMovieQuotaLimit) || 0,
     defaultMovieQuotaDays: Number(config.defaultMovieQuotaDays) || 7,
@@ -88,6 +92,48 @@ function settings() {
     defaultTvQuotaDays: Number(config.defaultTvQuotaDays) || 7,
     usersSeeAllRequests: config.usersSeeAllRequests === true,
   };
+}
+
+// ——— Notifications push (ntfy) pour l'admin : nouvelle demande, échec, disponible ———
+// L'admin s'abonne au sujet dans l'appli ntfy (iOS / Android). Les boutons « Valider » / « Refuser »
+// de la notification appellent /hooks/… avec une signature HMAC (pas besoin d'ouvrir l'appli).
+if (!config.hookSecret) {
+  config.hookSecret = crypto.randomBytes(24).toString('hex');
+  config.ntfyTopic = config.ntfyTopic || `lumio-${crypto.randomBytes(8).toString('hex')}`;
+  writeJson(CONFIG_FILE, config);
+}
+const NTFY_SERVER = (process.env.NTFY_SERVER || 'https://ntfy.sh').replace(/\/+$/, '');
+const ntfyTopic = () => process.env.NTFY_TOPIC || config.ntfyTopic;
+const publicUrl = () => (process.env.PUBLIC_URL || config.publicUrl || '').replace(/\/+$/, '');
+const sign = (id, action) => crypto.createHmac('sha256', config.hookSecret).update(`${action}:${id}`).digest('hex').slice(0, 32);
+
+async function notify({ title, message, tags, image, click, actions }) {
+  if (config.ntfyEnabled === false || !ntfyTopic()) return;
+  try {
+    await fetch(NTFY_SERVER, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(process.env.NTFY_TOKEN ? { Authorization: `Bearer ${process.env.NTFY_TOKEN}` } : {}) },
+      body: JSON.stringify({ topic: ntfyTopic(), title, message, tags, attach: image, click: click || 'lumio://activity', actions }),
+    });
+  } catch {}
+}
+
+function notifyRequest(r, what) {
+  const base = publicUrl();
+  const pending = r.status === RequestStatus.PENDING;
+  const actions = [];
+  if (pending && base) {
+    actions.push({ action: 'http', label: 'Valider', url: `${base}/hooks/approve?id=${r.id}&sig=${sign(r.id, 'approve')}`, method: 'POST', clear: true });
+    actions.push({ action: 'http', label: 'Refuser', url: `${base}/hooks/decline?id=${r.id}&sig=${sign(r.id, 'decline')}`, method: 'POST', clear: true });
+  }
+  actions.push({ action: 'view', label: 'Voir', url: 'lumio://activity' });
+  notify({
+    title: pending ? `Demande à valider · ${r.requestedBy.name}` : r.status === RequestStatus.FAILED ? `Demande en échec · ${r.requestedBy.name}` : `Nouvelle demande · ${r.requestedBy.name}`,
+    message: `${r.title}${r.year ? ` (${r.year})` : ''}${what}${r.status === RequestStatus.FAILED && r.error ? `\n${r.error}` : pending ? '' : '\nTéléchargement lancé.'}`,
+    tags: [pending ? 'hourglass' : r.status === RequestStatus.FAILED ? 'warning' : 'inbox_tray'],
+    image: r.poster,
+    actions,
+  });
 }
 
 // ——— Vérification du jeton Jellyfin (cache 10 min) ———
@@ -383,7 +429,7 @@ function refreshCompleted(lib) {
       r.status = RequestStatus.COMPLETED;
       r.completedAt = new Date().toISOString();
       changed = true;
-      postMessage(LUMIO_BOT, `🎉 Disponible dans Jellyfin (demandé par ${r.requestedBy.name})`, mediaOf(r), 'available');
+      notify({ title: 'Disponible dans Jellyfin', message: `${r.title} · demandé par ${r.requestedBy.name}`, tags: ['tada'], image: r.poster });
     }
   }
   if (changed) saveRequests();
@@ -536,6 +582,9 @@ async function status() {
 
 // ——— Chat ———
 const LUMIO_BOT = { id: 'lumio', name: 'Lumio', admin: true };
+// Anciennes annonces automatiques (demandes, validations…) : masquées, le chat sert juste à discuter
+const AUTO_KINDS = new Set(['request', 'approved', 'declined', 'available', 'grab']);
+const chatMessages = () => messages.filter((m) => !AUTO_KINDS.has(m.kind));
 
 function cleanMedia(m) {
   if (!m || typeof m !== 'object') return undefined;
@@ -722,8 +771,8 @@ async function createRequest(user, b) {
   library = null;
 
   const what = type === 'tv' ? ` (${seasons.length > 1 ? `${seasons.length} saisons` : `saison ${seasons[0]}`})` : '';
-  if (r.status === RequestStatus.PENDING) postMessage(user, `📝 a demandé${what} · en attente de validation`, mediaOf(r), 'request');
-  else if (r.status === RequestStatus.APPROVED) postMessage(user, `📥 a demandé${what} · téléchargement lancé`, mediaOf(r), 'request');
+  // Plus d'annonce dans le chat : notification push pour l'admin (sauf pour ses propres demandes)
+  if (!user.admin || r.status === RequestStatus.FAILED) notifyRequest(r, what);
   return r;
 }
 
@@ -743,7 +792,6 @@ async function approveRequest(admin, r, b) {
   }
   saveRequests();
   library = null;
-  if (r.status === RequestStatus.APPROVED) postMessage(admin, `✅ a validé la demande de ${r.requestedBy.name}`, mediaOf(r), 'approved');
   return r;
 }
 
@@ -767,10 +815,45 @@ const server = http.createServer(async (req, res) => {
     return res.end();
   }
 
+  // Boutons « Valider » / « Refuser » des notifications push (signés, sans jeton Jellyfin)
+  const hook = url.pathname.match(/^\/hooks\/(approve|decline)$/);
+  if (hook && req.method === 'POST') {
+    const id = url.searchParams.get('id') || '';
+    const sig = url.searchParams.get('sig') || '';
+    const r = requests.find((x) => x.id === id);
+    if (!r || sig !== sign(id, hook[1])) return send(res, 403, { error: 'lien invalide' });
+    try {
+      const admin = { id: 'push', name: 'Admin (notification)', admin: true };
+      if (hook[1] === 'approve') await approveRequest(admin, r, {});
+      else if (r.status === RequestStatus.PENDING) {
+        r.status = RequestStatus.DECLINED;
+        r.modifiedBy = { id: admin.id, name: admin.name };
+        r.modifiedAt = new Date().toISOString();
+        saveRequests();
+      }
+      return send(res, 200, { ok: true, status: r.status });
+    } catch (e) {
+      return send(res, 400, { error: String((e && e.message) || e) });
+    }
+  }
+
   if (!url.pathname.startsWith('/api/')) return send(res, 404, { error: 'introuvable' });
 
   const user = await whoAmI(req.headers['x-jellyfin-token']);
   if (!user) return send(res, 401, { error: 'jeton Jellyfin invalide' });
+
+  // Adresse publique du serveur (pour les boutons des notifications), vue depuis l'appli
+  if (!process.env.PUBLIC_URL) {
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    const proto = req.headers['x-forwarded-proto'] || (String(host || '').includes('localhost') ? 'http' : 'https');
+    if (host && !/^(localhost|127\.|192\.168\.|10\.)/.test(String(host))) {
+      const found = `${String(proto).split(',')[0]}://${String(host).split(',')[0]}`;
+      if (config.publicUrl !== found) {
+        config.publicUrl = found;
+        saveConfig();
+      }
+    }
+  }
 
   try {
     const p = url.pathname;
@@ -785,16 +868,18 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && p === '/api/messages') {
       const after = q.get('after');
       const limit = Math.min(200, Number(q.get('limit')) || 100);
-      let list = messages;
+      const all = chatMessages();
+      let list = all;
       if (after) {
-        const idx = messages.findIndex((m) => m.id === after);
-        list = idx >= 0 ? messages.slice(idx + 1) : messages;
+        const idx = all.findIndex((m) => m.id === after);
+        list = idx >= 0 ? all.slice(idx + 1) : all;
       }
       const { token, ...me } = user;
       return send(res, 200, { me, messages: list.slice(-limit) });
     }
     if (req.method === 'GET' && p === '/api/latest') {
-      const last = messages[messages.length - 1];
+      const all = chatMessages();
+      const last = all[all.length - 1];
       return send(res, 200, { id: last ? last.id : null, at: last ? last.createdAt : null, from: last ? last.userId : null });
     }
     if (req.method === 'POST' && p === '/api/messages') {
@@ -894,7 +979,6 @@ const server = http.createServer(async (req, res) => {
         r.modifiedBy = { id: user.id, name: user.name };
         r.modifiedAt = new Date().toISOString();
         saveRequests();
-        postMessage(user, `❌ a refusé la demande de ${r.requestedBy.name}${r.reason ? ` : ${r.reason}` : ''}`, mediaOf(r), 'declined');
         return send(res, 200, publicRequest(r, null));
       }
       if (req.method === 'DELETE' && !action) {
@@ -958,10 +1042,18 @@ const server = http.createServer(async (req, res) => {
       const b = await readBody(req);
       if (b.defaultAutoApprove !== undefined) config.defaultAutoApprove = Boolean(b.defaultAutoApprove);
       if (b.usersSeeAllRequests !== undefined) config.usersSeeAllRequests = Boolean(b.usersSeeAllRequests);
+      if (b.ntfyEnabled !== undefined) config.ntfyEnabled = Boolean(b.ntfyEnabled);
+      if (b.newNtfyTopic) config.ntfyTopic = `lumio-${crypto.randomBytes(8).toString('hex')}`;
       for (const k of ['defaultMovieQuotaLimit', 'defaultMovieQuotaDays', 'defaultTvQuotaLimit', 'defaultTvQuotaDays'])
         if (b[k] !== undefined) config[k] = Math.max(0, Number(b[k]) || 0);
       saveConfig();
       return send(res, 200, settings());
+    }
+
+    if (req.method === 'POST' && p === '/api/admin/notify-test') {
+      requireAdmin(user);
+      await notify({ title: 'Lumio', message: 'Les notifications fonctionnent ✅', tags: ['white_check_mark'] });
+      return send(res, 200, { ok: true, topic: ntfyTopic() });
     }
 
     // ——— Admin : config Radarr / Sonarr envoyée depuis l'appli ———

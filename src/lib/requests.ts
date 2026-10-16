@@ -57,6 +57,10 @@ export type ArrOptions = {
 };
 
 export type AdminSettings = {
+  ntfyTopic?: string;
+  ntfyServer?: string;
+  ntfyEnabled?: boolean;
+  publicUrl?: string | null;
   defaultAutoApprove: boolean;
   defaultMovieQuotaLimit: number;
   defaultMovieQuotaDays: number;
@@ -116,7 +120,8 @@ export const requestsApi = {
   users: (s: Settings) => serverCall<{ settings: AdminSettings; users: AdminUser[] }>(s, '/api/admin/users'),
   updateUser: (s: Settings, id: string, patch: Record<string, number | boolean | null>) =>
     serverCall(s, `/api/admin/users/${id}`, { method: 'PUT', body: JSON.stringify(patch) }),
-  updateSettings: (s: Settings, patch: Partial<AdminSettings>) =>
+  notifyTest: (s: Settings) => serverCall<{ ok: boolean; topic: string }>(s, '/api/admin/notify-test', { method: 'POST', body: '{}' }),
+  updateSettings: (s: Settings, patch: Partial<AdminSettings> & { newNtfyTopic?: boolean }) =>
     serverCall<AdminSettings>(s, '/api/admin/settings', { method: 'PUT', body: JSON.stringify(patch) }),
 };
 
