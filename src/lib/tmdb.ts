@@ -70,7 +70,7 @@ export type TmdbCredits = {
 
 export class TmdbError extends Error {}
 
-async function call<T>(s: Settings, path: string, params: Record<string, string | number> = {}): Promise<T> {
+export async function tmdbCall<T>(s: Settings, path: string, params: Record<string, string | number> = {}): Promise<T> {
   const key = s.tmdbKey.trim();
   if (!key) throw new TmdbError('Clé TMDB manquante');
   const isV4 = key.startsWith('eyJ');
@@ -103,23 +103,23 @@ function cached<T>(key: string, fn: () => Promise<T>): Promise<T> {
 
 export const tmdb = {
   search: (s: Settings, query: string, page = 1) =>
-    call<{ results: TmdbItem[]; total_pages: number }>(s, '/search/multi', { query, page, include_adult: 'false' }).then(
+    tmdbCall<{ results: TmdbItem[]; total_pages: number }>(s, '/search/multi', { query, page, include_adult: 'false' }).then(
       (r) => ({ ...r, results: r.results.filter((i) => i.media_type === 'movie' || i.media_type === 'tv') })
     ),
 
   searchType: (s: Settings, type: MediaType, query: string, year?: number) =>
-    call<{ results: TmdbItem[] }>(s, `/search/${type}`, {
+    tmdbCall<{ results: TmdbItem[] }>(s, `/search/${type}`, {
       query,
       ...(year ? (type === 'movie' ? { year } : { first_air_date_year: year }) : {}),
     }),
 
-  trending: (s: Settings) => call<{ results: TmdbItem[] }>(s, '/trending/all/week'),
+  trending: (s: Settings) => tmdbCall<{ results: TmdbItem[] }>(s, '/trending/all/week'),
 
   /** Découverte filtrée (genres / mot-clé), du plus récent au plus ancien. */
   discover: (s: Settings, type: MediaType, opts: { genres?: number[]; keyword?: number; page?: number }) => {
     const today = new Date().toISOString().slice(0, 10);
     const dateKey = type === 'movie' ? 'primary_release_date' : 'first_air_date';
-    return call<{ results: TmdbItem[] }>(s, `/discover/${type}`, {
+    return tmdbCall<{ results: TmdbItem[] }>(s, `/discover/${type}`, {
       sort_by: `${dateKey}.desc`,
       [`${dateKey}.lte`]: today,
       'vote_count.gte': 80,
@@ -132,12 +132,12 @@ export const tmdb = {
 
   movie: (s: Settings, id: number) =>
     cached(`movie:${id}`, () =>
-      call<TmdbMovie>(s, `/movie/${id}`, { append_to_response: 'images,credits', include_image_language: imgLangs(s) })
+      tmdbCall<TmdbMovie>(s, `/movie/${id}`, { append_to_response: 'images,credits', include_image_language: imgLangs(s) })
     ),
 
   tv: (s: Settings, id: number) =>
     cached(`tv:${id}`, () =>
-      call<TmdbTv>(s, `/tv/${id}`, {
+      tmdbCall<TmdbTv>(s, `/tv/${id}`, {
         append_to_response: 'external_ids,images,credits',
         include_image_language: imgLangs(s),
       })
@@ -146,21 +146,21 @@ export const tmdb = {
   /** Logo du titre (pour le hero), mis en cache. */
   logo: (s: Settings, type: MediaType, id: number) =>
     cached(`logo:${type}:${id}`, () =>
-      call<TmdbImages>(s, `/${type}/${id}/images`, { include_image_language: imgLangs(s) }).then((i) => pickLogo(s, i))
+      tmdbCall<TmdbImages>(s, `/${type}/${id}/images`, { include_image_language: imgLangs(s) }).then((i) => pickLogo(s, i))
     ),
 
   season: (s: Settings, tvId: number, n: number) =>
     cached(`season:${tvId}:${n}`, () =>
-      call<{
+      tmdbCall<{
         episodes: { id: number; episode_number: number; name: string; overview?: string; still_path?: string | null; air_date?: string | null; runtime?: number | null }[];
       }>(s, `/tv/${tvId}/season/${n}`)
     ),
 
   externalIds: (s: Settings, type: MediaType, id: number) =>
-    cached(`ext:${type}:${id}`, () => call<{ imdb_id?: string | null; tvdb_id?: number | null }>(s, `/${type}/${id}/external_ids`)),
+    cached(`ext:${type}:${id}`, () => tmdbCall<{ imdb_id?: string | null; tvdb_id?: number | null }>(s, `/${type}/${id}/external_ids`)),
 
   findImdb: (s: Settings, imdbId: string) =>
-    call<{ movie_results: TmdbItem[]; tv_results: TmdbItem[] }>(s, `/find/${imdbId}`, { external_source: 'imdb_id' }),
+    tmdbCall<{ movie_results: TmdbItem[]; tv_results: TmdbItem[] }>(s, `/find/${imdbId}`, { external_source: 'imdb_id' }),
 };
 
 const imgLangs = (s: Settings) => `${(s.language || 'fr-FR').slice(0, 2)},en,null`;

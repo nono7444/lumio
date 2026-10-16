@@ -117,21 +117,3 @@ export function ChatSection() {
     </Section>
   );
 }
-
-/** Source du calendrier des sorties. */
-export function CalendarSection() {
-  const { settings, update } = useSettings();
-  const [url, setUrl] = useState(settings.calendarAddon);
-  return (
-    <Section title="Calendrier">
-      <Field
-        label="Addon des sorties numériques"
-        value={url}
-        onChangeText={setUrl}
-        onEndEditing={() => url.trim() && update({ calendarAddon: url.trim().replace(/\/manifest\.json$/i, '') })}
-        keyboardType="url"
-        hint="Par défaut : Digital Releases (Releasio)."
-      />
-    </Section>
-  );
-}

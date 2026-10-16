@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ScreenTitle, SegChip, tap } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
-import { openStremioMeta } from '@/lib/navigation';
+import { openMedia } from '@/lib/navigation';
 import { dayKeyOf, dayLabel, fetchReleases, type Release } from '@/lib/releases';
 import { useSettings } from '@/lib/settings';
 
@@ -32,16 +32,13 @@ function DayChip({ date, count, on, onPress }: { date: Date; count: number; on: 
 }
 
 function ReleaseRow({ r }: { r: Release }) {
-  const { settings } = useSettings();
-  const [busy, setBusy] = useState(false);
-  const desc = (r.description ?? '').split('\n').slice(1).join(' ').trim();
+  const busy = false;
+  const desc = (r.description ?? '').trim();
   return (
     <Pressable
-      onPress={async () => {
-        if (busy) return;
+      onPress={() => {
         tap();
-        setBusy(true);
-        await openStremioMeta(settings, r).finally(() => setBusy(false));
+        openMedia(r.kind === 'movie' ? 'movie' : 'tv', r.tmdbId);
       }}
       style={({ pressed }) => [styles.row, { opacity: pressed ? 0.75 : 1 }]}>
       <View style={styles.poster}>
@@ -57,8 +54,7 @@ function ReleaseRow({ r }: { r: Release }) {
           {r.name}
         </Text>
         <Text style={styles.meta}>
-          {r.kind === 'movie' ? 'Film' : 'Série'}
-          {r.releaseInfo ? ` · ${r.releaseInfo}` : ''}
+          {r.kind === 'movie' ? 'Film' : 'Série'} · {r.info}
         </Text>
         {desc ? (
           <Text style={styles.desc} numberOfLines={3}>
@@ -82,17 +78,17 @@ export default function Calendar() {
   const [selected, setSelected] = useState<string | null>(null);
   const list = useRef<SectionList<Release>>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     setLoading(true);
     try {
-      setItems(await fetchReleases(settings.calendarAddon));
+      setItems(await fetchReleases(settings, force));
       setError(null);
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
       setLoading(false);
     }
-  }, [settings.calendarAddon]);
+  }, [settings]);
 
   useEffect(() => {
     load();
@@ -131,7 +127,7 @@ export default function Calendar() {
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
       <ScreenTitle title="Calendrier" />
-      <Text style={styles.subtitle}>Sorties numériques à venir</Text>
+      <Text style={styles.subtitle}>Sorties numériques (VOD, plateformes) et nouvelles saisons · dates TMDB</Text>
 
       <FlatList
         horizontal
@@ -161,10 +157,10 @@ export default function Calendar() {
         <SectionList
           ref={list}
           sections={sections}
-          keyExtractor={(r) => `${r.kind}:${r.id}`}
+          keyExtractor={(r) => r.id}
           stickySectionHeadersEnabled
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: TAB_SPACE }}
-          refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.text} />}
+          refreshControl={<RefreshControl refreshing={loading} onRefresh={() => load(true)} tintColor={C.text} />}
           onScrollToIndexFailed={() => {}}
           renderSectionHeader={({ section }) => (
             <View style={styles.sectionHead}>

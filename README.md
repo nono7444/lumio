@@ -29,7 +29,11 @@ Les réglages sont copiés dans le **trousseau iOS**, qui n'est pas effacé quan
 
 ### Calendrier
 
-Onglet des sorties numériques à venir (films et séries), alimenté par l'addon *Digital Releases* (Releasio). Cet addon n'a pas de champ date : la date est lue dans l'URL de l'affiche (`?d=JJ/MM/AA`), sinon dans la description (« Sortie numérique : … (15 octobre 2026) »).
+Onglet des sorties numériques, avec les dates exactes de TMDB :
+- **films** : sortie de type « numérique » (VOD, achat, location) en France, à défaut aux États-Unis, avec les plateformes ;
+- **séries** : nouvelles saisons sur les plateformes de streaming en France.
+
+Les sorties cinéma ne sont pas prises. La période couvre de J-7 à J+45.
 
 ### Accueil et périodes
 

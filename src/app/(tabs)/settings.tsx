@@ -10,7 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button, Field, ScreenTitle, Section } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
-import { CalendarSection, ChatSection, ThemeSection } from '@/components/extra-sections';
+import { ChatSection, ThemeSection } from '@/components/extra-sections';
 import { SeerrSection } from '@/components/seerr-section';
 import { ServerStatusSection } from '@/components/server-status';
 import { Addon, DEFAULT_ADDON, isManager, useSettings } from '@/lib/settings';
@@ -270,8 +270,6 @@ export default function SettingsScreen() {
             </>
           )}
         </Section>
-
-        <CalendarSection />
 
         <Section title="TMDB">
           <Field
