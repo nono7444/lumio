@@ -162,6 +162,11 @@ export function forgetChannels(src: LiveSource) {
 type Stream = { url?: string; name?: string; title?: string; behaviorHints?: { proxyHeaders?: { request?: Record<string, string> } } };
 
 /** Lien de lecture d'une chaîne (pour un addon Stremio, demandé à l'addon). */
+// Beaucoup de serveurs IPTV refusent les lecteurs inconnus : on se présente comme VLC si l'addon ne précise rien
+const IPTV_UA = 'VLC/3.0.20 LibVLC/3.0.20';
+const withUa = (h?: Record<string, string>) =>
+  h && Object.keys(h).some((k) => k.toLowerCase() === 'user-agent') ? h : { ...(h ?? {}), 'User-Agent': IPTV_UA };
+
 export type LiveStream = { uri: string; headers?: Record<string, string>; label?: string };
 
 /**
@@ -169,7 +174,7 @@ export type LiveStream = { uri: string; headers?: Record<string, string>; label?
  * (le lecteur passe à la suivante si l'une ne marche pas).
  */
 export async function channelStreams(ch: Channel): Promise<LiveStream[]> {
-  if (ch.url) return [{ uri: ch.url, headers: ch.headers }];
+  if (ch.url) return [{ uri: ch.url, headers: withUa(ch.headers) }];
   if (!ch.stremio) throw new Error('Chaîne sans lien');
   const { base, type, id } = ch.stremio;
   const encoded = `${base}/stream/${type}/${encodeURIComponent(id)}.json`;
@@ -188,7 +193,7 @@ export async function channelStreams(ch: Channel): Promise<LiveStream[]> {
     if (!s.url || !/^https?:\/\//i.test(s.url) || seen.has(s.url)) continue;
     seen.add(s.url);
     const h = s.behaviorHints?.proxyHeaders?.request;
-    out.push({ uri: s.url, headers: h && Object.keys(h).length ? h : undefined, label: [s.name, s.title].filter(Boolean).join(' · ').replace(/\s+/g, ' ').slice(0, 80) || undefined });
+    out.push({ uri: s.url, headers: withUa(h && Object.keys(h).length ? h : undefined), label: [s.name, s.title].filter(Boolean).join(' · ').replace(/\s+/g, ' ').slice(0, 80) || undefined });
   }
   if (!out.length) throw new Error('Aucun flux disponible pour cette chaîne');
   return out;
