@@ -223,6 +223,64 @@ export const jf = {
     return get<{ Items: JfItem[]; TotalRecordCount: number }>(`/Users/${j.userId}/Items?${q}`);
   },
 
+  /**
+   * Derniers ajouts, mais seulement les sorties récentes (année en cours et suivantes) :
+   * films sortis cette année, séries avec des épisodes diffusés cette année (nouvelle saison d'une ancienne série incluse).
+   * Ordre : du plus récemment ajouté sur le serveur au plus ancien. S'il y en a trop peu (début d'année), on inclut l'an dernier.
+   */
+  recentReleases: async (
+    s: Settings,
+    opts: { parentId?: string; kind: 'movies' | 'series' | 'both'; limit?: number }
+  ): Promise<JfItem[]> => {
+    const { j, get } = api(s);
+    const limit = opts.limit ?? 30;
+    const run = async (year: number) => {
+      const since = `${year}-01-01T00:00:00Z`;
+      const base = (types: string, n: number) => {
+        const q = new URLSearchParams({
+          Recursive: 'true',
+          IncludeItemTypes: types,
+          MinPremiereDate: since,
+          SortBy: 'DateCreated',
+          SortOrder: 'Descending',
+          Limit: String(n),
+          Fields: `${FIELDS},DateCreated,PremiereDate`,
+        });
+        if (opts.parentId) q.set('ParentId', opts.parentId);
+        return get<{ Items: (JfItem & { DateCreated?: string })[] }>(`/Users/${j.userId}/Items?${q}`).then((r) => r.Items);
+      };
+      const [movies, series] = await Promise.all([
+        opts.kind !== 'series' ? base('Movie', limit) : Promise.resolve([]),
+        opts.kind !== 'movies'
+          ? (async () => {
+              // Épisodes sortis cette année, regroupés par série dans l'ordre d'ajout
+              const eps = await base('Episode', 300);
+              const order: string[] = [];
+              const added = new Map<string, string>();
+              for (const e of eps)
+                if (e.SeriesId && !added.has(e.SeriesId)) {
+                  added.set(e.SeriesId, e.DateCreated ?? '');
+                  order.push(e.SeriesId);
+                }
+              const ids = order.slice(0, limit);
+              if (!ids.length) return [];
+              const r = await get<{ Items: JfItem[] }>(`/Users/${j.userId}/Items?Ids=${ids.join(',')}&Fields=${FIELDS}`);
+              return ids
+                .map((id) => r.Items.find((x) => x.Id === id))
+                .filter((x): x is JfItem => Boolean(x))
+                .map((x) => ({ ...x, DateCreated: added.get(x.Id) }));
+            })()
+          : Promise.resolve([]),
+      ]);
+      return [...movies, ...series]
+        .sort((a, b) => (b.DateCreated ?? '').localeCompare(a.DateCreated ?? ''))
+        .slice(0, limit) as JfItem[];
+    };
+    const year = new Date().getFullYear();
+    const items = await run(year);
+    return items.length >= 6 ? items : run(year - 1);
+  },
+
   item: (s: Settings, id: string) => {
     const { j, get } = api(s);
     return get<JfItem>(`/Users/${j.userId}/Items/${id}`);
