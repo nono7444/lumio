@@ -23,7 +23,7 @@ const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.4.0';
+const VERSION = '3.5.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -894,6 +894,32 @@ const server = http.createServer(async (req, res) => {
       };
     }
     return send(res, 200, publicStatusCache.body);
+  }
+
+  // Raccourci pour installer l'appli Android (téléphone)
+  if (url.pathname === '/android' || url.pathname === '/android.apk') {
+    res.writeHead(302, { Location: process.env.ANDROID_APK_URL || 'https://github.com/nono7444/lumio/releases/latest/download/lumio-android.apk' });
+    return res.end();
+  }
+
+  // Page d'invitation : lien cliquable partout (WhatsApp, SMS…), qui ouvre Lumio et le configure
+  if (url.pathname === '/invite') {
+    const deep = `lumio://invite${url.search}`;
+    const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+    const name = url.searchParams.get('name');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Invitation Lumio</title><style>
+body{margin:0;font-family:-apple-system,system-ui,sans-serif;background:#0B0D12;color:#fff;display:flex;min-height:100vh;align-items:center;justify-content:center}
+main{max-width:420px;padding:28px;text-align:center}h1{font-size:30px;margin:0 0 8px}p{color:#A1A1A6;line-height:1.5}
+a.b{display:block;margin:12px 0;padding:15px;border-radius:14px;background:#fff;color:#000;text-decoration:none;font-weight:700}
+a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1.6;padding-left:20px}</style></head><body><main>
+<h1>Lumio</h1><p>${name ? `${esc(name)} t'invite sur son serveur.` : 'Tu es invité sur un serveur Lumio.'}</p>
+<ol><li>Installe l'appli (bouton ci-dessous).</li><li>Reviens ici et touche « Ouvrir dans Lumio » : tout se configure.</li><li>Connecte-toi avec l'identifiant Jellyfin qu'on t'a donné.</li></ol>
+<a class="b" href="${esc(deep)}">Ouvrir dans Lumio</a>
+<a class="b s" href="/android">Installer sur Android (APK)</a>
+<a class="b s" href="https://github.com/nono7444/lumio/releases/latest">iPhone : via FlareStore / SideStore</a>
+</main></body></html>`);
   }
 
   // Raccourci pour installer l'appli TV : taper « lumio.tondomaine/tv » dans Downloader

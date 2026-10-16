@@ -1,12 +1,13 @@
 // Réglages → Application : version installée, dernière version publiée, bouton « Vérifier ».
 import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
-import { Linking, StyleSheet, Text, View } from "react-native";
+import { Linking, Platform, StyleSheet, Text, View } from "react-native";
 
 import { toast } from "@/components/toast";
 import { Button, Section } from "@/components/ui";
 import { C, R } from "@/constants/theme";
 import {
+  ANDROID_APK_URL,
   APP_VERSION,
   checkForUpdate,
   cleanNotes,
@@ -50,10 +51,17 @@ export function AppVersionSection() {
               <Text style={[styles.dim, { color: C.text }]}>{notes}</Text>
             ) : null}
             <Text style={styles.dim}>
-              Ouvre FlareStore, onglet des mises à jour (ou la source Lumio),
-              puis « Mettre à jour ». Tes réglages et ta connexion sont
-              conservés.
+              {Platform.OS === "android"
+                ? "Touche « Télécharger », puis ouvre le fichier pour l’installer par-dessus. Tes réglages et ta connexion sont conservés."
+                : "Ouvre FlareStore, onglet des mises à jour (ou la source Lumio), puis « Mettre à jour ». Tes réglages et ta connexion sont conservés."}
             </Text>
+            {Platform.OS === "android" ? (
+              <Button
+                title="Télécharger la mise à jour"
+                icon="download-outline"
+                onPress={() => Linking.openURL(ANDROID_APK_URL)}
+              />
+            ) : null}
           </View>
         ) : null}
         <View style={{ flexDirection: "row", gap: 10 }}>

@@ -2,13 +2,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Linking, Platform, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FocusPressable as Pressable } from '@/components/tv';
 import { tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
-import { APP_VERSION, cleanNotes, dismissedVersion, dismissVersion, useAppUpdate } from '@/lib/app-update';
+import { ANDROID_APK_URL, APP_VERSION, cleanNotes, dismissedVersion, dismissVersion, useAppUpdate } from '@/lib/app-update';
 
 export function UpdateBanner() {
   const insets = useSafeAreaInsets();
@@ -32,7 +32,8 @@ export function UpdateBanner() {
         onPress={() => {
           tap();
           close();
-          router.push('/settings');
+          if (Platform.OS === 'android') Linking.openURL(ANDROID_APK_URL).catch(() => {});
+          else router.push('/settings');
         }}
         style={styles.banner}>
         <View style={styles.icon}>
@@ -41,7 +42,7 @@ export function UpdateBanner() {
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Lumio {update.version} est disponible</Text>
           <Text style={styles.text} numberOfLines={2}>
-            {notes ? `${notes} · ` : ''}Tu as la {APP_VERSION}. Mets à jour depuis FlareStore.
+            {notes ? `${notes} · ` : ''}Tu as la {APP_VERSION}. {Platform.OS === 'android' ? 'Touche pour la télécharger.' : 'Mets à jour depuis FlareStore.'}
           </Text>
         </View>
         <Pressable onPress={close} hitSlop={12} style={styles.close}>

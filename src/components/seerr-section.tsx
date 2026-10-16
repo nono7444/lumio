@@ -5,6 +5,7 @@ import { Button, Field, Section } from '@/components/ui';
 import { ADDONS_ENABLED } from '@/constants/features';
 import { C } from '@/constants/theme';
 import { seerr } from '@/lib/seerr';
+import { serverBase } from '@/lib/chat';
 import { isManager, useSettings } from '@/lib/settings';
 
 /** Serveur de demandes (Seerr / Jellyseerr) + lien d'invitation pour l'admin. */
@@ -89,10 +90,12 @@ export function InviteButton() {
     if (settings.tmdbKey) q.set('tmdb', settings.tmdbKey);
     if (ADDONS_ENABLED && settings.addons.length) q.set('addons', settings.addons.map((a) => a.base).join('|'));
     if (userName) q.set('name', userName);
-    const link = `lumio://invite?${q}`;
+    // Avec le serveur Lumio : page web cliquable partout (installe l'appli puis l'ouvre configurée)
+    const web = settings.chatUrl ? `${serverBase(settings.chatUrl)}/invite?${q}` : null;
+    const link = web ?? `lumio://invite?${q}`;
     await Share.share({
       message:
-        `Installe Lumio puis ouvre ce lien pour tout configurer automatiquement (connexion avec ton compte Jellyfin) :\n\n${link}`,
+        `Lumio, l'appli de films et séries de la maison 🎬\n\nOuvre ce lien : il t'explique comment installer l'appli (Android ou iPhone) puis la configure toute seule. Connecte-toi ensuite avec ton compte Jellyfin.\n\n${link}`,
     });
   }
 

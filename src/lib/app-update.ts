@@ -7,6 +7,8 @@ import { AppState } from 'react-native';
 export const APP_VERSION = Constants.expoConfig?.version ?? '0.0.0';
 export const SOURCE_URL = 'https://github.com/nono7444/lumio/releases/latest/download/altstore.json';
 export const RELEASES_URL = 'https://github.com/nono7444/lumio/releases/latest';
+/** Android : l'APK de la dernière version (s'installe par-dessus, réglages conservés). */
+export const ANDROID_APK_URL = 'https://github.com/nono7444/lumio/releases/latest/download/lumio-android.apk';
 
 export type UpdateInfo = { version: string; date?: string; notes?: string };
 
