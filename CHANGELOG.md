@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Live TV : tri par langue (🇫🇷 Français par défaut, ou un autre pays) et par thème (Sport, Info, Cinéma & séries, Enfants, Documentaires, Musique, Généralistes), puis par groupe.
+- Live TV : les comptes Xtream Codes ne chargent plus que les chaînes en direct (plus les films et séries à la demande), avec leurs vraies catégories.
+
 ## 1.0.27 — 16 octobre 2026
 
 - Live TV : les listes IPTV et chaînes en « http:// » (Xtream Codes, M3U) se chargent enfin (blocage de sécurité iOS levé).

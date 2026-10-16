@@ -95,6 +95,8 @@ export type Settings = {
   liveSources: LiveSource[];
   /** Chaînes favorites (clés « source:chaîne ») */
   liveFavorites: string[];
+  /** Live TV : langue affichée ('fr' = chaînes en français, 'all' = tout, ou un code pays) */
+  liveLang: string;
 };
 
 export type LiveSource = {
@@ -136,6 +138,7 @@ const DEFAULTS: Settings = {
   showTrending: true,
   liveSources: [],
   liveFavorites: [],
+  liveLang: 'fr',
 };
 
 const KEY = 'lumio-native:settings:v2';

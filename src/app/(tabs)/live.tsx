@@ -10,11 +10,11 @@ import { toast } from '@/components/toast';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { Button, ScreenTitle, SegChip, tap } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
-import { channelStreams, loadChannels, type Channel } from '@/lib/live';
+import { channelStreams, COUNTRIES, countryOf, FRENCH, loadChannels, THEMES, themeOf, type Channel, type Theme } from '@/lib/live';
 import { useSettings } from '@/lib/settings';
 
-const FAV = '★ Favoris';
-const ALL = 'Toutes';
+const ALL = 'Tous les groupes';
+type ThemeFilter = 'all' | 'fav' | Theme;
 
 function ChannelTile({ ch, width, fav, onPress, onLong }: { ch: Channel; width: number; fav: boolean; onPress: () => void; onLong: () => void }) {
   const [broken, setBroken] = useState(false);
@@ -46,6 +46,13 @@ export default function Live() {
   const [channels, setChannels] = useState<Channel[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [group, setGroup] = useState(ALL);
+  const [theme, setTheme] = useState<ThemeFilter>('all');
+  const lang = settings.liveLang || 'fr';
+  const setLang = (l: string) => {
+    tap();
+    setGroup(ALL);
+    update({ liveLang: l });
+  };
   const [query, setQuery] = useState('');
   const [opening, setOpening] = useState<string | null>(null);
 
@@ -66,24 +73,62 @@ export default function Live() {
   useEffect(() => {
     setChannels(null);
     setGroup(ALL);
+    setTheme('all');
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source?.id, source?.url]);
 
   const favs = useMemo(() => new Set(settings.liveFavorites), [settings.liveFavorites]);
+
+  // Classement de chaque chaîne (pays / langue, thème), calculé une fois par liste
+  const tagged = useMemo(
+    () => (channels ?? []).map((c) => ({ c, country: countryOf(c), theme: themeOf(c) })),
+    [channels]
+  );
+
+  // Langues présentes : Français d'abord, puis les pays les plus fournis
+  const langs = useMemo(() => {
+    const n = new Map<string, number>();
+    for (const t of tagged) if (t.country && !FRENCH.has(t.country)) n.set(t.country, (n.get(t.country) ?? 0) + 1);
+    const hasFr = tagged.some((t) => t.country && FRENCH.has(t.country));
+    return [...(hasFr ? ['fr'] : []), 'all', ...[...n.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k)];
+  }, [tagged]);
+  const effLang = langs.includes(lang) ? lang : langs[0] ?? 'all';
+
+  const byLang = useMemo(
+    () =>
+      tagged.filter((t) =>
+        effLang === 'all' ? true : effLang === 'fr' ? Boolean(t.country && FRENCH.has(t.country)) : t.country === effLang
+      ),
+    [tagged, effLang]
+  );
+
+  // Thèmes présents dans cette langue (avec leur nombre de chaînes)
+  const themeCounts = useMemo(() => {
+    const n = new Map<Theme, number>();
+    for (const t of byLang) n.set(t.theme, (n.get(t.theme) ?? 0) + 1);
+    return n;
+  }, [byLang]);
+  const hasFav = byLang.some((t) => favs.has(t.c.key));
+
+  const byTheme = useMemo(
+    () => byLang.filter((t) => (theme === 'all' ? true : theme === 'fav' ? favs.has(t.c.key) : t.theme === theme)),
+    [byLang, theme, favs]
+  );
+
+  // Groupes d'origine de la liste, restreints à la langue et au thème choisis
   const groups = useMemo(() => {
     const g = new Map<string, number>();
-    for (const c of channels ?? []) if (c.group) g.set(c.group, (g.get(c.group) ?? 0) + 1);
-    const hasFav = (channels ?? []).some((c) => favs.has(c.key));
-    return [...(hasFav ? [FAV] : []), ALL, ...[...g.keys()].sort((a, b) => a.localeCompare(b, 'fr'))];
-  }, [channels, favs]);
+    for (const t of byTheme) if (t.c.group) g.set(t.c.group, (g.get(t.c.group) ?? 0) + 1);
+    return [ALL, ...[...g.keys()].sort((a, b) => a.localeCompare(b, 'fr'))];
+  }, [byTheme]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return (channels ?? []).filter(
-      (c) => (group === ALL || (group === FAV ? favs.has(c.key) : c.group === group)) && (!q || c.name.toLowerCase().includes(q))
-    );
-  }, [channels, group, query, favs]);
+    return byTheme
+      .filter((t) => (group === ALL || t.c.group === group) && (!q || t.c.name.toLowerCase().includes(q)))
+      .map((t) => t.c);
+  }, [byTheme, group, query]);
 
   const cols = width >= 1000 ? 7 : width >= 700 ? 5 : 3;
   const gap = 12;
@@ -151,7 +196,38 @@ export default function Live() {
               clearButtonMode="while-editing"
             />
           </View>
-          {groups.length > 1 ? (
+          {/* Langue / pays */}
+          {langs.length > 1 ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+              {langs.map((l) => (
+                <SegChip
+                  key={l}
+                  label={l === 'fr' ? '🇫🇷 Français' : l === 'all' ? '🌐 Toutes les langues' : `${COUNTRIES[l]?.flag ?? ''} ${COUNTRIES[l]?.label ?? l}`}
+                  on={l === effLang}
+                  onPress={() => setLang(l)}
+                />
+              ))}
+            </ScrollView>
+          ) : null}
+          {/* Thème : sport, info, cinéma… */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+            <SegChip label="Tout" icon="apps" on={theme === 'all'} onPress={() => { setTheme('all'); setGroup(ALL); }} />
+            {hasFav ? <SegChip label="Favoris" icon="star" on={theme === 'fav'} onPress={() => { setTheme('fav'); setGroup(ALL); }} /> : null}
+            {THEMES.filter((t) => themeCounts.get(t.id)).map((t) => (
+              <SegChip
+                key={t.id}
+                label={`${t.label} · ${themeCounts.get(t.id)}`}
+                icon={t.icon as keyof typeof Ionicons.glyphMap}
+                on={theme === t.id}
+                onPress={() => {
+                  setTheme(t.id);
+                  setGroup(ALL);
+                }}
+              />
+            ))}
+          </ScrollView>
+          {/* Groupes d'origine de la liste (affinage) */}
+          {groups.length > 2 ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
               {groups.map((g) => (
                 <SegChip key={g} label={g} on={g === group} onPress={() => setGroup(g)} />
