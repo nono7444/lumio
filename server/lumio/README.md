@@ -2,7 +2,7 @@
 
 Petit serveur, en un seul fichier et sans dépendance, qui sert trois choses dans l'appli :
 
-- **Chat famille** : onglet Chat, et bouton « Proposer à la famille » sur les fiches.
+- **Chat famille** : onglet Chat, et bouton « Proposer » sur les fiches.
 - **Demandes façon Seerr** : statuts (en attente, approuvée, refusée, échec, disponible), demandes saison par saison, validation automatique ou par l'admin, quotas, choix du dossier (Films, Kids, Anime…). Les clés Radarr et Sonarr restent sur ce serveur, jamais sur les téléphones. Chaque demande, validation ou arrivée dans Jellyfin est annoncée dans le chat.
 - **État des serveurs** : Jellyfin, Radarr et Sonarr (en ligne ou non, version, espace disque, file d'attente).
 

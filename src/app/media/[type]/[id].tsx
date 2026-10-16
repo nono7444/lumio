@@ -269,14 +269,15 @@ export default function MediaScreen() {
           ) : null}
 
           {/* ——— Proposer le titre dans le chat famille ——— */}
-          {settings.chatUrl && settings.jellyfin ? (
+          {/* Proposer : seulement pour un titre pas encore sur le serveur */}
+          {settings.chatUrl && settings.jellyfin && !jfItem ? (
             <Button
-              title="Proposer à la famille"
+              title="Proposer"
               icon="chatbubbles-outline"
               variant="secondary"
               onPress={() =>
                 Alert.prompt
-                  ? Alert.prompt('Proposer dans le chat', 'Un petit mot (facultatif) ?', async (msg) => {
+                  ? Alert.prompt('Proposer', 'Un petit mot pour la famille (facultatif) ?', async (msg) => {
                       try {
                         await chat.send(settings, msg ?? '', {
                           type: details.kind,

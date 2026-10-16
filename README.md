@@ -39,7 +39,7 @@ Le **thème de saison** (couleur d'accent, emoji, teinte du hero) suit la date. 
 ### Serveur Lumio : chat famille et téléchargements pour tous
 
 Un petit serveur Docker sans dépendance, qui s'authentifie avec le compte Jellyfin : voir [`server/lumio`](server/lumio/README.md).
-- Onglet **Chat** pour les remarques et propositions, avec le bouton « Proposer à la famille » sur chaque fiche.
+- Onglet **Chat** pour les remarques et propositions, avec le bouton « Proposer » sur les fiches des titres pas encore disponibles.
 - **Demandes façon Seerr**. Le serveur garde les clés Radarr et Sonarr (l'admin les envoie depuis Profil, rubrique Serveur Lumio). Il gère aussi la validation automatique ou par l'admin, les quotas, les demandes saison par saison, et les annonces dans le chat (demande, validation, refus, « disponible »).
 - **État des serveurs** en haut de Profil : Jellyfin, Radarr, Sonarr, serveur Lumio et Seerr (en ligne ou non, version, latence, espace disque).
 
