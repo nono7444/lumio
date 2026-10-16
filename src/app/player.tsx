@@ -14,7 +14,8 @@ import { NativePlayer } from '@/components/players/native-player';
 import { Toasts } from '@/components/toast';
 import { Button } from '@/components/ui';
 import { C } from '@/constants/theme';
-import { getPlayback, jf, jfImage, playback, type PlaybackTarget } from '@/lib/jellyfin';
+import { getPlayback, jf, jfImage, playback, QUALITIES, type PlaybackTarget } from '@/lib/jellyfin';
+import { QualitySheet } from '@/components/players/quality';
 import { tmdbNextEpisode } from '@/lib/smart-play';
 import { useSettings } from '@/lib/settings';
 
@@ -58,6 +59,8 @@ export default function Player() {
   const { settings } = useSettings();
   const insets = useSafeAreaInsets();
   const [engine, setEngine] = useState<'mpv' | 'native'>(settings.player ?? 'mpv');
+  const [quality, setQuality] = useState(settings.quality || 'original');
+  const [qualityOpen, setQualityOpen] = useState(false);
   const [source, setSource] = useState<Source | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -88,7 +91,13 @@ export default function Player() {
     (async () => {
       try {
         if (p.kind === 'jellyfin' && p.itemId) {
-          const t = await getPlayback(settings, p.itemId, Math.max(position.current, startAt), engine);
+          const t = await getPlayback(
+            settings,
+            p.itemId,
+            Math.max(position.current, startAt),
+            engine,
+            QUALITIES.find((x) => x.id === quality)
+          );
           if (cancelled) return;
           target.current = t;
           setSource({ uri: t.uri, isHls: t.isHls });
@@ -109,7 +118,7 @@ export default function Player() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, attempt]);
+  }, [engine, attempt, quality]);
 
   // Fin de lecture signalée à Jellyfin à la fermeture
   useEffect(() => {
@@ -216,7 +225,17 @@ export default function Player() {
     if (!source) throw new Error('Aucune source');
     return { uri: source.uri, contentType: guessContentType(source.uri, source.isHls), title: p.title, subtitle: p.subtitle };
   };
-  const castBtn = Platform.isTV ? undefined : <CastIcon />;
+  const qualityLabel = QUALITIES.find((x) => x.id === quality)?.label.split(' ')[0] ?? 'Auto';
+  const castBtn = (
+    <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+      {p.kind === 'jellyfin' ? (
+        <Pressable onPress={() => setQualityOpen(true)} hitSlop={8} style={styles.qualityBtn}>
+          <Text style={styles.qualityText}>{qualityLabel}</Text>
+        </Pressable>
+      ) : null}
+      {Platform.isTV ? null : <CastIcon />}
+    </View>
+  );
 
   return (
     <View style={styles.root}>
@@ -319,6 +338,15 @@ export default function Player() {
           <Ionicons name="close" size={24} color="#fff" />
         </Pressable>
       )}
+      <QualitySheet
+        visible={qualityOpen}
+        current={quality}
+        onClose={() => setQualityOpen(false)}
+        onPick={(id) => {
+          setQualityOpen(false);
+          if (id !== quality) setQuality(id);
+        }}
+      />
       <Toasts />
     </View>
   );
@@ -326,6 +354,8 @@ export default function Player() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000' },
+  qualityBtn: { paddingHorizontal: 10, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center' },
+  qualityText: { color: '#fff', fontSize: 13, fontWeight: '800' },
   center: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadingTitle: { color: '#fff', fontSize: 15, fontWeight: '700', marginTop: 6 },
   errorTitle: { color: C.text, fontSize: 20, fontWeight: '800' },

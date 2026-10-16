@@ -15,7 +15,7 @@ import { SeerrSection } from '@/components/seerr-section';
 import { ServerStatusSection } from '@/components/server-status';
 import { Addon, DEFAULT_ADDON, isManager, useSettings } from '@/lib/settings';
 import { RATING_SOURCES } from '@/lib/better-posters';
-import { logout as logoutJellyfin } from '@/lib/jellyfin';
+import { logout as logoutJellyfin, QUALITIES } from '@/lib/jellyfin';
 import { useServerArr } from '@/lib/lumio-server';
 import { useServerRequests } from '@/lib/requests';
 import { tmdb as tmdbApi } from '@/lib/tmdb';
@@ -225,6 +225,12 @@ export default function SettingsScreen() {
             ]}
             value={settings.player}
             onChange={(v) => update({ player: v as 'mpv' | 'native' })}
+          />
+          <Picker
+            label="Qualité par défaut (Jellyfin)"
+            options={QUALITIES.map((q) => ({ value: q.id, label: q.label }))}
+            value={settings.quality || 'original'}
+            onChange={(v) => update({ quality: String(v) })}
           />
           <Toggle label="Enchaîner l'épisode suivant" value={settings.autoNext} onChange={(v) => update({ autoNext: v })} />
         </Section>

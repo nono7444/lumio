@@ -477,18 +477,45 @@ export type PlaybackTarget = {
 
 export type PlaybackEngine = 'mpv' | 'native' | 'cast';
 
-export async function getPlayback(s: Settings, itemId: string, startSeconds = 0, engine: PlaybackEngine = 'mpv'): Promise<PlaybackTarget> {
+/** Qualités proposées dans le lecteur (débit et hauteur max). « original » = lecture directe. */
+export type Quality = { id: string; label: string; bitrate?: number; maxHeight?: number };
+export const QUALITIES: Quality[] = [
+  { id: 'original', label: 'Original' },
+  { id: '2160', label: '4K · 40 Mb/s', bitrate: 40_000_000, maxHeight: 2160 },
+  { id: '1080h', label: '1080p · 20 Mb/s', bitrate: 20_000_000, maxHeight: 1080 },
+  { id: '1080', label: '1080p · 10 Mb/s', bitrate: 10_000_000, maxHeight: 1080 },
+  { id: '720', label: '720p · 4 Mb/s', bitrate: 4_000_000, maxHeight: 720 },
+  { id: '480', label: '480p · 1,5 Mb/s', bitrate: 1_500_000, maxHeight: 480 },
+];
+
+export async function getPlayback(
+  s: Settings,
+  itemId: string,
+  startSeconds = 0,
+  engine: PlaybackEngine = 'mpv',
+  quality?: Quality
+): Promise<PlaybackTarget> {
   const { j, post } = api(s);
-  const info = await post<{ MediaSources: JfMediaSource[]; PlaySessionId?: string }>(
-    `/Items/${itemId}/PlaybackInfo?UserId=${j.userId}&StartTimeTicks=${Math.round(startSeconds * TICKS_PER_SECOND)}&AutoOpenLiveStream=true`,
-    { DeviceProfile: deviceProfile(engine), UserId: j.userId, MaxStreamingBitrate: engine === 'cast' ? 20_000_000 : 120_000_000 }
-  );
+  // Qualité choisie : on force le transcodage par le serveur au débit / à la hauteur demandés
+  const forced = quality?.bitrate ? quality : undefined;
+  const q = new URLSearchParams({
+    UserId: j.userId,
+    StartTimeTicks: String(Math.round(startSeconds * TICKS_PER_SECOND)),
+    AutoOpenLiveStream: 'true',
+    ...(forced ? { EnableDirectPlay: 'false', EnableDirectStream: 'false', AllowVideoStreamCopy: 'false', MaxStreamingBitrate: String(forced.bitrate) } : {}),
+  });
+  const info = await post<{ MediaSources: JfMediaSource[]; PlaySessionId?: string }>(`/Items/${itemId}/PlaybackInfo?${q}`, {
+    DeviceProfile: deviceProfile(engine),
+    UserId: j.userId,
+    MaxStreamingBitrate: forced?.bitrate ?? (engine === 'cast' ? 20_000_000 : 120_000_000),
+    ...(forced ? { EnableDirectPlay: false, EnableDirectStream: false, AllowVideoStreamCopy: false } : {}),
+  });
   const src = info.MediaSources?.[0];
   if (!src) throw new JellyfinError('Aucune source vidéo pour cet élément');
 
   const common = { itemId, mediaSourceId: src.Id, playSessionId: info.PlaySessionId };
-  if (src.SupportsDirectPlay || src.SupportsDirectStream) {
-    const q = new URLSearchParams({
+  if (!forced && (src.SupportsDirectPlay || src.SupportsDirectStream)) {
+    const p = new URLSearchParams({
       static: 'true',
       MediaSourceId: src.Id,
       DeviceId: s.deviceId,
@@ -498,14 +525,24 @@ export async function getPlayback(s: Settings, itemId: string, startSeconds = 0,
     const ext = (src.Container ?? 'mp4').split(',')[0];
     return {
       ...common,
-      uri: `${j.url}/Videos/${itemId}/stream.${ext}?${q}`,
+      uri: `${j.url}/Videos/${itemId}/stream.${ext}?${p}`,
       isHls: false,
       playMethod: src.SupportsDirectPlay ? 'DirectPlay' : 'DirectStream',
     };
   }
   if (src.TranscodingUrl) {
     let uri = `${j.url}${src.TranscodingUrl}`;
-    if (!/[?&]api_key=/i.test(uri)) uri += `${uri.includes('?') ? '&' : '?'}api_key=${j.token}`;
+    const add = (k: string, v: string) => {
+      uri = /[?&]/.test(uri) && new RegExp(`[?&]${k}=`, 'i').test(uri)
+        ? uri.replace(new RegExp(`([?&]${k}=)[^&]*`, 'i'), `$1${v}`)
+        : `${uri}${uri.includes('?') ? '&' : '?'}${k}=${v}`;
+    };
+    if (!/[?&]api_key=/i.test(uri)) add('api_key', j.token);
+    if (forced?.maxHeight) add('MaxHeight', String(forced.maxHeight));
+    if (forced?.bitrate) {
+      add('MaxStreamingBitrate', String(forced.bitrate));
+      add('VideoBitrate', String(Math.round(forced.bitrate * 0.9)));
+    }
     return { ...common, uri, isHls: true, playMethod: 'Transcode' };
   }
   throw new JellyfinError('Le serveur ne propose ni lecture directe ni transcodage');

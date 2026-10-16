@@ -80,6 +80,8 @@ export type Settings = {
   seasonTheme: string;
   /** Serveur du chat famille */
   chatUrl: string;
+  /** Qualité de lecture Jellyfin par défaut (id de QUALITIES, 'original' = lecture directe) */
+  quality: string;
   /** Moteur de lecture : mpv (lit tout, MKV inclus) ou lecteur natif du téléphone */
   player: 'mpv' | 'native';
   /** Clé API v3 ou jeton v4 TMDB (obligatoire : recherche + fiches) */
@@ -105,6 +107,7 @@ const DEFAULTS: Settings = {
   skipJellyfin: false,
   betterPosters: { enabled: true, rating: true, genre: false, ratingSource: '' },
   player: 'mpv',
+  quality: 'original',
   seerr: null,
   homeLayout: [],
   tabsLayout: [],
