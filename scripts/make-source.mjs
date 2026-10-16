@@ -11,7 +11,7 @@ const notes = (process.env.RELEASE_NOTES || '')
   .split('\n')
   .map((l) => l.trim())
   .filter((l) => l && !/^(Co-Authored-By|Claude-Session|Merge branch)/i.test(l))
-  .slice(0, 8)
+  .slice(0, 15)
   .join('\n');
 const downloadURL = `https://github.com/${repo}/releases/download/${tag}/${ipa}`;
 const iconURL = `https://raw.githubusercontent.com/${repo}/main/assets/images/icon.png`;
