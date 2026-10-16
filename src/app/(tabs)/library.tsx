@@ -1,35 +1,124 @@
-import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+// Bibliothèque : uniquement les bibliothèques Jellyfin, en grandes cartes (affiches récentes en éventail, nombre de titres).
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { ActivityIndicator, FlatList, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { FocusPressable as Pressable } from '@/components/tv';
+import { LinearGradient } from 'expo-linear-gradient';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { JfRow } from '@/components/jf-cards';
-import { libraryRowDefs, orderLibraryRows } from '@/lib/home-layout';
+import { FocusPressable as Pressable } from '@/components/tv';
 import { Button, ScreenTitle, tap } from '@/components/ui';
-import { C, TAB_SPACE } from '@/constants/theme';
-import { jf, jfImage, JellyfinError, type JfItem } from '@/lib/jellyfin';
+import { C, R, TAB_SPACE } from '@/constants/theme';
+import { libraryRowDefs, orderLibraryRows } from '@/lib/home-layout';
+import { jf, jfImage, jfPoster, JellyfinError, type JfItem } from '@/lib/jellyfin';
 import { useSettings } from '@/lib/settings';
 
-type Section = { view: JfItem; latest: JfItem[] };
+type Lib = { view: JfItem; count: number | null; posters: string[] };
 
-const LIB_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
-  movies: 'film-outline',
-  tvshows: 'tv-outline',
-  boxsets: 'albums-outline',
-  homevideos: 'videocam-outline',
-  mixed: 'folder-open-outline',
+const TYPES: Record<string, string> = {
+  movies: 'Movie',
+  tvshows: 'Series',
+  boxsets: 'BoxSet',
 };
+
+const ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
+  movies: 'film',
+  tvshows: 'tv',
+  boxsets: 'albums',
+  homevideos: 'videocam',
+  mixed: 'folder-open',
+};
+
+const UNIT: Record<string, [string, string]> = {
+  movies: ['film', 'films'],
+  tvshows: ['série', 'séries'],
+  boxsets: ['collection', 'collections'],
+};
+
+// Teinte de chaque carte, selon le type de bibliothèque
+const TINT: Record<string, [string, string]> = {
+  movies: ['#1B2A4A', '#0B1220'],
+  tvshows: ['#2A1B4A', '#120B20'],
+  boxsets: ['#3A2A12', '#1A120B'],
+};
+
+function LibraryCard({ lib, width }: { lib: Lib; width: number }) {
+  const { settings } = useSettings();
+  const type = lib.view.CollectionType ?? 'mixed';
+  const height = Math.round(width * 0.62);
+  const [a, b] = TINT[type] ?? ['#1C1C1E', '#0E0E10'];
+  const unit = UNIT[type] ?? ['titre', 'titres'];
+  const own = lib.view.ImageTags?.Primary
+    ? jfImage(settings, lib.view.Id, 'Primary', { tag: lib.view.ImageTags.Primary, maxWidth: 900 })
+    : undefined;
+  const pw = Math.round(height * 0.62);
+
+  return (
+    <Pressable
+      onPress={() => {
+        tap();
+        router.push({ pathname: '/jellyfin/[id]', params: { id: lib.view.Id } });
+      }}
+      style={({ pressed }) => [styles.card, { width, height, transform: [{ scale: pressed ? 0.98 : 1 }] }]}>
+      <LinearGradient colors={[a, b]} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
+      {own ? (
+        <Image source={own} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
+      ) : (
+        // Éventail des derniers ajouts
+        <View style={[StyleSheet.absoluteFill, { alignItems: 'flex-end', justifyContent: 'center', paddingRight: 18 }]}>
+          {lib.posters.slice(0, 3).map((p, i, arr) => (
+            <Image
+              key={p}
+              source={p}
+              contentFit="cover"
+              transition={200}
+              style={[
+                styles.poster,
+                {
+                  width: pw,
+                  height: Math.round(pw * 1.5),
+                  position: 'absolute',
+                  right: 18 + (arr.length - 1 - i) * pw * 0.42,
+                  transform: [{ rotate: `${(i - (arr.length - 1) / 2) * 7}deg` }, { scale: i === arr.length - 1 ? 1 : 0.9 }],
+                  zIndex: i,
+                },
+              ]}
+            />
+          ))}
+        </View>
+      )}
+      <LinearGradient
+        colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.85)']}
+        start={{ x: 0, y: 0.25 }}
+        end={{ x: 0, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+      <View style={styles.cardText}>
+        <View style={styles.iconWrap}>
+          <Ionicons name={ICON[type] ?? 'folder'} size={18} color="#fff" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.name} numberOfLines={1}>
+            {lib.view.Name}
+          </Text>
+          {lib.count != null ? (
+            <Text style={styles.count}>
+              {lib.count.toLocaleString('fr-FR')} {lib.count > 1 ? unit[1] : unit[0]}
+            </Text>
+          ) : null}
+        </View>
+        <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
+      </View>
+    </Pressable>
+  );
+}
 
 export default function Library() {
   const { settings, update } = useSettings();
   const insets = useSafeAreaInsets();
-  const [resume, setResume] = useState<JfItem[]>([]);
-  const [nextUp, setNextUp] = useState<JfItem[]>([]);
-  const [sections, setSections] = useState<Section[]>([]);
-  const [favorites, setFavorites] = useState<JfItem[]>([]);
+  const { width } = useWindowDimensions();
+  const [libs, setLibs] = useState<Lib[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
@@ -38,17 +127,26 @@ export default function Library() {
     if (!settings.jellyfin) return;
     setError(null);
     try {
-      const [r, n, views, favs] = await Promise.all([
-        jf.resume(settings),
-        jf.nextUp(settings),
-        jf.views(settings),
-        jf.favorites(settings).catch(() => [] as JfItem[]),
-      ]);
-      setFavorites(favs);
-      const latest = await Promise.all(views.map((v) => jf.latest(settings, v.Id).catch(() => [] as JfItem[])));
-      setResume(r);
-      setNextUp(n);
-      setSections(views.map((v, i) => ({ view: v, latest: latest[i] })));
+      const views = await jf.views(settings);
+      const out = await Promise.all(
+        views.map(async (v): Promise<Lib> => {
+          const r = await jf
+            .items(settings, {
+              parentId: v.Id,
+              types: TYPES[v.CollectionType ?? ''] ?? 'Movie,Series',
+              sort: 'DateCreated',
+              order: 'Descending',
+              limit: 3,
+            })
+            .catch(() => null);
+          return {
+            view: v,
+            count: r?.TotalRecordCount ?? null,
+            posters: (r?.Items ?? []).map((i) => jfPoster(settings, i, 420)).filter((x): x is string => Boolean(x)).reverse(),
+          };
+        })
+      );
+      setLibs(out);
     } catch (e: any) {
       setError(e?.message ?? String(e));
       setExpired(e instanceof JellyfinError && e.status === 401);
@@ -63,28 +161,41 @@ export default function Library() {
     }, [load])
   );
 
+  // Ordre et visibilité choisis dans Personnaliser
+  const ordered = orderLibraryRows(
+    libraryRowDefs(libs.map((l) => l.view)).map((d) => ({ ...d, lib: libs.find((l) => `lib:${l.view.Id}` === d.id)! })),
+    settings.libraryLayout
+  ).filter((r) => !r.hidden && r.lib);
+
+  // 2 colonnes sur iPad / TV, 1 sur téléphone
+  const cols = width >= 700 ? 2 : 1;
+  const cardW = Math.floor((Math.min(width, 1100) - 32 - (cols - 1) * 14) / cols);
+
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: C.bg }}
       contentContainerStyle={{ paddingTop: insets.top, paddingBottom: TAB_SPACE }}
       refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
-      <ScreenTitle title="Bibliothèque" />
-      {settings.jellyfin?.serverName ? (
-        <Text style={{ color: C.textDim, fontSize: 13, marginTop: -8, marginBottom: 16, paddingHorizontal: 16 }}>
-          {settings.jellyfin.serverName} · {settings.jellyfin.userName}
-        </Text>
-      ) : null}
-
-      {loading ? (
-        <ActivityIndicator color={C.text} style={{ marginTop: 60 }} />
+      <ScreenTitle
+        title="Bibliothèque"
+        right={
+          <Pressable onPress={() => router.push('/customize')} hitSlop={10} style={styles.headerBtn}>
+            <Ionicons name="options-outline" size={20} color={C.text} />
+          </Pressable>
+        }
+      />
+      {loading && !libs.length ? (
+        <ActivityIndicator color={C.text} style={{ marginTop: 40 }} />
       ) : error ? (
-        <View style={{ padding: 24, gap: 14, alignItems: 'center' }}>
+        <View style={{ alignItems: 'center', gap: 12, padding: 24 }}>
+          <Ionicons name="cloud-offline-outline" size={36} color={C.textFaint} />
           <Text style={{ color: C.textDim, textAlign: 'center' }}>{error}</Text>
           {expired ? (
             <Button
               title="Se reconnecter"
+              icon="log-in-outline"
               onPress={async () => {
-                await update({ jellyfin: null, skipJellyfin: false });
+                await update({ jellyfin: null });
                 router.replace('/login');
               }}
             />
@@ -93,85 +204,44 @@ export default function Library() {
           )}
         </View>
       ) : (
-        <>
-          {orderLibraryRows(libraryRowDefs(sections.map((x) => x.view)), settings.libraryLayout)
-            .filter((r) => !r.hidden)
-            .map((r) => {
-              if (r.id === 'libs')
-                return sections.length > 0 ? (
-                  <View key="libs">
-                    <FlatList
-              horizontal
-              data={sections.map((x) => x.view)}
-              keyExtractor={(v) => v.Id}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}
-              style={{ marginBottom: 26, flexGrow: 0 }}
-              renderItem={({ item: v }) => (
-                <Pressable
-                  onPress={() => {
-                    tap();
-                    router.push({ pathname: '/jellyfin/[id]', params: { id: v.Id } });
-                  }}
-                  style={({ pressed }) => [styles.lib, { transform: [{ scale: pressed ? 0.97 : 1 }] }]}>
-                  {v.ImageTags?.Primary ? (
-                    <Image
-                      source={jfImage(settings, v.Id, 'Primary', { tag: v.ImageTags.Primary, maxWidth: 500 })}
-                      style={StyleSheet.absoluteFill}
-                      contentFit="cover"
-                    />
-                  ) : null}
-                  <View style={styles.libShade} />
-                  <Ionicons name={LIB_ICON[v.CollectionType ?? ''] ?? 'folder-outline'} size={20} color="#fff" />
-                  <Text style={styles.libName} numberOfLines={1}>
-                    {v.Name}
-                  </Text>
-                </Pressable>
-              )}
-            />
-                  </View>
-                ) : null;
-              if (r.id === 'continue') return <JfRow key={r.id} title="Reprendre" items={resume} wide />;
-              if (r.id === 'nextup') return <JfRow key={r.id} title="À suivre" items={nextUp} wide />;
-              if (r.id === 'favorites') return <JfRow key={r.id} title="Favoris" items={favorites} />;
-              const sec = sections.find((x) => `latest:${x.view.Id}` === r.id);
-              if (!sec) return null;
-              return (
-                <JfRow
-                  key={r.id}
-                  title={r.label}
-                  items={sec.latest}
-                  onSeeAll={() => router.push({ pathname: '/jellyfin/[id]', params: { id: sec.view.Id } })}
-                />
-              );
-            })}
-          <Pressable onPress={() => router.push('/customize')} style={styles.customize} hitSlop={8}>
-            <Ionicons name="options-outline" size={16} color={C.textDim} />
-            <Text style={{ color: C.textDim, fontSize: 13, fontWeight: '600' }}>Personnaliser la bibliothèque</Text>
-          </Pressable>
-          {!resume.length && !nextUp.length && !sections.some((s) => s.latest.length) && (
-            <Text style={{ color: C.textDim, textAlign: 'center', marginTop: 40 }}>Ta bibliothèque est vide.</Text>
-          )}
-        </>
+        <View style={styles.grid}>
+          {ordered.map((r) => (
+            <LibraryCard key={r.id} lib={r.lib} width={cardW} />
+          ))}
+          {!ordered.length ? <Text style={{ color: C.textDim, textAlign: 'center', marginTop: 40, width: '100%' }}>Aucune bibliothèque.</Text> : null}
+        </View>
       )}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  lib: {
-    width: 170,
-    height: 96,
-    borderRadius: 14,
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, paddingHorizontal: 16, maxWidth: 1132, alignSelf: 'center', width: '100%' },
+  card: {
+    borderRadius: R.lg,
     overflow: 'hidden',
-    backgroundColor: C.surfaceHigh,
-    justifyContent: 'flex-end',
-    padding: 12,
-    gap: 4,
+    backgroundColor: C.surface,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.1)',
   },
-  libShade: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.45)' },
-  libName: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  customize: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 14 },
+  poster: {
+    borderRadius: 8,
+    backgroundColor: C.surfaceHigh,
+    shadowColor: '#000',
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  cardText: { position: 'absolute', left: 16, right: 16, bottom: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  iconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  name: { color: '#fff', fontSize: 22, fontWeight: '800', letterSpacing: -0.4 },
+  count: { color: 'rgba(255,255,255,0.75)', fontSize: 13, fontWeight: '600', marginTop: 1 },
+  headerBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: C.surfaceHigh, alignItems: 'center', justifyContent: 'center' },
 });

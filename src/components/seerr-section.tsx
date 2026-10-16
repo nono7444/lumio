@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Alert, Share, Text, View } from 'react-native';
 
 import { Button, Field, Section } from '@/components/ui';
+import { ADDONS_ENABLED } from '@/constants/features';
 import { C } from '@/constants/theme';
 import { seerr } from '@/lib/seerr';
 import { isManager, useSettings } from '@/lib/settings';
@@ -86,7 +87,7 @@ export function InviteButton() {
     if (settings.seerr?.url) q.set('seerr', settings.seerr.url);
     if (settings.chatUrl) q.set('chat', settings.chatUrl);
     if (settings.tmdbKey) q.set('tmdb', settings.tmdbKey);
-    if (settings.addons.length) q.set('addons', settings.addons.map((a) => a.base).join('|'));
+    if (ADDONS_ENABLED && settings.addons.length) q.set('addons', settings.addons.map((a) => a.base).join('|'));
     if (userName) q.set('name', userName);
     const link = `lumio://invite?${q}`;
     await Share.share({

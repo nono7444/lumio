@@ -9,6 +9,7 @@ import { ArrSection, Picker, Toggle } from '@/components/arr-section';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button, Field, ScreenTitle, Section } from '@/components/ui';
+import { ADDONS_ENABLED } from '@/constants/features';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { ChatSection, ThemeSection } from '@/components/extra-sections';
 import { SeerrSection } from '@/components/seerr-section';
@@ -339,6 +340,7 @@ export default function SettingsScreen() {
           </View>
         </Section>
 
+        {ADDONS_ENABLED ? (
         <Section title="Addons Stremio">
           <Text style={styles.help}>
             Colle l'URL du manifest d'un addon de catalogue (stremio://… ou https://…/manifest.json). Ses catalogues
@@ -372,6 +374,7 @@ export default function SettingsScreen() {
             )}
           </View>
         </Section>
+        ) : null}
 
         <Text style={styles.version}>Lumio · v{Constants.expoConfig?.version ?? '1.0.0'}</Text>
       </ScrollView>
