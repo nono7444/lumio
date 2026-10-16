@@ -98,6 +98,15 @@ export default function MediaScreen() {
     if (hasTmdb(settings)) load();
   }, [load, settings]);
 
+  // Téléchargement terminé : on recherche le titre dans Jellyfin pour que « Lire » apparaisse
+  const refreshJf = useCallback(() => {
+    if (!details) return;
+    jf.invalidateIndex();
+    const name = details.kind === 'movie' ? details.data.title : details.data.name;
+    const imdb = details.kind === 'movie' ? details.data.imdb_id : details.data.external_ids?.imdb_id;
+    jf.findByTmdb(settings, details.kind, tmdbId, name, imdb).then((i) => i && setJfItem(i)).catch(() => {});
+  }, [details, settings, tmdbId]);
+
   // Saisons qu'on peut encore demander : pas encore surveillées et incomplètes
   const requestable = useMemo(() => {
     if (details?.kind !== 'tv') return [];
@@ -255,6 +264,7 @@ export default function MediaScreen() {
           {serverReq ? (
             <RequestSection
               inJellyfin={Boolean(jfItem)}
+              onAvailable={refreshJf}
               target={{
                 type: details.kind,
                 tmdbId,

@@ -402,6 +402,7 @@ async function loadLibrary(force = false) {
       lib.seriesByTvdb.set(s.tvdbId, entry);
       if (s.tmdbId) lib.seriesByTmdb.set(s.tmdbId, entry);
     }
+    lib.queueAt = Date.now();
     [lib.queue, lib.jf] = await Promise.all([
       queueIndex().catch(() => ({ movies: new Map(), series: new Map() })),
       loadJfIndex().catch(() => null),
@@ -1050,7 +1051,17 @@ const server = http.createServer(async (req, res) => {
       const tmdbId = ids.tmdbId;
       let seasons = (q.get('seasons') || '').split(',').map(Number).filter((n) => n > 0);
       if (!seasons.length && ids.seasons) seasons = ids.seasons;
-      const lib = await loadLibrary().catch(() => ({ movies: new Map(), seriesByTvdb: new Map(), seriesByTmdb: new Map() }));
+      let lib = await loadLibrary().catch(() => ({ movies: new Map(), seriesByTvdb: new Map(), seriesByTmdb: new Map() }));
+      // Demande en cours de téléchargement : file d'attente rafraîchie toutes les 4 s pour un pourcentage en direct,
+      // et bibliothèque relue (toutes les 15 s au plus) dès que le téléchargement a quitté la file, pour passer à « Disponible »
+      const live = requests.find((r) => r.type === type && r.tmdbId === tmdbId && r.status === RequestStatus.APPROVED);
+      if (live && lib.queue) {
+        if (Date.now() - (lib.queueAt || 0) > 4000) {
+          lib.queue = await queueIndex().catch(() => lib.queue);
+          lib.queueAt = Date.now();
+        }
+        if (downloadOf(live, lib).state === 'searching' && Date.now() - libraryAt > 15_000) lib = await loadLibrary(true).catch(() => lib);
+      }
       refreshCompleted(lib);
       const st = mediaStatus(lib, type, tmdbId, ids.tvdbId || q.get('tvdbId'), seasons);
       const reqs = requests

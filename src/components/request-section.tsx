@@ -1,14 +1,13 @@
 // Bloc « demande » de la fiche, comme sur Seerr : statut du média, demandes en cours, boutons.
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 
 import { RequestModal, type RequestTarget } from '@/components/request-modal';
 import { toast } from '@/components/toast';
 import { Button } from '@/components/ui';
 import { C, R } from '@/constants/theme';
 import {
-  downloadLabel,
   MediaStatus,
   mediaStatusLabel,
   RequestStatus,
@@ -24,9 +23,12 @@ export function RequestSection({
   target,
   onChange,
   inJellyfin,
+  onAvailable,
 }: {
   target: RequestTarget;
   onChange?: () => void;
+  /** Appelé tant que le titre est prêt mais pas encore visible dans Jellyfin (la fiche le recherche pour afficher « Lire ») */
+  onAvailable?: () => void;
   /** Film déjà présent dans Jellyfin (même s'il n'est pas géré par Radarr) : pas de demande possible */
   inJellyfin?: boolean;
 }) {
@@ -62,6 +64,32 @@ export function RequestSection({
       : status === MediaStatus.UNKNOWN
     : false;
   const pendingReqs = (media?.requests ?? []).filter((r) => r.status === RequestStatus.PENDING || r.status === RequestStatus.FAILED);
+  // Demande validée en cours : le bouton devient la barre de téléchargement
+  const active = (media?.requests ?? []).find((r) => r.status === RequestStatus.APPROVED);
+  // Film prêt dans Radarr mais pas encore vu par Jellyfin (scan de la bibliothèque)
+  const arriving = !isTv && !inJellyfin && status === MediaStatus.AVAILABLE;
+
+  // Suivi en direct : toutes les 5 s pendant le téléchargement, puis jusqu'à l'arrivée dans Jellyfin
+  useEffect(() => {
+    if (!active && !arriving) return;
+    const t = setInterval(() => {
+      load();
+      if (arriving) onAvailable?.();
+    }, arriving ? 8000 : 5000);
+    if (arriving) onAvailable?.();
+    return () => clearInterval(t);
+  }, [active?.id, arriving, load, onAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Une demande vient de se terminer : on prévient la fiche pour qu'elle cherche le titre dans Jellyfin
+  const [hadActive, setHadActive] = useState(false);
+  useEffect(() => {
+    if (active) setHadActive(true);
+    else if (hadActive) {
+      setHadActive(false);
+      onAvailable?.();
+      onChange?.();
+    }
+  }, [active, hadActive, onAvailable, onChange]);
 
   async function act(r: Req, kind: 'approve' | 'decline' | 'cancel' | 'retry') {
     setBusy(`${kind}:${r.id}`);
@@ -107,21 +135,16 @@ export function RequestSection({
 
   return (
     <View style={{ gap: 10 }}>
-      {lab ? (
+      {lab && isTv && !active ? (
         <View style={[styles.status, { borderColor: lab.color }]}>
           <Ionicons name={lab.icon as keyof typeof Ionicons.glyphMap} size={18} color={lab.color} />
           <Text style={[styles.statusText, { color: lab.color }]}>{lab.label}</Text>
         </View>
       ) : null}
 
-      {/* Suivi des demandes approuvées : recherche, téléchargement, blocage dans Radarr / Sonarr */}
-      {(media?.requests ?? [])
-        .filter((r) => r.status === RequestStatus.APPROVED && downloadLabel(r))
-        .map((r) => (
-          <Text key={`dl-${r.id}`} style={[styles.text, { color: downloadLabel(r)!.color, fontWeight: '700', textAlign: 'center' }]}>
-            {downloadLabel(r)!.text}
-          </Text>
-        ))}
+      {/* Le bouton « Demander » devient la progression du téléchargement, puis « Lire » (sur la fiche) */}
+      {active ? <ProgressButton r={active} /> : null}
+      {arriving ? <ProgressButton label="Arrivée dans Jellyfin…" progress={100} color={C.success} spinner /> : null}
 
       {/* Demandes en attente (ou en échec) : l'admin valide ici, le demandeur peut annuler */}
       {pendingReqs.map((r) => {
@@ -155,7 +178,7 @@ export function RequestSection({
         );
       })}
 
-      {canRequest ? (
+      {canRequest && !active ? (
         <Button
           title={isTv && status !== MediaStatus.UNKNOWN ? 'Demander d’autres saisons' : 'Demander'}
           icon="paper-plane-outline"
@@ -180,7 +203,57 @@ export function RequestSection({
   );
 }
 
+/** Bouton-barre de progression : recherche, téléchargement %, import, problème. */
+function ProgressButton({ r, label, progress, color, spinner }: { r?: Req; label?: string; progress?: number; color?: string; spinner?: boolean }) {
+  const d = r?.download;
+  const app = r?.type === 'movie' ? 'Radarr' : 'Sonarr';
+  let text = label ?? 'Recherche d’une source…';
+  let pct = progress ?? 0;
+  let tint = color ?? C.accent;
+  let spin = spinner ?? true;
+  let icon: keyof typeof Ionicons.glyphMap | null = null;
+  let note: string | null = null;
+  if (r && d) {
+    if (d.state === 'downloading') {
+      pct = d.progress ?? 0;
+      text = `Téléchargement ${d.progress != null ? `${d.progress} %` : '…'}`;
+      if (d.count && d.count > 1) note = `${d.count} épisodes en cours`;
+      spin = false;
+      icon = 'arrow-down-circle';
+    } else if (d.state === 'importing') {
+      pct = 100;
+      text = 'Ajout au serveur…';
+      tint = C.success;
+    } else if (d.state === 'warning') {
+      pct = d.progress ?? 100;
+      text = 'Bloqué : à vérifier';
+      tint = C.warning;
+      spin = false;
+      icon = 'warning';
+      note = `${app} : ${d.message ?? 'intervention manuelle nécessaire'}`;
+    }
+  } else if (r) {
+    note = `${app} cherche une version à télécharger`;
+  }
+  return (
+    <View style={{ gap: 6 }}>
+      <View style={styles.progress}>
+        <View style={[styles.fill, { width: `${Math.max(0, Math.min(100, pct))}%`, backgroundColor: tint }]} />
+        <View style={styles.progressContent}>
+          {spin ? <ActivityIndicator size="small" color="#fff" /> : icon ? <Ionicons name={icon} size={19} color="#fff" /> : null}
+          <Text style={styles.progressText}>{text}</Text>
+        </View>
+      </View>
+      {note ? <Text style={[styles.text, { textAlign: 'center' }]}>{note}</Text> : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  progress: { height: 50, borderRadius: R.md, backgroundColor: C.surfaceHigh, overflow: 'hidden', justifyContent: 'center' },
+  fill: { position: 'absolute', left: 0, top: 0, bottom: 0, opacity: 0.85 },
+  progressContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  progressText: { color: '#fff', fontSize: 16, fontWeight: '800', fontVariant: ['tabular-nums'] },
   status: {
     flexDirection: 'row',
     alignItems: 'center',

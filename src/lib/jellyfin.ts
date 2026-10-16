@@ -191,6 +191,11 @@ function providerIndex(s: Settings) {
 }
 
 export const jf = {
+  /** Oublie l'index des titres (après un téléchargement terminé, pour voir le nouveau film). */
+  invalidateIndex: () => {
+    providerCache = null;
+  },
+
   views: (s: Settings) => {
     const { j, get } = api(s);
     return get<{ Items: JfItem[] }>(`/Users/${j.userId}/Views`).then((r) =>
