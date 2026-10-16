@@ -580,6 +580,8 @@ async function status() {
   return out;
 }
 
+let publicStatusCache = null;
+
 // ——— Chat ———
 const LUMIO_BOT = { id: 'lumio', name: 'Lumio', admin: true };
 // Anciennes annonces automatiques (demandes, validations…) : masquées, le chat sert juste à discuter
@@ -808,6 +810,19 @@ const server = http.createServer(async (req, res) => {
       radarr: Boolean(arrConfig('radarr')),
       sonarr: Boolean(arrConfig('sonarr')),
     });
+
+  // État public pour le widget iOS : en ligne / hors ligne et compteurs seulement (aucun titre, aucune clé)
+  if (url.pathname === '/status/public') {
+    if (!publicStatusCache || Date.now() - publicStatusCache.at > 60_000) {
+      const s = await status().catch(() => null);
+      const pick = (x) => (x ? { ok: Boolean(x.ok), queue: typeof x.queue === 'number' ? x.queue : undefined } : undefined);
+      publicStatusCache = {
+        at: Date.now(),
+        body: s ? { lumio: { ok: true, version: VERSION }, jellyfin: pick(s.jellyfin), radarr: pick(s.radarr), sonarr: pick(s.sonarr), pending: s.lumio.pending } : { lumio: { ok: true, version: VERSION } },
+      };
+    }
+    return send(res, 200, publicStatusCache.body);
+  }
 
   // Raccourci pour installer l'appli TV : taper « lumio.tondomaine/tv » dans Downloader
   if (url.pathname === '/tv' || url.pathname === '/tv.apk') {

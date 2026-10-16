@@ -9,6 +9,7 @@ import { FolderPickerHost } from '@/components/folder-picker';
 import { Toasts } from '@/components/toast';
 import { C } from '@/constants/theme';
 import { SettingsProvider, useSettings } from '@/lib/settings';
+import { useWidgetSync } from '@/lib/widget';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -19,6 +20,7 @@ const theme = {
 
 function Root() {
   const { ready } = useSettings();
+  useWidgetSync();
   useEffect(() => {
     if (ready) SplashScreen.hideAsync().catch(() => {});
     // Portrait partout, sauf le lecteur qui déverrouille la rotation
