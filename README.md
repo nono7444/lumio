@@ -29,7 +29,11 @@ Les réglages sont copiés dans le **trousseau iOS**, qui n'est pas effacé quan
 
 ### Calendrier
 
-Onglet des sorties numériques à venir (films et séries), alimenté par l'addon *Digital Releases* (Releasio). Cet addon n'a pas de champ date : la date est lue dans l'URL de l'affiche (`?d=JJ/MM/AA`), sinon dans la description (« Sortie numérique : … (15 octobre 2026) »).
+Onglet des sorties numériques, avec les dates exactes de TMDB :
+- **films** : sortie de type « numérique » (VOD, achat, location) en France, à défaut aux États-Unis, avec les plateformes ;
+- **séries** : nouvelles saisons sur les plateformes de streaming en France.
+
+Les sorties cinéma ne sont pas prises. La période couvre de J-7 à J+45.
 
 ### Accueil et périodes
 
@@ -39,7 +43,7 @@ Le **thème de saison** (couleur d'accent, emoji, teinte du hero) suit la date. 
 ### Serveur Lumio : chat famille et téléchargements pour tous
 
 Un petit serveur Docker sans dépendance, qui s'authentifie avec le compte Jellyfin : voir [`server/lumio`](server/lumio/README.md).
-- Onglet **Chat** pour les remarques et propositions, avec le bouton « Proposer à la famille » sur chaque fiche.
+- Onglet **Chat** pour les remarques et propositions, avec le bouton « Proposer » sur les fiches des titres pas encore disponibles.
 - **Demandes façon Seerr**. Le serveur garde les clés Radarr et Sonarr (l'admin les envoie depuis Profil, rubrique Serveur Lumio). Il gère aussi la validation automatique ou par l'admin, les quotas, les demandes saison par saison, et les annonces dans le chat (demande, validation, refus, « disponible »).
 - **État des serveurs** en haut de Profil : Jellyfin, Radarr, Sonarr, serveur Lumio et Seerr (en ligne ou non, version, latence, espace disque).
 

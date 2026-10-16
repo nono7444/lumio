@@ -12,6 +12,7 @@ import { useUnreadChat } from '@/lib/chat';
 import { usePendingRequests } from '@/lib/requests';
 import { orderTabs } from '@/lib/home-layout';
 import { useSeason } from '@/lib/seasons';
+import { useAppUpdate } from '@/lib/app-update';
 import { useSettings } from '@/lib/settings';
 
 type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>>[0];
@@ -44,6 +45,7 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
   const activeColor = season?.accent ?? C.text;
   const unread = useUnreadChat();
   const pending = usePendingRequests();
+  const update = useAppUpdate();
   const initial = (settings.jellyfin?.userName ?? 'L').slice(0, 1).toUpperCase();
 
   const visible = state.routes.filter((r) => {
@@ -105,7 +107,7 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
                   {short}
                 </Text>
               )}
-              {((route.name === 'chat' && unread > 0) || (route.name === 'activity' && pending > 0)) && (
+              {((route.name === 'chat' && unread > 0) || (route.name === 'activity' && pending > 0) || (route.name === 'settings' && update)) && (
                 <View style={[styles.unread, focused && { right: 8 }]} />
               )}
             </Pressable>

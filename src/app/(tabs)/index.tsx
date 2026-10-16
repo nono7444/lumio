@@ -95,8 +95,9 @@ function JfHero({ nonce }: { nonce: number }) {
 
   useEffect(() => {
     let alive = true;
-    jf.items(settings, { types: 'Movie,Series', sort: 'DateCreated', order: 'Descending', limit: 14 })
-      .then(({ Items }) => {
+    // Uniquement les sorties récentes (année en cours et suivantes), dans l'ordre d'ajout
+    jf.recentReleases(settings, { kind: 'both', limit: 14 })
+      .then((Items) => {
         if (!alive) return;
         const withArt = Items.filter((i) => i.ImageTags?.Primary).slice(0, 7);
         setItems(
@@ -221,7 +222,10 @@ function JfDynamicRow({ kind, view, nonce }: { kind: 'continue' | 'nextup' | 'fa
             ? jf.nextUp(settings)
             : kind === 'favorites'
               ? jf.favorites(settings)
-              : jf.latest(settings, view!.Id);
+              : jf.recentReleases(settings, {
+                  parentId: view!.Id,
+                  kind: view?.CollectionType === 'movies' ? 'movies' : view?.CollectionType === 'tvshows' ? 'series' : 'both',
+                });
       p.then(setItems).catch(() => {});
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [settings.jellyfin?.token, kind, view?.Id, nonce])

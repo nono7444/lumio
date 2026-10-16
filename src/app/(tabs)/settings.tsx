@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
@@ -9,13 +8,16 @@ import { ArrSection, Picker, Toggle } from '@/components/arr-section';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button, Field, ScreenTitle, Section } from '@/components/ui';
+import { ADDONS_ENABLED } from '@/constants/features';
 import { C, R, TAB_SPACE } from '@/constants/theme';
-import { CalendarSection, ChatSection, ThemeSection } from '@/components/extra-sections';
+import { AppVersionSection } from '@/components/app-version';
+import { useAppUpdate } from '@/lib/app-update';
+import { ChatSection, ThemeSection } from '@/components/extra-sections';
 import { SeerrSection } from '@/components/seerr-section';
 import { ServerStatusSection } from '@/components/server-status';
 import { Addon, DEFAULT_ADDON, isManager, useSettings } from '@/lib/settings';
 import { RATING_SOURCES } from '@/lib/better-posters';
-import { logout as logoutJellyfin } from '@/lib/jellyfin';
+import { logout as logoutJellyfin, QUALITIES } from '@/lib/jellyfin';
 import { useServerArr } from '@/lib/lumio-server';
 import { useServerRequests } from '@/lib/requests';
 import { tmdb as tmdbApi } from '@/lib/tmdb';
@@ -99,6 +101,7 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const manager = isManager(settings);
   const serverReq = useServerRequests();
+  const appUpdate = useAppUpdate();
   const serverArr = useServerArr();
 
   // Radarr / Sonarr gérés par le serveur Lumio : on efface les clés gardées sur le téléphone
@@ -171,6 +174,7 @@ export default function SettingsScreen() {
         <View style={{ marginHorizontal: -16 }}>
           <ScreenTitle title="Profil" />
         </View>
+        {appUpdate ? <AppVersionSection /> : null}
         <ServerStatusSection />
         <Section title="Jellyfin">
           {settings.jellyfin ? (
@@ -207,8 +211,17 @@ export default function SettingsScreen() {
 
         {serverReq && settings.jellyfin?.isAdmin !== false ? (
           <Section title="Demandes">
-            <Text style={styles.help}>Qui peut demander quoi : validation automatique ou par toi, quotas de films et de saisons.</Text>
-            <Button title="Utilisateurs et droits" icon="people-outline" variant="secondary" onPress={() => router.push('/users')} />
+            <Text style={styles.help}>Notifications push des demandes, validation automatique ou par toi, quotas de films et de saisons.</Text>
+            <Button title="Utilisateurs, droits et notifications" icon="people-outline" variant="secondary" onPress={() => router.push('/users')} />
+          </Section>
+        ) : null}
+
+        {serverReq ? (
+          <Section title="Mode développeur">
+            <Text style={styles.help}>
+              Propose une idée ou signale un bug. L’admin la reçoit en notification et peut la faire développer par Claude.
+            </Text>
+            <Button title="Idées & bugs" icon="bulb-outline" variant="secondary" onPress={() => router.push('/ideas')} />
           </Section>
         ) : null}
 
@@ -225,6 +238,12 @@ export default function SettingsScreen() {
             ]}
             value={settings.player}
             onChange={(v) => update({ player: v as 'mpv' | 'native' })}
+          />
+          <Picker
+            label="Qualité par défaut (Jellyfin)"
+            options={QUALITIES.map((q) => ({ value: q.id, label: q.label }))}
+            value={settings.quality || 'original'}
+            onChange={(v) => update({ quality: String(v) })}
           />
           <Toggle label="Enchaîner l'épisode suivant" value={settings.autoNext} onChange={(v) => update({ autoNext: v })} />
         </Section>
@@ -264,8 +283,6 @@ export default function SettingsScreen() {
             </>
           )}
         </Section>
-
-        <CalendarSection />
 
         <Section title="TMDB">
           <Field
@@ -335,6 +352,7 @@ export default function SettingsScreen() {
           </View>
         </Section>
 
+        {ADDONS_ENABLED ? (
         <Section title="Addons Stremio">
           <Text style={styles.help}>
             Colle l'URL du manifest d'un addon de catalogue (stremio://… ou https://…/manifest.json). Ses catalogues
@@ -368,8 +386,9 @@ export default function SettingsScreen() {
             )}
           </View>
         </Section>
+        ) : null}
 
-        <Text style={styles.version}>Lumio · v{Constants.expoConfig?.version ?? '1.0.0'}</Text>
+        {!appUpdate ? <AppVersionSection /> : null}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -384,7 +403,6 @@ const styles = StyleSheet.create({
   catRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 4 },
   catName: { color: C.text, fontSize: 14, flex: 1 },
   order: { justifyContent: 'center', gap: 6 },
-  version: { color: C.textFaint, textAlign: 'center', fontSize: 12, marginTop: 10 },
   avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.text, alignItems: 'center', justifyContent: 'center' },
   avatarText: { color: '#000', fontSize: 18, fontWeight: '800' },
 });

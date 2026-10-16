@@ -41,10 +41,11 @@ const FILTERS = [
 ];
 
 const SORTS = [
-  { label: 'Récents', sort: 'DateCreated', order: 'Descending' as const },
+  // Par défaut : date de sortie, du plus récent au plus ancien
+  { label: 'Sortie', sort: 'PremiereDate,ProductionYear,SortName', order: 'Descending' as const },
+  { label: 'Ajouts', sort: 'DateCreated', order: 'Descending' as const },
   { label: 'A-Z', sort: 'SortName', order: 'Ascending' as const },
   { label: 'Note', sort: 'CommunityRating', order: 'Descending' as const },
-  { label: 'Année', sort: 'ProductionYear,SortName', order: 'Descending' as const },
 ];
 
 function FolderGrid({ folder }: { folder: JfItem }) {

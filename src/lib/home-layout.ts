@@ -1,6 +1,8 @@
 // Rangées de l'accueil et onglets : ordre et visibilité personnalisables.
 import { useEffect, useState } from 'react';
 
+import { ADDONS_ENABLED } from '@/constants/features';
+
 import { jf, type JfItem } from './jellyfin';
 import { useSeason } from './seasons';
 import { hasTmdb, useSettings, type Addon, type HomeRow, type Settings, type TabPref } from './settings';
@@ -55,8 +57,9 @@ export function useAvailableRows(nonce = 0) {
         out.push({ id: 'favorites', label: 'Favoris Jellyfin', kind: 'favorites' });
       }
 
-      const manifests = await Promise.all(settings.addons.map((a) => fetchManifest(a.base).catch(() => null)));
-      settings.addons.forEach((addon, i) => {
+      const addons = ADDONS_ENABLED ? settings.addons : [];
+      const manifests = await Promise.all(addons.map((a) => fetchManifest(a.base).catch(() => null)));
+      addons.forEach((addon, i) => {
         const m = manifests[i];
         if (!m) return;
         for (const c of (m.catalogs ?? []).filter(isBrowsable)) {
@@ -136,17 +139,8 @@ export function currentTabPrefs(s: Settings): TabPref[] {
 export type LibraryRowDef = { id: string; label: string; view?: JfItem };
 
 export function libraryRowDefs(views: JfItem[]): LibraryRowDef[] {
-  return [
-    { id: 'libs', label: 'Mes bibliothèques (raccourcis)' },
-    { id: 'continue', label: 'Reprendre' },
-    { id: 'nextup', label: 'À suivre' },
-    { id: 'favorites', label: 'Favoris' },
-    ...views.map((v) => ({
-      id: `latest:${v.Id}`,
-      label: `Ajouts récents · ${VIEW_LABEL[v.CollectionType ?? ''] ?? v.Name}`,
-      view: v,
-    })),
-  ];
+  // L'onglet Bibliothèque ne montre que les bibliothèques Jellyfin
+  return views.map((v) => ({ id: `lib:${v.Id}`, label: v.Name || VIEW_LABEL[v.CollectionType ?? ''] || 'Bibliothèque', view: v }));
 }
 
 /** Ordre et visibilité de la Bibliothèque (tout est visible par défaut). */

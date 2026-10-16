@@ -2,8 +2,8 @@
 
 Petit serveur, en un seul fichier et sans dépendance, qui sert trois choses dans l'appli :
 
-- **Chat famille** : onglet Chat, et bouton « Proposer à la famille » sur les fiches.
-- **Demandes façon Seerr** : statuts (en attente, approuvée, refusée, échec, disponible), demandes saison par saison, validation automatique ou par l'admin, quotas, choix du dossier (Films, Kids, Anime…). Les clés Radarr et Sonarr restent sur ce serveur, jamais sur les téléphones. Chaque demande, validation ou arrivée dans Jellyfin est annoncée dans le chat.
+- **Chat famille** : onglet Chat, et bouton « Proposer » sur les fiches.
+- **Demandes façon Seerr** : statuts (en attente, approuvée, refusée, échec, disponible), demandes saison par saison, validation automatique ou par l'admin, quotas, choix du dossier (Films, Kids, Anime…). Les clés Radarr et Sonarr restent sur ce serveur, jamais sur les téléphones. L'admin reçoit une **notification push** (appli ntfy) pour chaque demande, avec les boutons Valider / Refuser, et quand un titre arrive dans Jellyfin. Le chat sert uniquement à discuter.
 - **État des serveurs** : Jellyfin, Radarr et Sonarr (en ligne ou non, version, espace disque, file d'attente).
 
 On se connecte avec son compte Jellyfin, sans mot de passe en plus. Les données sont dans `/data` : `messages.json`, `requests.json`, `users.json` et `config.json`.
@@ -22,6 +22,10 @@ On se connecte avec son compte Jellyfin, sans mot de passe en plus. Les données
       # - RADARR_API_KEY=xxxx
       # - SONARR_URL=http://sonarr:8989
       # - SONARR_API_KEY=xxxx
+      # Notifications (facultatif) : par défaut ntfy.sh avec un sujet aléatoire
+      # - NTFY_SERVER=https://ntfy.sh
+      # - NTFY_TOPIC=lumio-xxxx
+      # - PUBLIC_URL=https://lumio.tondomaine
     volumes:
       - ./lumio-server/data:/data
     ports:
@@ -50,8 +54,14 @@ Si Radarr, Sonarr et Jellyfin sont dans le même compose, utilise les noms des s
 | DELETE | `/api/requests/:id` | Le demandeur (si en attente) ou l'admin |
 | GET | `/api/arr/options?type` | Dossiers racine, et profils de qualité pour l'admin |
 | GET | `/api/queue` · `/api/status` | Téléchargements en cours · état des services |
+| GET | `/status/public` | Sans jeton, pour le widget iOS : en ligne / hors ligne et compteurs (aucun titre) |
+| GET / POST | `/api/ideas` | Mode développeur : idées et bugs proposés par la famille (notification à l'admin) |
+| POST | `/api/ideas/:id/vote` | Voter (ou retirer son vote) |
+| PUT / DELETE | `/api/ideas/:id` | Admin : statut (`new`, `planned`, `sent`, `done`, `rejected`) et réponse · suppression (auteur ou admin) |
 | GET / PUT | `/api/admin/users` · `/api/admin/users/:id` | Admin : droits et quotas par utilisateur |
 | PUT | `/api/admin/settings` | Admin : validation automatique et quotas par défaut, visibilité des demandes |
+| POST | `/hooks/approve` · `/hooks/decline` | Boutons des notifications (lien signé HMAC) |
+| POST | `/api/admin/notify-test` | Admin : notification de test |
 | POST | `/api/admin/arr` | Admin : config Radarr / Sonarr |
 | GET / POST / DELETE | `/api/messages`… | Chat |
 

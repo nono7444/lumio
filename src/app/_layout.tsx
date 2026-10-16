@@ -7,8 +7,10 @@ import { Platform } from 'react-native';
 
 import { FolderPickerHost } from '@/components/folder-picker';
 import { Toasts } from '@/components/toast';
+import { UpdateBanner } from '@/components/update-banner';
 import { C } from '@/constants/theme';
 import { SettingsProvider, useSettings } from '@/lib/settings';
+import { useWidgetSync } from '@/lib/widget';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -19,6 +21,7 @@ const theme = {
 
 function Root() {
   const { ready } = useSettings();
+  useWidgetSync();
   useEffect(() => {
     if (ready) SplashScreen.hideAsync().catch(() => {});
     // Portrait partout, sauf le lecteur qui déverrouille la rotation
@@ -38,6 +41,7 @@ function Root() {
       <Stack.Screen name="jellyfin/[id]" options={{ animation: 'fade_from_bottom' }} />
       <Stack.Screen name="customize" options={{ presentation: 'modal' }} />
       <Stack.Screen name="users" options={{ presentation: 'modal' }} />
+      <Stack.Screen name="ideas" options={{ presentation: 'modal' }} />
       <Stack.Screen name="invite" options={{ animation: 'fade' }} />
       <Stack.Screen name="watch" options={{ animation: 'fade', presentation: 'fullScreenModal' }} />
       <Stack.Screen name="player" options={{ animation: 'fade', presentation: 'fullScreenModal', gestureEnabled: false }} />
@@ -52,6 +56,7 @@ export default function RootLayout() {
         <StatusBar style="light" />
         <Root />
         <FolderPickerHost />
+        <UpdateBanner />
         <Toasts />
       </SettingsProvider>
     </ThemeProvider>

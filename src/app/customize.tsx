@@ -135,7 +135,7 @@ export default function Customize() {
         {settings.jellyfin ? (
           <>
             <Text style={[styles.section, { marginTop: 22 }]}>Bibliothèque</Text>
-            <Text style={styles.help}>Masque par exemple « Reprendre » ou une bibliothèque que tu n'utilises pas.</Text>
+            <Text style={styles.help}>Ordre et visibilité des bibliothèques Jellyfin.</Text>
             {libRows.map((r, i) => (
               <ReorderRow
                 key={r.id}

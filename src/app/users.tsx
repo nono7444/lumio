@@ -2,7 +2,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FocusPressable as Pressable } from '@/components/tv';
@@ -70,7 +71,7 @@ export default function Users() {
 
   useEffect(load, [load]);
 
-  async function saveGlobal(patch: Partial<AdminSettings>) {
+  async function saveGlobal(patch: Partial<AdminSettings> & { newNtfyTopic?: boolean }) {
     tap();
     try {
       setGlobal(await requestsApi.updateSettings(settings, patch));
@@ -105,7 +106,72 @@ export default function Users() {
 
         {global && (
           <>
-            <Text style={styles.section}>Par défaut</Text>
+            <Text style={styles.section}>Notifications push</Text>
+            <View style={styles.card}>
+              <View style={styles.line}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.name}>Me prévenir des demandes</Text>
+                  <Text style={styles.dim}>
+                    Notification sur ton iPhone pour chaque demande, avec les boutons Valider / Refuser, et quand un titre devient disponible.
+                  </Text>
+                </View>
+                <Switch value={global.ntfyEnabled !== false} onValueChange={(v) => saveGlobal({ ntfyEnabled: v })} trackColor={{ true: C.success, false: C.border }} />
+              </View>
+              <Text style={styles.dim}>
+                1. Installe l’appli gratuite « ntfy » (App Store).{'\n'}2. Dans ntfy, touche « + » et abonne-toi au sujet ci-dessous (serveur {global.ntfyServer?.replace('https://', '')}).
+              </Text>
+              <Pressable
+                onPress={async () => {
+                  await Clipboard.setStringAsync(global.ntfyTopic ?? '');
+                  Alert.alert('Sujet copié', 'Colle-le dans ntfy → « + » → Sujet.');
+                }}
+                style={styles.topic}>
+                <Text style={styles.topicText} selectable>
+                  {global.ntfyTopic}
+                </Text>
+                <Ionicons name="copy-outline" size={18} color={C.textDim} />
+              </Pressable>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <Pressable
+                  onPress={() =>
+                    Linking.openURL(`ntfy://${(global.ntfyServer ?? 'https://ntfy.sh').replace(/^https?:\/\//, '')}/${global.ntfyTopic}`).catch(() =>
+                      Linking.openURL('https://apps.apple.com/app/ntfy/id1625396347')
+                    )
+                  }
+                  style={styles.smallBtn}>
+                  <Text style={styles.smallBtnText}>Ouvrir ntfy</Text>
+                </Pressable>
+                <Pressable
+                  onPress={async () => {
+                    try {
+                      await requestsApi.notifyTest(settings);
+                      Alert.alert('Envoyée', 'Tu devrais recevoir une notification de test.');
+                    } catch (e: any) {
+                      Alert.alert('Échec', e?.message ?? String(e));
+                    }
+                  }}
+                  style={styles.smallBtn}>
+                  <Text style={styles.smallBtnText}>Tester</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() =>
+                    Alert.alert('Nouveau sujet ?', 'L’ancien ne recevra plus rien : il faudra te réabonner dans ntfy.', [
+                      { text: 'Annuler', style: 'cancel' },
+                      { text: 'Changer', onPress: () => saveGlobal({ newNtfyTopic: true }) },
+                    ])
+                  }
+                  style={styles.smallBtn}>
+                  <Text style={styles.smallBtnText}>Changer</Text>
+                </Pressable>
+              </View>
+              {!global.publicUrl ? (
+                <Text style={[styles.dim, { color: C.warning }]}>
+                  Les boutons Valider / Refuser des notifications ne marcheront qu’une fois l’appli ouverte via l’adresse publique du serveur (ex. https://lumio.wawanono.lol).
+                </Text>
+              ) : null}
+            </View>
+
+            <Text style={[styles.section, { marginTop: 12 }]}>Par défaut</Text>
             <View style={styles.card}>
               <View style={styles.line}>
                 <View style={{ flex: 1 }}>
@@ -230,6 +296,10 @@ const styles = StyleSheet.create({
   quota: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   qLabel: { color: C.text, fontSize: 14, fontWeight: '600', width: 64 },
   qText: { color: C.textDim, fontSize: 13 },
+  topic: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.surfaceHigh, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10 },
+  topicText: { color: C.text, fontSize: 15, fontWeight: '700', flex: 1, fontVariant: ['tabular-nums'] },
+  smallBtn: { flex: 1, backgroundColor: C.surfaceHigh, borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
+  smallBtnText: { color: C.text, fontSize: 13, fontWeight: '700' },
   num: {
     backgroundColor: C.surfaceHigh,
     color: C.text,
