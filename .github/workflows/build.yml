@@ -86,7 +86,8 @@ jobs:
           node scripts/changelog.mjs notes > notes.md
           if [ ! -s notes.md ]; then printf '%s\n' "$COMMIT_MSG" | grep -viE '^(Co-Authored-By|Claude-Session)' | sed '/^$/d' | head -8 > notes.md; fi
           cat notes.md
-          { echo 'RELEASE_NOTES<<EOF'; cat notes.md; echo 'EOF'; } >> "$GITHUB_ENV"
+          # (retour à la ligne final indispensable avant le délimiteur)
+          { echo 'RELEASE_NOTES<<LUMIO_NOTES_EOF'; cat notes.md; echo; echo 'LUMIO_NOTES_EOF'; } >> "$GITHUB_ENV"
       - name: Source AltStore / FlareStore (mises à jour automatiques)
         run: node scripts/make-source.mjs "1.0.${{ github.run_number }}" "build-${{ github.run_number }}" lumio-unsigned.ipa
       - name: Texte de la Release

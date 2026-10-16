@@ -17,7 +17,8 @@ function upcoming() {
 }
 
 if (cmd === 'notes') {
-  process.stdout.write(upcoming());
+  const n = upcoming();
+  process.stdout.write(n ? `${n}\n` : '');
 } else if (cmd === 'stamp') {
   if (!version) throw new Error('version manquante');
   const notes = upcoming();
