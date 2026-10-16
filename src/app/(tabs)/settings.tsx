@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
@@ -11,6 +10,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Field, ScreenTitle, Section } from '@/components/ui';
 import { ADDONS_ENABLED } from '@/constants/features';
 import { C, R, TAB_SPACE } from '@/constants/theme';
+import { AppVersionSection } from '@/components/app-version';
+import { useAppUpdate } from '@/lib/app-update';
 import { ChatSection, ThemeSection } from '@/components/extra-sections';
 import { SeerrSection } from '@/components/seerr-section';
 import { ServerStatusSection } from '@/components/server-status';
@@ -100,6 +101,7 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const manager = isManager(settings);
   const serverReq = useServerRequests();
+  const appUpdate = useAppUpdate();
   const serverArr = useServerArr();
 
   // Radarr / Sonarr gérés par le serveur Lumio : on efface les clés gardées sur le téléphone
@@ -172,6 +174,7 @@ export default function SettingsScreen() {
         <View style={{ marginHorizontal: -16 }}>
           <ScreenTitle title="Profil" />
         </View>
+        {appUpdate ? <AppVersionSection /> : null}
         <ServerStatusSection />
         <Section title="Jellyfin">
           {settings.jellyfin ? (
@@ -385,7 +388,7 @@ export default function SettingsScreen() {
         </Section>
         ) : null}
 
-        <Text style={styles.version}>Lumio · v{Constants.expoConfig?.version ?? '1.0.0'}</Text>
+        {!appUpdate ? <AppVersionSection /> : null}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -400,7 +403,6 @@ const styles = StyleSheet.create({
   catRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 4 },
   catName: { color: C.text, fontSize: 14, flex: 1 },
   order: { justifyContent: 'center', gap: 6 },
-  version: { color: C.textFaint, textAlign: 'center', fontSize: 12, marginTop: 10 },
   avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.text, alignItems: 'center', justifyContent: 'center' },
   avatarText: { color: '#000', fontSize: 18, fontWeight: '800' },
 });

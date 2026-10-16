@@ -444,6 +444,27 @@ setInterval(() => {
   loadLibrary(true).then(refreshCompleted).catch(() => {});
 }, 2 * 60 * 1000);
 
+// Nouvelle version de l'appli iOS publiée → notification push à l'admin (ntfy)
+const APP_SOURCE = process.env.APP_SOURCE_URL || 'https://github.com/nono7444/lumio/releases/latest/download/altstore.json';
+async function checkAppRelease() {
+  try {
+    const r = await fetch(APP_SOURCE);
+    if (!r.ok) return;
+    const app = ((await r.json()).apps || [])[0] || {};
+    const v = (app.versions || [])[0] || {};
+    const version = v.version || app.version;
+    if (!version || version === config.lastAppVersion) return;
+    const first = !config.lastAppVersion;
+    config.lastAppVersion = version;
+    saveConfig();
+    if (first) return; // premier démarrage : on mémorise sans prévenir
+    const notes = v.localizedDescription && !/^Build build-\d+$/.test(v.localizedDescription) ? `\n${v.localizedDescription}` : '';
+    notify({ title: `Lumio ${version} est disponible`, message: `Mets à jour depuis FlareStore.${notes}`, tags: ['arrow_down'], click: 'lumio://settings' });
+  } catch {}
+}
+setTimeout(checkAppRelease, 20_000);
+setInterval(checkAppRelease, 30 * 60 * 1000);
+
 /** État du téléchargement dans la file Radarr / Sonarr (pour voir ce qui bloque). */
 function trackOf(rec) {
   const state = rec.trackedDownloadState || rec.status;

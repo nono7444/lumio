@@ -7,6 +7,7 @@ import { Platform } from 'react-native';
 
 import { FolderPickerHost } from '@/components/folder-picker';
 import { Toasts } from '@/components/toast';
+import { UpdateBanner } from '@/components/update-banner';
 import { C } from '@/constants/theme';
 import { SettingsProvider, useSettings } from '@/lib/settings';
 import { useWidgetSync } from '@/lib/widget';
@@ -55,6 +56,7 @@ export default function RootLayout() {
         <StatusBar style="light" />
         <Root />
         <FolderPickerHost />
+        <UpdateBanner />
         <Toasts />
       </SettingsProvider>
     </ThemeProvider>

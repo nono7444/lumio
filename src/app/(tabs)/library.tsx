@@ -65,7 +65,7 @@ function LibraryCard({ lib, width }: { lib: Lib; width: number }) {
       {own ? (
         <Image source={own} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
       ) : (
-        // Éventail des derniers ajouts
+        // Éventail des dernières sorties
         <View style={[StyleSheet.absoluteFill, { alignItems: 'flex-end', justifyContent: 'center', paddingRight: 18 }]}>
           {lib.posters.slice(0, 3).map((p, i, arr) => (
             <Image
@@ -134,7 +134,7 @@ export default function Library() {
             .items(settings, {
               parentId: v.Id,
               types: TYPES[v.CollectionType ?? ''] ?? 'Movie,Series',
-              sort: 'DateCreated',
+              sort: 'PremiereDate,ProductionYear,SortName',
               order: 'Descending',
               limit: 3,
             })

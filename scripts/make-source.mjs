@@ -6,6 +6,13 @@ const [version, tag, ipa = 'lumio-unsigned.ipa'] = process.argv.slice(2);
 const repo = process.env.GITHUB_REPOSITORY || 'nono7444/lumio';
 const size = statSync(ipa).size;
 const date = new Date().toISOString();
+// Notes : message du commit sans les lignes d'attribution, limité à quelques lignes
+const notes = (process.env.RELEASE_NOTES || '')
+  .split('\n')
+  .map((l) => l.trim())
+  .filter((l) => l && !/^(Co-Authored-By|Claude-Session|Merge branch)/i.test(l))
+  .slice(0, 8)
+  .join('\n');
 const downloadURL = `https://github.com/${repo}/releases/download/${tag}/${ipa}`;
 const iconURL = `https://raw.githubusercontent.com/${repo}/main/assets/images/icon.png`;
 
@@ -13,7 +20,7 @@ const source = {
   name: 'Lumio',
   identifier: 'lol.wawanono.lumio.source',
   sourceURL: `https://github.com/${repo}/releases/latest/download/altstore.json`,
-  subtitle: 'Jellyfin, Radarr, Sonarr et Stremio dans ta poche',
+  subtitle: 'Jellyfin, Radarr et Sonarr dans ta poche',
   iconURL,
   tintColor: '#3D8BFF',
   apps: [
@@ -23,7 +30,7 @@ const source = {
       developerName: 'Norman',
       subtitle: 'Ton cinéma maison',
       localizedDescription:
-        'Lecture Jellyfin et streaming avec mpv, ajout direct dans Radarr / Sonarr, demandes Seerr, calendrier des sorties, chat famille.',
+        'Lecture Jellyfin avec mpv, demandes de films et séries (Radarr / Sonarr), calendrier des sorties numériques, chat famille.',
       iconURL,
       tintColor: '#3D8BFF',
       category: 'entertainment',
@@ -32,7 +39,7 @@ const source = {
       versionDate: date,
       downloadURL,
       size,
-      versions: [{ version, buildVersion: version.split('.').pop(), date, size, downloadURL, minOSVersion: '16.4', localizedDescription: `Build ${tag}` }],
+      versions: [{ version, buildVersion: version.split('.').pop(), date, size, downloadURL, minOSVersion: '16.4', localizedDescription: notes || `Build ${tag}` }],
       appPermissions: { entitlements: [], privacy: {} },
     },
   ],
