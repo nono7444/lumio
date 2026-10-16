@@ -20,7 +20,16 @@ import {
 } from '@/lib/requests';
 import { useSettings } from '@/lib/settings';
 
-export function RequestSection({ target, onChange }: { target: RequestTarget; onChange?: () => void }) {
+export function RequestSection({
+  target,
+  onChange,
+  inJellyfin,
+}: {
+  target: RequestTarget;
+  onChange?: () => void;
+  /** Film déjà présent dans Jellyfin (même s'il n'est pas géré par Radarr) : pas de demande possible */
+  inJellyfin?: boolean;
+}) {
   const { settings } = useSettings();
   const [media, setMedia] = useState<MediaInfo | null>(null);
   const [open, setOpen] = useState(false);
@@ -42,11 +51,12 @@ export function RequestSection({ target, onChange }: { target: RequestTarget; on
 
   useEffect(load, [load]);
 
-  const status = media?.status ?? MediaStatus.UNKNOWN;
+  const movieInJf = inJellyfin && target.type === 'movie';
+  const status = movieInJf ? MediaStatus.AVAILABLE : (media?.status ?? MediaStatus.UNKNOWN);
   const lab = mediaStatusLabel(status);
   const isTv = target.type === 'tv';
   const unknownSeasons = isTv ? (media?.seasons ?? []).filter((s) => s.status === MediaStatus.UNKNOWN).length : 0;
-  const canRequest = media
+  const canRequest = media && !movieInJf
     ? isTv
       ? unknownSeasons > 0
       : status === MediaStatus.UNKNOWN

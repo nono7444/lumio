@@ -23,7 +23,7 @@ const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.3.0';
+const VERSION = '3.4.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -156,6 +156,8 @@ async function whoAmI(token) {
     const me = await res.json();
     const user = { id: me.Id, name: me.Name, admin: Boolean(me.Policy && me.Policy.IsAdministrator), token };
     sessions.set(token, { user, until: Date.now() + 10 * 60 * 1000 });
+    // Jeton gardé en mémoire pour lire le contenu de Jellyfin (celui d'un admin de préférence)
+    if (user.admin || !jfIndexToken) jfIndexToken = token;
     return user;
   } catch {
     return null;
@@ -343,6 +345,40 @@ let library = null;
 let libraryAt = 0;
 let libraryPending = null;
 
+// ——— Contenu déjà présent dans Jellyfin (y compris ce qui n'est pas géré par Radarr / Sonarr) ———
+let jfIndexToken = null;
+async function loadJfIndex() {
+  const token = process.env.JELLYFIN_API_KEY || jfIndexToken;
+  if (!token) return null;
+  const get = async (types, fields) => {
+    const q = new URLSearchParams({ Recursive: 'true', IncludeItemTypes: types, Fields: fields, EnableImages: 'false', EnableUserData: 'false' });
+    const r = await fetch(`${JELLYFIN_URL}/Items?${q}`, { headers: jfHeaders(token) });
+    if (!r.ok) throw new Error(`Jellyfin HTTP ${r.status}`);
+    return (await r.json()).Items || [];
+  };
+  const [items, seasons] = await Promise.all([get('Movie,Series', 'ProviderIds'), get('Season', 'ChildCount')]);
+  const idx = { movies: new Set(), moviesImdb: new Set(), series: new Map(), seriesTvdb: new Map(), seriesById: new Map() };
+  for (const i of items) {
+    const p = i.ProviderIds || {};
+    if (i.Type === 'Movie') {
+      if (p.Tmdb) idx.movies.add(Number(p.Tmdb));
+      if (p.Imdb) idx.moviesImdb.add(p.Imdb);
+    } else if (i.Type === 'Series') {
+      const set = new Set();
+      idx.seriesById.set(i.Id, set);
+      if (p.Tmdb) idx.series.set(Number(p.Tmdb), set);
+      if (p.Tvdb) idx.seriesTvdb.set(Number(p.Tvdb), set);
+    }
+  }
+  // Saisons qui ont au moins un épisode dans Jellyfin
+  for (const s of seasons) {
+    const set = idx.seriesById.get(s.SeriesId);
+    if (set && s.IndexNumber > 0 && (s.ChildCount == null || s.ChildCount > 0)) set.add(s.IndexNumber);
+  }
+  return idx;
+}
+const jfSeasons = (lib, tmdbId, tvdbId) => (lib.jf && ((tvdbId && lib.jf.seriesTvdb.get(Number(tvdbId))) || lib.jf.series.get(tmdbId))) || null;
+
 async function loadLibrary(force = false) {
   if (!force && library && Date.now() - libraryAt < 60_000) return library;
   if (libraryPending) return libraryPending;
@@ -366,7 +402,10 @@ async function loadLibrary(force = false) {
       lib.seriesByTvdb.set(s.tvdbId, entry);
       if (s.tmdbId) lib.seriesByTmdb.set(s.tmdbId, entry);
     }
-    lib.queue = await queueIndex().catch(() => ({ movies: new Map(), series: new Map() }));
+    [lib.queue, lib.jf] = await Promise.all([
+      queueIndex().catch(() => ({ movies: new Map(), series: new Map() })),
+      loadJfIndex().catch(() => null),
+    ]);
     library = lib;
     libraryAt = Date.now();
     return lib;
@@ -393,15 +432,18 @@ function mediaStatus(lib, type, tmdbId, tvdbId, seasonNumbers) {
   if (type === 'movie') {
     const m = lib.movies.get(tmdbId);
     let status = MediaStatus.UNKNOWN;
-    if (m && m.hasFile) status = MediaStatus.AVAILABLE;
+    if ((m && m.hasFile) || (lib.jf && lib.jf.movies.has(tmdbId))) status = MediaStatus.AVAILABLE;
     else if (reqs.some((r) => r.status === RequestStatus.PENDING)) status = MediaStatus.PENDING;
     else if ((m && m.monitored) || reqs.some((r) => r.status === RequestStatus.APPROVED)) status = MediaStatus.PROCESSING;
     return { status, seasons: [] };
   }
   const entry = (tvdbId && lib.seriesByTvdb.get(Number(tvdbId))) || lib.seriesByTmdb.get(tmdbId);
-  const nums = seasonNumbers && seasonNumbers.length ? seasonNumbers : entry ? entry.seasons.map((s) => s.seasonNumber).filter((n) => n > 0) : [];
+  const inJf = jfSeasons(lib, tmdbId, tvdbId);
+  const nums = seasonNumbers && seasonNumbers.length ? seasonNumbers : entry ? entry.seasons.map((s) => s.seasonNumber).filter((n) => n > 0) : inJf ? [...inJf] : [];
   const seasons = nums.map((n) => {
     let st = seasonArrStatus(entry, n);
+    // Saison déjà dans Jellyfin mais inconnue de Sonarr (ajoutée à la main) : disponible, on ne la retélécharge pas
+    if (st === MediaStatus.UNKNOWN && inJf && inJf.has(n)) st = MediaStatus.AVAILABLE;
     if (st === MediaStatus.UNKNOWN || st === MediaStatus.PROCESSING) {
       const r = reqs.find((x) => activeReq(x) && (x.seasons || []).includes(n));
       if (r && r.status === RequestStatus.PENDING && st === MediaStatus.UNKNOWN) st = MediaStatus.PENDING;
@@ -754,7 +796,7 @@ async function createRequest(user, b) {
   let seasons = [];
   if (type === 'movie') {
     const m = lib.movies.get(tmdbId);
-    if (m && m.hasFile) throw new HttpError(409, 'Ce film est déjà disponible.');
+    if ((m && m.hasFile) || (lib.jf && lib.jf.movies.has(tmdbId))) throw new HttpError(409, 'Ce film est déjà disponible dans Jellyfin.');
     if (existing.length) throw new HttpError(409, 'Ce film a déjà été demandé.');
     if (quota.movie.remaining === 0) throw new HttpError(429, `Quota atteint : ${quota.movie.limit} film(s) tous les ${quota.movie.days} jours.`);
   } else {
@@ -1024,6 +1066,10 @@ const server = http.createServer(async (req, res) => {
       const series = {};
       for (const [id, m] of lib.movies) movies[id] = m.hasFile ? MediaStatus.AVAILABLE : m.monitored ? MediaStatus.PROCESSING : MediaStatus.UNKNOWN;
       for (const [id] of lib.seriesByTmdb) series[id] = mediaStatus(lib, 'tv', id, null, null).status;
+      if (lib.jf) {
+        for (const id of lib.jf.movies) movies[id] = MediaStatus.AVAILABLE;
+        for (const [id] of lib.jf.series) if (!series[id] || series[id] === MediaStatus.UNKNOWN) series[id] = mediaStatus(lib, 'tv', id, null, null).status;
+      }
       for (const r of requests.filter(activeReq)) {
         const target = r.type === 'movie' ? movies : series;
         if (!target[r.tmdbId] || target[r.tmdbId] === MediaStatus.UNKNOWN)

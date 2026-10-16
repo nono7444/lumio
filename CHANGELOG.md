@@ -6,6 +6,10 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Un film ou une série déjà dans Jellyfin est reconnu partout (même ajouté sans Radarr / Sonarr) : plus de bouton Demander, plus de second téléchargement.
+- Reconnaissance des titres Jellyfin par identifiant TMDB / IMDb, même quand le titre diffère (VO / VF).
+- Serveur Lumio 3.4.0 : vérifie aussi le contenu de Jellyfin avant d'accepter une demande.
+
 ## 1.0.20 — 16 octobre 2026
 
 - Lecteur : choix de la qualité (Original, 4K, 1080p, 720p, 480p, avec le débit) et qualité par défaut dans Profil → Lecture.

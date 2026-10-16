@@ -254,6 +254,7 @@ export default function MediaScreen() {
           {/* ——— Demande façon Seerr (serveur Lumio) ——— */}
           {serverReq ? (
             <RequestSection
+              inJellyfin={Boolean(jfItem)}
               target={{
                 type: details.kind,
                 tmdbId,

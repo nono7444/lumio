@@ -166,6 +166,30 @@ function api(s: Settings) {
   return { j, get, post };
 }
 
+// Index « type:tmdb:id » / « type:imdb:id » → Id Jellyfin, pour savoir si un titre est déjà sur le serveur
+let providerCache: { key: string; at: number; map: Promise<Map<string, string>> } | null = null;
+function providerIndex(s: Settings) {
+  const key = `${s.jellyfin?.url}|${s.jellyfin?.userId}`;
+  if (providerCache && providerCache.key === key && Date.now() - providerCache.at < 5 * 60_000) return providerCache.map;
+  const { j, get } = api(s);
+  const map = get<{ Items: JfItem[] }>(
+    `/Users/${j.userId}/Items?Recursive=true&IncludeItemTypes=Movie,Series&Fields=ProviderIds&EnableImages=false&EnableUserData=false`
+  ).then(({ Items }) => {
+    const m = new Map<string, string>();
+    for (const i of Items) {
+      const t = i.Type === 'Movie' ? 'movie' : 'tv';
+      if (i.ProviderIds?.Tmdb) m.set(`${t}:tmdb:${i.ProviderIds.Tmdb}`, i.Id);
+      if (i.ProviderIds?.Imdb) m.set(`${t}:imdb:${i.ProviderIds.Imdb}`, i.Id);
+    }
+    return m;
+  });
+  map.catch(() => {
+    providerCache = null;
+  });
+  providerCache = { key, at: Date.now(), map };
+  return map;
+}
+
 export const jf = {
   views: (s: Settings) => {
     const { j, get } = api(s);
@@ -304,6 +328,12 @@ export const jf = {
    */
   findByTmdb: async (s: Settings, type: 'movie' | 'tv', tmdbId: number, title: string, imdbId?: string | null) => {
     if (!s.jellyfin) return null;
+    // 1) Index de toute la bibliothèque par identifiants (fiable même si le titre diffère : VO, VF…)
+    const idx = await providerIndex(s).catch(() => null);
+    const hit = idx?.get(`${type}:tmdb:${tmdbId}`) ?? (imdbId ? idx?.get(`${type}:imdb:${imdbId}`) : undefined);
+    if (hit) return jf.item(s, hit).catch(() => null);
+    if (idx) return null;
+    // 2) Repli : recherche par titre
     const { Items } = await jf.items(s, {
       types: type === 'movie' ? 'Movie' : 'Series',
       search: title,
