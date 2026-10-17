@@ -12,7 +12,7 @@ struct LibraryView: View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 14) {
                 ForEach(views) { v in
-                    NavigationLink(value: v) {
+                    NavigationLink(value: Route.library(v)) {
                         ZStack(alignment: .bottomLeading) {
                             AsyncImage(url: session.jellyfin.thumbURL(v, width: 800)) { phase in
                                 if case .success(let img) = phase { img.resizable().scaledToFill() } else { Theme.surfaceHigh }
@@ -33,7 +33,7 @@ struct LibraryView: View {
         }
         .background(Color.black)
         .navigationTitle("Bibliothèque")
-        .itemDestinations()
+        .appDestinations()
         .task { if views.isEmpty { await load() } }
         .refreshable { await load() }
     }
@@ -61,7 +61,7 @@ struct LibraryGridView: View {
         ScrollView {
             LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
                 ForEach(items) { i in
-                    NavigationLink(value: i) { PosterCard(item: i, width: 120) }
+                    NavigationLink(value: Route.jellyfin(i)) { PosterCard(item: i, width: 120) }
                         .buttonStyle(.plain)
                         .onAppear { if i.Id == items.last?.Id { Task { await more() } } }
                 }
@@ -91,34 +91,65 @@ struct LibraryGridView: View {
 struct SearchView: View {
     @Environment(AppSession.self) private var session
     @State private var query = ""
-    @State private var results: [JfItem] = []
+    @State private var local: [JfItem] = []
+    @State private var tmdb: [TmdbItem] = []
     @State private var searching = false
+    @State private var error: String?
 
     private let columns = [GridItem(.adaptive(minimum: 120, maximum: 170), spacing: 14)]
 
     var body: some View {
         ScrollView {
-            if results.isEmpty && !query.isEmpty && !searching {
-                Text("Aucun résultat sur ton serveur").foregroundStyle(Theme.dim).padding(40)
-            }
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
-                ForEach(results) { i in
-                    NavigationLink(value: i) { PosterCard(item: i, width: 120) }.buttonStyle(.plain)
+            VStack(alignment: .leading, spacing: 24) {
+                if query.trimmingCharacters(in: .whitespaces).count < 2 {
+                    VStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass").font(.largeTitle).foregroundStyle(Theme.dim)
+                        Text("Cherche un film ou une série : sur ton serveur, ou à demander.").foregroundStyle(Theme.dim).multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity).padding(50)
                 }
+                if !local.isEmpty {
+                    ShelfRow(title: "Sur ton serveur") {
+                        ForEach(local) { i in NavigationLink(value: Route.jellyfin(i)) { PosterCard(item: i, width: 110) }.buttonStyle(.plain) }
+                    }
+                }
+                if !tmdb.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Tous les films et séries").font(.title3.bold()).padding(.horizontal)
+                        LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
+                            ForEach(tmdb) { t in
+                                TmdbLink(type: t.kind, id: t.id) {
+                                    TmdbPosterCard(id: t.id, type: t.kind, title: t.displayTitle,
+                                                   subtitle: "\(t.kind == "tv" ? "Série" : "Film")\(t.year.isEmpty ? "" : " · \(t.year)")",
+                                                   poster: t.poster, width: 120)
+                                }
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                }
+                if let error { Text(error).font(.footnote).foregroundStyle(.orange).padding(.horizontal) }
+                if searching { ProgressView().frame(maxWidth: .infinity) }
             }
-            .padding()
+            .padding(.vertical)
         }
         .background(Color.black)
         .navigationTitle("Recherche")
         .searchable(text: $query, prompt: "Films et séries")
-        .itemDestinations()
+        .appDestinations()
         .task(id: query) {
             let q = query.trimmingCharacters(in: .whitespaces)
-            guard q.count >= 2 else { results = []; return }
+            guard q.count >= 2 else { local = []; tmdb = []; return }
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
             searching = true
-            results = (try? await session.jellyfin.search(q)) ?? []
+            async let l = session.jellyfin.search(q)
+            if session.hasTmdb {
+                do { tmdb = try await session.tmdb.search(q); error = nil } catch { self.error = error.localizedDescription }
+            } else {
+                error = "Ajoute ta clé TMDB (Profil) pour chercher les titres à demander."
+            }
+            local = (try? await l) ?? []
             searching = false
         }
     }

@@ -123,6 +123,40 @@ struct JellyfinAPI {
         return try await get("/Users/\(userId)/Items?SearchTerm=\(q)&Recursive=true&IncludeItemTypes=Movie,Series&Limit=60&Fields=\(JellyfinAPI.fields)", as: JfItemsResponse.self).Items
     }
 
+    func me() async throws -> JfAuthUser {
+        try await get("/Users/Me")
+    }
+
+    func favorites() async throws -> [JfItem] {
+        try await get("/Users/\(userId)/Items?Recursive=true&Filters=IsFavorite&IncludeItemTypes=Movie,Series&Fields=\(JellyfinAPI.fields)", as: JfItemsResponse.self).Items
+    }
+
+    /// Requête libre (recommandations) : types, filtres, tri.
+    func query(types: String, filters: String? = nil, sort: String, order: String = "Descending", limit: Int) async throws -> [JfItem] {
+        var p = "/Users/\(userId)/Items?Recursive=true&IncludeItemTypes=\(types)&SortBy=\(sort)&SortOrder=\(order)&Limit=\(limit)&Fields=\(JellyfinAPI.fields)"
+        if let filters { p += "&Filters=\(filters)" }
+        return try await get(p, as: JfItemsResponse.self).Items
+    }
+
+    /// Titre Jellyfin correspondant à un identifiant TMDB (pour « Lire » depuis une fiche TMDB).
+    func findByTmdb(_ tmdbId: Int, type: String) async throws -> JfItem? {
+        let t = type == "tv" ? "Series" : "Movie"
+        return try await get("/Users/\(userId)/Items?Recursive=true&IncludeItemTypes=\(t)&AnyProviderIdEquals=tmdb.\(tmdbId)&Limit=1&Fields=\(JellyfinAPI.fields)", as: JfItemsResponse.self).Items.first
+    }
+
+    /// Épisode suivant d'une série (pour l'enchaînement automatique).
+    func episodeAfter(_ ep: JfItem) async -> JfItem? {
+        guard let sid = ep.SeriesId else { return nil }
+        let all = (try? await get("/Shows/\(sid)/Episodes?UserId=\(userId)&Fields=\(JellyfinAPI.fields)", as: JfItemsResponse.self).Items) ?? []
+        guard let i = all.firstIndex(where: { $0.Id == ep.Id }), i + 1 < all.count else { return nil }
+        return all[i + 1]
+    }
+
+    /// Sessions de lecture actives (admin : qui regarde quoi).
+    func sessions() async throws -> [JfSession] {
+        try await get("/Sessions?ActiveWithinSeconds=900")
+    }
+
     func setPlayed(_ id: String, _ played: Bool) async throws {
         _ = try await request("/Users/\(userId)/PlayedItems/\(id)", method: played ? "POST" : "DELETE")
     }
@@ -193,17 +227,22 @@ struct JellyfinAPI {
         let playMethod: String
     }
 
-    func playback(itemId: String, startSeconds: Double) async throws -> Playback {
+    func playback(itemId: String, startSeconds: Double, quality: Quality? = nil) async throws -> Playback {
         let ticks = Int64(startSeconds * 10_000_000)
-        let data = try await request(
-            "/Items/\(itemId)/PlaybackInfo?UserId=\(userId)&StartTimeTicks=\(ticks)&AutoOpenLiveStream=true",
-            method: "POST",
-            body: ["DeviceProfile": JellyfinAPI.deviceProfile, "UserId": userId, "MaxStreamingBitrate": 120_000_000]
-        )
+        let forced = quality?.bitrate
+        var path = "/Items/\(itemId)/PlaybackInfo?UserId=\(userId)&StartTimeTicks=\(ticks)&AutoOpenLiveStream=true"
+        var body: [String: Any] = ["DeviceProfile": JellyfinAPI.deviceProfile, "UserId": userId, "MaxStreamingBitrate": forced ?? 120_000_000]
+        if let forced {
+            path += "&EnableDirectPlay=false&EnableDirectStream=false&AllowVideoStreamCopy=false&MaxStreamingBitrate=\(forced)"
+            body["EnableDirectPlay"] = false
+            body["EnableDirectStream"] = false
+            body["AllowVideoStreamCopy"] = false
+        }
+        let data = try await request(path, method: "POST", body: body)
         let info = try JellyfinAPI.decoder.decode(JfPlaybackInfo.self, from: data)
         guard let src = info.MediaSources?.first else { throw APIError(message: "Aucune source vidéo pour cet élément") }
 
-        if src.SupportsDirectPlay == true {
+        if forced == nil, src.SupportsDirectPlay == true {
             let ext = (src.Container ?? "mp4").split(separator: ",").first.map { String($0) } ?? "mp4"
             var c = URLComponents(string: "\(base)/Videos/\(itemId)/stream.\(ext)")!
             c.queryItems = [
@@ -216,6 +255,7 @@ struct JellyfinAPI {
         }
         if var t = src.TranscodingUrl {
             if !t.lowercased().contains("api_key=") { t += (t.contains("?") ? "&" : "?") + "api_key=\(token)" }
+            if let h = quality?.maxHeight { t += "&MaxHeight=\(h)" }
             guard let url = URL(string: base + t) else { throw APIError(message: "Lien de lecture invalide") }
             return Playback(url: url, itemId: itemId, mediaSourceId: src.Id, playSessionId: info.PlaySessionId,
                             playMethod: src.SupportsDirectStream == true ? "DirectStream" : "Transcode")
@@ -238,25 +278,35 @@ struct JellyfinAPI {
     }
 }
 
-/// Serveur Lumio : demandes de films et séries (authentifié par le jeton Jellyfin).
-struct LumioAPI {
-    let base: String
-    let token: String
 
-    @MainActor
-    init(session: AppSession) {
-        base = JellyfinAPI.normalize(session.lumioURL)
-        token = session.token
-    }
+/// Qualités proposées dans le lecteur (débit et hauteur max). « Original » = lecture directe.
+struct Quality: Identifiable, Hashable {
+    let id: String
+    let label: String
+    var bitrate: Int?
+    var maxHeight: Int?
 
-    func requests(filter: String = "all") async throws -> [LumioRequest] {
-        guard let url = URL(string: "\(base)/api/requests?filter=\(filter)&take=60&skip=0&sort=added") else { throw APIError(message: "Adresse du serveur Lumio invalide") }
-        var req = URLRequest(url: url)
-        req.setValue("application/json", forHTTPHeaderField: "Accept")
-        req.setValue(token, forHTTPHeaderField: "X-Jellyfin-Token")
-        let (data, res) = try await URLSession.shared.data(for: req)
-        let code = (res as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(code) else { throw APIError(message: "Serveur Lumio : erreur \(code)") }
-        return try JSONDecoder().decode(LumioRequestList.self, from: data).results
-    }
+    static let all: [Quality] = [
+        Quality(id: "original", label: "Original"),
+        Quality(id: "2160", label: "4K · 40 Mb/s", bitrate: 40_000_000, maxHeight: 2160),
+        Quality(id: "1080h", label: "1080p · 20 Mb/s", bitrate: 20_000_000, maxHeight: 1080),
+        Quality(id: "1080", label: "1080p · 10 Mb/s", bitrate: 10_000_000, maxHeight: 1080),
+        Quality(id: "720", label: "720p · 4 Mb/s", bitrate: 4_000_000, maxHeight: 720),
+        Quality(id: "480", label: "480p · 1,5 Mb/s", bitrate: 1_500_000, maxHeight: 480),
+    ]
+    static func of(_ id: String) -> Quality { all.first { $0.id == id } ?? all[0] }
+}
+
+struct JfPlayState: Codable, Hashable { var PositionTicks: Int64?; var IsPaused: Bool?; var PlayMethod: String? }
+struct JfTranscoding: Codable, Hashable { var VideoCodec: String?; var AudioCodec: String?; var Bitrate: Int?; var IsVideoDirect: Bool? }
+
+struct JfSession: Codable, Identifiable, Hashable {
+    let Id: String
+    var UserName: String?
+    var Client: String?
+    var DeviceName: String?
+    var NowPlayingItem: JfItem?
+    var PlayState: JfPlayState?
+    var TranscodingInfo: JfTranscoding?
+    var id: String { Id }
 }

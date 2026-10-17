@@ -16,6 +16,14 @@ struct ItemDetailView: View {
                 header
                 VStack(alignment: .leading, spacing: 16) {
                     actions
+                    if let tmdb = item.tmdbId {
+                        VStack(spacing: 8) {
+                            FamilyRatingCard(type: item.isSeries ? "tv" : "movie", tmdbId: tmdb, title: item.name,
+                                             poster: session.jellyfin.posterURL(item)?.absoluteString)
+                            ReportProblemButton(type: item.isSeries ? "tv" : "movie", tmdbId: tmdb, title: item.name,
+                                                poster: session.jellyfin.posterURL(item)?.absoluteString)
+                        }
+                    }
                     if let o = item.Overview, !o.isEmpty {
                         Text(o).foregroundStyle(.white.opacity(0.88)).lineSpacing(3)
                     }
