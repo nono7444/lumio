@@ -6,7 +6,6 @@ import { useEffect } from 'react';
 import { Platform } from 'react-native';
 
 import { AnimatedSplash } from '@/components/animated-splash';
-import { AppLock } from '@/components/app-lock';
 import { FolderPickerHost } from '@/components/folder-picker';
 import { Toasts } from '@/components/toast';
 import { UpdateBanner } from '@/components/update-banner';
@@ -54,15 +53,10 @@ function Root() {
   );
 }
 
-/** Logo animé au lancement, puis verrou Face ID si activé. */
+/** Logo animé au lancement. */
 function LaunchOverlays() {
   const { ready } = useSettings();
-  return (
-    <>
-      {ready ? <AppLock /> : null}
-      <AnimatedSplash ready={ready} />
-    </>
-  );
+  return <AnimatedSplash ready={ready} />;
 }
 
 export default function RootLayout() {

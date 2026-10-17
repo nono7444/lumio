@@ -11,7 +11,6 @@ import { Button, Field, ScreenTitle, Section } from '@/components/ui';
 import { ADDONS_ENABLED } from '@/constants/features';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { AppVersionSection } from '@/components/app-version';
-import { canUseAppLock } from '@/components/app-lock';
 import { NowPlayingEntry } from '@/components/now-playing-entry';
 import { useAppUpdate } from '@/lib/app-update';
 import { ChatSection, ThemeSection } from '@/components/extra-sections';
@@ -342,26 +341,6 @@ export default function SettingsScreen() {
           />
         </ArrSection>
         </>
-        )}
-
-        {Platform.isTV ? null : (
-          <Section title="Sécurité">
-            <View style={styles.catRow}>
-              <Text style={styles.catName}>Verrouiller avec Face ID</Text>
-              <Switch
-                value={settings.appLock}
-                trackColor={{ true: C.success, false: C.border }}
-                onValueChange={async (v) => {
-                  if (v && !(await canUseAppLock())) {
-                    Alert.alert('Face ID indisponible', 'Active Face ID, Touch ID ou un code sur ton téléphone pour utiliser le verrouillage.');
-                    return;
-                  }
-                  update({ appLock: v });
-                }}
-              />
-            </View>
-            <Text style={styles.help}>Lumio demande Face ID à l'ouverture et après une minute en arrière-plan.</Text>
-          </Section>
         )}
 
         <Section title="Accueil">

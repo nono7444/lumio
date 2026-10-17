@@ -7,7 +7,6 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 ## À venir
 
 - Logo animé au lancement de l'appli.
-- Sécurité : verrouillage de l'appli par Face ID / Touch ID (Profil → Sécurité).
 
 ## 1.0.30 — 17 octobre 2026
 
