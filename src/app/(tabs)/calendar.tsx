@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScreenTitle, SegChip, tap } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { openMedia } from '@/lib/navigation';
-import { dayKeyOf, dayLabel, fetchReleases, type Release } from '@/lib/releases';
+import { dayKeyOf, dayLabel, fetchReleases, type Platform, type Release } from '@/lib/releases';
 import { useSettings } from '@/lib/settings';
 
 type Filter = 'all' | 'movie' | 'series';
@@ -56,6 +56,13 @@ function ReleaseRow({ r }: { r: Release }) {
         <Text style={styles.meta}>
           {r.kind === 'movie' ? 'Film' : 'Série'} · {r.info}
         </Text>
+        {r.providers?.length ? (
+          <View style={{ flexDirection: 'row', gap: 6 }}>
+            {r.providers.slice(0, 4).map((p) =>
+              p.logo ? <Image key={p.key} source={p.logo} style={styles.rowLogo} contentFit="cover" /> : null
+            )}
+          </View>
+        ) : null}
         {desc ? (
           <Text style={styles.desc} numberOfLines={3}>
             {desc}
@@ -75,6 +82,8 @@ export default function Calendar() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
+  // Plateforme choisie (null = toutes) ; « rent » = achat / location uniquement
+  const [platform, setPlatform] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const list = useRef<SectionList<Release>>(null);
 
@@ -94,7 +103,30 @@ export default function Calendar() {
     load();
   }, [load]);
 
-  const visible = useMemo(() => items.filter((r) => filter === 'all' || r.kind === filter), [items, filter]);
+  // Plateformes présentes, de la plus fournie à la moins fournie
+  const platforms = useMemo(() => {
+    const m = new Map<string, { p: Platform; n: number }>();
+    let rentOnly = 0;
+    for (const r of items) {
+      if (filter !== 'all' && r.kind !== filter) continue;
+      const subs = (r.providers ?? []).filter((x) => x.kind === 'flatrate');
+      if (!subs.length) rentOnly++;
+      for (const p of subs) m.set(p.key, { p, n: (m.get(p.key)?.n ?? 0) + 1 });
+    }
+    const list = [...m.values()].sort((a, b) => b.n - a.n);
+    return { list, rentOnly };
+  }, [items, filter]);
+
+  const visible = useMemo(
+    () =>
+      items.filter((r) => {
+        if (filter !== 'all' && r.kind !== filter) return false;
+        if (!platform) return true;
+        const subs = (r.providers ?? []).filter((x) => x.kind === 'flatrate');
+        return platform === 'rent' ? subs.length === 0 : subs.some((x) => x.key === platform);
+      }),
+    [items, filter, platform]
+  );
 
   const sections = useMemo(() => {
     const map = new Map<string, Release[]>();
@@ -145,6 +177,34 @@ export default function Calendar() {
           />
         )}
       />
+      {/* Plateformes */}
+      <FlatList
+        horizontal
+        data={[null, ...platforms.list.map((x) => x.p.key), ...(platforms.rentOnly ? ['rent'] : [])]}
+        keyExtractor={(k) => k ?? 'all'}
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
+        style={{ flexGrow: 0, marginBottom: 10 }}
+        renderItem={({ item: k }) => {
+          const on = platform === k;
+          const entry = platforms.list.find((x) => x.p.key === k);
+          return (
+            <Pressable
+              onPress={() => {
+                tap();
+                setPlatform(k);
+              }}
+              style={[styles.platform, on && styles.platformOn]}>
+              {entry?.p.logo ? <Image source={entry.p.logo} style={styles.platformLogo} contentFit="cover" /> : null}
+              {!entry ? <Ionicons name={k === 'rent' ? 'cart-outline' : 'apps'} size={16} color={on ? '#000' : C.text} /> : null}
+              <Text style={[styles.platformText, on && { color: '#000' }]}>
+                {k === null ? 'Toutes' : k === 'rent' ? 'Achat / location' : entry?.p.name}
+                {entry ? ` · ${entry.n}` : k === 'rent' ? ` · ${platforms.rentOnly}` : ''}
+              </Text>
+            </Pressable>
+          );
+        }}
+      />
       <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 8 }}>
         <SegChip label="Tout" on={filter === 'all'} onPress={() => setFilter('all')} />
         <SegChip label="Films" on={filter === 'movie'} onPress={() => setFilter('movie')} />
@@ -182,6 +242,11 @@ export default function Calendar() {
 }
 
 const styles = StyleSheet.create({
+  platform: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 6, paddingRight: 12, height: 36, borderRadius: 18, backgroundColor: C.surfaceHigh },
+  platformOn: { backgroundColor: C.text },
+  platformLogo: { width: 24, height: 24, borderRadius: 6 },
+  platformText: { color: C.text, fontSize: 13, fontWeight: '700' },
+  rowLogo: { width: 22, height: 22, borderRadius: 5 },
   subtitle: { color: C.textDim, fontSize: 13, marginTop: -8, marginBottom: 14, paddingHorizontal: 16 },
   day: { width: 52, paddingVertical: 8, borderRadius: 14, backgroundColor: C.surfaceHigh, alignItems: 'center', gap: 2 },
   dayOn: { backgroundColor: C.text },

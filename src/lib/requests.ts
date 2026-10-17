@@ -134,7 +134,7 @@ export async function serverHasRequests(s: Settings) {
   return Boolean(h?.features?.includes('requests'));
 }
 
-export function useServerRequests() {
+export function useServerRequests(nonce = 0) {
   const { settings } = useSettings();
   const [ok, setOk] = useState<boolean | null>(null);
   useEffect(() => {
@@ -143,7 +143,7 @@ export function useServerRequests() {
     return () => {
       alive = false;
     };
-  }, [settings.chatUrl, settings.jellyfin?.token]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [settings.chatUrl, settings.jellyfin?.token, nonce]); // eslint-disable-line react-hooks/exhaustive-deps
   return ok;
 }
 

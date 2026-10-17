@@ -14,7 +14,6 @@ import { AppVersionSection } from '@/components/app-version';
 import { NowPlayingEntry } from '@/components/now-playing-entry';
 import { useAppUpdate } from '@/lib/app-update';
 import { ChatSection, ThemeSection } from '@/components/extra-sections';
-import { SeerrSection } from '@/components/seerr-section';
 import { ServerStatusSection } from '@/components/server-status';
 import { Addon, DEFAULT_ADDON, isManager, useSettings } from '@/lib/settings';
 import { RATING_SOURCES } from '@/lib/better-posters';
@@ -219,15 +218,14 @@ export default function SettingsScreen() {
         ) : null}
 
         {serverReq ? (
-          <Section title="Mode développeur">
+          <Section title="Idées & signalements">
             <Text style={styles.help}>
               Propose une idée ou signale un bug. L’admin la reçoit en notification et peut la faire développer par Claude.
             </Text>
-            <Button title="Idées & bugs" icon="bulb-outline" variant="secondary" onPress={() => router.push('/ideas')} />
+            <Button title="Idées & signalements" icon="bulb-outline" variant="secondary" onPress={() => router.push('/ideas')} />
           </Section>
         ) : null}
 
-        {serverReq === false ? <SeerrSection /> : null}
 
         <ThemeSection />
 

@@ -26,14 +26,19 @@ export type ServerHealth = { ok: boolean; version?: string; features?: string[];
 
 // Le /health est public : on le garde en cache pour savoir si le serveur gère les téléchargements
 let healthCache: { url: string; at: number; value: ServerHealth | null } | null = null;
+export const invalidateHealth = () => {
+  healthCache = null;
+};
 
 export async function serverHealth(s: Settings, force = false): Promise<ServerHealth | null> {
   if (!s.chatUrl) return null;
-  if (!force && healthCache && healthCache.url === s.chatUrl && Date.now() - healthCache.at < 60_000) return healthCache.value;
+  // Réponse gardée 60 s ; un échec seulement 5 s, pour réessayer vite après une coupure
+  if (!force && healthCache && healthCache.url === s.chatUrl && Date.now() - healthCache.at < (healthCache.value ? 60_000 : 5_000))
+    return healthCache.value;
   let value: ServerHealth | null = null;
   try {
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 6000);
+    const t = setTimeout(() => ctrl.abort(), 10000);
     const res = await fetch(`${serverBase(s.chatUrl)}/health`, { signal: ctrl.signal });
     clearTimeout(t);
     value = res.ok ? await res.json() : null;

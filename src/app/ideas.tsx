@@ -1,6 +1,7 @@
 // Mode développeur : la famille propose des idées ou signale des bugs, vote pour celles des autres ;
 // l'admin les envoie à Claude avec un prompt prêt à l'emploi (contexte du projet compris).
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import * as Clipboard from 'expo-clipboard';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
@@ -12,6 +13,7 @@ import { FocusPressable as Pressable } from '@/components/tv';
 import { Button, SegChip, tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
 import { claudePrompt, claudeUrl, IDEA_STATUS, ideasApi, type Idea, type IdeaStatus } from '@/lib/ideas';
+import { openMedia } from '@/lib/navigation';
 import { requestsApi, timeAgo } from '@/lib/requests';
 import { useSettings } from '@/lib/settings';
 
@@ -74,6 +76,15 @@ function IdeaCard({ idea, admin, onChange, onRemoved }: { idea: Idea; admin: boo
             ) : null}
           </View>
           <Text style={styles.ideaTitle}>{idea.title}</Text>
+          {idea.media ? (
+            <Pressable onPress={() => openMedia(idea.media!.type, idea.media!.tmdbId)} style={styles.mediaChip}>
+              {idea.media.poster ? <Image source={idea.media.poster} style={styles.mediaPoster} /> : null}
+              <Text style={styles.mediaText} numberOfLines={1}>
+                {idea.media.type === 'tv' ? 'Série' : 'Film'} · {idea.media.title}
+              </Text>
+              <Ionicons name="chevron-forward" size={14} color={C.textDim} />
+            </Pressable>
+          ) : null}
           {idea.details ? <Text style={styles.details}>{idea.details}</Text> : null}
           {idea.note ? (
             <Text style={[styles.details, { color: C.text }]}>
@@ -176,7 +187,7 @@ export default function Ideas() {
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: C.bg }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
-        <Text style={styles.title}>Idées & bugs</Text>
+        <Text style={styles.title}>Idées & signalements</Text>
         <Pressable onPress={() => router.back()} hitSlop={10} style={styles.close}>
           <Ionicons name="close" size={20} color={C.text} />
         </Pressable>
@@ -276,4 +287,7 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', gap: 8, marginTop: 4 },
   action: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.surfaceHigh, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   actionText: { color: C.text, fontSize: 13, fontWeight: '700' },
+  mediaChip: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.surfaceHigh, borderRadius: 10, padding: 6, alignSelf: 'flex-start', maxWidth: '100%' },
+  mediaPoster: { width: 24, height: 36, borderRadius: 4 },
+  mediaText: { color: C.text, fontSize: 13, fontWeight: '600', flexShrink: 1 },
 });

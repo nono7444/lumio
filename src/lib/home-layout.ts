@@ -8,7 +8,7 @@ import { useSeason } from './seasons';
 import { hasTmdb, useSettings, type Addon, type HomeRow, type Settings, type TabPref } from './settings';
 import { catalogKey, fetchManifest, isBrowsable, type StremioCatalog } from './stremio';
 
-export type RowKind = 'hero' | 'season-jf' | 'season-tmdb' | 'continue' | 'nextup' | 'favorites' | 'trending' | 'jf-latest' | 'jf-reco' | 'catalog';
+export type RowKind = 'hero' | 'season-jf' | 'season-tmdb' | 'continue' | 'nextup' | 'favorites' | 'trending' | 'jf-latest' | 'jf-reco' | 'family-top' | 'catalog';
 
 export type RowDef = {
   id: string;
@@ -46,6 +46,7 @@ export function useAvailableRows(nonce = 0) {
       if (settings.jellyfin) {
         // Recommandations calculées sur le téléphone d'après ce que tu regardes
         out.push({ id: 'jf-reco', label: '🍿 Prochaine soirée cinéma', kind: 'jf-reco' });
+        if (settings.chatUrl) out.push({ id: 'family-top', label: '⭐ Coups de cœur de la famille', kind: 'family-top' });
         const views = await jf.views(settings).catch(() => [] as JfItem[]);
         for (const v of views)
           out.push({

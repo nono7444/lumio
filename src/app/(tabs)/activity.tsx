@@ -1,17 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Requests } from '@/components/requests-list';
-import { ScreenTitle, SegChip, SetupPrompt } from '@/components/ui';
+import { Button, ScreenTitle, SegChip, SetupPrompt } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { formatBytes, radarr, sonarr, type QueueItem } from '@/lib/arr';
 import { ServerRequests } from '@/components/server-requests';
-import { lumio } from '@/lib/lumio-server';
+import { invalidateHealth, lumio } from '@/lib/lumio-server';
 import { useServerRequests } from '@/lib/requests';
 import { openMedia } from '@/lib/navigation';
 import { isManager, useSettings } from '@/lib/settings';
@@ -207,12 +207,23 @@ const styles = StyleSheet.create({
 
 export default function Activity() {
   const { settings } = useSettings();
-  const manager = isManager(settings);
-  const hasSeerr = Boolean(settings.seerr?.url);
-  const serverReq = useServerRequests();
+  const [nonce, setNonce] = useState(0);
+  const serverReq = useServerRequests(nonce);
   const [tab, setTab] = useState<'downloads' | 'requests'>('requests');
+  const insets = useSafeAreaInsets();
 
-  // ——— Serveur Lumio : page Demandes façon Seerr + file de téléchargement ———
+  // Serveur injoignable : on réessaie tout seul à chaque retour sur l'onglet
+  useFocusEffect(
+    useCallback(() => {
+      if (serverReq === false) {
+        invalidateHealth();
+        setNonce((n) => n + 1);
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+  );
+
+  // ——— Serveur Lumio : page Demandes + file de téléchargement ———
   if (serverReq) {
     const header = (
       <View>
@@ -227,19 +238,33 @@ export default function Activity() {
     return <ServerRequests header={header} />;
   }
 
-  // ——— Sans serveur Lumio : Radarr / Sonarr en direct (admin) et Seerr ———
-  const showTabs = manager && hasSeerr;
-  const header = (
-    <View>
-      <ScreenTitle title="Activité" />
-      {showTabs && (
-        <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 14 }}>
-          <SegChip label="Téléchargements" on={tab === 'downloads'} onPress={() => setTab('downloads')} />
-          <SegChip label="Demandes" on={tab === 'requests'} onPress={() => setTab('requests')} />
+  // Vérification du serveur en cours, ou serveur injoignable / pas configuré
+  return (
+    <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
+      <ScreenTitle title="Demandes" />
+      {serverReq === null ? (
+        <ActivityIndicator color={C.text} style={{ marginTop: 60 }} />
+      ) : (
+        <View style={{ alignItems: 'center', gap: 14, padding: 32, marginTop: 40 }}>
+          <Ionicons name={settings.chatUrl ? 'cloud-offline-outline' : 'server-outline'} size={44} color={C.textFaint} />
+          <Text style={{ color: C.text, fontSize: 18, fontWeight: '800', textAlign: 'center' }}>
+            {settings.chatUrl ? 'Serveur Lumio injoignable' : 'Serveur Lumio non configuré'}
+          </Text>
+          <Text style={{ color: C.textDim, fontSize: 14, lineHeight: 20, textAlign: 'center' }}>
+            {settings.chatUrl
+              ? 'Le serveur ne répond pas pour le moment (redémarrage, coupure internet…). Réessaie dans un instant.'
+              : 'Renseigne l’adresse du serveur Lumio dans Profil → Serveur Lumio pour faire des demandes.'}
+          </Text>
+          {settings.chatUrl ? (
+            <Button title="Réessayer" icon="refresh" variant="secondary" onPress={() => {
+                invalidateHealth();
+                setNonce((n) => n + 1);
+              }} />
+          ) : (
+            <Button title="Ouvrir le Profil" icon="person-circle-outline" onPress={() => router.push('/settings')} />
+          )}
         </View>
       )}
     </View>
   );
-  if (manager && (tab === 'downloads' || !hasSeerr)) return <Downloads header={header} />;
-  return <Requests header={header} admin={manager} />;
 }

@@ -17,6 +17,9 @@ export type Idea = {
   votes: number;
   voted: boolean;
   mine: boolean;
+  /** Signalement lié à un film / une série */
+  media?: { type: 'movie' | 'tv'; tmdbId: number; title: string; poster?: string };
+  category?: string;
 };
 
 export const IDEA_STATUS: Record<IdeaStatus, { label: string; color: string; icon: string }> = {
@@ -29,7 +32,7 @@ export const IDEA_STATUS: Record<IdeaStatus, { label: string; color: string; ico
 
 export const ideasApi = {
   list: (s: Settings) => serverCall<{ ideas: Idea[] }>(s, '/api/ideas').then((r) => r.ideas),
-  create: (s: Settings, b: { title: string; details: string; kind: Idea['kind'] }) =>
+  create: (s: Settings, b: { title: string; details: string; kind: Idea['kind']; category?: string; media?: Idea['media'] }) =>
     serverCall<Idea>(s, '/api/ideas', { method: 'POST', body: JSON.stringify(b) }),
   vote: (s: Settings, id: string) => serverCall<Idea>(s, `/api/ideas/${id}/vote`, { method: 'POST' }),
   update: (s: Settings, id: string, b: { status?: IdeaStatus; note?: string }) =>

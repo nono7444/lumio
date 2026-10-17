@@ -20,8 +20,9 @@ import {
 } from '@/lib/arr';
 import { jf, type JfItem } from '@/lib/jellyfin';
 import { askFolder } from '@/components/folder-picker';
+import { FamilyRating } from '@/components/family-rating';
+import { ReportProblemButton } from '@/components/report-problem';
 import { RequestSection } from '@/components/request-section';
-import { RequestBlock } from '@/components/request-block';
 import { grab, mediaFlavor } from '@/lib/grab';
 import { useServerRequests } from '@/lib/requests';
 import { chat } from '@/lib/chat';
@@ -279,6 +280,14 @@ export default function MediaScreen() {
             />
           ) : null}
 
+          {/* ——— Notes de la famille + signalement d'un problème ——— */}
+          {serverReq ? (
+            <FamilyRating type={details.kind} tmdbId={tmdbId} title={title} poster={tmdbImg(d.poster_path, 'w342')} />
+          ) : null}
+          {serverReq && jfItem ? (
+            <ReportProblemButton type={details.kind} tmdbId={tmdbId} title={title} poster={tmdbImg(d.poster_path, 'w342')} />
+          ) : null}
+
           {/* ——— Proposer le titre dans le chat famille ——— */}
           {/* Proposer : seulement pour un titre pas encore sur le serveur */}
           {settings.chatUrl && settings.jellyfin && !jfItem ? (
@@ -311,7 +320,6 @@ export default function MediaScreen() {
           ) : null}
 
           {/* ——— Sans serveur Lumio : demande Seerr pour les non-admins ——— */}
-          {serverReq === false && !manager && !jfItem ? <RequestBlock type={details.kind} tmdbId={tmdbId} /> : null}
 
           {/* ——— Action principale (admin) ——— */}
           {!manager || serverReq !== false ? null : !configured ? (

@@ -14,6 +14,7 @@ import { C, TAB_SPACE } from '@/constants/theme';
 import { openMedia, openStremioMeta } from '@/lib/navigation';
 import { orderRows, useAvailableRows } from '@/lib/home-layout';
 import { nextMovieNight, type Reco } from '@/lib/recommend';
+import { ratingsApi, type TopRated } from '@/lib/ratings';
 import { Addon, hasTmdb, useSettings } from '@/lib/settings';
 import { itemTitle, itemYear, tmdb, tmdbImg, type MediaType } from '@/lib/tmdb';
 import { useLibrary } from '@/lib/use-library';
@@ -210,6 +211,29 @@ function SeasonTmdbRow({ nonce }: { nonce: number }) {
   );
 }
 
+/** Titres les mieux notés par la famille (notes en étoiles du serveur Lumio). */
+function FamilyTopRow({ nonce }: { nonce: number }) {
+  const { settings } = useSettings();
+  const [items, setItems] = useState<TopRated[]>([]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!settings.chatUrl || !settings.jellyfin) return;
+      ratingsApi.top(settings).then(setItems).catch(() => {});
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [settings.chatUrl, settings.jellyfin?.token, nonce])
+  );
+  if (!items.length) return null;
+  const posters: PosterItem[] = items.map((r) => ({
+    key: `${r.type}:${r.tmdbId}`,
+    title: r.title,
+    poster: r.poster,
+    ids: { tmdb: r.tmdbId, type: r.type },
+    subtitle: `★ ${r.avg.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} · ${r.count} avis`,
+    onPress: () => openMedia(r.type, r.tmdbId),
+  }));
+  return <Row title="⭐ Coups de cœur de la famille" items={posters} />;
+}
+
 /** « Prochaine soirée cinéma » : films pas encore vus, choisis d'après tes genres préférés (calcul local). */
 function MovieNightRow({ nonce }: { nonce: number }) {
   const { settings } = useSettings();
@@ -304,6 +328,9 @@ export default function Home() {
               break;
             case 'trending':
               el = <Trending part="row" nonce={nonce} />;
+              break;
+            case 'family-top':
+              el = <FamilyTopRow nonce={nonce} />;
               break;
             case 'jf-reco':
               el = <MovieNightRow nonce={nonce} />;

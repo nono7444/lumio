@@ -150,6 +150,8 @@ function mergeSettings(saved: Partial<Settings>): Settings {
     radarr: { ...DEFAULTS.radarr, ...saved.radarr },
     sonarr: { ...DEFAULTS.sonarr, ...saved.sonarr },
     betterPosters: { ...DEFAULTS.betterPosters, ...saved.betterPosters },
+    // Seerr n'est plus utilisé : les demandes passent par le serveur Lumio
+    seerr: null,
   };
 }
 

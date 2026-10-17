@@ -21,9 +21,10 @@ const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 const REQUESTS_FILE = path.join(DATA_DIR, 'requests.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
+const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.5.0';
+const VERSION = '3.6.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -50,6 +51,7 @@ let config = readJson(CONFIG_FILE, {});
 let requests = readJson(REQUESTS_FILE, []);
 let userPrefs = readJson(USERS_FILE, {});
 let ideas = readJson(IDEAS_FILE, []);
+let ratings = readJson(RATINGS_FILE, {});
 
 const timers = {};
 function persist(file, getData) {
@@ -60,6 +62,7 @@ const saveMessages = () => persist(MESSAGES_FILE, () => messages);
 const saveRequests = () => persist(REQUESTS_FILE, () => requests);
 const saveUsers = () => persist(USERS_FILE, () => userPrefs);
 const saveIdeas = () => persist(IDEAS_FILE, () => ideas);
+const saveRatings = () => persist(RATINGS_FILE, () => ratings);
 const saveConfig = () => writeJson(CONFIG_FILE, config);
 
 class HttpError extends Error {
@@ -890,7 +893,7 @@ const server = http.createServer(async (req, res) => {
       ok: true,
       version: VERSION,
       messages: messages.length,
-      features: ['chat', 'requests', 'status', 'ideas'],
+      features: ['chat', 'requests', 'status', 'ideas', 'ratings'],
       radarr: Boolean(arrConfig('radarr')),
       sonarr: Boolean(arrConfig('sonarr')),
     });
@@ -1024,6 +1027,48 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
       return send(res, 204);
     }
 
+    // ——— Notes de la famille (étoiles + avis) ———
+    if (req.method === 'GET' && p === '/api/ratings') {
+      const key = `${q.get('type') === 'tv' ? 'tv' : 'movie'}:${Number(q.get('tmdbId'))}`;
+      const entry = ratings[key];
+      const votes = entry ? Object.entries(entry.votes) : [];
+      const list = votes
+        .map(([id, v]) => ({ name: v.name, stars: v.stars, comment: v.comment || undefined, at: v.at, mine: id === user.id }))
+        .sort((a, b) => String(b.at).localeCompare(String(a.at)));
+      const avg = list.length ? Math.round((list.reduce((n, v) => n + v.stars, 0) / list.length) * 10) / 10 : null;
+      const mine = entry && entry.votes[user.id] ? { stars: entry.votes[user.id].stars, comment: entry.votes[user.id].comment || '' } : null;
+      return send(res, 200, { avg, count: list.length, mine, list });
+    }
+    if (req.method === 'POST' && p === '/api/ratings') {
+      const b = await readBody(req);
+      const type = b.type === 'tv' ? 'tv' : 'movie';
+      const tmdbId = Number(b.tmdbId);
+      if (!tmdbId) throw new HttpError(400, 'tmdbId manquant');
+      const key = `${type}:${tmdbId}`;
+      const stars = Math.max(0, Math.min(5, Math.round(Number(b.stars) || 0)));
+      const entry = ratings[key] || { type, tmdbId, title: '', poster: undefined, votes: {} };
+      if (b.title) entry.title = String(b.title).slice(0, 200);
+      if (typeof b.poster === 'string' && b.poster.startsWith('https://')) entry.poster = b.poster;
+      if (!stars) delete entry.votes[user.id];
+      else entry.votes[user.id] = { name: user.name, stars, comment: String(b.comment || '').trim().slice(0, 600) || undefined, at: new Date().toISOString() };
+      if (Object.keys(entry.votes).length) ratings[key] = entry;
+      else delete ratings[key];
+      saveRatings();
+      return send(res, 200, { ok: true });
+    }
+    // Coups de cœur : titres les mieux notés par la famille
+    if (req.method === 'GET' && p === '/api/ratings/top') {
+      const out = Object.values(ratings)
+        .map((e) => {
+          const v = Object.values(e.votes);
+          return { type: e.type, tmdbId: e.tmdbId, title: e.title, poster: e.poster, count: v.length, avg: v.reduce((n, x) => n + x.stars, 0) / (v.length || 1) };
+        })
+        .filter((x) => x.count)
+        .sort((a, b) => b.avg - a.avg || b.count - a.count)
+        .slice(0, 30);
+      return send(res, 200, { items: out });
+    }
+
     // ——— Mode développeur : idées de fonctionnalités et bugs proposés par la famille ———
     if (req.method === 'GET' && p === '/api/ideas') {
       return send(res, 200, { ideas: ideas.map((i) => publicIdea(i, user)) });
@@ -1042,11 +1087,21 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
         createdAt: new Date().toISOString(),
         votes: [user.id],
       };
+      // Signalement d'un problème sur un film / une série
+      if (b.media && b.media.tmdbId) {
+        idea.media = {
+          type: b.media.type === 'tv' ? 'tv' : 'movie',
+          tmdbId: Number(b.media.tmdbId),
+          title: String(b.media.title || '').slice(0, 200),
+          poster: typeof b.media.poster === 'string' && b.media.poster.startsWith('https://') ? b.media.poster : undefined,
+        };
+      }
+      if (b.category) idea.category = String(b.category).slice(0, 40);
       ideas.unshift(idea);
       saveIdeas();
       if (!user.admin)
         notify({
-          title: `${idea.kind === 'bug' ? 'Bug signalé' : 'Nouvelle idée'} · ${user.name}`,
+          title: `${idea.media ? 'Problème signalé' : idea.kind === 'bug' ? 'Bug signalé' : 'Nouvelle idée'} · ${user.name}`,
           message: `${idea.title}${idea.details ? `\n${idea.details.slice(0, 200)}` : ''}`,
           tags: [idea.kind === 'bug' ? 'bug' : 'bulb'],
           click: 'lumio://ideas',

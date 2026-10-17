@@ -15,6 +15,8 @@ export type Release = {
   dayKey: string;
   /** « Sortie numérique · Prime Video », « Saison 2 · Netflix »… */
   info: string;
+  /** Plateformes (abonnement d'abord, puis achat / location) */
+  providers: Platform[];
   description?: string;
 };
 
@@ -28,11 +30,52 @@ const parseDay = (s?: string | null) => {
   return y && m && d ? new Date(y, m - 1, d) : null;
 };
 
+export type Platform = { key: string; name: string; logo?: string; kind: 'flatrate' | 'rent' };
+
+// Une seule entrée par plateforme (« Netflix Standard with Ads » → Netflix…)
+const PLATFORM_RULES: [RegExp, string][] = [
+  [/netflix/i, 'Netflix'],
+  [/amazon|prime video/i, 'Prime Video'],
+  [/disney/i, 'Disney+'],
+  [/canal\+|canal plus|mycanal/i, 'Canal+'],
+  [/apple tv/i, 'Apple TV+'],
+  [/^max\b|hbo/i, 'Max'],
+  [/paramount/i, 'Paramount+'],
+  [/crunchyroll/i, 'Crunchyroll'],
+  [/france ?tv|france télévisions/i, 'france.tv'],
+  [/tf1/i, 'TF1+'],
+  [/m6|6play/i, 'M6+'],
+  [/arte/i, 'Arte'],
+  [/ocs/i, 'OCS'],
+  [/rakuten/i, 'Rakuten TV'],
+  [/google play/i, 'Google Play'],
+  [/itunes|apple tv store/i, 'Apple TV (achat)'],
+];
+export function platformName(raw: string) {
+  for (const [re, name] of PLATFORM_RULES) if (re.test(raw)) return name;
+  return raw.replace(/\s+(standard|basic|premium)?\s*with ads$/i, '').trim();
+}
+
+type ProviderEntry = { provider_name: string; logo_path?: string | null };
+function platformsOf(p: Providers | undefined, country = 'FR'): Platform[] {
+  const r = p?.results?.[country];
+  const out = new Map<string, Platform>();
+  const add = (list: ProviderEntry[] | undefined, kind: Platform['kind']) => {
+    for (const x of list ?? []) {
+      const name = platformName(x.provider_name);
+      if (!out.has(name)) out.set(name, { key: name, name, logo: x.logo_path ? `https://image.tmdb.org/t/p/w92${x.logo_path}` : undefined, kind });
+    }
+  };
+  add(r?.flatrate as ProviderEntry[], 'flatrate');
+  add([...((r?.rent as ProviderEntry[]) ?? []), ...((r?.buy as ProviderEntry[]) ?? [])], 'rent');
+  return [...out.values()];
+}
+
 type Providers = { results?: Record<string, { flatrate?: { provider_name: string }[]; rent?: { provider_name: string }[]; buy?: { provider_name: string }[] }> };
 
 function providerNames(p: Providers | undefined, country = 'FR') {
   const r = p?.results?.[country];
-  const names = [...(r?.flatrate ?? []), ...(r?.rent ?? []), ...(r?.buy ?? [])].map((x) => x.provider_name);
+  const names = [...(r?.flatrate ?? []), ...(r?.rent ?? []), ...(r?.buy ?? [])].map((x) => platformName(x.provider_name));
   return [...new Set(names)].slice(0, 2);
 }
 
@@ -90,7 +133,9 @@ async function digitalMovies(s: Settings, from: Date, to: Date): Promise<Release
       const date = fr ?? pick('US');
       if (!date || date < from || date > to) return null;
       const where = providerNames(m['watch/providers']);
+      const providers = platformsOf(m['watch/providers']);
       return {
+        providers,
         id: `movie:${m.id}`,
         tmdbId: m.id,
         kind: 'movie' as const,
@@ -137,6 +182,7 @@ async function newSeasons(s: Settings, from: Date, to: Date): Promise<Release[]>
         'watch/providers'?: Providers;
       }>(s, `/tv/${id}`, { append_to_response: 'watch/providers' });
       const where = providerNames(t['watch/providers']);
+      const providers = platformsOf(t['watch/providers']);
       // Une ligne par saison qui démarre dans la période (date de la saison = premier épisode)
       return (t.seasons ?? [])
         .filter((x) => x.season_number > 0)
@@ -144,6 +190,7 @@ async function newSeasons(s: Settings, from: Date, to: Date): Promise<Release[]>
         .filter(({ date }) => date && date >= from && date <= to)
         .map(({ x, date }) => ({
           id: `series:${t.id}:${x.season_number}`,
+          providers,
           tmdbId: t.id,
           kind: 'series' as const,
           name: t.name,
