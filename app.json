@@ -76,7 +76,13 @@
           "expandedController": true
         }
       ],
-      "@bacons/apple-targets"
+      "@bacons/apple-targets",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Lumio utilise Face ID pour protéger l’accès à l’appli."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

@@ -5,6 +5,8 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
 
+import { AnimatedSplash } from '@/components/animated-splash';
+import { AppLock } from '@/components/app-lock';
 import { FolderPickerHost } from '@/components/folder-picker';
 import { Toasts } from '@/components/toast';
 import { UpdateBanner } from '@/components/update-banner';
@@ -23,7 +25,8 @@ function Root() {
   const { ready } = useSettings();
   useWidgetSync();
   useEffect(() => {
-    if (ready) SplashScreen.hideAsync().catch(() => {});
+    // L'écran de démarrage natif laisse la place au logo animé, qui reste affiché jusqu'à ce que l'appli soit prête
+    SplashScreen.hideAsync().catch(() => {});
     // Portrait partout, sauf le lecteur qui déverrouille la rotation
     if (!Platform.isTV) ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
   }, [ready]);
@@ -51,6 +54,17 @@ function Root() {
   );
 }
 
+/** Logo animé au lancement, puis verrou Face ID si activé. */
+function LaunchOverlays() {
+  const { ready } = useSettings();
+  return (
+    <>
+      {ready ? <AppLock /> : null}
+      <AnimatedSplash ready={ready} />
+    </>
+  );
+}
+
 export default function RootLayout() {
   return (
     <ThemeProvider value={theme}>
@@ -60,6 +74,7 @@ export default function RootLayout() {
         <FolderPickerHost />
         <UpdateBanner />
         <Toasts />
+        <LaunchOverlays />
       </SettingsProvider>
     </ThemeProvider>
   );

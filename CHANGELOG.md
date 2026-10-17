@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Logo animé au lancement de l'appli.
+- Sécurité : verrouillage de l'appli par Face ID / Touch ID (Profil → Sécurité).
+
 ## 1.0.30 — 17 octobre 2026
 
 - Demandes : profil de qualité imposé « HD-1080p nono » pour les films et les séries (serveur Lumio 3.5.0, réglable par l'admin).

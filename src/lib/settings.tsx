@@ -97,6 +97,8 @@ export type Settings = {
   liveFavorites: string[];
   /** Live TV : langue affichée ('fr' = chaînes en français, 'all' = tout, ou un code pays) */
   liveLang: string;
+  /** Verrouiller l'appli (Face ID / Touch ID / code) à l'ouverture */
+  appLock: boolean;
 };
 
 export type LiveSource = {
@@ -139,6 +141,7 @@ const DEFAULTS: Settings = {
   liveSources: [],
   liveFavorites: [],
   liveLang: 'fr',
+  appLock: false,
 };
 
 const KEY = 'lumio-native:settings:v2';

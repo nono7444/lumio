@@ -20,6 +20,7 @@
     "expo-keep-awake": "~57.0.2",
     "expo-linear-gradient": "~57.0.2",
     "expo-linking": "~57.0.13",
+    "expo-local-authentication": "~57.0.0",
     "expo-mpv": "^0.1.13",
     "expo-router": "~57.0.27",
     "expo-screen-orientation": "~57.0.3",
