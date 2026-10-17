@@ -129,8 +129,9 @@ export default function Calendar() {
         data={[null, ...platforms.list.map((x) => x.p.key), ...(platforms.rentOnly ? ['rent'] : [])]}
         keyExtractor={(k) => k ?? 'all'}
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
-        style={{ flexGrow: 0, marginBottom: 10 }}
+        contentContainerStyle={{ paddingHorizontal: 16, gap: 8, alignItems: 'center' }}
+        // Hauteur fixe : sinon la rangée des plateformes peut être coupée de moitié
+        style={{ flexGrow: 0, flexShrink: 0, height: 48, minHeight: 48, marginBottom: 8 }}
         renderItem={({ item: k }) => {
           const on = platform === k;
           const entry = platforms.list.find((x) => x.p.key === k);
@@ -188,7 +189,7 @@ export default function Calendar() {
 }
 
 const styles = StyleSheet.create({
-  platform: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 6, paddingRight: 12, height: 36, borderRadius: 18, backgroundColor: C.surfaceHigh },
+  platform: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 6, paddingRight: 12, height: 38, borderRadius: 19, backgroundColor: C.surfaceHigh },
   platformOn: { backgroundColor: C.text },
   platformLogo: { width: 24, height: 24, borderRadius: 6 },
   platformText: { color: C.text, fontSize: 13, fontWeight: '700' },

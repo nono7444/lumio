@@ -13,6 +13,7 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 - Notes de la famille visibles sur les affiches (★ 4,5).
 - Fiche : notes de la famille et « Signaler un problème » (avec icône ⚠️) remontés juste sous les boutons Lire / Vu.
 - Live TV : bouton VPN pour démarrer ou éteindre Proton VPN (via l'app Raccourcis), avec démarrage automatique en option.
+- Calendrier : les plateformes ne sont plus coupées de moitié.
 - Correction : la pastille rouge du Chat disparaît bien une fois les messages lus.
 - Serveur Lumio 3.7.0 conseillé (notes sur toutes les affiches ; sinon seulement les coups de cœur).
 
