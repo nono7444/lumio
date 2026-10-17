@@ -68,6 +68,8 @@ export default function Player() {
   const [attempt, setAttempt] = useState(0);
   // Liste des sources directes : la principale puis les alternatives
   const [altIdx, setAltIdx] = useState(0);
+  // Image dans l'image demandée depuis mpv : le lecteur natif démarre directement en PiP
+  const pipRequested = useRef(false);
   const sources = useRef<{ uri: string; headers?: Record<string, string>; label?: string }[] | null>(null);
   if (sources.current == null && p.uri) {
     let main: Record<string, string> | undefined;
@@ -262,6 +264,18 @@ export default function Player() {
     return { uri: source.uri, contentType: guessContentType(source.uri, source.isHls), title: p.title, subtitle: p.subtitle };
   };
   const qualityLabel = QUALITIES.find((x) => x.id === quality)?.label.split(' ')[0] ?? 'Auto';
+  // Statistiques : méthode de lecture côté serveur et qualité demandée
+  const METHOD: Record<string, string> = {
+    DirectPlay: 'Lecture directe (fichier d’origine)',
+    DirectStream: 'Flux direct (remuxé par le serveur)',
+    Transcode: 'Conversion par le serveur',
+  };
+  const statsInfo = [
+    p.kind === 'jellyfin'
+      ? `Méthode : ${METHOD[target.current?.playMethod ?? ''] ?? '…'}`
+      : `Source : lien direct${sourceCount > 1 ? ` (${altIdx + 1}/${sourceCount})` : ''}`,
+    ...(p.kind === 'jellyfin' ? [`Qualité demandée : ${QUALITIES.find((x) => x.id === quality)?.label ?? 'Original'}`] : []),
+  ];
   const castBtn = (
     <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
       {p.kind === 'jellyfin' ? (
@@ -302,6 +316,15 @@ export default function Player() {
             onClose={() => router.back()}
             onEnded={onEnded}
             extra={castBtn}
+            statsInfo={statsInfo}
+            onPip={
+              Platform.OS === 'ios'
+                ? () => {
+                    pipRequested.current = true;
+                    setEngine('native');
+                  }
+                : undefined
+            }
           />
         ) : (
           <NativePlayer
@@ -318,6 +341,8 @@ export default function Player() {
             onClose={() => router.back()}
             onEnded={onEnded}
             extra={castBtn}
+            statsInfo={statsInfo}
+            autoPip={pipRequested.current}
           />
         )
       ) : !error ? (

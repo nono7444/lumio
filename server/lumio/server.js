@@ -94,6 +94,7 @@ function settings() {
     defaultTvQuotaLimit: Number(config.defaultTvQuotaLimit) || 0,
     defaultTvQuotaDays: Number(config.defaultTvQuotaDays) || 7,
     usersSeeAllRequests: config.usersSeeAllRequests === true,
+    lockedProfile: lockedProfileName(),
   };
 }
 
@@ -238,10 +239,20 @@ async function folders(kind) {
   };
 }
 
+// Profil de qualité imposé à toutes les demandes (films et séries), s'il existe dans Radarr / Sonarr
+const lockedProfileName = () => (config.lockedProfile !== undefined ? config.lockedProfile : process.env.LOCKED_PROFILE || 'HD-1080p nono') || '';
+const normName = (t) => String(t || '').toLowerCase().replace(/\s+/g, ' ').trim();
+
 async function profiles(kind) {
   const list = await arr(kind, '/qualityprofile');
   const c = arrConfig(kind);
-  return { profiles: list.map((p) => ({ id: p.id, name: p.name })), default: c.qualityProfileId || (list[0] && list[0].id) || null };
+  const lockName = normName(lockedProfileName());
+  const locked = lockName ? list.find((p) => normName(p.name) === lockName) : null;
+  return {
+    profiles: list.map((p) => ({ id: p.id, name: p.name })),
+    default: (locked && locked.id) || c.qualityProfileId || (list[0] && list[0].id) || null,
+    locked: locked ? { id: locked.id, name: locked.name } : null,
+  };
 }
 
 async function checkFolder(kind, wanted) {
@@ -254,7 +265,8 @@ async function checkFolder(kind, wanted) {
 }
 
 async function checkProfile(kind, wanted) {
-  const { profiles: list, default: def } = await profiles(kind);
+  const { profiles: list, default: def, locked } = await profiles(kind);
+  if (locked) return locked.id; // profil imposé : on ignore tout autre choix
   if (!wanted) {
     if (!def) throw new HttpError(500, 'Aucun profil de qualité');
     return def;
@@ -1181,7 +1193,7 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
     if (req.method === 'GET' && p === '/api/arr/options') {
       const kind = kindOf(q.get('type'));
       const [f, pr] = await Promise.all([folders(kind), user.admin ? profiles(kind) : null]);
-      return send(res, 200, { ...f, profiles: pr ? pr.profiles : [], defaultProfile: pr ? pr.default : null });
+      return send(res, 200, { ...f, profiles: pr ? pr.profiles : [], defaultProfile: pr ? pr.default : null, lockedProfile: pr ? pr.locked : null });
     }
 
     if (req.method === 'GET' && p === '/api/queue') return send(res, 200, await queue());
@@ -1228,6 +1240,7 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
       if (b.defaultAutoApprove !== undefined) config.defaultAutoApprove = Boolean(b.defaultAutoApprove);
       if (b.usersSeeAllRequests !== undefined) config.usersSeeAllRequests = Boolean(b.usersSeeAllRequests);
       if (b.ntfyEnabled !== undefined) config.ntfyEnabled = Boolean(b.ntfyEnabled);
+      if (typeof b.lockedProfile === 'string') config.lockedProfile = b.lockedProfile.trim();
       if (b.newNtfyTopic) config.ntfyTopic = `lumio-${crypto.randomBytes(8).toString('hex')}`;
       for (const k of ['defaultMovieQuotaLimit', 'defaultMovieQuotaDays', 'defaultTvQuotaLimit', 'defaultTvQuotaDays'])
         if (b[k] !== undefined) config[k] = Math.max(0, Number(b[k]) || 0);

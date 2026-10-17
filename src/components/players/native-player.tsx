@@ -2,17 +2,21 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEventListener } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { PlayerProps } from './types';
 
 /** Lecteur natif du téléphone (AVPlayer / ExoPlayer) avec ses contrôles système. */
-export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, onTime, onReady, onError, onClose, onEnded, extra }: PlayerProps) {
+export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, onTime, onReady, onError, onClose, onEnded, extra, statsInfo, autoPip }: PlayerProps) {
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const seeked = useRef(false);
+  const view = useRef<VideoView>(null);
+  const [stats, setStats] = useState(false);
+  // Remplir l'écran (recadrage) pour supprimer les bandes noires
+  const [fill, setFill] = useState(false);
 
   const player = useVideoPlayer(null, (pl) => {
     pl.timeUpdateEventInterval = 1;
@@ -40,6 +44,8 @@ export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, on
         seeked.current = true;
         if (startAt > 5 && player.currentTime < startAt - 5) player.currentTime = startAt;
         onReady(player.currentTime);
+        // Image dans l'image demandée depuis le lecteur mpv
+        if (autoPip) setTimeout(() => view.current?.startPictureInPicture().catch(() => {}), 400);
       }
     } else if (status === 'loading') setLoading(true);
     else if (status === 'error') onError(error?.message ?? 'Lecture impossible');
@@ -52,10 +58,11 @@ export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, on
   return (
     <View style={StyleSheet.absoluteFill}>
       <VideoView
+        ref={view}
         player={player}
         style={StyleSheet.absoluteFill}
         nativeControls
-        contentFit="contain"
+        contentFit={fill ? 'cover' : 'contain'}
         allowsPictureInPicture
         startsPictureInPictureAutomatically
       />
@@ -67,12 +74,43 @@ export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, on
       <Pressable onPress={onClose} hitSlop={12} style={[styles.close, { top: insets.top + 8, left: insets.left + 12 }]}>
         <Ionicons name="close" size={24} color="#fff" />
       </Pressable>
+      <Pressable
+        onPress={() => setStats((v) => !v)}
+        hitSlop={12}
+        style={[styles.close, { top: insets.top + 8, left: insets.left + 60 }]}>
+        <Ionicons name={stats ? 'stats-chart' : 'stats-chart-outline'} size={18} color="#fff" />
+      </Pressable>
+      <Pressable
+        onPress={() => setFill((v) => !v)}
+        hitSlop={12}
+        style={[styles.close, { top: insets.top + 8, left: insets.left + 108 }]}>
+        <Ionicons name={fill ? 'contract' : 'expand'} size={18} color="#fff" />
+      </Pressable>
+      {stats ? (
+        <View pointerEvents="none" style={[styles.stats, { top: insets.top + 56, left: insets.left + 12 }]}>
+          {(statsInfo ?? []).map((l) => (
+            <Text key={l} style={styles.statsText}>
+              {l}
+            </Text>
+          ))}
+          <Text style={styles.statsText}>Lecteur : natif (AVPlayer)</Text>
+          {player.videoTrack ? (
+            <Text style={styles.statsText}>
+              Vidéo : {player.videoTrack.size ? `${player.videoTrack.size.width}×${player.videoTrack.size.height}` : '?'}
+              {player.videoTrack.bitrate ? ` · ${(player.videoTrack.bitrate / 1e6).toFixed(1)} Mb/s` : ''}
+              {player.videoTrack.mimeType ? ` · ${player.videoTrack.mimeType}` : ''}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
       {extra ? <View style={{ position: 'absolute', top: insets.top + 8, right: insets.right + 12 }}>{extra}</View> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  stats: { position: 'absolute', backgroundColor: 'rgba(0,0,0,0.72)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, gap: 2, maxWidth: 460 },
+  statsText: { color: '#E5E5EA', fontSize: 11.5, fontFamily: 'Menlo', lineHeight: 16 },
   center: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
   close: {
     position: 'absolute',

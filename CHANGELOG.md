@@ -6,6 +6,11 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Demandes : profil de qualité imposé « HD-1080p nono » pour les films et les séries (serveur Lumio 3.5.0, réglable par l'admin).
+- Lecteur : statistiques en direct (méthode de lecture directe ou conversion, codecs, résolution, débit, décodage matériel, réseau, tampon).
+- Lecteur : image dans l'image depuis mpv (bascule sur le lecteur natif), et bouton « remplir l'écran » dans le lecteur natif.
+- Accueil : « 🍿 Prochaine soirée cinéma », des films pas encore vus choisis d'après tes genres préférés, calculés sur le téléphone et renouvelés chaque jour.
+
 ## 1.0.29 — 16 octobre 2026
 
 - Nouvelle appli Android (téléphone) : APK publié à chaque version (lumio.wawanono.lol/android), mise à jour proposée dans l'appli.

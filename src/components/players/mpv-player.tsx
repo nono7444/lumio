@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { ExpoMpvView, type ExpoMpvViewRef, type TrackInfo } from 'expo-mpv';
+import { ExpoMpvView, type ExpoMpvViewRef, type MediaInfo, type TrackInfo } from 'expo-mpv';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View, type GestureResponderEvent, type LayoutChangeEvent } from 'react-native';
 import { FocusPressable as Pressable, IS_TV, useTVRemote } from '@/components/tv';
@@ -23,7 +23,7 @@ function trackLabel(t: TrackInfo) {
 }
 
 /** Lecteur mpv avec contrôles maison (lecture, barre de progression, pistes, vitesse, zoom). */
-export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onReady, onError, onClose, onEnded, extra }: PlayerProps) {
+export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onReady, onError, onClose, onEnded, extra, statsInfo, onPip }: PlayerProps) {
   const insets = useSafeAreaInsets();
   const ref = useRef<ExpoMpvViewRef>(null);
   const [source, setSource] = useState<string | undefined>();
@@ -35,6 +35,17 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
   const [visible, setVisible] = useState(true);
   const [speedIdx, setSpeedIdx] = useState(0);
   const [zoom, setZoom] = useState(false);
+  // Statistiques en direct (« Stats for nerds »)
+  const [stats, setStats] = useState(false);
+  const [media, setMedia] = useState<MediaInfo | null>(null);
+  const net = useRef({ rate: 0, ahead: 0 });
+  useEffect(() => {
+    if (!stats) return;
+    const poll = () => ref.current?.getMediaInfo().then(setMedia).catch(() => {});
+    poll();
+    const t = setInterval(poll, 2000);
+    return () => clearInterval(t);
+  }, [stats]);
   const [sheet, setSheet] = useState<null | { audio: TrackInfo[]; subs: TrackInfo[] }>(null);
   const [scrub, setScrub] = useState<number | null>(null);
   const [barWidth, setBarWidth] = useState(1);
@@ -151,6 +162,7 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
           setPosition(nativeEvent.position);
           if (nativeEvent.duration) setDuration(nativeEvent.duration);
           setBuffered(nativeEvent.bufferedPosition || 0);
+          net.current = { rate: nativeEvent.bufferRate || 0, ahead: nativeEvent.bufferedDuration || 0 };
           onTime(nativeEvent.position, paused);
         }}
         onPlaybackStateChange={({ nativeEvent }) => setState(nativeEvent.state)}
@@ -169,6 +181,37 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
           <ActivityIndicator size="large" color="#fff" />
         </View>
       )}
+
+      {stats ? (
+        <View pointerEvents="none" style={[styles.stats, { top: insets.top + 64, left: insets.left + 14 }]}>
+          {(statsInfo ?? []).map((l) => (
+            <Text key={l} style={styles.statsText}>
+              {l}
+            </Text>
+          ))}
+          <Text style={styles.statsText}>Lecteur : mpv</Text>
+          {media ? (
+            <>
+              <Text style={styles.statsText}>
+                Vidéo : {media.videoCodec?.toUpperCase() || '?'} · {media.width}×{media.height}
+                {media.fps ? ` · ${Math.round(media.fps * 100) / 100} i/s` : ''}
+                {media.isHdr ? ` · ${media.hdrFormat === 'hlg' ? 'HLG' : 'HDR10 / DV'}` : ' · SDR'}
+              </Text>
+              <Text style={styles.statsText}>
+                Débit vidéo : {media.videoBitrate ? `${(media.videoBitrate / 1e6).toFixed(1)} Mb/s` : '—'} · audio :{' '}
+                {media.audioCodec?.toUpperCase() || '?'}
+                {media.audioBitrate ? ` ${Math.round(media.audioBitrate / 1000)} kb/s` : ''}
+              </Text>
+              <Text style={styles.statsText}>
+                Décodage : {media.hwdecCurrent ? `matériel (${media.hwdecCurrent})` : 'logiciel'} · {media.pixelFormat || '?'} · {media.colorspace || '?'}
+              </Text>
+            </>
+          ) : null}
+          <Text style={styles.statsText}>
+            Réseau : {net.current.rate ? `${((net.current.rate * 8) / 1e6).toFixed(1)} Mb/s` : '—'} · tampon : {Math.round(net.current.ahead)} s
+          </Text>
+        </View>
+      ) : null}
 
       {visible && (
         <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
@@ -214,6 +257,27 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
             </Pressable>
             <Pressable onPress={openTracks} hitSlop={8} style={styles.iconBtn}>
               <Ionicons name="chatbox-ellipses-outline" size={22} color="#fff" />
+            </Pressable>
+            {onPip && !IS_TV ? (
+              <Pressable
+                onPress={() => {
+                  tap();
+                  onPip();
+                }}
+                hitSlop={8}
+                style={styles.iconBtn}>
+                <Ionicons name="albums-outline" size={21} color="#fff" />
+              </Pressable>
+            ) : null}
+            <Pressable
+              onPress={() => {
+                tap();
+                setStats((v) => !v);
+                bump();
+              }}
+              hitSlop={8}
+              style={styles.iconBtn}>
+              <Ionicons name={stats ? 'stats-chart' : 'stats-chart-outline'} size={20} color="#fff" />
             </Pressable>
           </View>
 
@@ -334,6 +398,17 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
 }
 
 const styles = StyleSheet.create({
+  stats: {
+    position: 'absolute',
+    zIndex: 20,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 2,
+    maxWidth: 460,
+  },
+  statsText: { color: '#E5E5EA', fontSize: 11.5, fontFamily: 'Menlo', lineHeight: 16 },
   center: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
   scrim: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.42)' },
   top: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', gap: 10 },

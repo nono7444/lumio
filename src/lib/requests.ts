@@ -54,6 +54,8 @@ export type ArrOptions = {
   default: string | null;
   profiles: { id: number; name: string }[];
   defaultProfile: number | null;
+  /** Profil imposé par le serveur à toutes les demandes (ex. « HD-1080p nono ») */
+  lockedProfile?: { id: number; name: string } | null;
 };
 
 export type AdminSettings = {

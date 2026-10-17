@@ -210,7 +210,7 @@ export function RequestModal({
                 <Ionicons name="options-outline" size={18} color={C.textDim} />
                 <Text style={[styles.cell, { flex: 1 }]}>
                   Options{folder ? ` · ${folderName(folder)}` : ''}
-                  {me?.admin && profile ? ` · ${opts.profiles.find((p) => p.id === profile)?.name ?? ''}` : ''}
+                  {opts.lockedProfile ? ` · ${opts.lockedProfile.name}` : me?.admin && profile ? ` · ${opts.profiles.find((p) => p.id === profile)?.name ?? ''}` : ''}
                 </Text>
                 <Ionicons name={advanced ? 'chevron-up' : 'chevron-down'} size={18} color={C.textDim} />
               </Pressable>
@@ -233,7 +233,16 @@ export function RequestModal({
                       </Pressable>
                     ))}
                   </View>
-                  {me?.admin && opts.profiles.length > 1 ? (
+                  {opts.lockedProfile ? (
+                    <>
+                      <Text style={styles.label}>Profil de qualité</Text>
+                      <View style={styles.chips}>
+                        <View style={[styles.chip, styles.chipOn]}>
+                          <Text style={[styles.chipText, { color: '#000' }]}>🔒 {opts.lockedProfile.name}</Text>
+                        </View>
+                      </View>
+                    </>
+                  ) : me?.admin && opts.profiles.length > 1 ? (
                     <>
                       <Text style={styles.label}>Profil de qualité</Text>
                       <View style={styles.chips}>

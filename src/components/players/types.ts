@@ -17,6 +17,12 @@ export type PlayerProps = {
   onEnded: () => void;
   /** Bouton(s) en plus dans la barre du haut (ex. Cast) */
   extra?: ReactNode;
+  /** Lignes fournies par l'écran de lecture pour les statistiques (méthode, qualité…) */
+  statsInfo?: string[];
+  /** mpv : passer en image dans l'image (bascule sur le lecteur natif) */
+  onPip?: () => void;
+  /** Lecteur natif : démarrer directement en image dans l'image */
+  autoPip?: boolean;
 };
 
 export function formatTime(sec: number) {

@@ -13,6 +13,7 @@ import { PosterItem, Row } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
 import { openMedia, openStremioMeta } from '@/lib/navigation';
 import { orderRows, useAvailableRows } from '@/lib/home-layout';
+import { nextMovieNight, type Reco } from '@/lib/recommend';
 import { Addon, hasTmdb, useSettings } from '@/lib/settings';
 import { itemTitle, itemYear, tmdb, tmdbImg, type MediaType } from '@/lib/tmdb';
 import { useLibrary } from '@/lib/use-library';
@@ -209,6 +210,24 @@ function SeasonTmdbRow({ nonce }: { nonce: number }) {
   );
 }
 
+/** « Prochaine soirée cinéma » : films pas encore vus, choisis d'après tes genres préférés (calcul local). */
+function MovieNightRow({ nonce }: { nonce: number }) {
+  const { settings } = useSettings();
+  const [reco, setReco] = useState<Reco | null>(null);
+  useEffect(() => {
+    if (!settings.jellyfin) return;
+    nextMovieNight(settings).then(setReco).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.jellyfin?.token, nonce]);
+  if (!reco?.items.length) return null;
+  return (
+    <JfRow
+      title={reco.because.length ? `🍿 Prochaine soirée cinéma · ${reco.because.slice(0, 2).join(', ')}` : '🍿 Prochaine soirée cinéma'}
+      items={reco.items}
+    />
+  );
+}
+
 function JfDynamicRow({ kind, view, nonce }: { kind: 'continue' | 'nextup' | 'favorites' | 'jf-latest'; view?: JfItem; nonce: number }) {
   const { settings } = useSettings();
   const [items, setItems] = useState<JfItem[]>([]);
@@ -285,6 +304,9 @@ export default function Home() {
               break;
             case 'trending':
               el = <Trending part="row" nonce={nonce} />;
+              break;
+            case 'jf-reco':
+              el = <MovieNightRow nonce={nonce} />;
               break;
             case 'catalog':
               el = r.addon && r.catalog ? <CatalogRow addon={r.addon} catalog={r.catalog} nonce={nonce} /> : null;
