@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.30 — 17 octobre 2026
+
 - Demandes : profil de qualité imposé « HD-1080p nono » pour les films et les séries (serveur Lumio 3.5.0, réglable par l'admin).
 - Lecteur : statistiques en direct (méthode de lecture directe ou conversion, codecs, résolution, débit, décodage matériel, réseau, tampon).
 - Lecteur : image dans l'image depuis mpv (bascule sur le lecteur natif), et bouton « remplir l'écran » dans le lecteur natif.
