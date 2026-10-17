@@ -34,7 +34,7 @@ jobs:
           set -o pipefail
           xcodebuild -project LumioSwift.xcodeproj -scheme LumioSwift -configuration Release \
             -destination 'generic/platform=iOS' -derivedDataPath build/ios \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 | tee ios.log | grep -E "error:|\*\* BUILD" || { grep -E "error:" -A3 ios.log | head -80; exit 1; }
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 | tee ios.log | grep -E "error:|\*\* BUILD" || { grep -E "error:" ios.log | sed "s#^.*/swift/##" | sort -u | head -60 > err.txt; cat err.txt; echo "::error title=Compilation::$(sed 's/%/%25/g' err.txt | awk '{printf "%s%%0A", $0}')"; exit 1; }
           mkdir -p Payload
           cp -R "build/ios/Build/Products/Release-iphoneos/Lumio Swift.app" Payload/
           zip -qry ../lumio-swift.ipa Payload
@@ -44,7 +44,7 @@ jobs:
           xcodebuild -project LumioSwift.xcodeproj -scheme LumioSwift -configuration Release \
             -destination 'generic/platform=macOS' -derivedDataPath build/mac \
             ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
-            CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO 2>&1 | tee mac.log | grep -E "error:|\*\* BUILD" || { grep -E "error:" -A3 mac.log | head -80; exit 1; }
+            CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO 2>&1 | tee mac.log | grep -E "error:|\*\* BUILD" || { grep -E "error:" mac.log | sed "s#^.*/swift/##" | sort -u | head -60 > err.txt; cat err.txt; echo "::error title=Compilation::$(sed 's/%/%25/g' err.txt | awk '{printf "%s%%0A", $0}')"; exit 1; }
           cd build/mac/Build/Products/Release
           ditto -c -k --keepParent "Lumio Swift.app" "$GITHUB_WORKSPACE/lumio-swift-mac.zip"
       - name: Source FlareStore dédiée
