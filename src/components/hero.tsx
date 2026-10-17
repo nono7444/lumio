@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { FlatList, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 
@@ -153,25 +153,26 @@ export function Hero({ items, season }: { items: HeroItem[]; season?: Season | n
   );
 }
 
-export function HeroTopBar({ title, onCustomize, season }: { title: string; onCustomize?: () => void; season?: Season | null }) {
+export function HeroTopBar({ title, onCustomize, season, right }: { title: string; onCustomize?: () => void; season?: Season | null; right?: ReactNode }) {
   return (
     <View style={styles.topBar} pointerEvents="box-none">
       <Text style={styles.brand}>
         {title}
         {season ? <Text style={{ fontSize: 22 }}> {season.emoji}</Text> : null}
       </Text>
-      {onCustomize ? (
-        <Pressable
-          onPress={() => {
-            tap();
-            onCustomize();
-          }}
-          hitSlop={10}
-          accessibilityLabel="Personnaliser l'accueil"
-          style={styles.topBtn}>
-          <Ionicons name="options-outline" size={20} color={C.text} />
-        </Pressable>
-      ) : null}
+      {right ??
+        (onCustomize ? (
+          <Pressable
+            onPress={() => {
+              tap();
+              onCustomize();
+            }}
+            hitSlop={10}
+            accessibilityLabel="Personnaliser l'accueil"
+            style={styles.topBtn}>
+            <Ionicons name="options-outline" size={20} color={C.text} />
+          </Pressable>
+        ) : null)}
     </View>
   );
 }

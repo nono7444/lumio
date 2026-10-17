@@ -3,7 +3,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as Clipboard from 'expo-clipboard';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Linking, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,12 +12,12 @@ import { toast } from '@/components/toast';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { Button, SegChip, tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
-import { claudePrompt, claudeUrl, IDEA_STATUS, ideasApi, type Idea, type IdeaStatus } from '@/lib/ideas';
+import { claudePrompt, claudeUrl, IDEA_STATUS, ideasApi, refreshProblemCount, type Idea, type IdeaStatus } from '@/lib/ideas';
 import { openMedia } from '@/lib/navigation';
 import { requestsApi, timeAgo } from '@/lib/requests';
 import { useSettings } from '@/lib/settings';
 
-type Filter = 'open' | 'done' | 'all';
+type Filter = 'open' | 'problems' | 'done' | 'all';
 const OPEN: IdeaStatus[] = ['new', 'planned', 'sent'];
 
 async function sendToClaude(ideas: Idea[], s: ReturnType<typeof useSettings>['settings'], onDone: () => void) {
@@ -139,7 +139,8 @@ export default function Ideas() {
   const [ideas, setIdeas] = useState<Idea[] | null>(null);
   const [admin, setAdmin] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<Filter>('open');
+  const params = useLocalSearchParams<{ filter?: string }>();
+  const [filter, setFilter] = useState<Filter>(params.filter === 'problems' ? 'problems' : 'open');
   const [kind, setKind] = useState<Idea['kind']>('feature');
   const [title, setTitle] = useState('');
   const [details, setDetails] = useState('');
@@ -159,7 +160,11 @@ export default function Ideas() {
   useFocusEffect(
     useCallback(() => {
       load();
-    }, [load])
+      // La pastille ⚠️ de l'accueil se met à jour en revenant
+      return () => {
+        refreshProblemCount(settings);
+      };
+    }, [load, settings])
   );
 
   const submit = async () => {
@@ -180,7 +185,15 @@ export default function Ideas() {
 
   const replace = (i: Idea) => setIdeas((l) => (l ?? []).map((x) => (x.id === i.id ? i : x)));
   const shown = (ideas ?? [])
-    .filter((i) => (filter === 'all' ? true : filter === 'open' ? OPEN.includes(i.status) : !OPEN.includes(i.status)))
+    .filter((i) =>
+      filter === 'all'
+        ? true
+        : filter === 'problems'
+          ? i.kind === 'bug' && OPEN.includes(i.status)
+          : filter === 'open'
+            ? OPEN.includes(i.status)
+            : !OPEN.includes(i.status)
+    )
     .sort((a, b) => b.votes - a.votes || b.createdAt.localeCompare(a.createdAt));
   const fresh = (ideas ?? []).filter((i) => i.status === 'new' || i.status === 'planned');
 
@@ -236,8 +249,9 @@ export default function Ideas() {
           />
         ) : null}
 
-        <View style={{ flexDirection: 'row', gap: 8 }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
           <SegChip label="En cours" on={filter === 'open'} onPress={() => setFilter('open')} />
+          <SegChip label="⚠️ Problèmes" on={filter === 'problems'} onPress={() => setFilter('problems')} />
           <SegChip label="Terminées" on={filter === 'done'} onPress={() => setFilter('done')} />
           <SegChip label="Toutes" on={filter === 'all'} onPress={() => setFilter('all')} />
         </View>

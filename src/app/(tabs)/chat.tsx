@@ -1,3 +1,4 @@
+import { useTabInBar } from '@/lib/home-layout';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
@@ -72,6 +73,7 @@ function Bubble({ m, mine, me, accent, onDelete }: { m: ChatMessage; mine: boole
 /** Discussion familiale : remarques, propositions de films et séries. */
 export default function Chat() {
   const { settings } = useSettings();
+  const inBar = useTabInBar('chat');
   const insets = useSafeAreaInsets();
   const season = useSeason();
   const accent = season?.accent ?? '#FFFFFF';
@@ -92,8 +94,9 @@ export default function Chat() {
           const seen = new Set(prev.map((m) => m.id));
           return [...prev, ...r.messages.filter((m) => !seen.has(m.id))];
         });
-        lastId.current = r.messages[r.messages.length - 1].id;
-        markChatRead(lastId.current);
+        const last = r.messages[r.messages.length - 1];
+        lastId.current = last.id;
+        markChatRead(last.createdAt);
       }
       setError(null);
     } catch (e: any) {
@@ -106,6 +109,8 @@ export default function Chat() {
   useFocusEffect(
     useCallback(() => {
       if (!settings.chatUrl || !settings.jellyfin) return;
+      // Ouvrir la discussion suffit à tout marquer comme lu
+      markChatRead();
       poll();
       const t = setInterval(poll, POLL_MS);
       return () => clearInterval(t);
@@ -122,7 +127,7 @@ export default function Chat() {
       setText('');
       setMessages((prev) => [...prev, m]);
       lastId.current = m.id;
-      markChatRead(m.id);
+      markChatRead(m.createdAt);
     } catch (e: any) {
       Alert.alert('Message non envoyé', e?.message ?? String(e));
     } finally {
@@ -133,7 +138,7 @@ export default function Chat() {
   if (!settings.chatUrl || !settings.jellyfin) {
     return (
       <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
-        <ScreenTitle title="Chat" />
+        <ScreenTitle title="Chat" onBack={inBar ? undefined : () => router.navigate('/')} />
         <View style={styles.empty}>
           <Ionicons name="chatbubbles-outline" size={42} color={C.textFaint} />
           <Text style={styles.emptyTitle}>Discussion de la famille</Text>
@@ -156,7 +161,7 @@ export default function Chat() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={0}>
       <View style={{ paddingTop: insets.top }}>
-        <ScreenTitle title="Chat" />
+        <ScreenTitle title="Chat" onBack={inBar ? undefined : () => router.navigate('/')} />
         <Text style={styles.subtitle}>Remarques et propositions pour la vidéothèque</Text>
       </View>
 

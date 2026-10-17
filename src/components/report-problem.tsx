@@ -42,7 +42,7 @@ export function ReportProblemButton({ type, tmdbId, title, poster }: { type: 'mo
   return (
     <>
       <Pressable onPress={() => setOpen(true)} style={styles.link} hitSlop={8}>
-        <Ionicons name="flag-outline" size={15} color={C.textDim} />
+        <Ionicons name="warning" size={16} color={C.warning} />
         <Text style={styles.linkText}>Signaler un problème</Text>
       </Pressable>
       <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
@@ -76,8 +76,18 @@ export function ReportProblemButton({ type, tmdbId, title, poster }: { type: 'mo
 }
 
 const styles = StyleSheet.create({
-  link: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'center', paddingVertical: 6 },
-  linkText: { color: C.textDim, fontSize: 13, fontWeight: '600' },
+  link: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 11,
+    borderRadius: R.lg,
+    backgroundColor: 'rgba(255,179,64,0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,179,64,0.35)',
+  },
+  linkText: { color: C.warning, fontSize: 14, fontWeight: '700' },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
   sheet: { backgroundColor: C.surface, borderTopLeftRadius: R.xl, borderTopRightRadius: R.xl, padding: 20, paddingBottom: 36, gap: 12 },
   title: { color: C.text, fontSize: 20, fontWeight: '800' },

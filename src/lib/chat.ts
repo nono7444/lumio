@@ -51,7 +51,7 @@ export async function serverCall<T>(s: Settings, path: string, init?: RequestIni
 export const chat = {
   list: (s: Settings, after?: string) =>
     serverCall<{ me: ChatMe; messages: ChatMessage[] }>(s, `/api/messages${after ? `?after=${encodeURIComponent(after)}` : ''}`),
-  latest: (s: Settings) => serverCall<{ id: string | null; from: string | null }>(s, '/api/latest'),
+  latest: (s: Settings) => serverCall<{ id: string | null; at: string | null; from: string | null }>(s, '/api/latest'),
   send: (s: Settings, text: string, media?: ChatMedia) =>
     serverCall<ChatMessage>(s, '/api/messages', { method: 'POST', body: JSON.stringify({ text, media }) }),
   remove: (s: Settings, id: string) => serverCall(s, `/api/messages/${id}`, { method: 'DELETE' }),
@@ -59,29 +59,38 @@ export const chat = {
 };
 
 // ——— Pastille « non lu » ———
+// On retient la date du dernier message lu (et plus seulement son identifiant) : un message supprimé
+// ou une lecture faite avant le chargement du stockage ne laissent plus la pastille allumée.
 
-const READ_KEY = 'lumio-chat:last-read';
-let lastRead: string | null = null;
+const READ_KEY = 'lumio-chat:last-read-at';
+let lastReadAt = '';
+let touched = false;
 const listeners = new Set<() => void>();
+let latestCache: { id: string | null; at: string | null; from: string | null } = { id: null, at: null, from: null };
 
 AsyncStorage.getItem(READ_KEY)
   .then((v) => {
-    lastRead = v;
+    if (touched || !v) return;
+    lastReadAt = v;
     listeners.forEach((l) => l());
   })
   .catch(() => {});
 
-export function markChatRead(id: string | null) {
-  if (!id || id === lastRead) return;
-  lastRead = id;
-  AsyncStorage.setItem(READ_KEY, id).catch(() => {});
+/** Marque la discussion comme lue jusqu'au message donné (sa date), ou jusqu'au dernier connu. */
+export function markChatRead(at?: string | null) {
+  const v = at || latestCache.at;
+  if (!v) return;
+  touched = true;
+  if (v <= lastReadAt) return;
+  lastReadAt = v;
+  AsyncStorage.setItem(READ_KEY, v).catch(() => {});
   listeners.forEach((l) => l());
 }
 
 /** 1 s'il y a un message non lu d'une autre personne, sinon 0 (vérifié toutes les 45 s). */
 export function useUnreadChat() {
   const { settings } = useSettings();
-  const [latest, setLatest] = useState<{ id: string | null; from: string | null }>({ id: null, from: null });
+  const [latest, setLatest] = useState(latestCache);
   const [, force] = useState(0);
 
   useEffect(() => {
@@ -98,7 +107,10 @@ export function useUnreadChat() {
     const tick = () =>
       chat
         .latest(settings)
-        .then((r) => alive && setLatest(r))
+        .then((r) => {
+          latestCache = r;
+          if (alive) setLatest(r);
+        })
         .catch(() => {});
     tick();
     const t = setInterval(tick, 45_000);
@@ -108,7 +120,7 @@ export function useUnreadChat() {
     };
   }, [settings.chatUrl, settings.jellyfin?.token]);
 
-  if (!latest.id || latest.id === lastRead) return 0;
+  if (!latest.id || !latest.at) return 0;
   if (latest.from && latest.from === settings.jellyfin?.userId) return 0;
-  return 1;
+  return latest.at > lastReadAt ? 1 : 0;
 }

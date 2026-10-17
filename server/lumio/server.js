@@ -24,7 +24,7 @@ const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
 const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.6.0';
+const VERSION = '3.7.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1055,6 +1055,16 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
       else delete ratings[key];
       saveRatings();
       return send(res, 200, { ok: true });
+    }
+    // Résumé de toutes les notes (moyenne + nombre), pour les pastilles sur les affiches
+    if (req.method === 'GET' && p === '/api/ratings/summary') {
+      const items = {};
+      for (const [key, e] of Object.entries(ratings)) {
+        const v = Object.values(e.votes);
+        if (!v.length) continue;
+        items[key] = { avg: Math.round((v.reduce((n, x) => n + x.stars, 0) / v.length) * 10) / 10, count: v.length };
+      }
+      return send(res, 200, { items });
     }
     // Coups de cœur : titres les mieux notés par la famille
     if (req.method === 'GET' && p === '/api/ratings/top') {

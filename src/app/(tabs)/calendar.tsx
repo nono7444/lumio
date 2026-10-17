@@ -1,3 +1,5 @@
+import { router } from 'expo-router';
+import { useTabInBar } from '@/lib/home-layout';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -59,6 +61,7 @@ function ReleaseRow({ r }: { r: Release }) {
 /** Calendrier des sorties numériques (films et séries). */
 export default function Calendar() {
   const { settings } = useSettings();
+  const inBar = useTabInBar('calendar');
   const insets = useSafeAreaInsets();
   const [items, setItems] = useState<Release[]>([]);
   const [loading, setLoading] = useState(true);
@@ -117,7 +120,7 @@ export default function Calendar() {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
-      <ScreenTitle title="Calendrier" />
+      <ScreenTitle title="Calendrier" onBack={inBar ? undefined : () => router.navigate('/')} />
       <Text style={styles.subtitle}>Sorties numériques (VOD, plateformes) et nouvelles saisons · dates TMDB</Text>
 
       {/* Plateformes */}

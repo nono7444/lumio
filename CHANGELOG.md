@@ -6,6 +6,16 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Nouvelle barre du bas façon iOS 26 (« Liquid Glass ») : icône et nom sous chaque onglet, bulle sur l'onglet actif, mêmes couleurs.
+- Barre du bas personnalisable : appui long sur la barre (ou Accueil → Personnaliser) pour ajouter, retirer et ranger les raccourcis.
+- Calendrier et Chat quittent la barre du bas et passent en haut de l'accueil (petite vignette du jour pour le calendrier, point rouge pour les nouveaux messages). On peut les remettre dans la barre.
+- Admin : icône ⚠️ en haut de l'accueil avec le nombre de problèmes signalés, qui ouvre directement la liste.
+- Notes de la famille visibles sur les affiches (★ 4,5).
+- Fiche : notes de la famille et « Signaler un problème » (avec icône ⚠️) remontés juste sous les boutons Lire / Vu.
+- Live TV : bouton VPN pour démarrer ou éteindre Proton VPN (via l'app Raccourcis), avec démarrage automatique en option.
+- Correction : la pastille rouge du Chat disparaît bien une fois les messages lus.
+- Serveur Lumio 3.7.0 conseillé (notes sur toutes les affiches ; sinon seulement les coups de cœur).
+
 ## 1.0.36 — 17 octobre 2026
 
 - Notes de la famille et « Signaler un problème » aussi sur les fiches ouvertes depuis la Bibliothèque et l'Accueil (titres Jellyfin).

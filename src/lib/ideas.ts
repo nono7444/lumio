@@ -1,6 +1,9 @@
 // Mode développeur : idées de fonctionnalités et bugs proposés par la famille, stockés sur le serveur Lumio.
 // L'admin les transmet à Claude (claude.ai) avec un prompt prêt à l'emploi.
+import { useEffect, useState } from 'react';
+
 import { serverCall } from './chat';
+import { useSettings } from './settings';
 import type { Settings } from './settings';
 
 export type IdeaStatus = 'new' | 'planned' | 'sent' | 'done' | 'rejected';
@@ -63,3 +66,34 @@ Pour chaque demande : dis si c'est faisable et comment, puis implémente-la sur 
 
 /** Ouvre claude.ai avec le prompt pré-rempli. */
 export const claudeUrl = (prompt: string) => `https://claude.ai/new?q=${encodeURIComponent(prompt)}`;
+
+// ——— Admin : problèmes signalés pas encore traités (icône ⚠️ de l'accueil) ———
+
+let problemCount = 0;
+const problemListeners = new Set<(n: number) => void>();
+
+export async function refreshProblemCount(s: Settings) {
+  if (!s.jellyfin?.isAdmin || !s.chatUrl) return;
+  const list = await ideasApi.list(s).catch(() => null);
+  if (!list) return;
+  problemCount = list.filter((i) => i.kind === 'bug' && i.status === 'new').length;
+  problemListeners.forEach((l) => l(problemCount));
+}
+
+/** Nombre de signalements « nouveaux » (admin seulement), vérifié toutes les 60 s. */
+export function useProblemCount() {
+  const { settings } = useSettings();
+  const [n, setN] = useState(problemCount);
+  const admin = settings.jellyfin?.isAdmin === true;
+  useEffect(() => {
+    problemListeners.add(setN);
+    if (!admin || !settings.chatUrl) return () => void problemListeners.delete(setN);
+    refreshProblemCount(settings);
+    const t = setInterval(() => refreshProblemCount(settings), 60_000);
+    return () => {
+      problemListeners.delete(setN);
+      clearInterval(t);
+    };
+  }, [admin, settings.chatUrl, settings.jellyfin?.token]); // eslint-disable-line react-hooks/exhaustive-deps
+  return admin ? n : 0;
+}

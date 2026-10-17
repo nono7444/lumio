@@ -51,6 +51,13 @@ export type SeerrConfig = {
 export type HomeRow = { id: string; hidden?: boolean };
 /** Onglet de la barre du bas */
 export type TabPref = { name: string; hidden?: boolean };
+export type LiveVpnConfig = {
+  enabled: boolean;
+  /** Démarrer le VPN automatiquement en ouvrant la Live TV */
+  auto: boolean;
+  onShortcut: string;
+  offShortcut: string;
+};
 
 export type BetterPostersConfig = {
   enabled: boolean;
@@ -97,6 +104,10 @@ export type Settings = {
   liveFavorites: string[];
   /** Live TV : langue affichée ('fr' = chaînes en français, 'all' = tout, ou un code pays) */
   liveLang: string;
+  /** VPN (Proton VPN…) piloté par des raccourcis iOS autour de la Live TV */
+  liveVpn: LiveVpnConfig;
+  /** Calendrier et Chat retirés de la barre du bas (migration faite une fois) */
+  tabsV2?: boolean;
 };
 
 export type LiveSource = {
@@ -139,6 +150,7 @@ const DEFAULTS: Settings = {
   liveSources: [],
   liveFavorites: [],
   liveLang: 'fr',
+  liveVpn: { enabled: false, auto: false, onShortcut: 'Lumio VPN On', offShortcut: 'Lumio VPN Off' },
 };
 
 const KEY = 'lumio-native:settings:v2';
@@ -150,6 +162,12 @@ function mergeSettings(saved: Partial<Settings>): Settings {
     radarr: { ...DEFAULTS.radarr, ...saved.radarr },
     sonarr: { ...DEFAULTS.sonarr, ...saved.sonarr },
     betterPosters: { ...DEFAULTS.betterPosters, ...saved.betterPosters },
+    liveVpn: { ...DEFAULTS.liveVpn, ...saved.liveVpn },
+    // Calendrier et Chat passent en haut de l'accueil : retirés une fois de la barre du bas
+    tabsLayout: saved.tabsV2
+      ? (saved.tabsLayout ?? [])
+      : (saved.tabsLayout ?? []).map((t) => (t.name === 'calendar' || t.name === 'chat' ? { ...t, hidden: true } : t)),
+    tabsV2: true,
     // Seerr n'est plus utilisé : les demandes passent par le serveur Lumio
     seerr: null,
   };

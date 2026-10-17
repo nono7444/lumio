@@ -119,11 +119,24 @@ export const TAB_LABELS: Record<string, string> = {
 };
 
 /** Onglets déplaçables / masquables (Accueil et Profil restent toujours visibles). */
-export const MOVABLE_TABS = ['search', 'library', 'live', 'calendar', 'chat', 'activity'];
+export const MOVABLE_TABS = ['search', 'library', 'live', 'activity', 'calendar', 'chat'];
+/** Raccourcis absents de la barre par défaut (ils sont en haut de l'accueil). */
+export const HIDDEN_TABS_BY_DEFAULT = ['calendar', 'chat'];
+
+const isHidden = (prefs: TabPref[], name: string) => {
+  const p = prefs.find((t) => t.name === name);
+  return p ? Boolean(p.hidden) : HIDDEN_TABS_BY_DEFAULT.includes(name);
+};
+
+/** Ce raccourci est-il dans la barre du bas ? */
+export function useTabInBar(name: string) {
+  const { settings } = useSettings();
+  return !isHidden(settings.tabsLayout, name);
+}
 
 export function orderTabs(names: string[], prefs: TabPref[]) {
   const pos = new Map(prefs.map((t, i) => [t.name, i]));
-  const hidden = new Set(prefs.filter((t) => t.hidden && MOVABLE_TABS.includes(t.name)).map((t) => t.name));
+  const hidden = new Set(names.filter((n) => MOVABLE_TABS.includes(n) && isHidden(prefs, n)));
   const middle = names
     .filter((n) => n !== 'index' && n !== 'settings' && !hidden.has(n))
     .sort((a, b) => (pos.get(a) ?? 100) - (pos.get(b) ?? 100));
@@ -134,7 +147,7 @@ export function orderTabs(names: string[], prefs: TabPref[]) {
 export function currentTabPrefs(s: Settings): TabPref[] {
   const known = new Map(s.tabsLayout.map((t) => [t.name, t]));
   const ordered = s.tabsLayout.filter((t) => MOVABLE_TABS.includes(t.name));
-  for (const n of MOVABLE_TABS) if (!known.has(n)) ordered.push({ name: n });
+  for (const n of MOVABLE_TABS) if (!known.has(n)) ordered.push({ name: n, hidden: HIDDEN_TABS_BY_DEFAULT.includes(n) });
   return ordered;
 }
 

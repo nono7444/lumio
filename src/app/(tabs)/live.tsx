@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { toast } from '@/components/toast';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { Button, ScreenTitle, SegChip, tap } from '@/components/ui';
+import { VpnButton } from '@/components/vpn-button';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { channelStreams, COUNTRIES, countryOf, FRENCH, loadChannels, THEMES, themeOf, type Channel, type Theme } from '@/lib/live';
 import { useSettings } from '@/lib/settings';
@@ -170,9 +171,12 @@ export default function Live() {
       <ScreenTitle
         title="Live TV"
         right={
-          <Pressable onPress={() => router.push('/live-sources')} hitSlop={10} style={styles.headerBtn}>
-            <Ionicons name="add" size={22} color={C.text} />
-          </Pressable>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <VpnButton />
+            <Pressable onPress={() => router.push('/live-sources')} hitSlop={10} style={styles.headerBtn}>
+              <Ionicons name="add" size={22} color={C.text} />
+            </Pressable>
+          </View>
         }
       />
       {sources.length > 1 ? (

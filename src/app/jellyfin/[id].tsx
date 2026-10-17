@@ -296,8 +296,6 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
             </View>
           )}
 
-          {item.Overview ? <Text style={styles.overview}>{item.Overview}</Text> : null}
-
           {/* Notes de la famille et signalement d'un problème (serveur Lumio) */}
           {serverReq && tmdbId ? (
             <View style={{ gap: 6 }}>
@@ -305,6 +303,8 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
               <ReportProblemButton type={isSeries ? 'tv' : 'movie'} tmdbId={tmdbId} title={item.Name} poster={jfPoster(settings, item, 342)} />
             </View>
           ) : null}
+
+          {item.Overview ? <Text style={styles.overview}>{item.Overview}</Text> : null}
 
           {isSeries && (
             <View>

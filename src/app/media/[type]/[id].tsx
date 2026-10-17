@@ -282,10 +282,12 @@ export default function MediaScreen() {
 
           {/* ——— Notes de la famille + signalement d'un problème ——— */}
           {serverReq ? (
-            <FamilyRating type={details.kind} tmdbId={tmdbId} title={title} poster={tmdbImg(d.poster_path, 'w342')} />
-          ) : null}
-          {serverReq && jfItem ? (
-            <ReportProblemButton type={details.kind} tmdbId={tmdbId} title={title} poster={tmdbImg(d.poster_path, 'w342')} />
+            <View style={{ gap: 6 }}>
+              <FamilyRating type={details.kind} tmdbId={tmdbId} title={title} poster={tmdbImg(d.poster_path, 'w342')} />
+              {jfItem ? (
+                <ReportProblemButton type={details.kind} tmdbId={tmdbId} title={title} poster={tmdbImg(d.poster_path, 'w342')} />
+              ) : null}
+            </View>
           ) : null}
 
           {/* ——— Proposer le titre dans le chat famille ——— */}

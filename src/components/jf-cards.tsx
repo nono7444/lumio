@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 
-import { tap } from '@/components/ui';
+import { FamilyStarBadge, tap } from '@/components/ui';
 import { C, POSTER_W, R } from '@/constants/theme';
 import { useBetterPoster } from '@/lib/better-posters';
 import { jfBackdrop, jfPoster, type JfItem } from '@/lib/jellyfin';
@@ -82,11 +82,13 @@ export function JfPosterCard({ item, width = POSTER_W }: { item: JfItem; width?:
             <Text style={styles.countText}>{unplayed}</Text>
           </View>
         )}
-        {pct > 0 && pct < 1 && (
+        {pct > 0 && pct < 1 ? (
           <View style={styles.barTrack}>
             <View style={[styles.barFill, { width: `${pct * 100}%` }]} />
           </View>
-        )}
+        ) : item.Type === 'Movie' || item.Type === 'Series' ? (
+          <FamilyStarBadge type={item.Type === 'Movie' ? 'movie' : 'tv'} tmdbId={item.ProviderIds?.Tmdb ? Number(item.ProviderIds.Tmdb) : undefined} />
+        ) : null}
       </View>
       <Text style={styles.title} numberOfLines={1}>
         {item.Type === 'Episode' ? item.SeriesName : item.Name}

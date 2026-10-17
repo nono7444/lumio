@@ -1,3 +1,4 @@
+import { HomeShortcuts } from '@/components/home-shortcuts';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
@@ -360,7 +361,7 @@ export default function Home() {
       {/* Barre du haut : transparente sur le hero, voile noir une fois qu'on a défilé */}
       <View style={[styles.top, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
         <View style={[StyleSheet.absoluteFill, { backgroundColor: scrolled || !withHero ? 'rgba(0,0,0,0.88)' : 'transparent' }]} />
-        <HeroTopBar title="Lumio" season={season} onCustomize={() => router.push('/customize')} />
+        <HeroTopBar title="Lumio" season={season} right={<HomeShortcuts onCustomize={() => router.push('/customize')} />} />
       </View>
     </View>
   );

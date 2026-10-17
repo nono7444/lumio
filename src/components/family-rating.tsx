@@ -7,7 +7,7 @@ import { toast } from '@/components/toast';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
-import { ratingsApi, type RatingInfo } from '@/lib/ratings';
+import { refreshRatingSummary, ratingsApi, type RatingInfo } from '@/lib/ratings';
 import { timeAgo } from '@/lib/requests';
 import { useSettings } from '@/lib/settings';
 
@@ -30,6 +30,7 @@ export function FamilyRating({ type, tmdbId, title, poster }: { type: 'movie' | 
     try {
       await ratingsApi.set(settings, { type, tmdbId, stars, comment: comment ?? info.mine?.comment, title, poster });
       load();
+      refreshRatingSummary(settings);
     } catch (e: any) {
       toast(e?.message ?? String(e), 'error');
     }

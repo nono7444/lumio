@@ -9,6 +9,8 @@ import { FocusPressable as Pressable } from '@/components/tv';
 
 import { C, POSTER_H, POSTER_W, R } from '@/constants/theme';
 import { useBetterPoster, type PosterIds } from '@/lib/better-posters';
+import { useFamilyRatingBadge } from '@/lib/ratings';
+import { useSettings } from '@/lib/settings';
 
 export const tap = () => Haptics.selectionAsync().catch(() => {});
 
@@ -37,6 +39,19 @@ export function StatusBadge({ badge }: { badge: NonNullable<PosterItem['badge']>
   return (
     <View style={styles.badge} accessibilityLabel={badge.label}>
       <Ionicons name={icon} size={13} color={badge.state === 'monitored' || badge.state === 'pending' ? C.warning : '#fff'} />
+    </View>
+  );
+}
+
+/** Pastille « ★ 4,5 » en bas à gauche de l'affiche : moyenne des notes de la famille. */
+export function FamilyStarBadge({ type, tmdbId }: { type?: 'movie' | 'tv'; tmdbId?: number }) {
+  const { settings } = useSettings();
+  const r = useFamilyRatingBadge(settings, type, tmdbId);
+  if (!r) return null;
+  return (
+    <View style={styles.stars} accessibilityLabel={`Note de la famille ${r.avg} sur 5`}>
+      <Ionicons name="star" size={10} color="#FFC93C" />
+      <Text style={styles.starsText}>{r.avg.toLocaleString('fr-FR', { maximumFractionDigits: 1 })}</Text>
     </View>
   );
 }
@@ -93,6 +108,7 @@ export function PosterCard({ item, width = POSTER_W }: { item: PosterItem; width
           </View>
         )}
         {item.badge && <StatusBadge badge={item.badge} />}
+        <FamilyStarBadge type={item.ids?.type === 'tv' ? 'tv' : item.ids?.type === 'movie' ? 'movie' : undefined} tmdbId={item.ids?.tmdb} />
         {busy && (
           <View style={styles.posterBusy}>
             <ActivityIndicator color="#fff" />
@@ -269,10 +285,22 @@ export function Section({ title, children }: { title: string; children: ReactNod
 }
 
 /** En-tête de grand titre, aligné à gauche (style Apple TV / Nuvio). */
-export function ScreenTitle({ title, right }: { title: string; right?: ReactNode }) {
+export function ScreenTitle({ title, right, onBack }: { title: string; right?: ReactNode; onBack?: () => void }) {
   return (
     <View style={styles.screenTitle}>
-      <Text style={styles.screenTitleText}>{title}</Text>
+      {onBack ? (
+        <Pressable
+          onPress={() => {
+            tap();
+            onBack();
+          }}
+          hitSlop={10}
+          accessibilityLabel="Retour"
+          style={styles.backBtn}>
+          <Ionicons name="chevron-back" size={22} color={C.text} />
+        </Pressable>
+      ) : null}
+      <Text style={[styles.screenTitleText, onBack ? { flex: 1 } : null]}>{title}</Text>
       {right}
     </View>
   );
@@ -310,6 +338,20 @@ export function Fade({ height, top }: { height: number; top?: boolean }) {
 }
 
 const styles = StyleSheet.create({
+  stars: {
+    position: 'absolute',
+    left: 6,
+    bottom: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  starsText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center', marginRight: 10 },
   poster: {
     borderRadius: 10,
     overflow: 'hidden',

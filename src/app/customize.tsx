@@ -8,12 +8,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
 import {
-  currentTabPrefs,
   libraryRowDefs,
-  MOVABLE_TABS,
   orderLibraryRows,
   orderRows,
-  TAB_LABELS,
   useAvailableRows,
 } from '@/lib/home-layout';
 import { jf, type JfItem } from '@/lib/jellyfin';
@@ -61,7 +58,6 @@ export default function Customize() {
   const { rows, loading } = useAvailableRows();
   const ordered = orderRows(rows, settings.homeLayout);
   const layout = ordered.map((r) => ({ id: r.id, hidden: r.hidden }));
-  const tabs = currentTabPrefs(settings);
   const [views, setViews] = useState<JfItem[]>([]);
 
   useEffect(() => {
@@ -92,15 +88,6 @@ export default function Customize() {
     if (j < 0 || j >= next.length) return;
     [next[i], next[j]] = [next[j], next[i]];
     saveRows(next);
-  }
-
-  function moveTab(i: number, d: -1 | 1) {
-    const next = [...tabs];
-    const j = i + d;
-    if (j < 0 || j >= next.length) return;
-    [next[i], next[j]] = [next[j], next[i]];
-    tap();
-    update({ tabsLayout: next });
   }
 
   return (
@@ -154,32 +141,16 @@ export default function Customize() {
           </>
         ) : null}
 
-        <Text style={[styles.section, { marginTop: 22 }]}>Onglets</Text>
-        <Text style={styles.help}>Accueil et Profil restent toujours visibles.</Text>
-        {tabs.map((t, i) => (
-          <ReorderRow
-            key={t.name}
-            label={TAB_LABELS[t.name]}
-            hidden={Boolean(t.hidden)}
-            first={i === 0}
-            last={i === tabs.length - 1}
-            onUp={() => moveTab(i, -1)}
-            onDown={() => moveTab(i, 1)}
-            onToggle={() => {
-              tap();
-              update({ tabsLayout: tabs.map((x) => (x.name === t.name ? { ...x, hidden: !x.hidden } : x)) });
-            }}
-          />
-        ))}
-        {MOVABLE_TABS.length > 0 && (
-          <Button
-            title="Réinitialiser"
-            icon="refresh"
-            variant="secondary"
-            onPress={() => update({ homeLayout: [], tabsLayout: [], libraryLayout: [] })}
-            style={{ marginTop: 18 }}
-          />
-        )}
+        <Text style={[styles.section, { marginTop: 22 }]}>Barre du bas</Text>
+        <Text style={styles.help}>Ajoute, retire ou range les raccourcis (aussi par un appui long sur la barre).</Text>
+        <Button title="Personnaliser la barre du bas" icon="apps-outline" variant="secondary" onPress={() => router.push('/customize-tabs')} />
+        <Button
+          title="Réinitialiser"
+          icon="refresh"
+          variant="secondary"
+          onPress={() => update({ homeLayout: [], tabsLayout: [], libraryLayout: [] })}
+          style={{ marginTop: 18 }}
+        />
       </ScrollView>
     </View>
   );
