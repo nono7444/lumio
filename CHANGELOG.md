@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Notes de la famille et « Signaler un problème » aussi sur les fiches ouvertes depuis la Bibliothèque et l'Accueil (titres Jellyfin).
+
 ## 1.0.35 — 17 octobre 2026
 
 - Profil : la configuration de Radarr et Sonarr disparaît pour de bon (tout est réglé sur le serveur Lumio).

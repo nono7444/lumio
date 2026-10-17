@@ -15,9 +15,13 @@ import {
   jfBackdrop,
   jfImage,
   jfLogo,
+  jfPoster,
   ticksToSeconds,
   type JfItem,
 } from '@/lib/jellyfin';
+import { FamilyRating } from '@/components/family-rating';
+import { ReportProblemButton } from '@/components/report-problem';
+import { useServerRequests } from '@/lib/requests';
 import { useSettings } from '@/lib/settings';
 
 const FOLDER_TYPES = ['CollectionFolder', 'UserView', 'Folder', 'BoxSet'];
@@ -178,6 +182,8 @@ function FolderGrid({ folder }: { folder: JfItem }) {
 // ——— Fiche film / série ———
 
 function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
+  const serverReq = useServerRequests();
+  const tmdbId = item.ProviderIds?.Tmdb ? Number(item.ProviderIds.Tmdb) : undefined;
   const { settings } = useSettings();
   const { width, height: screenH } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -291,6 +297,14 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
           )}
 
           {item.Overview ? <Text style={styles.overview}>{item.Overview}</Text> : null}
+
+          {/* Notes de la famille et signalement d'un problème (serveur Lumio) */}
+          {serverReq && tmdbId ? (
+            <View style={{ gap: 6 }}>
+              <FamilyRating type={isSeries ? 'tv' : 'movie'} tmdbId={tmdbId} title={item.Name} poster={jfPoster(settings, item, 342)} />
+              <ReportProblemButton type={isSeries ? 'tv' : 'movie'} tmdbId={tmdbId} title={item.Name} poster={jfPoster(settings, item, 342)} />
+            </View>
+          ) : null}
 
           {isSeries && (
             <View>
