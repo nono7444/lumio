@@ -1,0 +1,86 @@
+name: Lumio Swift (test, iPhone + Mac)
+
+# Appli de test écrite en SwiftUI (dossier swift/), indépendante de l'appli Lumio habituelle.
+on:
+  push:
+    branches: [main]
+    paths: ['swift/**', '.github/workflows/swift.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: swift-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: swift
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode et XcodeGen
+        run: |
+          xcodebuild -version
+          brew install xcodegen
+      - name: Numéro de version (0.1.<n° de build>)
+        run: |
+          sed -i '' "s/MARKETING_VERSION: \"0.1.0\"/MARKETING_VERSION: \"0.1.${{ github.run_number }}\"/; s/CURRENT_PROJECT_VERSION: \"1\"/CURRENT_PROJECT_VERSION: \"${{ github.run_number }}\"/" project.yml
+          xcodegen generate
+      - name: Compile pour iPhone (non signée)
+        run: |
+          set -o pipefail
+          xcodebuild -project LumioSwift.xcodeproj -scheme LumioSwift -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath build/ios \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 | tee ios.log | grep -E "error:|\*\* BUILD" || { grep -E "error:" -A3 ios.log | head -80; exit 1; }
+          mkdir -p Payload
+          cp -R "build/ios/Build/Products/Release-iphoneos/Lumio Swift.app" Payload/
+          zip -qry ../lumio-swift.ipa Payload
+      - name: Compile pour Mac (Intel + Apple Silicon)
+        run: |
+          set -o pipefail
+          xcodebuild -project LumioSwift.xcodeproj -scheme LumioSwift -configuration Release \
+            -destination 'generic/platform=macOS' -derivedDataPath build/mac \
+            ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO 2>&1 | tee mac.log | grep -E "error:|\*\* BUILD" || { grep -E "error:" -A3 mac.log | head -80; exit 1; }
+          cd build/mac/Build/Products/Release
+          ditto -c -k --keepParent "Lumio Swift.app" "$GITHUB_WORKSPACE/lumio-swift-mac.zip"
+      - name: Source FlareStore dédiée
+        working-directory: .
+        run: |
+          node -e '
+            const fs = require("fs");
+            const v = "0.1.${{ github.run_number }}";
+            const base = "https://github.com/${{ github.repository }}/releases/download/swift-test";
+            const icon = "https://raw.githubusercontent.com/${{ github.repository }}/main/assets/images/icon.png";
+            const size = fs.statSync("lumio-swift.ipa").size;
+            const date = new Date().toISOString();
+            const src = {
+              name: "Lumio Swift (test)", identifier: "lol.wawanono.lumio.swift.source",
+              sourceURL: base + "/altstore-swift.json", iconURL: icon, tintColor: "#3D8BFF",
+              apps: [{ name: "Lumio Swift", bundleIdentifier: "lol.wawanono.lumio.swift", developerName: "Norman",
+                subtitle: "Version SwiftUI de test", localizedDescription: "Lumio réécrit en SwiftUI (iPhone et Mac) : version de test, à côté de l’appli Lumio habituelle.",
+                iconURL: icon, tintColor: "#3D8BFF", category: "entertainment", version: v, versionDate: date,
+                downloadURL: base + "/lumio-swift.ipa", size,
+                versions: [{ version: v, buildVersion: "${{ github.run_number }}", date, size, downloadURL: base + "/lumio-swift.ipa", minOSVersion: "18.0", localizedDescription: "Build de test " + v }],
+                appPermissions: { entitlements: [], privacy: {} } }],
+              news: [] };
+            fs.writeFileSync("altstore-swift.json", JSON.stringify(src, null, 2));
+          '
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: swift-test
+          name: Lumio Swift (test)
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
+          body: |
+            Version de test de Lumio écrite en SwiftUI (iPhone et Mac). Build 0.1.${{ github.run_number }}.
+            iPhone : source FlareStore https://github.com/${{ github.repository }}/releases/download/swift-test/altstore-swift.json
+            Mac : https://github.com/${{ github.repository }}/releases/download/swift-test/lumio-swift-mac.zip
+          files: |
+            lumio-swift.ipa
+            lumio-swift-mac.zip
+            altstore-swift.json
