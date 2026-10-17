@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Profil : la configuration de Radarr et Sonarr disparaît pour de bon (tout est réglé sur le serveur Lumio).
+
 - Calendrier : la bande des jours est retirée, il ne reste que les plateformes et la liste des sorties.
 
 ## 1.0.33 — 17 octobre 2026

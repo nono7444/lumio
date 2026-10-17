@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 
-import { ArrSection, Picker, Toggle } from '@/components/arr-section';
+import { Picker, Toggle } from '@/components/arr-section';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button, Field, ScreenTitle, Section } from '@/components/ui';
@@ -18,7 +18,6 @@ import { ServerStatusSection } from '@/components/server-status';
 import { Addon, DEFAULT_ADDON, isManager, useSettings } from '@/lib/settings';
 import { RATING_SOURCES } from '@/lib/better-posters';
 import { logout as logoutJellyfin, QUALITIES } from '@/lib/jellyfin';
-import { useServerArr } from '@/lib/lumio-server';
 import { useServerRequests } from '@/lib/requests';
 import { tmdb as tmdbApi } from '@/lib/tmdb';
 import {
@@ -102,15 +101,14 @@ export default function SettingsScreen() {
   const manager = isManager(settings);
   const serverReq = useServerRequests();
   const appUpdate = useAppUpdate();
-  const serverArr = useServerArr();
 
-  // Radarr / Sonarr gérés par le serveur Lumio : on efface les clés gardées sur le téléphone
+  // Radarr / Sonarr sont configurés uniquement sur le serveur Lumio (docker-compose) :
+  // on efface les anciennes clés qui seraient restées sur le téléphone
   useEffect(() => {
-    if (!serverArr) return;
     if (settings.radarr.apiKey || settings.sonarr.apiKey)
       update({ radarr: { ...settings.radarr, url: '', apiKey: '' }, sonarr: { ...settings.sonarr, url: '', apiKey: '' } });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverArr]);
+  }, []);
   const [tmdb, setTmdb] = useState(settings.tmdbKey);
   const [testing, setTesting] = useState(false);
   const [addonUrl, setAddonUrl] = useState('');
@@ -295,51 +293,6 @@ export default function SettingsScreen() {
           />
           <Button title="Enregistrer et tester" icon="flash-outline" onPress={saveTmdb} loading={testing} disabled={!tmdb.trim()} />
         </Section>
-
-        {manager && serverArr ? (
-          <Section title="Radarr et Sonarr">
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <Ionicons name="checkmark-circle" size={20} color={C.success} />
-              <Text style={[styles.help, { flex: 1, marginBottom: 0 }]}>
-                Configurés sur le serveur Lumio (docker-compose). Aucune clé n'est gardée sur ce téléphone.
-              </Text>
-            </View>
-          </Section>
-        ) : null}
-
-        {manager && serverArr === false && (
-        <>
-        <ArrSection
-          title="Radarr · Films"
-          placeholder="http://192.168.1.10:7878"
-          config={settings.radarr}
-          onSave={(radarr) => update({ radarr })}>
-          <Picker
-            label="Disponibilité minimale"
-            options={[
-              { value: 'announced', label: 'Annoncé' },
-              { value: 'inCinemas', label: 'Au cinéma' },
-              { value: 'released', label: 'Sorti' },
-            ]}
-            value={settings.radarr.minimumAvailability}
-            onChange={(v) => update({ radarr: { ...settings.radarr, minimumAvailability: v } })}
-          />
-        </ArrSection>
-
-        <ArrSection
-          title="Sonarr · Séries"
-          placeholder="http://192.168.1.10:8989"
-          config={settings.sonarr}
-          withLanguageProfile
-          onSave={(sonarr) => update({ sonarr })}>
-          <Toggle
-            label="Un dossier par saison"
-            value={settings.sonarr.seasonFolder}
-            onChange={(v) => update({ sonarr: { ...settings.sonarr, seasonFolder: v } })}
-          />
-        </ArrSection>
-        </>
-        )}
 
         <Section title="Accueil">
           <View style={styles.catRow}>
