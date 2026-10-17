@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.32 — 17 octobre 2026
+
 - Logo animé au lancement de l'appli.
 
 ## 1.0.30 — 17 octobre 2026
