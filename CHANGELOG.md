@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.38 — 17 octobre 2026
+
 - Nouvelle barre du bas façon iOS 26 (« Liquid Glass ») : icône et nom sous chaque onglet, bulle sur l'onglet actif, mêmes couleurs.
 - Barre du bas personnalisable : appui long sur la barre (ou Accueil → Personnaliser) pour ajouter, retirer et ranger les raccourcis.
 - Calendrier et Chat quittent la barre du bas et passent en haut de l'accueil (petite vignette du jour pour le calendrier, point rouge pour les nouveaux messages). On peut les remettre dans la barre.
