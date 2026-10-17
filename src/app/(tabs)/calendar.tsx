@@ -8,28 +8,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScreenTitle, SegChip, tap } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { openMedia } from '@/lib/navigation';
-import { dayKeyOf, dayLabel, fetchReleases, type Platform, type Release } from '@/lib/releases';
+import { dayLabel, fetchReleases, type Platform, type Release } from '@/lib/releases';
 import { useSettings } from '@/lib/settings';
 
 type Filter = 'all' | 'movie' | 'series';
-
-function DayChip({ date, count, on, onPress }: { date: Date; count: number; on: boolean; onPress: () => void }) {
-  const today = dayKeyOf(new Date()) === dayKeyOf(date);
-  return (
-    <Pressable
-      onPress={() => {
-        tap();
-        onPress();
-      }}
-      style={[styles.day, on && styles.dayOn]}>
-      <Text style={[styles.dayWeek, on && { color: '#000' }]}>
-        {date.toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '')}
-      </Text>
-      <Text style={[styles.dayNum, on && { color: '#000' }, today && !on && { color: C.accent }]}>{date.getDate()}</Text>
-      <View style={[styles.dot, { opacity: count ? 1 : 0, backgroundColor: on ? '#000' : C.text }]} />
-    </Pressable>
-  );
-}
 
 function ReleaseRow({ r }: { r: Release }) {
   const busy = false;
@@ -84,7 +66,6 @@ export default function Calendar() {
   const [filter, setFilter] = useState<Filter>('all');
   // Plateforme choisie (null = toutes) ; « rent » = achat / location uniquement
   const [platform, setPlatform] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
   const list = useRef<SectionList<Release>>(null);
 
   const load = useCallback(async (force = false) => {
@@ -134,49 +115,11 @@ export default function Calendar() {
     return [...map.entries()].map(([key, data]) => ({ key, title: dayLabel(data[0].date), data }));
   }, [visible]);
 
-  // Bande des jours : de aujourd'hui à la dernière sortie connue
-  const days = useMemo(() => {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    const last = visible.length ? visible[visible.length - 1].date : start;
-    const out: Date[] = [];
-    for (let d = new Date(start); d <= last && out.length < 90; d.setDate(d.getDate() + 1)) out.push(new Date(d));
-    return out;
-  }, [visible]);
-
-  const counts = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of visible) m.set(r.dayKey, (m.get(r.dayKey) ?? 0) + 1);
-    return m;
-  }, [visible]);
-
-  function jumpTo(key: string) {
-    setSelected(key);
-    const idx = sections.findIndex((s) => s.key >= key);
-    if (idx >= 0) list.current?.scrollToLocation({ sectionIndex: idx, itemIndex: 0, viewOffset: 0, animated: true });
-  }
-
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
       <ScreenTitle title="Calendrier" />
       <Text style={styles.subtitle}>Sorties numériques (VOD, plateformes) et nouvelles saisons · dates TMDB</Text>
 
-      <FlatList
-        horizontal
-        data={days}
-        keyExtractor={(d) => dayKeyOf(d)}
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
-        style={{ flexGrow: 0, marginBottom: 12 }}
-        renderItem={({ item: d }) => (
-          <DayChip
-            date={d}
-            count={counts.get(dayKeyOf(d)) ?? 0}
-            on={selected === dayKeyOf(d)}
-            onPress={() => jumpTo(dayKeyOf(d))}
-          />
-        )}
-      />
       {/* Plateformes */}
       <FlatList
         horizontal

@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Calendrier : la bande des jours est retirée, il ne reste que les plateformes et la liste des sorties.
+
 ## 1.0.33 — 17 octobre 2026
 
 - Notes de la famille : chacun note un film ou une série en étoiles (avec un petit avis) sur sa fiche ; moyenne et avis des autres visibles, rangée « ⭐ Coups de cœur de la famille » sur l'accueil.
