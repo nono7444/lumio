@@ -275,6 +275,7 @@ struct Recommendation {
     let items: [JfItem]
     let because: [String]
 
+    @MainActor
     static func nextMovieNight(_ session: AppSession) async -> Recommendation {
         let api = session.jellyfin
         async let playedQ = api.query(types: "Movie,Series", filters: "IsPlayed", sort: "DatePlayed", limit: 80)
