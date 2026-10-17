@@ -143,7 +143,8 @@ const styles = StyleSheet.create({
   wrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center', paddingHorizontal: 14 },
   pill: {
     flexDirection: 'row',
-    alignSelf: 'stretch',
+    alignSelf: 'center',
+    width: '100%',
     maxWidth: 560,
     height: 66,
     borderRadius: 33,

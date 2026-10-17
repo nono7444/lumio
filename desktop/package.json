@@ -1,0 +1,43 @@
+{
+  "name": "lumio-mac",
+  "productName": "Lumio",
+  "version": "1.0.0",
+  "description": "Lumio pour Mac",
+  "main": "main.js",
+  "private": true,
+  "author": "Lumio",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --mac dmg --universal --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.5.1",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "lol.wawanono.lumio.mac",
+    "productName": "Lumio",
+    "artifactName": "lumio-mac.${ext}",
+    "files": ["main.js", "preload.js", "web/**/*"],
+    "mac": {
+      "category": "public.app-category.entertainment",
+      "icon": "icon.png",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "minimumSystemVersion": "12.0",
+      "darkModeSupport": true,
+      "extendInfo": {
+        "NSAppTransportSecurity": { "NSAllowsArbitraryLoads": true }
+      },
+      "protocols": [{ "name": "Lumio", "schemes": ["lumio"] }]
+    },
+    "dmg": {
+      "title": "Lumio",
+      "contents": [
+        { "x": 140, "y": 160 },
+        { "x": 400, "y": 160, "type": "link", "path": "/Applications" }
+      ]
+    }
+  }
+}

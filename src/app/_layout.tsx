@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
 
+import '@/lib/web-dialogs';
 import { AnimatedSplash } from '@/components/animated-splash';
 import { FolderPickerHost } from '@/components/folder-picker';
 import { Toasts } from '@/components/toast';

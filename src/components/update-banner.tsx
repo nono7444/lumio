@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
-import { ANDROID_APK_URL, APP_VERSION, cleanNotes, dismissedVersion, dismissVersion, useAppUpdate } from '@/lib/app-update';
+import { ANDROID_APK_URL, MAC_DMG_URL, APP_VERSION, cleanNotes, dismissedVersion, dismissVersion, useAppUpdate } from '@/lib/app-update';
 
 export function UpdateBanner() {
   const insets = useSafeAreaInsets();
@@ -33,6 +33,7 @@ export function UpdateBanner() {
           tap();
           close();
           if (Platform.OS === 'android') Linking.openURL(ANDROID_APK_URL).catch(() => {});
+          else if (Platform.OS === 'web') Linking.openURL(MAC_DMG_URL).catch(() => {});
           else router.push('/settings');
         }}
         style={styles.banner}>
@@ -42,7 +43,7 @@ export function UpdateBanner() {
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Lumio {update.version} est disponible</Text>
           <Text style={styles.text} numberOfLines={2}>
-            {notes ? `${notes} · ` : ''}Tu as la {APP_VERSION}. {Platform.OS === 'android' ? 'Touche pour la télécharger.' : 'Mets à jour depuis FlareStore.'}
+            {notes ? `${notes} · ` : ''}Tu as la {APP_VERSION}. {Platform.OS === 'android' ? 'Touche pour la télécharger.' : Platform.OS === 'web' ? 'Clique pour la télécharger.' : 'Mets à jour depuis FlareStore.'}
           </Text>
         </View>
         <Pressable onPress={close} hitSlop={12} style={styles.close}>

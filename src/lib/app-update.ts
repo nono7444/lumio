@@ -9,6 +9,8 @@ export const SOURCE_URL = 'https://github.com/nono7444/lumio/releases/latest/dow
 export const RELEASES_URL = 'https://github.com/nono7444/lumio/releases/latest';
 /** Android : l'APK de la dernière version (s'installe par-dessus, réglages conservés). */
 export const ANDROID_APK_URL = 'https://github.com/nono7444/lumio/releases/latest/download/lumio-android.apk';
+/** Mac : l'image disque de la dernière version (glisser Lumio dans Applications pour remplacer l'ancienne). */
+export const MAC_DMG_URL = 'https://github.com/nono7444/lumio/releases/latest/download/lumio-mac.dmg';
 
 export type UpdateInfo = { version: string; date?: string; notes?: string };
 

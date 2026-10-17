@@ -24,7 +24,7 @@ const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
 const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.7.0';
+const VERSION = '3.7.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -912,6 +912,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Raccourci pour installer l'appli Android (téléphone)
+  if (url.pathname === '/mac' || url.pathname === '/mac.dmg') {
+    res.writeHead(302, { Location: 'https://github.com/nono7444/lumio/releases/latest/download/lumio-mac.dmg' });
+    return res.end();
+  }
   if (url.pathname === '/android' || url.pathname === '/android.apk') {
     res.writeHead(302, { Location: process.env.ANDROID_APK_URL || 'https://github.com/nono7444/lumio/releases/latest/download/lumio-android.apk' });
     return res.end();

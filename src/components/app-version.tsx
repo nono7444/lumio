@@ -8,6 +8,7 @@ import { Button, Section } from "@/components/ui";
 import { C, R } from "@/constants/theme";
 import {
   ANDROID_APK_URL,
+  MAC_DMG_URL,
   APP_VERSION,
   checkForUpdate,
   cleanNotes,
@@ -53,13 +54,15 @@ export function AppVersionSection() {
             <Text style={styles.dim}>
               {Platform.OS === "android"
                 ? "Touche « Télécharger », puis ouvre le fichier pour l’installer par-dessus. Tes réglages et ta connexion sont conservés."
+                : Platform.OS === "web"
+                ? "Clique sur « Télécharger », ouvre le fichier .dmg et glisse Lumio dans Applications (remplacer). Tes réglages et ta connexion sont conservés."
                 : "Ouvre FlareStore, onglet des mises à jour (ou la source Lumio), puis « Mettre à jour ». Tes réglages et ta connexion sont conservés."}
             </Text>
-            {Platform.OS === "android" ? (
+            {Platform.OS === "android" || Platform.OS === "web" ? (
               <Button
                 title="Télécharger la mise à jour"
                 icon="download-outline"
-                onPress={() => Linking.openURL(ANDROID_APK_URL)}
+                onPress={() => Linking.openURL(Platform.OS === "web" ? MAC_DMG_URL : ANDROID_APK_URL)}
               />
             ) : null}
           </View>

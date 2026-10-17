@@ -6,6 +6,11 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Nouvelle appli Mac (Intel et Apple Silicon, macOS 12 et plus, Tahoe compris) : le même Lumio dans une fenêtre Mac, publié en .dmg à chaque version (lumio.wawanono.lol/mac).
+- Mac : lecture Jellyfin dans le lecteur du Mac (lecture directe quand c'est possible, sinon conversion par le serveur), raccourcis clavier (espace, flèches, F pour le plein écran, Échap pour quitter).
+- Mac : mise à jour proposée dans l'appli (téléchargement du nouveau .dmg).
+- Serveur Lumio 3.7.1 : raccourci /mac vers la dernière version Mac.
+
 ## 1.0.38 — 17 octobre 2026
 
 - Nouvelle barre du bas façon iOS 26 (« Liquid Glass ») : icône et nom sous chaque onglet, bulle sur l'onglet actif, mêmes couleurs.

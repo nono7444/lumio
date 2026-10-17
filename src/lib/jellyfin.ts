@@ -59,7 +59,7 @@ export class JellyfinError extends Error {
 }
 
 const VERSION = Constants.expoConfig?.version ?? '1.0.0';
-const DEVICE_NAME = Platform.OS === 'ios' ? 'iPhone' : 'Android';
+const DEVICE_NAME = Platform.OS === 'ios' ? 'iPhone' : Platform.OS === 'web' ? 'Mac' : 'Android';
 
 const trimUrl = (u: string) => {
   let url = u.trim().replace(/\/+$/, '');
@@ -478,9 +478,45 @@ export function jfLogo(s: Settings, i: JfItem) {
  * Profil de l'appareil envoyé à Jellyfin : ce que le lecteur natif sait lire directement.
  * Le reste est transcodé en HLS par le serveur.
  */
+/** Appli Mac (Electron / Chromium) : MP4 et WebM lus directement, le reste converti en HLS H.264 / AAC (lu par hls.js). */
+const WEB_PROFILE = {
+  Name: 'Lumio Mac',
+  MaxStreamingBitrate: 120_000_000,
+  MaxStaticBitrate: 120_000_000,
+  MusicStreamingTranscodingBitrate: 384_000,
+  DirectPlayProfiles: [
+    { Container: 'mp4,m4v,mov', Type: 'Video', VideoCodec: 'h264,hevc,av1', AudioCodec: 'aac,mp3,opus,flac,alac' },
+    { Container: 'webm', Type: 'Video', VideoCodec: 'vp8,vp9,av1', AudioCodec: 'opus,vorbis' },
+  ],
+  TranscodingProfiles: [
+    {
+      Container: 'ts',
+      Type: 'Video',
+      Protocol: 'hls',
+      VideoCodec: 'h264',
+      AudioCodec: 'aac',
+      Context: 'Streaming',
+      MaxAudioChannels: '2',
+      MinSegments: 1,
+      BreakOnNonKeyFrames: true,
+    },
+  ],
+  ContainerProfiles: [],
+  CodecProfiles: [],
+  SubtitleProfiles: [
+    { Format: 'vtt', Method: 'Hls' },
+    { Format: 'subrip', Method: 'Hls' },
+    { Format: 'ass', Method: 'Encode' },
+    { Format: 'ssa', Method: 'Encode' },
+    { Format: 'pgssub', Method: 'Encode' },
+    { Format: 'dvdsub', Method: 'Encode' },
+  ],
+};
+
 function deviceProfile(engine: PlaybackEngine) {
-  if (engine === 'mpv') return MPV_PROFILE;
   if (engine === 'cast') return CAST_PROFILE;
+  if (Platform.OS === 'web') return WEB_PROFILE;
+  if (engine === 'mpv') return MPV_PROFILE;
   const android = Platform.OS === 'android';
   return {
     Name: 'Lumio',
