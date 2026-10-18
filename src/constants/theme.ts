@@ -1,3 +1,5 @@
+import { Platform } from 'react-native';
+
 // Thème sombre « cinéma », inspiré de l'esthétique de Nuvio :
 // noir profond, visuels plein cadre, boutons blancs, chrome minimal.
 export const C = {
@@ -23,4 +25,4 @@ export const POSTER_W = 120;
 export const POSTER_H = Math.round(POSTER_W * 1.5);
 
 /** Espace à laisser en bas des écrans : la barre d'onglets flotte au-dessus du contenu. */
-export const TAB_SPACE = 110;
+export const TAB_SPACE = Platform.isTV ? 40 : 110;

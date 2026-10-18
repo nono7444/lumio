@@ -1,5 +1,6 @@
 import { Redirect, Tabs } from 'expo-router';
 import { useEffect } from 'react';
+import { Platform } from 'react-native';
 
 import { FloatingTabBar } from '@/components/tab-bar';
 import { C } from '@/constants/theme';
@@ -27,7 +28,7 @@ export default function TabsLayout() {
   return (
     <Tabs
       tabBar={(props) => <FloatingTabBar {...props} />}
-      screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: C.bg } }}>
+      screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: C.bg }, tabBarPosition: Platform.isTV ? 'top' : 'bottom' }}>
       <Tabs.Screen name="index" options={{ title: 'Accueil' }} />
       <Tabs.Screen name="search" options={{ title: 'Recherche' }} />
       <Tabs.Screen name="library" options={{ title: 'Bibliothèque', href: settings.jellyfin ? undefined : null }} />

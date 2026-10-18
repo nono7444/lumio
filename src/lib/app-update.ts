@@ -2,13 +2,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { useEffect, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
 export const APP_VERSION = Constants.expoConfig?.version ?? '0.0.0';
 export const SOURCE_URL = 'https://github.com/nono7444/lumio/releases/latest/download/altstore.json';
 export const RELEASES_URL = 'https://github.com/nono7444/lumio/releases/latest';
 /** Android : l'APK de la dernière version (s'installe par-dessus, réglages conservés). */
-export const ANDROID_APK_URL = 'https://github.com/nono7444/lumio/releases/latest/download/lumio-android.apk';
+export const ANDROID_APK_URL = Platform.isTV
+  ? 'https://github.com/nono7444/lumio/releases/latest/download/lumio-tv.apk'
+  : 'https://github.com/nono7444/lumio/releases/latest/download/lumio-android.apk';
 /** Mac : l'image disque de la dernière version (glisser Lumio dans Applications pour remplacer l'ancienne). */
 export const MAC_DMG_URL = 'https://github.com/nono7444/lumio/releases/latest/download/lumio-mac.dmg';
 

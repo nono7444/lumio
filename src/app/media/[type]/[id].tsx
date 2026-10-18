@@ -217,7 +217,7 @@ export default function MediaScreen() {
             {logo ? (
               <Image
                 source={tmdbImg(logo, 'w500')}
-                style={{ width: width * 0.7, height: 100 }}
+                style={{ width: Math.min(width * 0.7, 460), height: 100 }}
                 contentFit="contain"
                 contentPosition="bottom"
                 transition={250}

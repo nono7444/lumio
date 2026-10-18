@@ -5,6 +5,7 @@ import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleShe
 import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { TvLogin } from '@/components/tv-login';
 import { Button, tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
 import { login, serverInfo } from '@/lib/jellyfin';
@@ -23,6 +24,8 @@ export default function Login() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPass, setShowPass] = useState(false);
+  // TV : connexion par code d'abord, identifiant / mot de passe sur demande
+  const [tvPassword, setTvPassword] = useState(false);
 
   async function checkServer() {
     if (!url.trim()) return;
@@ -76,7 +79,7 @@ export default function Login() {
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: C.bg }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView
-        contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 24, paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }}
+        contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 24, paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24, ...(Platform.isTV ? { paddingHorizontal: '22%' } : {}) }}
         keyboardShouldPersistTaps="handled">
         <View style={styles.brandWrap}>
           <View style={styles.mark}>
@@ -86,6 +89,15 @@ export default function Login() {
           <Text style={styles.tagline}>Connecte-toi à ton serveur Jellyfin</Text>
         </View>
 
+        {Platform.isTV && !tvPassword ? (
+          <TvLogin
+            onPassword={(u) => {
+              if (u) setUrl(u);
+              setTvPassword(true);
+            }}
+          />
+        ) : (
+        <>
         <Text style={styles.label}>Serveur</Text>
         <View style={styles.inputRow}>
           <Ionicons name="server-outline" size={18} color={C.textDim} />
@@ -157,6 +169,8 @@ export default function Login() {
         <Pressable onPress={skip} style={styles.skip} hitSlop={8}>
           <Text style={styles.skipText}>Continuer sans Jellyfin</Text>
         </Pressable>
+        </>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );

@@ -85,7 +85,7 @@ function Slide({ item, width, height, season }: { item: HeroItem; width: number;
 
       <View style={styles.content}>
         {logo ? (
-          <Image source={logo} style={{ width: width * 0.66, height: 90 }} contentFit="contain" contentPosition="bottom" transition={250} />
+          <Image source={logo} style={{ width: Math.min(width * 0.66, 420), height: 90 }} contentFit="contain" contentPosition="bottom" transition={250} />
         ) : (
           <Text style={styles.title} numberOfLines={2}>
             {item.title}

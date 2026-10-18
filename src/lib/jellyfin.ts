@@ -59,7 +59,7 @@ export class JellyfinError extends Error {
 }
 
 const VERSION = Constants.expoConfig?.version ?? '1.0.0';
-const DEVICE_NAME = Platform.OS === 'ios' ? 'iPhone' : Platform.OS === 'web' ? 'Mac' : 'Android';
+const DEVICE_NAME = Platform.isTV ? 'Android TV' : Platform.OS === 'ios' ? 'iPhone' : Platform.OS === 'web' ? 'Mac' : 'Android';
 
 const trimUrl = (u: string) => {
   let url = u.trim().replace(/\/+$/, '');
@@ -138,6 +138,38 @@ export async function login(url: string, username: string, password: string, dev
     userName: user.Name,
     serverName: info.ServerName,
     isAdmin: Boolean(user.Policy?.IsAdministrator),
+  };
+}
+
+// ——— Connexion par code (Jellyfin Quick Connect) : pour la TV, validée depuis le téléphone ———
+
+export async function quickConnectStart(url: string, deviceId: string) {
+  const r = await call<{ Code: string; Secret: string }>(trimUrl(url), deviceId, undefined, '/QuickConnect/Initiate', { method: 'POST' });
+  return { code: r.Code, secret: r.Secret };
+}
+
+export async function quickConnectReady(url: string, deviceId: string, secret: string) {
+  const r = await call<{ Authenticated?: boolean }>(trimUrl(url), deviceId, undefined, `/QuickConnect/Connect?secret=${encodeURIComponent(secret)}`);
+  return Boolean(r.Authenticated);
+}
+
+export async function quickConnectLogin(url: string, deviceId: string, secret: string): Promise<JellyfinSession> {
+  const base = trimUrl(url);
+  const info = await serverInfo(base, deviceId);
+  const res = await call<{ AccessToken: string; User: { Id: string; Name: string; Policy?: { IsAdministrator?: boolean } } }>(
+    base,
+    deviceId,
+    undefined,
+    '/Users/AuthenticateWithQuickConnect',
+    { method: 'POST', body: JSON.stringify({ Secret: secret }) }
+  );
+  return {
+    url: base,
+    token: res.AccessToken,
+    userId: res.User.Id,
+    userName: res.User.Name,
+    serverName: info.ServerName,
+    isAdmin: Boolean(res.User.Policy?.IsAdministrator),
   };
 }
 

@@ -72,7 +72,7 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
   };
 
   return (
-    <View pointerEvents="box-none" style={[styles.wrap, { bottom: Math.max(insets.bottom - 6, 10) }]}>
+    <View pointerEvents="box-none" style={Platform.isTV ? styles.wrapTv : [styles.wrap, { bottom: Math.max(insets.bottom - 6, 10) }]}>
       <View style={styles.pill}>
         {glass ? (
           <GlassView glassEffectStyle="regular" colorScheme="dark" tintColor="rgba(20,20,22,0.35)" style={StyleSheet.absoluteFill} />
@@ -141,11 +141,13 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
 
 const styles = StyleSheet.create({
   wrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center', paddingHorizontal: 14 },
+  // TV : barre en haut de l'écran (comme sur Apple TV), dans le flux pour ne rien recouvrir
+  wrapTv: { alignItems: 'center', paddingTop: 14, paddingBottom: 4, paddingHorizontal: 40, backgroundColor: C.bg },
   pill: {
     flexDirection: 'row',
     alignSelf: 'center',
     width: '100%',
-    maxWidth: 560,
+    maxWidth: Platform.isTV ? 820 : 560,
     height: 66,
     borderRadius: 33,
     padding: 5,

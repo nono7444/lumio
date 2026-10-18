@@ -241,7 +241,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
           <Fade height={heroH * 0.7} />
           <View style={styles.heroContent}>
             {logo ? (
-              <Image source={logo} style={{ width: width * 0.7, height: 100 }} contentFit="contain" contentPosition="bottom" />
+              <Image source={logo} style={{ width: Math.min(width * 0.7, 460), height: 100 }} contentFit="contain" contentPosition="bottom" />
             ) : (
               <Text style={styles.title}>{item.Name}</Text>
             )}
