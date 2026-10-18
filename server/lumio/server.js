@@ -24,7 +24,7 @@ const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
 const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.9.1';
+const VERSION = '3.9.2';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1486,6 +1486,21 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
     if (req.method === 'GET' && p === '/api/queue') return send(res, 200, await queue());
     if (req.method === 'GET' && p === '/api/status') return send(res, 200, await status());
 
+
+    // ——— Clé TMDB partagée : l'admin la confie au serveur, la famille la reçoit automatiquement ———
+    if (p === '/api/config/tmdb') {
+      if (req.method === 'PUT') {
+        requireAdmin(user);
+        const b = await readBody(req);
+        const key = String(b.key || '').trim();
+        if (key && config.tmdbKey !== key) {
+          config.tmdbKey = key;
+          saveConfig();
+        }
+        return send(res, 200, { ok: true });
+      }
+      if (req.method === 'GET') return send(res, 200, { key: process.env.TMDB_KEY || config.tmdbKey || null });
+    }
 
     // ——— Admin : disques et téléchargements AllDebrid ———
     if (p.startsWith('/api/files') || p.startsWith('/api/downloads') || p === '/api/alldebrid') {
