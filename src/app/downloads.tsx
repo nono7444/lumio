@@ -22,6 +22,14 @@ const STATUS: Record<DownloadJob['status'], { label: string; color: string }> = 
   cancelled: { label: 'Annulé', color: C.textDim },
 };
 
+/** Temps restant lisible : « 3 min », « 1 h 12 » */
+function eta(sec: number) {
+  if (!isFinite(sec) || sec <= 0) return '';
+  if (sec < 60) return `${Math.ceil(sec)} s restantes`;
+  if (sec < 3600) return `${Math.round(sec / 60)} min restantes`;
+  return `${Math.floor(sec / 3600)} h ${String(Math.round((sec % 3600) / 60)).padStart(2, '0')} restantes`;
+}
+
 export default function Downloads() {
   const { settings } = useSettings();
   const insets = useSafeAreaInsets();
@@ -65,11 +73,13 @@ export default function Downloads() {
     filesApi.downloads(settings).then(setJobs).catch(() => {});
   }, [settings]);
 
+  // Toutes les secondes tant qu'un téléchargement tourne (pourcentage en direct), sinon toutes les 5 s
+  const anyActive = jobs.some((j) => ['queued', 'debrid', 'downloading'].includes(j.status));
   useEffect(() => {
     loadJobs();
-    const t = setInterval(loadJobs, 2000);
+    const t = setInterval(loadJobs, anyActive ? 1000 : 5000);
     return () => clearInterval(t);
-  }, [loadJobs]);
+  }, [loadJobs, anyActive]);
 
   const saveKey = async () => {
     try {
@@ -222,14 +232,24 @@ export default function Downloads() {
                   <Ionicons name={active ? 'stop-circle-outline' : 'close'} size={20} color={C.textDim} />
                 </Pressable>
               </View>
-              <Text style={[styles.dim, { color: st.color }]}>
-                {st.label}
-                {j.status === 'downloading' || j.status === 'debrid'
-                  ? ` · ${Math.round(pct * 100)} % · ${formatSize(j.done)} / ${formatSize(j.size)}${j.speed ? ` · ${formatSize(j.speed)}/s` : ''}`
-                  : j.status === 'done'
-                    ? ` · ${formatSize(j.size || j.done)}`
-                    : ''}
-              </Text>
+              {active ? (
+                <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 10 }}>
+                  <Text style={[styles.bigPct, { color: st.color }]}>{j.size ? `${(pct * 100).toFixed(pct < 0.1 ? 1 : 0)} %` : '…'}</Text>
+                  <View style={{ flex: 1, paddingBottom: 3 }}>
+                    <Text style={[styles.dim, { color: st.color }]}>{st.label}</Text>
+                    <Text style={styles.dim}>
+                      {formatSize(j.done)} / {formatSize(j.size)}
+                      {j.speed ? ` · ${formatSize(j.speed)}/s` : ''}
+                      {j.speed && j.size ? ` · ${eta((j.size - j.done) / j.speed)}` : ''}
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                <Text style={[styles.dim, { color: st.color }]}>
+                  {st.label}
+                  {j.status === 'done' ? ` · ${formatSize(j.size || j.done)}` : ''}
+                </Text>
+              )}
               {active ? (
                 <View style={styles.track}>
                   <View style={[styles.fill, { width: `${pct * 100}%`, backgroundColor: st.color }]} />
@@ -249,6 +269,7 @@ export default function Downloads() {
 }
 
 const styles = StyleSheet.create({
+  bigPct: { fontSize: 30, fontWeight: '800', fontVariant: ['tabular-nums'] },
   header: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingBottom: 8 },
   title: { flex: 1, color: C.text, fontSize: 26, fontWeight: '800' },
   round: { width: 38, height: 38, borderRadius: 19, backgroundColor: C.surfaceHigh, alignItems: 'center', justifyContent: 'center' },

@@ -24,7 +24,7 @@ const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
 const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.10.0';
+const VERSION = '3.11.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -592,6 +592,93 @@ function publicRequest(r, lib) {
   };
 }
 
+// ——— Accélérer les imports : Radarr / Sonarr ne regardent le client de téléchargement qu'une fois par minute ———
+const lastRefresh = { radarr: 0, sonarr: 0 };
+function refreshDownloads(kinds = ['radarr', 'sonarr'], minGap = 10_000) {
+  for (const kind of kinds) {
+    if (!arrConfig(kind) || Date.now() - lastRefresh[kind] < minGap) continue;
+    lastRefresh[kind] = Date.now();
+    arr(kind, '/command', { method: 'POST', body: JSON.stringify({ name: 'RefreshMonitoredDownloads' }) }).catch(() => {});
+  }
+}
+
+// Toutes les 20 s : un téléchargement fini attend d'être importé → on lance l'import tout de suite ;
+// un élément vient de quitter la file (importé) → Jellyfin rescanne sans attendre son propre passage.
+const queueSeen = { radarr: new Set(), sonarr: new Set() };
+let jfRefreshAt = 0;
+async function fastImportTick() {
+  let imported = false;
+  for (const kind of ['radarr', 'sonarr']) {
+    if (!arrConfig(kind)) continue;
+    let q;
+    try {
+      q = await arr(kind, '/queue?page=1&pageSize=200');
+    } catch {
+      continue;
+    }
+    const recs = q.records || [];
+    const ids = new Set(recs.map((r) => r.downloadId || r.id));
+    for (const id of queueSeen[kind]) if (!ids.has(id)) imported = true;
+    queueSeen[kind] = ids;
+    const waiting = recs.some(
+      (r) => r.trackedDownloadState === 'importPending' || r.status === 'completed' || (r.size > 0 && r.sizeleft === 0 && r.trackedDownloadState !== 'importing')
+    );
+    if (waiting) refreshDownloads([kind], 20_000);
+  }
+  if (imported && Date.now() - jfRefreshAt > 30_000) {
+    jfRefreshAt = Date.now();
+    // Laisse le temps au déplacement / lien du fichier de se terminer
+    setTimeout(() => {
+      const token = process.env.JELLYFIN_API_KEY || jfIndexToken;
+      if (token) fetch(`${JELLYFIN_URL}/Library/Refresh`, { method: 'POST', headers: jfHeaders(token) }).catch(() => {});
+      loadLibrary(true).then(refreshCompleted).catch(() => {});
+    }, 8000);
+  }
+}
+setInterval(() => fastImportTick().catch(() => {}), 20_000);
+
+/** Relance la recherche d'une demande approuvée et dit si une version est partie en téléchargement. */
+async function recheckRequest(r) {
+  const kind = r.type === 'movie' ? 'radarr' : 'sonarr';
+  let command;
+  let match;
+  if (r.type === 'movie') {
+    const m = (await arr('radarr', `/movie?tmdbId=${r.tmdbId}`))[0];
+    if (!m) {
+      await sendToArr(r);
+      return { found: false, message: 'Film renvoyé à Radarr, la recherche est lancée.' };
+    }
+    if (m.hasFile) return { found: true, available: true, message: 'Le film est déjà téléchargé, il arrive dans Jellyfin.' };
+    command = { name: 'MoviesSearch', movieIds: [m.id] };
+    match = (x) => x.movieId === m.id;
+  } else {
+    const ser = (await arr('sonarr', `/series?tvdbId=${r.tvdbId}`))[0];
+    if (!ser) {
+      await sendToArr(r);
+      return { found: false, message: 'Série renvoyée à Sonarr, la recherche est lancée.' };
+    }
+    const seasons = (r.seasons || []).map(Number).filter((n) => n > 0);
+    command = seasons.length === 1 ? { name: 'SeasonSearch', seriesId: ser.id, seasonNumber: seasons[0] } : { name: 'SeriesSearch', seriesId: ser.id };
+    match = (x) => x.seriesId === ser.id && (!seasons.length || seasons.includes(x.seasonNumber ?? (x.episode && x.episode.seasonNumber)));
+  }
+  const cmd = await arr(kind, '/command', { method: 'POST', body: JSON.stringify(command) });
+  let st = cmd;
+  for (let i = 0; i < 40 && st && !['completed', 'failed', 'aborted', 'cancelled'].includes(st.status); i++) {
+    await sleep(2000);
+    st = await arr(kind, `/command/${cmd.id}`).catch(() => st);
+  }
+  if (st && st.status !== 'completed' && st.status !== 'started' && st.status !== 'queued')
+    return { found: false, message: `${label(kind)} : recherche ${st.status === 'failed' ? 'en échec' : 'interrompue'}${st.message ? ` (${st.message})` : ''}` };
+  const q = await arr(kind, `/queue?page=1&pageSize=200${kind === 'sonarr' ? '&includeEpisode=true' : ''}`).catch(() => ({ records: [] }));
+  const hit = (q.records || []).find(match);
+  if (hit) {
+    loadLibrary(true).catch(() => {});
+    return { found: true, message: `Trouvé : ${hit.title || 'une version'} part en téléchargement.` };
+  }
+  if (st && st.status !== 'completed') return { found: false, pending: true, message: `${label(kind)} cherche encore, regarde dans quelques minutes.` };
+  return { found: false, message: `Toujours rien de disponible. ${label(kind)} continue de chercher tout seul régulièrement.` };
+}
+
 // ——— File de téléchargement ———
 async function queue() {
   const out = [];
@@ -759,6 +846,21 @@ setInterval(sampleSystem, 2000);
 
 let publicStatusCache = null;
 let watchStatsCache = null;
+
+const UPTIME_NAMES = { lumio: 'Serveur Lumio', jellyfin: 'Jellyfin', radarr: 'Radarr', sonarr: 'Sonarr' };
+/** 24 barres d'une heure (1 = tout allait bien, 0,5 = coupure, 0 = hors ligne, -1 = pas de mesure) et % de disponibilité. */
+function uptimeSummary(k) {
+  const since = Date.now() - 24 * 3600_000;
+  const hist = (uptime[k] || []).filter((x) => x.t >= since);
+  const bars = [];
+  for (let h = 23; h >= 0; h--) {
+    const from = Date.now() - (h + 1) * 3600_000;
+    const pts = hist.filter((x) => x.t >= from && x.t < from + 3600_000);
+    bars.push(pts.length ? (pts.every((x) => x.ok) ? 1 : pts.some((x) => x.ok) ? 0.5 : 0) : -1);
+  }
+  const pct = hist.length ? Math.round((hist.filter((x) => x.ok).length / hist.length) * 1000) / 10 : null;
+  return { uptime: pct, bars };
+}
 
 function publicIdea(i, user) {
   const { votes, ...rest } = i;
@@ -1243,15 +1345,20 @@ const server = http.createServer(async (req, res) => {
 
   // État public pour le widget iOS : en ligne / hors ligne et compteurs seulement (aucun titre, aucune clé)
   if (url.pathname === '/status/public') {
-    if (!publicStatusCache || Date.now() - publicStatusCache.at > 60_000) {
+    if (!publicStatusCache || Date.now() - publicStatusCache.at > 30_000) {
       const s = await status().catch(() => null);
-      const pick = (x) => (x ? { ok: Boolean(x.ok), queue: typeof x.queue === 'number' ? x.queue : undefined } : undefined);
+      const pick = (k, x) =>
+        x && x.configured !== false ? { ok: Boolean(x.ok), queue: typeof x.queue === 'number' ? x.queue : undefined, ms: x.ms || undefined, ...uptimeSummary(k) } : undefined;
       publicStatusCache = {
         at: Date.now(),
-        body: s ? { lumio: { ok: true, version: VERSION }, jellyfin: pick(s.jellyfin), radarr: pick(s.radarr), sonarr: pick(s.sonarr), pending: s.lumio.pending } : { lumio: { ok: true, version: VERSION } },
+        body: s
+          ? { lumio: { ok: true, version: VERSION, ...uptimeSummary('lumio') }, jellyfin: pick('jellyfin', s.jellyfin), radarr: pick('radarr', s.radarr), sonarr: pick('sonarr', s.sonarr), pending: s.lumio.pending }
+          : { lumio: { ok: true, version: VERSION } },
       };
     }
-    return send(res, 200, publicStatusCache.body);
+    // Processeur et chaleur toujours frais (mesurés toutes les 2 s), sans détail sensible
+    const last = sysHistory[sysHistory.length - 1] || {};
+    return send(res, 200, { ...publicStatusCache.body, machine: { cpu: last.cpu ?? null, temp: last.temp ?? null }, at: new Date().toISOString() });
   }
 
   // Raccourci pour installer l'appli Android (téléphone)
@@ -1521,7 +1628,9 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
       // et bibliothèque relue (toutes les 15 s au plus) dès que le téléchargement a quitté la file, pour passer à « Disponible »
       const live = requests.find((r) => r.type === type && r.tmdbId === tmdbId && r.status === RequestStatus.APPROVED);
       if (live && lib.queue) {
-        if (Date.now() - (lib.queueAt || 0) > 4000) {
+        // Radarr / Sonarr ne relisent le client de téléchargement qu'une fois par minute : on les relance (toutes les 10 s au plus)
+        refreshDownloads([type === 'movie' ? 'radarr' : 'sonarr']);
+        if (Date.now() - (lib.queueAt || 0) > 2500) {
           lib.queue = await queueIndex().catch(() => lib.queue);
           lib.queueAt = Date.now();
         }
@@ -1585,11 +1694,19 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
       return send(res, 201, publicRequest(r, await loadLibrary().catch(() => null)));
     }
 
-    const one = p.match(/^\/api\/requests\/([\w-]+)(?:\/(approve|decline|retry))?$/);
+    const one = p.match(/^\/api\/requests\/([\w-]+)(?:\/(approve|decline|retry|search))?$/);
     if (one) {
       const r = requests.find((x) => x.id === one[1]);
       if (!r) return send(res, 404, { error: 'demande introuvable' });
       const action = one[2];
+      // « Relancer » : nouvelle recherche Radarr / Sonarr, puis on regarde si une version part en téléchargement
+      if (req.method === 'POST' && action === 'search') {
+        if (!user.admin && r.requestedBy.id !== user.id) return send(res, 403, { error: 'Ce n’est pas ta demande.' });
+        if (r.status !== RequestStatus.APPROVED) return send(res, 409, { error: 'Cette demande n’est pas en cours.' });
+        if (r.lastSearchAt && Date.now() - r.lastSearchAt < 45_000) return send(res, 429, { error: 'Recherche déjà lancée il y a moins d’une minute, patiente un peu.' });
+        r.lastSearchAt = Date.now();
+        return send(res, 200, await recheckRequest(r));
+      }
       if (req.method === 'POST' && (action === 'approve' || action === 'retry')) {
         requireAdmin(user);
         return send(res, 200, publicRequest(await approveRequest(user, r, await readBody(req)), await loadLibrary().catch(() => null)));
@@ -1623,7 +1740,10 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
       return send(res, 200, { ...f, profiles: pr ? pr.profiles : [], defaultProfile: pr ? pr.default : null, lockedProfile: pr ? pr.locked : null });
     }
 
-    if (req.method === 'GET' && p === '/api/queue') return send(res, 200, await queue());
+    if (req.method === 'GET' && p === '/api/queue') {
+      refreshDownloads();
+      return send(res, 200, await queue());
+    }
     if (req.method === 'GET' && p === '/api/status') return send(res, 200, await status());
 
 
@@ -1698,11 +1818,11 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
       );
       const data = {
         users: perUser.sort((a, b) => b.minutes - a.minutes),
-        topMovies: [...movies.values()].sort((a, b) => b.viewers.length - a.viewers.length || b.plays - a.plays).slice(0, 10),
+        topMovies: [...movies.values()].sort((a, b) => b.viewers.length - a.viewers.length || b.plays - a.plays).slice(0, 20),
         topSeries: [...series.values()]
           .map((x) => ({ id: x.id, title: x.title, viewers: [...x.viewers], episodes: x.episodes }))
           .sort((a, b) => b.episodes - a.episodes)
-          .slice(0, 10),
+          .slice(0, 20),
         days: Object.entries(days).sort(([a], [b]) => a.localeCompare(b)).map(([day, n]) => ({ day, n })),
       };
       watchStatsCache = { at: Date.now(), data };
@@ -1713,22 +1833,11 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
     if (req.method === 'GET' && p === '/api/uptime') {
       requireAdmin(user);
       const st = await status();
-      const names = { lumio: 'Serveur Lumio', jellyfin: 'Jellyfin', radarr: 'Radarr', sonarr: 'Sonarr' };
-      const since = Date.now() - 24 * 3600_000;
-      const services = Object.keys(names)
+      const services = Object.keys(UPTIME_NAMES)
         .filter((k) => st[k] && st[k].configured !== false)
         .map((k) => {
-          const hist = (uptime[k] || []).filter((x) => x.t >= since);
-          // 24 barres d'une heure : vert si tout allait bien, rouge s'il y a eu une panne, gris sans mesure
-          const bars = [];
-          for (let h = 23; h >= 0; h--) {
-            const from = Date.now() - (h + 1) * 3600_000;
-            const pts = hist.filter((x) => x.t >= from && x.t < from + 3600_000);
-            bars.push(pts.length ? (pts.every((x) => x.ok) ? 1 : pts.some((x) => x.ok) ? 0.5 : 0) : -1);
-          }
-          const pct = hist.length ? Math.round((hist.filter((x) => x.ok).length / hist.length) * 1000) / 10 : null;
           const e = st[k];
-          return { key: k, name: names[k], ok: Boolean(e.ok), ms: e.ms || null, version: e.version || null, error: e.error || null, uptime: pct, bars };
+          return { key: k, name: UPTIME_NAMES[k], ok: Boolean(e.ok), ms: e.ms || null, version: e.version || null, error: e.error || null, ...uptimeSummary(k) };
         });
       return send(res, 200, { services });
     }

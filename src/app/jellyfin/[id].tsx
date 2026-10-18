@@ -297,7 +297,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
             </View>
           )}
 
-          <TrailerButton type={isSeries ? 'tv' : 'movie'} tmdbId={tmdbId} />
+          <TrailerButton type={isSeries ? 'tv' : 'movie'} tmdbId={tmdbId} title={item.Name} />
 
           {/* Notes de la famille et signalement d'un problème (serveur Lumio) */}
           {serverReq && tmdbId ? (

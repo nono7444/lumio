@@ -35,7 +35,7 @@ export function heroFromTmdb(item: TmdbItem, badge: LibraryEntry | null): HeroIt
   return {
     key: `${type}:${item.id}`,
     title: itemTitle(item),
-    posterUrl: tmdbImg(item.poster_path, 'w780'),
+    posterUrl: tmdbImg(item.poster_path, 'original'),
     tmdb: { type, id: item.id },
     genres: (item.genre_ids ?? []).map((g) => GENRES[g]).filter(Boolean).slice(0, 3),
     meta: [type === 'movie' ? 'Film' : 'Série', itemYear(item), item.vote_average ? `★ ${item.vote_average.toFixed(1)}` : null]
@@ -58,7 +58,7 @@ function Slide({ item, width, height, season }: { item: HeroItem; width: number;
     let alive = true;
     tmdb
       .logo(settings, item.tmdb.type, item.tmdb.id)
-      .then((l) => alive && l && setLogo(tmdbImg(l, 'w500') ?? null))
+      .then((l) => alive && l && setLogo(tmdbImg(l, 'original') ?? null))
       .catch(() => {});
     return () => {
       alive = false;
@@ -77,6 +77,7 @@ function Slide({ item, width, height, season }: { item: HeroItem; width: number;
         style={StyleSheet.absoluteFill}
         contentFit="cover"
         transition={300}
+        priority="high"
         placeholder={{ blurhash: 'L03[%0IU00~q00xu00Rj00%M~qIU' }}
       />
       {season && <View style={[StyleSheet.absoluteFill, { backgroundColor: season.tint }]} pointerEvents="none" />}

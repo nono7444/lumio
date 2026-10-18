@@ -270,7 +270,7 @@ export default function MediaScreen() {
             </View>
           ) : null}
 
-          <TrailerButton type={details.kind} tmdbId={tmdbId} />
+          <TrailerButton type={details.kind} tmdbId={tmdbId} title={title} />
 
           {/* ——— Demande façon Seerr (serveur Lumio) ——— */}
           {serverReq ? (

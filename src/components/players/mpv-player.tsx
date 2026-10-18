@@ -23,7 +23,7 @@ function trackLabel(t: TrackInfo) {
 }
 
 /** Lecteur mpv avec contrôles maison (lecture, barre de progression, pistes, vitesse, zoom). */
-export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onReady, onError, onClose, onEnded, extra, statsInfo, onPip }: PlayerProps) {
+export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onReady, onError, onClose, onEnded, extra, statsInfo, onPip, audioUri }: PlayerProps) {
   const insets = useSafeAreaInsets();
   const ref = useRef<ExpoMpvViewRef>(null);
   const [source, setSource] = useState<string | undefined>();
@@ -155,6 +155,8 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
           setDuration(nativeEvent.duration);
           if (!readyOnce.current) {
             readyOnce.current = true;
+            // Son séparé (bande-annonce YouTube) : ajouté et sélectionné dès que la vidéo est chargée
+            if (audioUri) ref.current?.addAudio(audioUri, 'select', 'Audio').catch(() => {});
             onReady(startAt > 5 ? startAt : 0);
           }
         }}

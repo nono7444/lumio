@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { toast } from '@/components/toast';
 import { FocusPressable as Pressable } from '@/components/tv';
+import { RecheckButton } from '@/components/recheck-button';
 import { Button, SegChip, tap } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { openMedia } from '@/lib/navigation';
@@ -131,6 +132,13 @@ function RequestCard({ r, admin, meId, onChanged }: { r: Req; admin: boolean; me
           {r.error ? <Text style={[styles.meta, { color: C.danger }]}>{r.error}</Text> : null}
         </View>
       </View>
+
+      {/* Recherche en attente : relancer pour voir s'il y a enfin une version dispo */}
+      {r.status === RequestStatus.APPROVED && (!r.download || r.download.state === 'searching') && (admin || mine) ? (
+        <View style={styles.actions}>
+          <RecheckButton r={r} onDone={onChanged} style={styles.actBtn} />
+        </View>
+      ) : null}
 
       {/* Actions, comme sur Seerr */}
       {(admin || (mine && r.status === RequestStatus.PENDING)) && (

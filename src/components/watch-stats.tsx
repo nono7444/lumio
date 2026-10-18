@@ -1,7 +1,8 @@
 // Admin : statistiques de visionnage (temps par compte, activité sur 30 jours, tops films et séries).
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
+import { SizeStepper, useCardSize, type SizeLevel } from '@/components/size-stepper';
 import { C, R } from '@/constants/theme';
 import { serverCall } from '@/lib/chat';
 import { useSettings } from '@/lib/settings';
@@ -15,6 +16,23 @@ type Stats = {
 
 const COLORS = ['#3D8BFF', '#4ADE80', '#FFB340', '#FF6B9A', '#A78BFA', '#64D2FF', '#FF8A3D'];
 const hours = (m: number) => (m >= 60 ? `${Math.round(m / 60)} h` : `${m} min`);
+
+/** Carte avec son titre et ses boutons − / + (le niveau choisi est mémorisé). */
+function StatCard({ id, title, children }: { id: string; title: string; children: (level: SizeLevel) => ReactNode }) {
+  const [level, setLevel] = useCardSize(`stats-${id}`);
+  return (
+    <View style={[styles.card, level === 0 && { gap: 8, paddingVertical: 10 }]}>
+      <View style={styles.row}>
+        <Text style={[styles.title, level === 0 && { fontSize: 15 }, level === 2 && { fontSize: 19 }]}>{title}</Text>
+        <SizeStepper level={level} onChange={setLevel} />
+      </View>
+      {children(level)}
+    </View>
+  );
+}
+
+/** Nombre d'éléments affichés selon la taille de la carte */
+const LIMIT = [3, 6, 20];
 
 export function WatchStats() {
   const { settings } = useSettings();
@@ -45,83 +63,101 @@ export function WatchStats() {
 
   return (
     <View style={{ gap: 14 }}>
-      <View style={styles.card}>
-        <Text style={styles.title}>⏱️ Temps de visionnage par compte</Text>
-        {stats.users.map((u, i) => (
-          <View key={u.name} style={{ gap: 4 }}>
-            <View style={styles.row}>
-              <Text style={styles.name}>{u.name}</Text>
-              <Text style={styles.dim}>
-                {hours(u.minutes)} · {u.movies} films · {u.episodes} épisodes
-              </Text>
+      <StatCard id="users" title="⏱️ Temps de visionnage par compte">
+        {(lv) =>
+          stats.users.slice(0, lv === 0 ? 4 : 50).map((u, i) => (
+            <View key={u.name} style={{ gap: 4 }}>
+              <View style={styles.row}>
+                <Text style={styles.name}>{u.name}</Text>
+                <Text style={styles.dim}>
+                  {hours(u.minutes)}
+                  {lv > 0 ? ` · ${u.movies} films · ${u.episodes} épisodes` : ''}
+                </Text>
+              </View>
+              <View style={[styles.track, lv === 2 && styles.trackBig]}>
+                <View style={[styles.fill, lv === 2 && styles.trackBig, { width: `${(u.minutes / maxMin) * 100}%`, backgroundColor: COLORS[i % COLORS.length] }]} />
+              </View>
+              {lv > 0
+                ? u.recent.slice(0, lv === 2 ? 5 : 1).map((r, k) => (
+                    <Text key={k} style={styles.faint} numberOfLines={1}>
+                      {k === 0 ? 'Dernier : ' : '· '}
+                      {r.title}
+                    </Text>
+                  ))
+                : null}
             </View>
-            <View style={styles.track}>
-              <View style={[styles.fill, { width: `${(u.minutes / maxMin) * 100}%`, backgroundColor: COLORS[i % COLORS.length] }]} />
-            </View>
-            {u.recent[0] ? (
-              <Text style={styles.faint} numberOfLines={1}>
-                Dernier : {u.recent[0].title}
-              </Text>
-            ) : null}
-          </View>
-        ))}
-      </View>
+          ))
+        }
+      </StatCard>
 
-      <View style={styles.card}>
-        <Text style={styles.title}>📅 Activité sur 30 jours</Text>
-        <View style={styles.chart}>
-          {days.map((d) => (
-            <View key={d.day} style={{ flex: 1, height: `${Math.max(3, (d.n / maxDay) * 100)}%`, backgroundColor: d.n ? C.accent : '#2C2C30', borderRadius: 2 }} />
-          ))}
-        </View>
-        <View style={styles.row}>
-          <Text style={styles.faint}>il y a 30 j</Text>
-          <Text style={styles.faint}>aujourd’hui · {days.reduce((n, d) => n + d.n, 0)} titres vus</Text>
-        </View>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.title}>🎬 Top films</Text>
-        {stats.topMovies.map((m, i) => (
-          <View key={m.id} style={{ gap: 3 }}>
+      <StatCard id="days" title="📅 Activité sur 30 jours">
+        {(lv) => (
+          <>
+            <View style={[styles.chart, { height: [40, 80, 170][lv] }]}>
+              {days.map((d) => (
+                <View key={d.day} style={{ flex: 1, height: `${Math.max(3, (d.n / maxDay) * 100)}%`, backgroundColor: d.n ? C.accent : '#2C2C30', borderRadius: 2 }} />
+              ))}
+            </View>
             <View style={styles.row}>
-              <Text style={styles.name} numberOfLines={1}>
-                {i + 1}. {m.title}
-                {m.year ? <Text style={styles.dim}> ({m.year})</Text> : null}
-              </Text>
-              <Text style={styles.dim}>{m.viewers.length} 👤</Text>
+              <Text style={styles.faint}>il y a 30 j</Text>
+              <Text style={styles.faint}>aujourd’hui · {days.reduce((n, d) => n + d.n, 0)} titres vus</Text>
             </View>
-            <View style={styles.track}>
-              <View style={[styles.fill, { width: `${(m.viewers.length / maxTop) * 100}%`, backgroundColor: '#FFB340' }]} />
-            </View>
-            <Text style={styles.faint} numberOfLines={1}>
-              {m.viewers.join(', ')}
-            </Text>
-          </View>
-        ))}
-        {!stats.topMovies.length ? <Text style={styles.dim}>Aucun film vu pour l’instant.</Text> : null}
-      </View>
+          </>
+        )}
+      </StatCard>
 
-      <View style={styles.card}>
-        <Text style={styles.title}>📺 Top séries</Text>
-        {stats.topSeries.map((s, i) => (
-          <View key={s.id ?? s.title} style={{ gap: 3 }}>
-            <View style={styles.row}>
-              <Text style={styles.name} numberOfLines={1}>
-                {i + 1}. {s.title}
-              </Text>
-              <Text style={styles.dim}>{s.episodes} ép.</Text>
-            </View>
-            <View style={styles.track}>
-              <View style={[styles.fill, { width: `${(s.episodes / maxSeries) * 100}%`, backgroundColor: '#A78BFA' }]} />
-            </View>
-            <Text style={styles.faint} numberOfLines={1}>
-              {s.viewers.join(', ')}
-            </Text>
-          </View>
-        ))}
-        {!stats.topSeries.length ? <Text style={styles.dim}>Aucune série vue pour l’instant.</Text> : null}
-      </View>
+      <StatCard id="movies" title="🎬 Top films">
+        {(lv) => (
+          <>
+            {stats.topMovies.slice(0, LIMIT[lv]).map((m, i) => (
+              <View key={m.id} style={{ gap: 3 }}>
+                <View style={styles.row}>
+                  <Text style={styles.name} numberOfLines={1}>
+                    {i + 1}. {m.title}
+                    {m.year ? <Text style={styles.dim}> ({m.year})</Text> : null}
+                  </Text>
+                  <Text style={styles.dim}>{m.viewers.length} 👤</Text>
+                </View>
+                <View style={[styles.track, lv === 2 && styles.trackBig]}>
+                  <View style={[styles.fill, lv === 2 && styles.trackBig, { width: `${(m.viewers.length / maxTop) * 100}%`, backgroundColor: '#FFB340' }]} />
+                </View>
+                {lv > 0 ? (
+                  <Text style={styles.faint} numberOfLines={lv === 2 ? 3 : 1}>
+                    {m.viewers.join(', ')}
+                  </Text>
+                ) : null}
+              </View>
+            ))}
+            {!stats.topMovies.length ? <Text style={styles.dim}>Aucun film vu pour l’instant.</Text> : null}
+          </>
+        )}
+      </StatCard>
+
+      <StatCard id="series" title="📺 Top séries">
+        {(lv) => (
+          <>
+            {stats.topSeries.slice(0, LIMIT[lv]).map((s, i) => (
+              <View key={s.id ?? s.title} style={{ gap: 3 }}>
+                <View style={styles.row}>
+                  <Text style={styles.name} numberOfLines={1}>
+                    {i + 1}. {s.title}
+                  </Text>
+                  <Text style={styles.dim}>{s.episodes} ép.</Text>
+                </View>
+                <View style={[styles.track, lv === 2 && styles.trackBig]}>
+                  <View style={[styles.fill, lv === 2 && styles.trackBig, { width: `${(s.episodes / maxSeries) * 100}%`, backgroundColor: '#A78BFA' }]} />
+                </View>
+                {lv > 0 ? (
+                  <Text style={styles.faint} numberOfLines={lv === 2 ? 3 : 1}>
+                    {s.viewers.join(', ')}
+                  </Text>
+                ) : null}
+              </View>
+            ))}
+            {!stats.topSeries.length ? <Text style={styles.dim}>Aucune série vue pour l’instant.</Text> : null}
+          </>
+        )}
+      </StatCard>
     </View>
   );
 }
@@ -136,4 +172,5 @@ const styles = StyleSheet.create({
   track: { height: 7, borderRadius: 4, backgroundColor: C.surfaceHigh, overflow: 'hidden' },
   fill: { height: 7, borderRadius: 4 },
   chart: { flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: 80 },
+  trackBig: { height: 11, borderRadius: 6 },
 });

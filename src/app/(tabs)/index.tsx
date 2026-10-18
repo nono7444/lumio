@@ -109,7 +109,8 @@ function JfHero({ nonce }: { nonce: number }) {
             return {
               key: i.Id,
               title: i.Name,
-              posterUrl: jfImage(settings, i.Id, 'Primary', { tag: i.ImageTags?.Primary, maxHeight: 1200 }),
+              // Grande image d'accueil : pleine définition de l'écran (Retina ×3), compression minimale
+              posterUrl: jfImage(settings, i.Id, 'Primary', { tag: i.ImageTags?.Primary, maxHeight: 2600, quality: 97 }),
               logoUrl: jfLogo(settings, i),
               tmdb: tmdbId ? { type: i.Type === 'Movie' ? 'movie' : 'tv', id: tmdbId } : undefined,
               genres: (i.Genres ?? []).slice(0, 3),
@@ -229,7 +230,7 @@ function FamilyTopRow({ nonce }: { nonce: number }) {
     title: r.title,
     poster: r.poster,
     ids: { tmdb: r.tmdbId, type: r.type },
-    subtitle: `🍅 ${r.avg.toLocaleString('fr-FR', { maximumFractionDigits: 1 })}/10 · ${r.count} avis`,
+    subtitle: `Notes ${r.avg.toLocaleString('fr-FR', { maximumFractionDigits: 1 })}/10 · ${r.count} avis`,
     onPress: () => openMedia(r.type, r.tmdbId),
   }));
   return <Row title="⭐ Coups de cœur de la famille" items={posters} />;

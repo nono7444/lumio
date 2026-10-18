@@ -223,6 +223,16 @@ export const sonarr = {
     call<{ records: QueueItem[] }>(c, '/queue?page=1&pageSize=100&includeSeries=true&includeEpisode=true'),
 };
 
+/** Demande à Radarr / Sonarr de relire tout de suite l'état du client de téléchargement (sinon : une fois par minute). */
+const lastRefresh = new Map<string, number>();
+export function refreshDownloads(c: ArrConfig) {
+  if (!c.url || !c.apiKey) return;
+  const k = c.url;
+  if (Date.now() - (lastRefresh.get(k) ?? 0) < 10_000) return;
+  lastRefresh.set(k, Date.now());
+  call(c, '/command', { method: 'POST', body: JSON.stringify({ name: 'RefreshMonitoredDownloads' }) }).catch(() => {});
+}
+
 // ——— Index de la bibliothèque (pour les badges) ———
 
 export type LibraryEntry = { state: 'available' | 'partial' | 'monitored' | 'missing' | 'pending'; label: string; color: string };

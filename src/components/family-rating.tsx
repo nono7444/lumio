@@ -1,4 +1,4 @@
-// Fiche : note de la famille (moyenne), ma note en étoiles, et les avis des autres.
+// Fiche : « Notes » (moyenne de la famille), ma note en puces 1 à 10 sur une ligne, et les avis des autres.
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
@@ -13,7 +13,8 @@ import { refreshRatingSummary, ratingsApi, type RatingInfo } from '@/lib/ratings
 import { timeAgo } from '@/lib/requests';
 import { useSettings } from '@/lib/settings';
 
-const GOLD = '#FFC93C';
+/** Couleur d'une note : rouge (bas), orange (moyen), vert (haut) */
+export const scoreColor = (n: number) => (n >= 7 ? '#34C759' : n >= 4 ? '#FF9F0A' : '#FF453A');
 
 export function FamilyRating({ type, tmdbId, title, poster }: { type: 'movie' | 'tv'; tmdbId: number; title: string; poster?: string }) {
   const { settings } = useSettings();
@@ -51,12 +52,14 @@ export function FamilyRating({ type, tmdbId, title, poster }: { type: 'movie' | 
     <View style={styles.card}>
       {element}
       <View style={styles.head}>
-        <Text style={styles.title}>Notes de la famille</Text>
+        <Text style={styles.title}>Notes</Text>
         {info.avg != null ? (
           <View style={styles.avg}>
-            <Text style={{ fontSize: 14 }}>🍅</Text>
-            <Text style={styles.avgText}>
-              {info.avg.toLocaleString('fr-FR', { maximumFractionDigits: 1 })}/10 · {info.count} avis
+            <View style={[styles.avgChip, { backgroundColor: scoreColor(info.avg) }]}>
+              <Text style={styles.avgChipText}>{info.avg.toLocaleString('fr-FR', { maximumFractionDigits: 1 })}</Text>
+            </View>
+            <Text style={styles.dim}>
+              /10 · {info.count} avis
             </Text>
           </View>
         ) : (
@@ -64,19 +67,26 @@ export function FamilyRating({ type, tmdbId, title, poster }: { type: 'movie' | 
         )}
       </View>
 
+      {/* Ma note : 10 puces sur une seule ligne + bouton d'avis */}
       <View style={styles.mineRow}>
-        <View style={{ flex: 1, gap: 4 }}>
-          <Text style={styles.dim}>Ta note{mine ? ` : ${mine}/10` : ''}</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Platform.isTV ? 6 : 2 }}>
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-              <Pressable key={n} hitSlop={4} onPress={() => rate(n === mine ? 0 : n)} style={{ padding: Platform.isTV ? 4 : 1 }}>
-                <Text style={{ fontSize: Platform.isTV ? 26 : 21, opacity: n <= mine ? 1 : 0.22 }}>🍅</Text>
+        <View style={styles.chips}>
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
+            const on = mine > 0 && n <= mine;
+            const current = n === mine;
+            return (
+              <Pressable
+                key={n}
+                hitSlop={3}
+                onPress={() => rate(current ? 0 : n)}
+                accessibilityLabel={`Noter ${n} sur 10`}
+                style={[styles.chip, on && { backgroundColor: scoreColor(mine), opacity: current ? 1 : 0.55 }, current && styles.chipCurrent]}>
+                <Text style={[styles.chipText, on && { color: '#fff' }]}>{n}</Text>
               </Pressable>
-            ))}
-          </View>
+            );
+          })}
         </View>
-        <Pressable onPress={review} hitSlop={8} style={styles.reviewBtn}>
-          <Ionicons name="chatbubble-ellipses-outline" size={16} color={C.text} />
+        <Pressable onPress={review} hitSlop={8} style={styles.reviewBtn} accessibilityLabel="Laisser un avis">
+          <Ionicons name={info.mine?.comment ? 'chatbubble-ellipses' : 'chatbubble-ellipses-outline'} size={16} color={C.text} />
         </Pressable>
       </View>
       {info.mine?.comment ? <Text style={[styles.comment, { color: C.text }]}>« {info.mine.comment} »</Text> : null}
@@ -85,7 +95,9 @@ export function FamilyRating({ type, tmdbId, title, poster }: { type: 'movie' | 
         <View key={i} style={styles.other}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Text style={styles.name}>{v.name}</Text>
-            <Text style={{ color: GOLD, fontSize: 13 }}>🍅 {v.stars}/10</Text>
+            <View style={[styles.miniChip, { backgroundColor: scoreColor(v.stars) }]}>
+              <Text style={styles.miniChipText}>{v.stars}</Text>
+            </View>
             <Text style={styles.dim}>{timeAgo(v.at)}</Text>
           </View>
           {v.comment ? <Text style={styles.comment}>{v.comment}</Text> : null}
@@ -99,11 +111,25 @@ const styles = StyleSheet.create({
   card: { backgroundColor: C.surface, borderRadius: R.lg, padding: 14, gap: 10 },
   head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   title: { color: C.text, fontSize: 16, fontWeight: '800' },
-  avg: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  avgText: { color: C.text, fontSize: 14, fontWeight: '700' },
+  avg: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  avgChip: { borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
+  avgChipText: { color: '#fff', fontSize: 14, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  chips: { flex: 1, flexDirection: 'row', gap: Platform.isTV ? 8 : 4 },
+  chip: {
+    flex: 1,
+    height: Platform.isTV ? 44 : 30,
+    borderRadius: Platform.isTV ? 22 : 15,
+    backgroundColor: C.surfaceHigh,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipCurrent: { transform: [{ scale: 1.08 }] },
+  chipText: { color: C.textDim, fontSize: Platform.isTV ? 17 : 13, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  miniChip: { borderRadius: 8, paddingHorizontal: 7, paddingVertical: 1 },
+  miniChipText: { color: '#fff', fontSize: 12, fontWeight: '800' },
   dim: { color: C.textDim, fontSize: 13 },
-  mineRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  reviewBtn: { marginLeft: 'auto', width: 34, height: 34, borderRadius: 17, backgroundColor: C.surfaceHigh, alignItems: 'center', justifyContent: 'center' },
+  mineRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  reviewBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: C.surfaceHigh, alignItems: 'center', justifyContent: 'center' },
   other: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.border, paddingTop: 8, gap: 3 },
   name: { color: C.text, fontSize: 14, fontWeight: '700' },
   comment: { color: C.textDim, fontSize: 13, lineHeight: 18 },

@@ -1,3 +1,5 @@
+// En tout premier : fetch plus robuste (requêtes coupées par iOS relancées)
+import '@/lib/net';
 import { DarkTheme, Stack, ThemeProvider } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as SplashScreen from 'expo-splash-screen';

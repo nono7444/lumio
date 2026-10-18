@@ -6,6 +6,17 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Notes : les tomates laissent place à des puces de 1 à 10 sur une seule ligne, colorées selon la note. « Notes de la famille » s'appelle maintenant « Notes ».
+- Bande-annonce lue directement dans le lecteur mpv de Lumio (jusqu'en 1080p, piste française si elle existe).
+- Statistiques serveur et statistiques de visionnage : boutons − / + sur chaque carte pour la réduire ou l'agrandir (graphiques plus grands, plus de lignes, historique de chaleur).
+- Widget iOS refait façon UptimeRobot (barres des 24 dernières heures, % de disponibilité, processeur et chaleur), nouveau grand format, rafraîchi toutes les 5 min, à chaque ouverture de Lumio, et avec un bouton ↻ (iOS 17).
+- Corrigé : l'erreur « fetch failed: UnexpectedException: cancelled » (requête coupée par iOS) — la requête est relancée toute seule.
+- Grande image d'accueil en pleine définition.
+- Téléchargements : pourcentage en direct (toutes les secondes pour AllDebrid, avec le temps restant ; quelques secondes pour Radarr / Sonarr).
+- Demandes dont la recherche est en attente : bouton « Relancer la recherche » qui dit si une version a été trouvée ou si c'est toujours indisponible.
+- Imports Radarr / Sonarr plus rapides : le serveur Lumio déclenche l'import dès qu'un téléchargement est fini et fait rescanner Jellyfin juste après.
+- Serveur Lumio 3.11.0 requis.
+
 ## 1.0.48 — 18 octobre 2026
 
 - Notes de la famille en tomates 🍅 sur 10 (les anciennes notes sont converties). Sur les affiches : la note de la famille si le titre est noté, sinon la note Better Posters.

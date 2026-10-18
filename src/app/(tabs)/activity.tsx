@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Requests } from '@/components/requests-list';
 import { Button, ScreenTitle, SegChip, SetupPrompt } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
-import { formatBytes, radarr, sonarr, type QueueItem } from '@/lib/arr';
+import { formatBytes, radarr, refreshDownloads, sonarr, type QueueItem } from '@/lib/arr';
 import { ServerRequests } from '@/components/server-requests';
 import { invalidateHealth, lumio } from '@/lib/lumio-server';
 import { useServerRequests } from '@/lib/requests';
@@ -77,7 +77,7 @@ function QueueRow({ q }: { q: Row }) {
       </View>
       <View style={styles.rowFoot}>
         <Text style={styles.dim}>
-          {Math.round(done * 100)} % · {formatBytes(q.size - q.sizeleft)} / {formatBytes(q.size)}
+          {(done * 100).toFixed(done < 1 ? 1 : 0)} % · {formatBytes(q.size - q.sizeleft)} / {formatBytes(q.size)}
         </Text>
         <Text style={styles.dim}>{q.timeleft ? q.timeleft.replace(/\.\d+$/, '') : (q.downloadClient ?? '')}</Text>
       </View>
@@ -119,6 +119,8 @@ function Downloads({ header, viaServer }: { header: React.ReactNode; viaServer?:
         return;
       }
       const errs: string[] = [];
+      if (settings.radarr.url && settings.radarr.apiKey) refreshDownloads(settings.radarr);
+      if (settings.sonarr.url && settings.sonarr.apiKey) refreshDownloads(settings.sonarr);
       const [r, s] = await Promise.all([
         settings.radarr.url && settings.radarr.apiKey
           ? radarr.queue(settings.radarr).catch((e) => (errs.push(`Radarr : ${e.message}`), { records: [] }))
@@ -138,12 +140,13 @@ function Downloads({ header, viaServer }: { header: React.ReactNode; viaServer?:
     [configured, viaServer, settings.radarr, settings.sonarr, settings.chatUrl, settings.jellyfin?.token]
   );
 
-  // Rafraîchit toutes les 8 s tant que l'onglet est affiché
+  // Pourcentage en direct : rafraîchit toutes les 3 s tant que l'onglet est affiché
+  // (Radarr / Sonarr sont relancés toutes les 10 s pour relire le client de téléchargement)
   useFocusEffect(
     useCallback(() => {
       load(first.current);
       first.current = false;
-      const t = setInterval(() => load(false), 8000);
+      const t = setInterval(() => load(false), 3000);
       return () => clearInterval(t);
     }, [load])
   );

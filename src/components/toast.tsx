@@ -15,6 +15,8 @@ const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 
 export function toast(text: string, kind: Toast['kind'] = 'ok', ms = 6000) {
+  // Requête coupée par iOS (arrière-plan, changement de réseau) : rien d'utile à montrer
+  if (kind === 'error' && /Connexion interrompue|cancell?ed|UnexpectedException|Promise\.swift/i.test(String(text))) return;
   const t = { id: ++seq, text, kind };
   items = [...items, t].slice(-3);
   emit();

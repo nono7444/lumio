@@ -17,6 +17,7 @@ import {
   type MediaInfo,
   type Req,
 } from '@/lib/requests';
+import { RecheckButton } from '@/components/recheck-button';
 import { useSettings } from '@/lib/settings';
 
 export function RequestSection({
@@ -69,13 +70,13 @@ export function RequestSection({
   // Film prêt dans Radarr mais pas encore vu par Jellyfin (scan de la bibliothèque)
   const arriving = !isTv && !inJellyfin && status === MediaStatus.AVAILABLE;
 
-  // Suivi en direct : toutes les 5 s pendant le téléchargement, puis jusqu'à l'arrivée dans Jellyfin
+  // Suivi en direct : toutes les 3 s pendant le téléchargement, puis jusqu'à l'arrivée dans Jellyfin
   useEffect(() => {
     if (!active && !arriving) return;
     const t = setInterval(() => {
       load();
       if (arriving) onAvailable?.();
-    }, arriving ? 8000 : 5000);
+    }, arriving ? 8000 : 3000);
     if (arriving) onAvailable?.();
     return () => clearInterval(t);
   }, [active?.id, arriving, load, onAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -144,6 +145,9 @@ export function RequestSection({
 
       {/* Le bouton « Demander » devient la progression du téléchargement, puis « Lire » (sur la fiche) */}
       {active ? <ProgressButton r={active} /> : null}
+      {active && (!active.download || active.download.state === 'searching') && (admin || active.requestedBy.id === me) ? (
+        <RecheckButton r={active} onDone={load} />
+      ) : null}
       {arriving ? <ProgressButton label="Arrivée dans Jellyfin…" progress={100} color={C.success} spinner /> : null}
 
       {/* Demandes en attente (ou en échec) : l'admin valide ici, le demandeur peut annuler */}

@@ -115,6 +115,9 @@ export const requestsApi = {
   approve: (s: Settings, id: string, opts: { rootFolderPath?: string; qualityProfileId?: number } = {}) =>
     serverCall<Req>(s, `/api/requests/${id}/approve`, { method: 'POST', body: JSON.stringify(opts) }),
   retry: (s: Settings, id: string) => serverCall<Req>(s, `/api/requests/${id}/retry`, { method: 'POST', body: '{}' }),
+  /** Relance la recherche Radarr / Sonarr d'une demande en cours et dit si une version a été trouvée */
+  search: (s: Settings, id: string) =>
+    serverCall<{ found: boolean; available?: boolean; pending?: boolean; message: string }>(s, `/api/requests/${id}/search`, { method: 'POST', body: '{}' }),
   decline: (s: Settings, id: string, reason?: string) =>
     serverCall<Req>(s, `/api/requests/${id}/decline`, { method: 'POST', body: JSON.stringify({ reason }) }),
   remove: (s: Settings, id: string) => serverCall(s, `/api/requests/${id}`, { method: 'DELETE' }),

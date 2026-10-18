@@ -3,6 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { SizeStepper, useCardSize, type SizeLevel } from '@/components/size-stepper';
 import { Section } from '@/components/ui';
 import { C, R } from '@/constants/theme';
 import { serverCall } from '@/lib/chat';
@@ -40,29 +41,60 @@ function duration(sec: number) {
   return d ? `${d} j ${h} h` : `${h} h ${Math.floor((sec % 3600) / 60)} min`;
 }
 
+function UptimeText({ s, size = 13 }: { s: Service; size?: number }) {
+  return (
+    <Text style={[styles.mono, { fontSize: size, color: s.uptime == null || s.uptime >= 99 ? GREEN : s.uptime >= 95 ? '#FFB340' : '#FF453A' }]}>
+      {s.uptime == null ? '— uptime' : `${s.uptime.toLocaleString('fr-FR')}% uptime`}
+    </Text>
+  );
+}
+
 function ServiceCard({ s }: { s: Service }) {
+  const [level, setLevel] = useCardSize(`svc-${s.key}`);
+  const stepper = <SizeStepper level={level} onChange={setLevel} />;
+
+  // Compact : une seule ligne (état, nom, mini-barres, %)
+  if (level === 0)
+    return (
+      <View style={[styles.card, { paddingVertical: 10, gap: 8 }]}>
+        <View style={[styles.head, { gap: 10 }]}>
+          <View style={[styles.dotInline, { backgroundColor: s.ok ? GREEN : '#FF453A' }]} />
+          <Text style={[styles.name, { fontSize: 15, flex: 1 }]} numberOfLines={1}>
+            {s.name}
+          </Text>
+          <UptimeText s={s} size={12} />
+          {stepper}
+        </View>
+        <View style={[styles.bars, { height: 8, gap: 2 }]}>
+          {s.bars.map((b, i) => (
+            <View key={i} style={[styles.bar, { borderRadius: 2, backgroundColor: barColor(b) }]} />
+          ))}
+        </View>
+      </View>
+    );
+
+  const big = level === 2;
   return (
     <View style={styles.card}>
       <View style={styles.head}>
-        <View style={styles.iconBox}>
-          <Ionicons name={ICON[s.key] ?? 'server'} size={22} color={C.text} />
+        <View style={[styles.iconBox, big && { width: 58, height: 58, borderRadius: 14 }]}>
+          <Ionicons name={ICON[s.key] ?? 'server'} size={big ? 28 : 22} color={C.text} />
           <View style={[styles.dot, { backgroundColor: s.ok ? GREEN : '#FF453A' }]} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.name}>{s.name}</Text>
-          <Text style={styles.desc} numberOfLines={2}>
+          <Text style={[styles.name, big && { fontSize: 21 }]}>{s.name}</Text>
+          <Text style={styles.desc} numberOfLines={big ? 3 : 2}>
             {s.ok ? DESC[s.key] : `Hors ligne : ${s.error ?? 'injoignable'}`}
           </Text>
         </View>
+        <View style={{ alignSelf: 'flex-start' }}>{stepper}</View>
       </View>
       <View style={styles.sep} />
       <View style={styles.row}>
         <Text style={styles.small}>HISTORIQUE</Text>
-        <Text style={[styles.mono, { color: s.uptime == null || s.uptime >= 99 ? GREEN : s.uptime >= 95 ? '#FFB340' : '#FF453A' }]}>
-          {s.uptime == null ? '— uptime' : `${s.uptime.toLocaleString('fr-FR')}% uptime`}
-        </Text>
+        <UptimeText s={s} size={big ? 15 : 13} />
       </View>
-      <View style={styles.bars}>
+      <View style={[styles.bars, big && { height: 44, gap: 4 }]}>
         {s.bars.map((b, i) => (
           <View key={i} style={[styles.bar, { backgroundColor: barColor(b) }]} />
         ))}
@@ -73,15 +105,31 @@ function ServiceCard({ s }: { s: Service }) {
           {[s.version ? `v${s.version}` : null, s.ms != null ? `${s.ms} ms` : null, 'maintenant'].filter(Boolean).join(' · ')}
         </Text>
       </View>
+      {big ? (
+        <View style={styles.statsRow}>
+          <MiniStat label="RÉPONSE" value={s.ms != null ? `${s.ms} ms` : '—'} />
+          <MiniStat label="PANNES 24 H" value={String(s.bars.filter((b) => b === 0 || b === 0.5).length)} />
+          <MiniStat label="ÉTAT" value={s.ok ? 'En ligne' : 'Hors ligne'} color={s.ok ? GREEN : '#FF453A'} />
+        </View>
+      ) : null}
     </View>
   );
 }
 
-function Gauge({ label, value, unit, color, max = 100 }: { label: string; value: number | null; unit: string; color: string; max?: number }) {
+function MiniStat({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <View style={styles.miniStat}>
+      <Text style={styles.small}>{label}</Text>
+      <Text style={[styles.mono, { fontSize: 16, color: color ?? C.text }]}>{value}</Text>
+    </View>
+  );
+}
+
+function Gauge({ label, value, unit, color, max = 100, level = 1 }: { label: string; value: number | null; unit: string; color: string; max?: number; level?: SizeLevel }) {
   return (
     <View style={styles.gauge}>
       <Text style={styles.small}>{label}</Text>
-      <Text style={[styles.big, { color }]}>
+      <Text style={[styles.big, { color }, level === 0 && { fontSize: 18 }, level === 2 && { fontSize: 32 }]}>
         {value == null ? '—' : value}
         <Text style={styles.unit}>{value == null ? '' : unit}</Text>
       </Text>
@@ -93,8 +141,32 @@ function Gauge({ label, value, unit, color, max = 100 }: { label: string; value:
 }
 
 function SystemCard({ sys }: { sys: System }) {
+  const [level, setLevel] = useCardSize('machine');
   const memPct = sys.mem ? Math.round((sys.mem.used / sys.mem.total) * 100) : null;
-  const hist = sys.history.slice(-45);
+  const span = level === 2 ? 90 : 45;
+  const hist = sys.history.slice(-span);
+  const stepper = <SizeStepper level={level} onChange={setLevel} />;
+  const gauges = (
+    <View style={styles.gauges}>
+      <Gauge label="PROCESSEUR" value={sys.cpu} unit=" %" color={cpuColor(sys.cpu ?? 0)} level={level} />
+      <Gauge label="CHALEUR" value={sys.temp} unit=" °C" color={tempColor(sys.temp ?? 0)} max={100} level={level} />
+      <Gauge label="MÉMOIRE" value={memPct} unit=" %" color={C.accent} level={level} />
+    </View>
+  );
+
+  if (level === 0)
+    return (
+      <View style={[styles.card, { paddingVertical: 12 }]}>
+        <View style={[styles.head, { gap: 10 }]}>
+          <View style={[styles.dotInline, { backgroundColor: GREEN }]} />
+          <Text style={[styles.name, { fontSize: 15, flex: 1 }]}>Machine</Text>
+          {stepper}
+        </View>
+        {gauges}
+      </View>
+    );
+
+  const temps = hist.map((h) => h.temp).filter((t): t is number => t != null);
   return (
     <View style={styles.card}>
       <View style={styles.head}>
@@ -108,20 +180,31 @@ function SystemCard({ sys }: { sys: System }) {
             En direct · {sys.cores} cœurs{sys.uptime ? ` · allumée depuis ${duration(sys.uptime)}` : ''}
           </Text>
         </View>
+        <View style={{ alignSelf: 'flex-start' }}>{stepper}</View>
       </View>
-      <View style={styles.gauges}>
-        <Gauge label="PROCESSEUR" value={sys.cpu} unit=" %" color={cpuColor(sys.cpu ?? 0)} />
-        <Gauge label="CHALEUR" value={sys.temp} unit=" °C" color={tempColor(sys.temp ?? 0)} max={100} />
-        <Gauge label="MÉMOIRE" value={memPct} unit=" %" color={C.accent} />
-      </View>
-      {/* Charge du processeur sur les 90 dernières secondes */}
-      <View style={styles.spark}>
+      {gauges}
+      {/* Charge du processeur en direct */}
+      {level === 2 ? <Text style={styles.small}>PROCESSEUR</Text> : null}
+      <View style={[styles.spark, level === 2 && { height: 110 }]}>
         {hist.map((h, i) => (
           <View key={i} style={{ flex: 1, height: `${Math.max(4, h.cpu)}%`, backgroundColor: cpuColor(h.cpu), borderRadius: 2, opacity: 0.85 }} />
         ))}
       </View>
+      {level === 2 && temps.length ? (
+        <>
+          <Text style={styles.small}>CHALEUR</Text>
+          <View style={[styles.spark, { height: 70 }]}>
+            {hist.map((h, i) => (
+              <View
+                key={i}
+                style={{ flex: 1, height: `${Math.max(4, Math.min(100, h.temp ?? 0))}%`, backgroundColor: tempColor(h.temp ?? 0), borderRadius: 2, opacity: 0.8 }}
+              />
+            ))}
+          </View>
+        </>
+      ) : null}
       <View style={styles.row}>
-        <Text style={styles.faint}>il y a 90 s</Text>
+        <Text style={styles.faint}>il y a {span * 2} s</Text>
         <Text style={styles.faint}>
           {sys.load ? `charge ${sys.load.map((l) => l.toFixed(2)).join(' · ')}` : ''}
           {sys.mem ? ` · ${formatSize(sys.mem.used)} / ${formatSize(sys.mem.total)}` : ''}
@@ -137,8 +220,8 @@ function SystemCard({ sys }: { sys: System }) {
                 {formatSize(d.free)} libres / {formatSize(d.total)}
               </Text>
             </View>
-            <View style={styles.track}>
-              <View style={[styles.fill, { width: `${used * 100}%`, backgroundColor: used > 0.9 ? '#FF453A' : C.accent }]} />
+            <View style={[styles.track, level === 2 && { height: 9 }]}>
+              <View style={[styles.fill, level === 2 && { height: 9 }, { width: `${used * 100}%`, backgroundColor: used > 0.9 ? '#FF453A' : C.accent }]} />
             </View>
           </View>
         );
@@ -207,4 +290,7 @@ const styles = StyleSheet.create({
   track: { height: 5, borderRadius: 3, backgroundColor: '#2C2C30', overflow: 'hidden' },
   fill: { height: 5, borderRadius: 3 },
   spark: { flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: 46 },
+  dotInline: { width: 10, height: 10, borderRadius: 5 },
+  statsRow: { flexDirection: 'row', gap: 8 },
+  miniStat: { flex: 1, backgroundColor: '#1F1F2C', borderRadius: 10, padding: 10, gap: 4 },
 });

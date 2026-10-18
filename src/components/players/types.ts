@@ -21,6 +21,8 @@ export type PlayerProps = {
   statsInfo?: string[];
   /** mpv : passer en image dans l'image (bascule sur le lecteur natif) */
   onPip?: () => void;
+  /** Piste audio séparée (bande-annonce YouTube : vidéo et son sont deux flux) */
+  audioUri?: string;
   /** Lecteur natif : démarrer directement en image dans l'image */
   autoPip?: boolean;
 };

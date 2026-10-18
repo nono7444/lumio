@@ -24,6 +24,8 @@ type Params = {
   itemId?: string;
   uri?: string;
   headers?: string;
+  /** Piste audio séparée (bande-annonce YouTube), lue par mpv */
+  audio?: string;
   /** Autres sources (JSON [{uri, headers, label}]) essayées une par une si la lecture échoue */
   alts?: string;
   title?: string;
@@ -301,10 +303,11 @@ export default function Player() {
           onClose={() => router.back()}
         />
       ) : source && !error ? (
-        engine === 'mpv' ? (
+        engine === 'mpv' || p.audio ? (
           <MpvPlayer
             key={`mpv-${attempt}`}
             uri={source.uri}
+            audioUri={p.audio}
             headers={source.headers}
             isHls={source.isHls}
             title={p.title}
@@ -318,7 +321,7 @@ export default function Player() {
             extra={castBtn}
             statsInfo={statsInfo}
             onPip={
-              Platform.OS === 'ios'
+              Platform.OS === 'ios' && !p.audio
                 ? () => {
                     pipRequested.current = true;
                     setEngine('native');
