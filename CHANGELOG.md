@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.46 — 18 octobre 2026
+
 - Nouvelle appli Android TV : le même Lumio que sur l'iPhone (mêmes écrans, mêmes fonctions, même design), adapté à la télécommande : barre d'onglets en haut, éléments sélectionnés bien visibles, tailles adaptées à la TV. Elle remplace l'ancienne Lumio TV (NuvioTV).
 - TV : connexion sans clavier. La TV affiche un code, on le valide sur le téléphone (Profil → Connecter une TV).
 - Serveur Lumio 3.9.1 : lumio.wawanono.lol/tv donne la nouvelle appli TV.
