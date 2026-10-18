@@ -20,6 +20,7 @@ import {
 } from '@/lib/arr';
 import { jf, type JfItem } from '@/lib/jellyfin';
 import { askFolder } from '@/components/folder-picker';
+import { JfEpisodes } from '@/components/jf-episodes';
 import { FamilyRating } from '@/components/family-rating';
 import { ReportProblemButton } from '@/components/report-problem';
 import { RequestSection } from '@/components/request-section';
@@ -259,6 +260,9 @@ export default function MediaScreen() {
               }
             />
           ) : null}
+
+          {/* ——— Série dans Jellyfin : choix de la saison et de l'épisode ——— */}
+          {jfItem && details.kind === 'tv' ? <JfEpisodes seriesId={jfItem.Id} /> : null}
 
           {/* ——— Demande façon Seerr (serveur Lumio) ——— */}
           {serverReq ? (

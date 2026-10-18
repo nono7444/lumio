@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Séries : la fiche affiche les saisons et la liste des épisodes, pour lancer celui qu'on veut.
+
 - Bouton Bande-annonce retiré des fiches.
 - Séries partielles : le compte se fait sur toutes les saisons de la série (« 1 saison sur 10 »).
 
