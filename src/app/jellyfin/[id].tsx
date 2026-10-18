@@ -21,7 +21,6 @@ import {
 } from '@/lib/jellyfin';
 import { FamilyRating } from '@/components/family-rating';
 import { ReportProblemButton } from '@/components/report-problem';
-import { TrailerButton } from '@/components/trailer-button';
 import { useServerRequests } from '@/lib/requests';
 import { useSettings } from '@/lib/settings';
 
@@ -268,7 +267,6 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                   onPress={() => playJellyfin(item)}
                   style={{ flex: 1.3 }}
                 />
-                <TrailerButton type="movie" tmdbId={tmdbId} title={item.Name} year={item.ProductionYear} small style={{ flex: 1 }} />
               </View>
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 {resumeAt > 30 && (
@@ -300,7 +298,6 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                     style={{ flex: 1.3 }}
                   />
                 ) : null}
-                <TrailerButton type="tv" tmdbId={tmdbId} title={item.Name} year={item.ProductionYear} small style={{ flex: 1 }} />
                 <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" small onPress={toggleFav} style={{ width: 46, paddingHorizontal: 0 }} />
               </View>
             </View>

@@ -23,7 +23,6 @@ import { askFolder } from '@/components/folder-picker';
 import { FamilyRating } from '@/components/family-rating';
 import { ReportProblemButton } from '@/components/report-problem';
 import { RequestSection } from '@/components/request-section';
-import { TrailerButton } from '@/components/trailer-button';
 import { grab, mediaFlavor } from '@/lib/grab';
 import { useServerRequests } from '@/lib/requests';
 import { chat } from '@/lib/chat';
@@ -246,24 +245,20 @@ export default function MediaScreen() {
         </View>
 
         <View style={{ paddingHorizontal: 16, gap: 20, marginTop: 4 }}>
-          {/* ——— Lecture (depuis Jellyfin) et bande-annonce, sur une ligne ——— */}
-          <View style={{ flexDirection: 'row', gap: 10 }}>
-            {jfItem ? (
-              <Button
-                title="Lire"
-                icon="play"
-                small
-                onPress={() =>
-                  router.push({
-                    pathname: '/watch',
-                    params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title },
-                  })
-                }
-                style={{ flex: 1 }}
-              />
-            ) : null}
-            <TrailerButton type={details.kind} tmdbId={tmdbId} title={title} year={date?.slice(0, 4)} small style={{ flex: 1 }} />
-          </View>
+          {/* ——— Lecture (depuis Jellyfin) ——— */}
+          {jfItem ? (
+            <Button
+              title="Lire"
+              icon="play"
+              small
+              onPress={() =>
+                router.push({
+                  pathname: '/watch',
+                  params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title },
+                })
+              }
+            />
+          ) : null}
 
           {/* ——— Demande façon Seerr (serveur Lumio) ——— */}
           {serverReq ? (

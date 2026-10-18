@@ -24,7 +24,7 @@ const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
 const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.13.0';
+const VERSION = '3.12.2';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -692,167 +692,6 @@ async function recheckRequest(r) {
   return { found: false, message: `Toujours rien de disponible. ${label(kind)} continue de chercher tout seul régulièrement.` };
 }
 
-// ——— Bandes-annonces : vidéo YouTube récupérée par yt-dlp et relayée par le serveur (marche partout, même en 4G) ———
-const { execFile } = require('child_process');
-const { Readable } = require('stream');
-const YTDLP = path.join(DATA_DIR, 'bin', 'yt-dlp');
-let ytdlpReady = null;
-/** Télécharge yt-dlp (binaire autonome) au premier besoin, et le remet à jour tous les 3 jours. */
-function ensureYtdlp() {
-  if (ytdlpReady) return ytdlpReady;
-  ytdlpReady = (async () => {
-    let fresh = false;
-    try {
-      fresh = Date.now() - fs.statSync(YTDLP).mtimeMs < 3 * 86400_000;
-    } catch {}
-    if (fresh) return YTDLP;
-    const musl = fs.existsSync('/etc/alpine-release');
-    const arm = process.arch === 'arm64';
-    const name = musl ? (arm ? 'yt-dlp_musllinux_aarch64' : 'yt-dlp_musllinux') : arm ? 'yt-dlp_linux_aarch64' : 'yt-dlp_linux';
-    const r = await fetch(`https://github.com/yt-dlp/yt-dlp/releases/latest/download/${name}`);
-    if (!r.ok) {
-      if (fs.existsSync(YTDLP)) return YTDLP; // garde l'ancienne version
-      throw new Error(`yt-dlp introuvable (HTTP ${r.status})`);
-    }
-    await fs.promises.mkdir(path.dirname(YTDLP), { recursive: true });
-    const tmp = `${YTDLP}.tmp`;
-    await fs.promises.writeFile(tmp, Buffer.from(await r.arrayBuffer()));
-    await fs.promises.chmod(tmp, 0o755);
-    await fs.promises.rename(tmp, YTDLP);
-    return YTDLP;
-  })().catch((e) => {
-    ytdlpReady = null;
-    throw e;
-  });
-  return ytdlpReady;
-}
-setTimeout(() => ensureYtdlp().catch((e) => console.log('yt-dlp :', e.message)), 15_000);
-
-const trailerStreams = new Map(); // id → { formats: {v, a}, at }
-const trailerByKey = new Map(); // clé YouTube → { id, height, at }
-
-function ytInfo(key) {
-  return ensureYtdlp().then(
-    (bin) =>
-      new Promise((resolve, reject) => {
-        execFile(
-          bin,
-          ['-J', '--no-warnings', '--no-playlist', '--js-runtimes', `node:${process.execPath}`, `https://www.youtube.com/watch?v=${key}`],
-          { maxBuffer: 64 * 1024 * 1024, timeout: 90_000 },
-          (err, stdout, stderr) => {
-            if (err) return reject(new Error(String(stderr || err.message).split('\n').filter(Boolean).pop() || 'yt-dlp a échoué'));
-            try {
-              resolve(JSON.parse(stdout));
-            } catch {
-              reject(new Error('Réponse yt-dlp illisible'));
-            }
-          }
-        );
-      })
-  );
-}
-
-/** Choisit la meilleure vidéo H.264 (≤ 1080p) et la piste audio (française si elle existe). */
-async function resolveTrailer(key) {
-  const cached = trailerByKey.get(key);
-  if (cached && Date.now() - cached.at < 4 * 3600_000 && trailerStreams.has(cached.id)) return cached;
-  const info = await ytInfo(key);
-  const fmts = (info.formats || []).filter((f) => f.url && /^https?$/.test(f.protocol || 'https'));
-  const videos = fmts
-    .filter((f) => f.vcodec && f.vcodec !== 'none' && (!f.acodec || f.acodec === 'none') && /^avc1/.test(f.vcodec) && (f.height || 0) <= 1080)
-    .sort((a, b) => (b.height || 0) - (a.height || 0) || (b.tbr || 0) - (a.tbr || 0));
-  const audios = fmts
-    .filter((f) => f.acodec && f.acodec !== 'none' && (!f.vcodec || f.vcodec === 'none') && (f.ext === 'm4a' || /^mp4a/.test(f.acodec)))
-    .sort(
-      (a, b) =>
-        Number(/^fr/.test(b.language || '')) - Number(/^fr/.test(a.language || '')) ||
-        (b.language_preference || 0) - (a.language_preference || 0) ||
-        (b.abr || 0) - (a.abr || 0)
-    );
-  const muxed = fmts.filter((f) => f.vcodec && f.vcodec !== 'none' && f.acodec && f.acodec !== 'none').sort((a, b) => (b.height || 0) - (a.height || 0));
-  let formats;
-  let height;
-  if (videos[0] && audios[0]) {
-    formats = { v: videos[0], a: audios[0] };
-    height = videos[0].height;
-  } else if (muxed[0]) {
-    formats = { v: muxed[0] };
-    height = muxed[0].height;
-  } else throw new Error('Aucun flux vidéo lisible pour cette bande-annonce');
-  const id = crypto.randomBytes(12).toString('hex');
-  trailerStreams.set(id, { formats, at: Date.now() });
-  const entry = { id, height, audio: Boolean(formats.a), at: Date.now() };
-  trailerByKey.set(key, entry);
-  // Ménage : liens valables 6 h
-  for (const [k, v] of trailerStreams) if (Date.now() - v.at > 6 * 3600_000) trailerStreams.delete(k);
-  return entry;
-}
-
-/** Relaie un flux YouTube par morceaux de 8 Mo (YouTube coupe les longues requêtes), avec les « Range » du lecteur. */
-async function proxyTrailer(req, res, f) {
-  const CH = 8 * 1024 * 1024;
-  const headers = { ...(f.http_headers || {}) };
-  const m = /bytes=(\d+)-(\d*)/.exec(req.headers.range || '');
-  let start = m ? Number(m[1]) : 0;
-  let end = m && m[2] ? Number(m[2]) : null;
-  const grab = (a, b) => fetch(f.url, { headers: { ...headers, Range: `bytes=${a}-${b}` } });
-  let first = await grab(start, end != null ? Math.min(end, start + CH - 1) : start + CH - 1);
-  if (first.status === 416) {
-    res.writeHead(416);
-    return res.end();
-  }
-  if (!first.ok) {
-    res.writeHead(502, { 'Content-Type': 'text/plain' });
-    return res.end(`YouTube : HTTP ${first.status}`);
-  }
-  const total = Number((/\/(\d+)$/.exec(first.headers.get('content-range') || '') || [])[1]) || Number(f.filesize) || null;
-  if (end == null || (total && end > total - 1)) end = total ? total - 1 : null;
-  const head = { 'Content-Type': first.headers.get('content-type') || (f.vcodec && f.vcodec !== 'none' ? 'video/mp4' : 'audio/mp4'), 'Accept-Ranges': 'bytes' };
-  if (end != null) {
-    head['Content-Length'] = String(end - start + 1);
-    if (total) head['Content-Range'] = `bytes ${start}-${end}/${total}`;
-  }
-  res.writeHead(m && total ? 206 : 200, head);
-  let closed = false;
-  req.on('close', () => (closed = true));
-  let r = first;
-  for (;;) {
-    for await (const chunk of Readable.fromWeb(r.body)) {
-      if (closed) return;
-      if (!res.write(chunk)) await new Promise((ok) => res.once('drain', ok));
-    }
-    const got = Number((/bytes (\d+)-(\d+)/.exec(r.headers.get('content-range') || '') || [])[2]);
-    if (!got || closed || end == null || got >= end) break;
-    start = got + 1;
-    r = await grab(start, Math.min(end, start + CH - 1));
-    if (!r.ok) break;
-  }
-  res.end();
-}
-
-/** Bande-annonce de l'iTunes Store France (lien direct d'Apple), en secours. */
-async function itunesTrailer(type, title, year) {
-  if (!title) return null;
-  const norm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
-  const q = new URLSearchParams({ term: title, country: 'FR', lang: 'fr_fr', limit: '15', ...(type === 'movie' ? { media: 'movie', entity: 'movie' } : { media: 'tvShow', entity: 'tvSeason' }) });
-  const r = await fetch(`https://itunes.apple.com/search?${q}`).catch(() => null);
-  if (!r || !r.ok) return null;
-  const hits = ((await r.json().catch(() => ({}))).results || []).filter((h) => h.previewUrl);
-  const want = norm(title);
-  const y = Number(String(year || '').slice(0, 4)) || null;
-  let best = null;
-  let bestScore = 0;
-  for (const h of hits) {
-    const n = norm(type === 'movie' ? h.trackName : String(h.collectionName || '').replace(/,?\s*(saison|season)\s*\d+.*$/i, ''));
-    let sc = n === want ? 10 : n.startsWith(want) || want.startsWith(n) ? 5 : 0;
-    if (!sc) continue;
-    const yy = h.releaseDate ? Number(h.releaseDate.slice(0, 4)) : null;
-    if (y && yy) sc += Math.abs(yy - y) <= 1 ? 5 : type === 'movie' ? -20 : 0;
-    if (sc > bestScore) (best = h), (bestScore = sc);
-  }
-  return best ? best.previewUrl : null;
-}
-
 // ——— File de téléchargement ———
 async function queue() {
   const out = [];
@@ -1512,27 +1351,12 @@ const server = http.createServer(async (req, res) => {
       ok: true,
       version: VERSION,
       messages: messages.length,
-      features: ['chat', 'requests', 'status', 'ideas', 'ratings', 'files', 'trailer'],
+      features: ['chat', 'requests', 'status', 'ideas', 'ratings', 'files'],
       radarr: Boolean(arrConfig('radarr')),
       sonarr: Boolean(arrConfig('sonarr')),
     });
 
   // État public pour le widget iOS : en ligne / hors ligne et compteurs seulement (aucun titre, aucune clé)
-  // Flux de bande-annonce relayé (lien à usage temporaire, sans compte)
-  const tr = url.pathname.match(/^\/trailer\/([a-f0-9]{24})\/(v|a)$/);
-  if (tr) {
-    const t = trailerStreams.get(tr[1]);
-    const f = t && t.formats[tr[2]];
-    if (!f) return send(res, 404, { error: 'lien expiré' });
-    try {
-      await proxyTrailer(req, res, f);
-    } catch (e) {
-      if (!res.headersSent) send(res, 502, { error: String(e.message || e) });
-      else res.end();
-    }
-    return;
-  }
-
   if (url.pathname === '/status/public') {
     if (!publicStatusCache || Date.now() - publicStatusCache.at > 30_000) {
       const s = await status().catch(() => null);
@@ -1927,23 +1751,6 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
       const kind = kindOf(q.get('type'));
       const [f, pr] = await Promise.all([folders(kind), user.admin ? profiles(kind) : null]);
       return send(res, 200, { ...f, profiles: pr ? pr.profiles : [], defaultProfile: pr ? pr.default : null, lockedProfile: pr ? pr.locked : null });
-    }
-
-    // Bande-annonce : YouTube relayé par le serveur, sinon iTunes Store France
-    if (req.method === 'GET' && p === '/api/trailer') {
-      const key = String(q.get('key') || '').replace(/[^\w-]/g, '').slice(0, 20);
-      let ytError = null;
-      if (key) {
-        try {
-          const t = await resolveTrailer(key);
-          return send(res, 200, { source: 'youtube', video: `/trailer/${t.id}/v`, audio: t.audio ? `/trailer/${t.id}/a` : null, height: t.height || null });
-        } catch (e) {
-          ytError = String(e.message || e);
-        }
-      }
-      const it = await itunesTrailer(q.get('type') === 'tv' ? 'tv' : 'movie', q.get('title'), q.get('year'));
-      if (it) return send(res, 200, { source: 'itunes', video: it, audio: null, height: null });
-      return send(res, 404, { error: ytError ? `Bande-annonce indisponible (${ytError})` : 'Pas de bande-annonce trouvée' });
     }
 
     if (req.method === 'GET' && p === '/api/queue') {
