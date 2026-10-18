@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.44 — 18 octobre 2026
+
 - Profil → « Connecter une TV » : tape le code affiché par Lumio TV pour la connecter à ton compte, sans rien saisir à la télécommande.
 - Serveur Lumio 3.8.0 : donne aux TV l'adresse de Jellyfin pour leur configuration automatique.
 
