@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.49 — 18 octobre 2026
+
 - Notes : les tomates laissent place à des puces de 1 à 10 sur une seule ligne, colorées selon la note. « Notes de la famille » s'appelle maintenant « Notes ».
 - Bande-annonce lue directement dans le lecteur mpv de Lumio (jusqu'en 1080p, piste française si elle existe).
 - Statistiques serveur et statistiques de visionnage : boutons − / + sur chaque carte pour la réduire ou l'agrandir (graphiques plus grands, plus de lignes, historique de chaleur).
