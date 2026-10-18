@@ -24,7 +24,7 @@ const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
 const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.12.0';
+const VERSION = '3.12.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -580,10 +580,16 @@ function downloadOf(r, lib) {
   }
   // Série : une partie des saisons est déjà là et le reste n'est trouvé nulle part → « Partiel » plutôt que « recherche »
   if (r.type === 'tv') {
-    const m = mediaStatus(lib, 'tv', r.tmdbId, r.tvdbId, r.seasons);
-    const have = m.seasons.filter((x) => x.status === MediaStatus.AVAILABLE).length;
-    const some = m.seasons.filter((x) => x.status === MediaStatus.PARTIALLY_AVAILABLE).length;
-    if (have || some) return { state: 'partial', available: have, partial: some, total: m.seasons.length };
+    const asked = mediaStatus(lib, 'tv', r.tmdbId, r.tvdbId, r.seasons);
+    const got = (x) => x.status === MediaStatus.AVAILABLE || x.status === MediaStatus.PARTIALLY_AVAILABLE;
+    if (asked.seasons.some(got)) {
+      // Compte sur toute la série (toutes ses saisons), pas seulement les saisons demandées
+      const all = mediaStatus(lib, 'tv', r.tmdbId, r.tvdbId, null);
+      const list = all.seasons.length >= asked.seasons.length ? all.seasons : asked.seasons;
+      const have = list.filter((x) => x.status === MediaStatus.AVAILABLE).length;
+      const some = list.filter((x) => x.status === MediaStatus.PARTIALLY_AVAILABLE).length;
+      return { state: 'partial', available: have, partial: some, total: list.length };
+    }
   }
   // Approuvée mais rien dans la file : Radarr / Sonarr cherche encore une release
   return { state: 'searching' };
