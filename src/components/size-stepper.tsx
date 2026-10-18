@@ -29,19 +29,20 @@ export function useCardSize(key: string, initial: SizeLevel = 1): [SizeLevel, (l
 }
 
 export function SizeStepper({ level, onChange }: { level: SizeLevel; onChange: (l: SizeLevel) => void }) {
+  // « − » réduit d'un coup au minimum ; « + » agrandit d'un cran
   const step = (d: number) => {
-    const n = Math.max(0, Math.min(2, level + d)) as SizeLevel;
+    const n = (d < 0 ? 0 : Math.min(2, level + d)) as SizeLevel;
     if (n === level) return;
     tap();
     onChange(n);
   };
   return (
     <View style={styles.wrap}>
-      <Pressable onPress={() => step(-1)} hitSlop={6} style={[styles.btn, level === 0 && styles.off]} accessibilityLabel="Réduire">
+      <Pressable onPress={() => step(-1)} hitSlop={8} style={[styles.btn, level === 0 && styles.off]} accessibilityLabel="Réduire">
         <Ionicons name="remove" size={15} color={C.text} />
       </Pressable>
       <View style={styles.sep} />
-      <Pressable onPress={() => step(1)} hitSlop={6} style={[styles.btn, level === 2 && styles.off]} accessibilityLabel="Agrandir">
+      <Pressable onPress={() => step(1)} hitSlop={8} style={[styles.btn, level === 2 && styles.off]} accessibilityLabel="Agrandir">
         <Ionicons name="add" size={15} color={C.text} />
       </Pressable>
     </View>
@@ -50,7 +51,7 @@ export function SizeStepper({ level, onChange }: { level: SizeLevel; onChange: (
 
 const styles = StyleSheet.create({
   wrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' },
-  btn: { width: 30, height: 26, alignItems: 'center', justifyContent: 'center' },
+  btn: { width: 34, height: 28, alignItems: 'center', justifyContent: 'center' },
   off: { opacity: 0.3 },
   sep: { width: StyleSheet.hairlineWidth, height: 14, backgroundColor: 'rgba(255,255,255,0.25)' },
 });

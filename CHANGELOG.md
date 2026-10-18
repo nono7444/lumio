@@ -6,6 +6,13 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Séries : quand seule une partie des saisons a été trouvée, la demande passe en « Partiel · 1 saison sur 10 » au lieu de rester en recherche (avec le bouton « Relancer la recherche »).
+- Fiches : boutons Lire et Bande-annonce plus petits, côte à côte ; le bouton Jellyfin est retiré.
+- Bandes-annonces : d'abord celles de l'iTunes Store France (vidéo directe d'Apple, en français), lues dans le lecteur de Lumio ; YouTube seulement en secours.
+- Nouvelle animation de démarrage : une bulle tombe sur le logo, éclate, et le logo se remplit de lumière.
+- Statistiques : le bouton « − » réduit d'un coup chaque carte à une seule ligne fine.
+- Serveur Lumio 3.12.0 requis pour le statut « Partiel ».
+
 ## 1.0.49 — 18 octobre 2026
 
 - Notes : les tomates laissent place à des puces de 1 à 10 sur une seule ligne, colorées selon la note. « Notes de la famille » s'appelle maintenant « Notes ».

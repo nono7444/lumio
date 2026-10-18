@@ -260,17 +260,23 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
         <View style={{ paddingHorizontal: 16, gap: 18 }}>
           {!isSeries ? (
             <View style={{ gap: 10 }}>
-              <Button
-                title={resumeAt > 30 ? `Reprendre à ${formatRuntime(item.UserData?.PlaybackPositionTicks)}` : 'Lire'}
-                icon="play"
-                onPress={() => playJellyfin(item)}
-              />
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <Button
+                  title={resumeAt > 30 ? `Reprendre à ${formatRuntime(item.UserData?.PlaybackPositionTicks)}` : 'Lire'}
+                  icon="play"
+                  small
+                  onPress={() => playJellyfin(item)}
+                  style={{ flex: 1.3 }}
+                />
+                <TrailerButton type="movie" tmdbId={tmdbId} title={item.Name} year={item.ProductionYear} small style={{ flex: 1 }} />
+              </View>
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 {resumeAt > 30 && (
-                  <Button title="Depuis le début" icon="refresh" variant="glass" onPress={() => playJellyfin(item, true)} style={{ flex: 1 }} />
+                  <Button title="Depuis le début" icon="refresh" variant="glass" small onPress={() => playJellyfin(item, true)} style={{ flex: 1 }} />
                 )}
-                <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" onPress={toggleFav} style={{ width: 54, paddingHorizontal: 0 }} />
+                <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" small onPress={toggleFav} style={{ width: 46, paddingHorizontal: 0 }} />
                 <Button
+                  small
                   title={item.UserData?.Played ? 'Vu' : 'Marquer vu'}
                   icon={item.UserData?.Played ? 'checkmark-circle' : 'checkmark-circle-outline'}
                   variant="glass"
@@ -284,20 +290,22 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
             </View>
           ) : (
             <View style={{ gap: 10 }}>
-              {nextEpisode ? (
-                <Button
-                  title={`Lire S${nextEpisode.ParentIndexNumber}E${nextEpisode.IndexNumber}`}
-                  icon="play"
-                  onPress={() => playJellyfin(nextEpisode)}
-                />
-              ) : null}
               <View style={{ flexDirection: 'row', gap: 10 }}>
-                <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" onPress={toggleFav} style={{ width: 54, paddingHorizontal: 0 }} />
+                {nextEpisode ? (
+                  <Button
+                    title={`Lire S${nextEpisode.ParentIndexNumber}E${nextEpisode.IndexNumber}`}
+                    icon="play"
+                    small
+                    onPress={() => playJellyfin(nextEpisode)}
+                    style={{ flex: 1.3 }}
+                  />
+                ) : null}
+                <TrailerButton type="tv" tmdbId={tmdbId} title={item.Name} year={item.ProductionYear} small style={{ flex: 1 }} />
+                <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" small onPress={toggleFav} style={{ width: 46, paddingHorizontal: 0 }} />
               </View>
             </View>
           )}
 
-          <TrailerButton type={isSeries ? 'tv' : 'movie'} tmdbId={tmdbId} title={item.Name} />
 
           {/* Notes de la famille et signalement d'un problème (serveur Lumio) */}
           {serverReq && tmdbId ? (

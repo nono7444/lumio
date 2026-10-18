@@ -246,31 +246,24 @@ export default function MediaScreen() {
         </View>
 
         <View style={{ paddingHorizontal: 16, gap: 20, marginTop: 4 }}>
-          {/* ——— Lecture : uniquement depuis Jellyfin ——— */}
-          {jfItem ? (
-            <View style={{ flexDirection: 'row', gap: 10 }}>
+          {/* ——— Lecture (depuis Jellyfin) et bande-annonce, sur une ligne ——— */}
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            {jfItem ? (
               <Button
                 title="Lire"
                 icon="play"
+                small
                 onPress={() =>
                   router.push({
                     pathname: '/watch',
                     params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title },
                   })
                 }
-                style={{ flex: 1.4 }}
-              />
-              <Button
-                title="Jellyfin"
-                icon="albums-outline"
-                variant="glass"
-                onPress={() => router.push({ pathname: '/jellyfin/[id]', params: { id: jfItem.Id } })}
                 style={{ flex: 1 }}
               />
-            </View>
-          ) : null}
-
-          <TrailerButton type={details.kind} tmdbId={tmdbId} title={title} />
+            ) : null}
+            <TrailerButton type={details.kind} tmdbId={tmdbId} title={title} year={date?.slice(0, 4)} small style={{ flex: 1 }} />
+          </View>
 
           {/* ——— Demande façon Seerr (serveur Lumio) ——— */}
           {serverReq ? (

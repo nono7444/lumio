@@ -53,23 +53,16 @@ function ServiceCard({ s }: { s: Service }) {
   const [level, setLevel] = useCardSize(`svc-${s.key}`);
   const stepper = <SizeStepper level={level} onChange={setLevel} />;
 
-  // Compact : une seule ligne (état, nom, mini-barres, %)
+  // Réduit : une seule ligne fine (état, nom, %)
   if (level === 0)
     return (
-      <View style={[styles.card, { paddingVertical: 10, gap: 8 }]}>
-        <View style={[styles.head, { gap: 10 }]}>
-          <View style={[styles.dotInline, { backgroundColor: s.ok ? GREEN : '#FF453A' }]} />
-          <Text style={[styles.name, { fontSize: 15, flex: 1 }]} numberOfLines={1}>
-            {s.name}
-          </Text>
-          <UptimeText s={s} size={12} />
-          {stepper}
-        </View>
-        <View style={[styles.bars, { height: 8, gap: 2 }]}>
-          {s.bars.map((b, i) => (
-            <View key={i} style={[styles.bar, { borderRadius: 2, backgroundColor: barColor(b) }]} />
-          ))}
-        </View>
+      <View style={styles.mini}>
+        <View style={[styles.dotInline, { backgroundColor: s.ok ? GREEN : '#FF453A' }]} />
+        <Text style={styles.miniName} numberOfLines={1}>
+          {s.name}
+        </Text>
+        <UptimeText s={s} size={12} />
+        {stepper}
       </View>
     );
 
@@ -154,15 +147,16 @@ function SystemCard({ sys }: { sys: System }) {
     </View>
   );
 
+  // Réduit : une seule ligne avec les trois valeurs
   if (level === 0)
     return (
-      <View style={[styles.card, { paddingVertical: 12 }]}>
-        <View style={[styles.head, { gap: 10 }]}>
-          <View style={[styles.dotInline, { backgroundColor: GREEN }]} />
-          <Text style={[styles.name, { fontSize: 15, flex: 1 }]}>Machine</Text>
-          {stepper}
-        </View>
-        {gauges}
+      <View style={styles.mini}>
+        <View style={[styles.dotInline, { backgroundColor: GREEN }]} />
+        <Text style={styles.miniName}>Machine</Text>
+        <Text style={[styles.mono, { fontSize: 12, color: cpuColor(sys.cpu ?? 0) }]}>{sys.cpu ?? '—'} %</Text>
+        {sys.temp != null ? <Text style={[styles.mono, { fontSize: 12, color: tempColor(sys.temp) }]}>{sys.temp} °C</Text> : null}
+        <Text style={[styles.mono, { fontSize: 12, color: C.textDim }]}>{memPct ?? '—'} %</Text>
+        {stepper}
       </View>
     );
 
@@ -290,7 +284,20 @@ const styles = StyleSheet.create({
   track: { height: 5, borderRadius: 3, backgroundColor: '#2C2C30', overflow: 'hidden' },
   fill: { height: 5, borderRadius: 3 },
   spark: { flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: 46 },
-  dotInline: { width: 10, height: 10, borderRadius: 5 },
+  dotInline: { width: 9, height: 9, borderRadius: 5 },
+  mini: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#14141F',
+    borderRadius: 12,
+    paddingVertical: 6,
+    paddingLeft: 12,
+    paddingRight: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#2A2A3A',
+  },
+  miniName: { color: C.text, fontSize: 14, fontWeight: '700', flex: 1 },
   statsRow: { flexDirection: 'row', gap: 8 },
   miniStat: { flex: 1, backgroundColor: '#1F1F2C', borderRadius: 10, padding: 10, gap: 4 },
 });

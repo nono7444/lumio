@@ -219,8 +219,11 @@ export function Button({
   loading,
   disabled,
   style,
+  small,
 }: {
   title: string;
+  /** Version compacte (fiches : Lire, Bande-annonce) */
+  small?: boolean;
   onPress: () => void;
   icon?: keyof typeof Ionicons.glyphMap;
   /** primary : blanc plein · glass : verre dépoli · secondary : gris · danger */
@@ -247,6 +250,7 @@ export function Button({
       }}
       style={({ pressed }) => [
         styles.button,
+        small && styles.buttonSmall,
         { backgroundColor: bg, opacity: disabled ? 0.4 : 1, transform: [{ scale: pressed ? 0.97 : 1 }] },
         style,
       ]}>
@@ -254,8 +258,8 @@ export function Button({
         <ActivityIndicator color={fg} />
       ) : (
         <>
-          {icon && <Ionicons name={icon} size={19} color={fg} />}
-          <Text style={[styles.buttonText, { color: fg }]}>{title}</Text>
+          {icon && <Ionicons name={icon} size={small ? 16 : 19} color={fg} />}
+          {title ? <Text style={[styles.buttonText, small && styles.buttonTextSmall, { color: fg }]}>{title}</Text> : null}
         </>
       )}
     </Pressable>
@@ -442,6 +446,8 @@ const styles = StyleSheet.create({
     minHeight: 50,
   },
   buttonText: { fontSize: 16, fontWeight: '700' },
+  buttonSmall: { minHeight: 40, paddingVertical: 9, paddingHorizontal: 14, gap: 6, borderRadius: 12 },
+  buttonTextSmall: { fontSize: 14 },
   label: { color: C.textDim, fontSize: 13, fontWeight: '600', marginBottom: 7 },
   input: {
     backgroundColor: C.surfaceHigh,

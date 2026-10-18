@@ -13,6 +13,7 @@ import {
   RequestStatus,
   requestStatusLabel,
   requestsApi,
+  partialText,
   timeAgo,
   type MediaInfo,
   type Req,
@@ -145,7 +146,7 @@ export function RequestSection({
 
       {/* Le bouton « Demander » devient la progression du téléchargement, puis « Lire » (sur la fiche) */}
       {active ? <ProgressButton r={active} /> : null}
-      {active && (!active.download || active.download.state === 'searching') && (admin || active.requestedBy.id === me) ? (
+      {active && (!active.download || active.download.state === 'searching' || active.download.state === 'partial') && (admin || active.requestedBy.id === me) ? (
         <RecheckButton r={active} onDone={load} />
       ) : null}
       {arriving ? <ProgressButton label="Arrivée dans Jellyfin…" progress={100} color={C.success} spinner /> : null}
@@ -228,6 +229,14 @@ function ProgressButton({ r, label, progress, color, spinner }: { r?: Req; label
       pct = 100;
       text = 'Ajout au serveur…';
       tint = C.success;
+    } else if (d.state === 'partial') {
+      // Une partie des saisons est là, le reste n'est disponible nulle part pour l'instant
+      pct = d.total ? Math.round((((d.available ?? 0) + (d.partial ?? 0) * 0.5) / d.total) * 100) : 50;
+      text = `Partiel · ${partialText(d)}`;
+      tint = C.warning;
+      spin = false;
+      icon = 'contrast';
+      note = `Le reste n'est pas encore disponible : ${app} continue de chercher.`;
     } else if (d.state === 'warning') {
       pct = d.progress ?? 100;
       text = 'Bloqué : à vérifier';

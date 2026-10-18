@@ -18,12 +18,29 @@ const COLORS = ['#3D8BFF', '#4ADE80', '#FFB340', '#FF6B9A', '#A78BFA', '#64D2FF'
 const hours = (m: number) => (m >= 60 ? `${Math.round(m / 60)} h` : `${m} min`);
 
 /** Carte avec son titre et ses boutons − / + (le niveau choisi est mémorisé). */
-function StatCard({ id, title, children }: { id: string; title: string; children: (level: SizeLevel) => ReactNode }) {
+function StatCard({ id, title, summary, children }: { id: string; title: string; summary?: string; children: (level: SizeLevel) => ReactNode }) {
   const [level, setLevel] = useCardSize(`stats-${id}`);
+  // Réduit : juste le titre et un résumé, sur une ligne
+  if (level === 0)
+    return (
+      <View style={[styles.card, styles.mini]}>
+        <Text style={[styles.title, { fontSize: 14, flexShrink: 1 }]} numberOfLines={1}>
+          {title}
+        </Text>
+        {summary ? (
+          <Text style={[styles.dim, { flex: 1, textAlign: 'right' }]} numberOfLines={1}>
+            {summary}
+          </Text>
+        ) : (
+          <View style={{ flex: 1 }} />
+        )}
+        <SizeStepper level={level} onChange={setLevel} />
+      </View>
+    );
   return (
-    <View style={[styles.card, level === 0 && { gap: 8, paddingVertical: 10 }]}>
+    <View style={styles.card}>
       <View style={styles.row}>
-        <Text style={[styles.title, level === 0 && { fontSize: 15 }, level === 2 && { fontSize: 19 }]}>{title}</Text>
+        <Text style={[styles.title, level === 2 && { fontSize: 19 }]}>{title}</Text>
         <SizeStepper level={level} onChange={setLevel} />
       </View>
       {children(level)}
@@ -63,7 +80,7 @@ export function WatchStats() {
 
   return (
     <View style={{ gap: 14 }}>
-      <StatCard id="users" title="⏱️ Temps de visionnage par compte">
+      <StatCard id="users" title="⏱️ Temps par compte" summary={stats.users[0] ? `${stats.users[0].name} · ${hours(stats.users[0].minutes)}` : undefined}>
         {(lv) =>
           stats.users.slice(0, lv === 0 ? 4 : 50).map((u, i) => (
             <View key={u.name} style={{ gap: 4 }}>
@@ -90,7 +107,7 @@ export function WatchStats() {
         }
       </StatCard>
 
-      <StatCard id="days" title="📅 Activité sur 30 jours">
+      <StatCard id="days" title="📅 30 jours" summary={`${days.reduce((n, d) => n + d.n, 0)} titres vus`}>
         {(lv) => (
           <>
             <View style={[styles.chart, { height: [40, 80, 170][lv] }]}>
@@ -106,7 +123,7 @@ export function WatchStats() {
         )}
       </StatCard>
 
-      <StatCard id="movies" title="🎬 Top films">
+      <StatCard id="movies" title="🎬 Top films" summary={stats.topMovies[0]?.title}>
         {(lv) => (
           <>
             {stats.topMovies.slice(0, LIMIT[lv]).map((m, i) => (
@@ -133,7 +150,7 @@ export function WatchStats() {
         )}
       </StatCard>
 
-      <StatCard id="series" title="📺 Top séries">
+      <StatCard id="series" title="📺 Top séries" summary={stats.topSeries[0]?.title}>
         {(lv) => (
           <>
             {stats.topSeries.slice(0, LIMIT[lv]).map((s, i) => (
@@ -173,4 +190,5 @@ const styles = StyleSheet.create({
   fill: { height: 7, borderRadius: 4 },
   chart: { flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: 80 },
   trackBig: { height: 11, borderRadius: 6 },
+  mini: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, paddingLeft: 14, paddingRight: 6 },
 });

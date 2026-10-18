@@ -33,7 +33,17 @@ export type Req = {
   mediaStatus: number;
   seasonStatuses: { seasonNumber: number; status: number }[];
   /** Suivi dans Radarr / Sonarr pour une demande approuvée */
-  download?: { state: 'searching' | 'downloading' | 'importing' | 'warning'; progress?: number | null; message?: string; release?: string; count?: number };
+  download?: {
+    state: 'searching' | 'downloading' | 'importing' | 'warning' | 'partial';
+    progress?: number | null;
+    message?: string;
+    release?: string;
+    count?: number;
+    /** Partiel : saisons complètes, saisons entamées, saisons demandées */
+    available?: number;
+    partial?: number;
+    total?: number;
+  };
 };
 
 export type MediaInfo = { status: number; seasons: { seasonNumber: number; status: number }[]; requests: Req[] };
@@ -157,7 +167,7 @@ export function mediaStatusLabel(st: number): { label: string; color: string; ic
     case MediaStatus.AVAILABLE:
       return { label: 'Disponible', color: '#30D158', icon: 'checkmark-circle' };
     case MediaStatus.PARTIALLY_AVAILABLE:
-      return { label: 'Partiellement disponible', color: '#30D158', icon: 'remove-circle' };
+      return { label: 'Partiel', color: '#FF9F0A', icon: 'contrast' };
     case MediaStatus.PROCESSING:
       return { label: 'En cours de traitement', color: '#3D8BFF', icon: 'cloud-download' };
     case MediaStatus.PENDING:
@@ -234,6 +244,14 @@ export function usePendingRequests() {
 }
 
 /** Ligne de suivi d'une demande approuvée (recherche, téléchargement, blocage). */
+/** « 1 saison sur 10 » (+ « 1 entamée ») */
+export function partialText(d: NonNullable<Req['download']>) {
+  const have = d.available ?? 0;
+  const total = d.total ?? 0;
+  const part = d.partial ? ` · ${d.partial} entamée${d.partial > 1 ? 's' : ''}` : '';
+  return `${have} saison${have > 1 ? 's' : ''} sur ${total}${part}`;
+}
+
 export function downloadLabel(r: Req): { text: string; color: string } | null {
   const d = r.download;
   if (!d) return null;
@@ -245,6 +263,8 @@ export function downloadLabel(r: Req): { text: string; color: string } | null {
       return { text: `Import dans ${app}…`, color: '#64D2FF' };
     case 'downloading':
       return { text: `Téléchargement${d.progress != null ? ` ${d.progress} %` : '…'}${d.count && d.count > 1 ? ` · ${d.count} épisodes` : ''}`, color: '#3D8BFF' };
+    case 'partial':
+      return { text: `◐ Partiel · ${partialText(d)}`, color: '#FF9F0A' };
     default:
       return { text: `${app} cherche une release…`, color: '#8E8E93' };
   }

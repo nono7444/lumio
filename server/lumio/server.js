@@ -24,7 +24,7 @@ const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
 const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.11.0';
+const VERSION = '3.12.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -577,6 +577,13 @@ function downloadOf(r, lib) {
         count: items.length,
       };
     }
+  }
+  // Série : une partie des saisons est déjà là et le reste n'est trouvé nulle part → « Partiel » plutôt que « recherche »
+  if (r.type === 'tv') {
+    const m = mediaStatus(lib, 'tv', r.tmdbId, r.tvdbId, r.seasons);
+    const have = m.seasons.filter((x) => x.status === MediaStatus.AVAILABLE).length;
+    const some = m.seasons.filter((x) => x.status === MediaStatus.PARTIALLY_AVAILABLE).length;
+    if (have || some) return { state: 'partial', available: have, partial: some, total: m.seasons.length };
   }
   // Approuvée mais rien dans la file : Radarr / Sonarr cherche encore une release
   return { state: 'searching' };
@@ -1634,7 +1641,7 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
           lib.queue = await queueIndex().catch(() => lib.queue);
           lib.queueAt = Date.now();
         }
-        if (downloadOf(live, lib).state === 'searching' && Date.now() - libraryAt > 15_000) lib = await loadLibrary(true).catch(() => lib);
+        if (['searching', 'partial'].includes(downloadOf(live, lib).state) && Date.now() - libraryAt > 15_000) lib = await loadLibrary(true).catch(() => lib);
       }
       refreshCompleted(lib);
       const st = mediaStatus(lib, type, tmdbId, ids.tvdbId || q.get('tvdbId'), seasons);

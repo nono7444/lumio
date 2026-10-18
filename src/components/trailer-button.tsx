@@ -1,4 +1,5 @@
-// « Bande-annonce » sous Lire : la bande-annonce YouTube (en français si elle existe), lue dans le lecteur mpv de Lumio.
+// « Bande-annonce » à côté de Lire, lue dans le lecteur mpv de Lumio.
+// Source : iTunes Store France (lien vidéo direct d'Apple), sinon YouTube (flux direct), sinon l'appli YouTube.
 import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useState } from 'react';
 import { router } from 'expo-router';
@@ -7,6 +8,8 @@ import { Linking, Platform } from 'react-native';
 import { Button } from '@/components/ui';
 import { hasTmdb, useSettings } from '@/lib/settings';
 import { trailerKey } from '@/lib/tmdb';
+import { itunesTrailer } from '@/lib/itunes-trailer';
+import { toast } from '@/components/toast';
 import { trailerStream } from '@/lib/youtube';
 
 export function openTrailer(key: string) {
@@ -21,7 +24,12 @@ export function openTrailer(key: string) {
   }
 }
 
-/** Ouvre la bande-annonce dans mpv ; si YouTube refuse les flux directs, dans YouTube. */
+/** Ouvre un lien vidéo direct (iTunes) dans le lecteur. */
+function playDirect(uri: string, title?: string) {
+  router.push({ pathname: '/player', params: { kind: 'url', uri, title: 'Bande-annonce', subtitle: title ?? '', start: '0' } });
+}
+
+/** Ouvre la bande-annonce YouTube dans mpv ; si YouTube refuse les flux directs, dans YouTube. */
 export async function playTrailer(key: string, title?: string) {
   if (Platform.OS === 'web') return openTrailer(key);
   const s = await trailerStream(key).catch(() => null);
@@ -40,29 +48,50 @@ export async function playTrailer(key: string, title?: string) {
   });
 }
 
-export function TrailerButton({ type, tmdbId, title, style }: { type: 'movie' | 'tv'; tmdbId?: number; title?: string; style?: object }) {
+export function TrailerButton({
+  type,
+  tmdbId,
+  title,
+  year,
+  style,
+  small,
+}: {
+  type: 'movie' | 'tv';
+  tmdbId?: number;
+  title?: string;
+  year?: number | string | null;
+  style?: object;
+  small?: boolean;
+}) {
   const { settings } = useSettings();
   const [key, setKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const [direct, setDirect] = useState<string | null>(null);
+
   useEffect(() => {
-    if (!tmdbId || !hasTmdb(settings)) return;
     let alive = true;
-    trailerKey(settings, type, tmdbId).then((k) => alive && setKey(k));
+    setKey(null);
+    setDirect(null);
+    if (tmdbId && hasTmdb(settings)) trailerKey(settings, type, tmdbId).then((k) => alive && setKey(k));
+    if (title && Platform.OS !== 'web') itunesTrailer(type, title, year).then((u) => alive && setDirect(u));
     return () => {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type, tmdbId, settings.tmdbKey]);
+  }, [type, tmdbId, title, year, settings.tmdbKey]);
 
-  if (!key) return null;
+  if (!key && !direct) return null;
   return (
     <Button
       title="Bande-annonce"
       icon="film-outline"
       variant="glass"
+      small={small}
       loading={busy}
       onPress={async () => {
+        if (direct) return playDirect(direct, title);
+        if (!key) return toast('Pas de bande-annonce trouvée', 'info');
         setBusy(true);
         try {
           await playTrailer(key, title);

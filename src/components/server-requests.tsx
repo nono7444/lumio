@@ -134,7 +134,7 @@ function RequestCard({ r, admin, meId, onChanged }: { r: Req; admin: boolean; me
       </View>
 
       {/* Recherche en attente : relancer pour voir s'il y a enfin une version dispo */}
-      {r.status === RequestStatus.APPROVED && (!r.download || r.download.state === 'searching') && (admin || mine) ? (
+      {r.status === RequestStatus.APPROVED && (!r.download || r.download.state === 'searching' || r.download.state === 'partial') && (admin || mine) ? (
         <View style={styles.actions}>
           <RecheckButton r={r} onDone={onChanged} style={styles.actBtn} />
         </View>
