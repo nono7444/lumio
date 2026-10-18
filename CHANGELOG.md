@@ -6,6 +6,12 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Fiche d'un film ou d'une série pas encore sortie : « Disponible en numérique le … » (ou date de sortie au cinéma, nouvelle saison, prochain épisode).
+- Admin : icône ⚠️ toujours visible en haut de l'accueil pour ouvrir les signalements (avec le nombre de nouveaux).
+- Admin : nouvelle icône Téléchargements sur l'accueil : colle un lien d'hébergeur ou un magnet, AllDebrid le récupère et le serveur le télécharge directement sur le disque et le dossier choisis (progression en direct, Jellyfin rafraîchi à la fin).
+- Admin : gestion des disques du serveur : place libre, parcourir les dossiers, créer un dossier, renommer, déplacer (même vers un autre disque), supprimer.
+- Serveur Lumio 3.9.0 requis (et les disques à monter dans le conteneur).
+
 ## 1.0.44 — 18 octobre 2026
 
 - Profil → « Connecter une TV » : tape le code affiché par Lumio TV pour la connecter à ton compte, sans rien saisir à la télécommande.

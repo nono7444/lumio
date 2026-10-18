@@ -47,6 +47,8 @@ function Root() {
       <Stack.Screen name="users" options={{ presentation: 'modal' }} />
       <Stack.Screen name="ideas" options={{ presentation: 'modal' }} />
       <Stack.Screen name="sessions" options={{ presentation: 'modal' }} />
+      <Stack.Screen name="downloads" options={{ presentation: 'modal' }} />
+      <Stack.Screen name="files" options={{ presentation: 'modal' }} />
       <Stack.Screen name="live-sources" options={{ presentation: 'modal' }} />
       <Stack.Screen name="invite" options={{ animation: 'fade' }} />
       <Stack.Screen name="watch" options={{ animation: 'fade', presentation: 'fullScreenModal' }} />

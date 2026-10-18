@@ -24,7 +24,7 @@ const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
 const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.8.0';
+const VERSION = '3.9.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -736,6 +736,209 @@ function readBody(req) {
 }
 
 const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o && o[k] !== undefined && o[k] !== '').map((k) => [k, o[k]]));
+
+// ——— Disques et téléchargements AllDebrid (admin) ———
+// Disques visibles par le serveur : LUMIO_DISKS="Films:/media/jellyfin1,Séries:/media/jellyfin2"
+// (les dossiers doivent être montés dans le conteneur, voir README).
+function disks() {
+  const raw = process.env.LUMIO_DISKS || process.env.ROOT_DIRS || '';
+  return raw
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .map((x) => {
+      const i = x.indexOf(':');
+      const name = i > 0 ? x.slice(0, i) : path.basename(x);
+      const dir = path.resolve(i > 0 ? x.slice(i + 1) : x);
+      return { name, dir };
+    })
+    .filter((d) => fs.existsSync(d.dir));
+}
+
+/** Chemin absolu sûr à l'intérieur d'un disque (refuse « .. » et les liens qui sortent du disque). */
+function safePath(rootName, rel) {
+  const d = disks().find((x) => x.name === rootName);
+  if (!d) throw new HttpError(404, 'disque inconnu');
+  const full = path.resolve(d.dir, '.' + path.sep + String(rel || '').replace(/^\/+/, ''));
+  if (full !== d.dir && !full.startsWith(d.dir + path.sep)) throw new HttpError(400, 'chemin interdit');
+  return { root: d, full };
+}
+
+async function diskInfo(d) {
+  try {
+    const st = await fs.promises.statfs(d.dir);
+    return { name: d.name, free: st.bavail * st.bsize, total: st.blocks * st.bsize };
+  } catch {
+    return { name: d.name, free: null, total: null };
+  }
+}
+
+async function listDir(rootName, rel) {
+  const { full } = safePath(rootName, rel);
+  const entries = await fs.promises.readdir(full, { withFileTypes: true });
+  const out = [];
+  for (const e of entries) {
+    if (e.name.startsWith('.')) continue;
+    let size = 0;
+    let mtime = null;
+    try {
+      const st = await fs.promises.stat(path.join(full, e.name));
+      size = st.size;
+      mtime = st.mtime.toISOString();
+    } catch {}
+    out.push({ name: e.name, dir: e.isDirectory(), size, mtime });
+  }
+  out.sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name, 'fr') : a.dir ? -1 : 1));
+  return out;
+}
+
+// AllDebrid : la clé reste sur le serveur (jamais renvoyée à l'appli)
+const AD_API = 'https://api.alldebrid.com';
+async function ad(pathname, params = {}) {
+  const key = process.env.ALLDEBRID_KEY || config.alldebridKey;
+  if (!key) throw new HttpError(400, 'Clé AllDebrid non configurée');
+  const body = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (Array.isArray(v)) v.forEach((x) => body.append(`${k}[]`, String(x)));
+    else if (v !== undefined && v !== null) body.append(k, String(v));
+  }
+  const r = await fetch(`${AD_API}${pathname}`, { method: 'POST', headers: { Authorization: `Bearer ${key}` }, body });
+  const j = await r.json().catch(() => null);
+  if (!j || j.status !== 'success') throw new HttpError(502, `AllDebrid : ${(j && j.error && (j.error.message || j.error.code)) || `HTTP ${r.status}`}`);
+  return j.data;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Lien hébergeur / AllDebrid → lien direct (attend les liens « différés »). */
+async function unlockLink(link, job) {
+  const d = await ad('/v4/link/unlock', { link });
+  if (d.link) return { url: d.link, name: d.filename, size: d.filesize };
+  if (d.delayed) {
+    for (let i = 0; i < 120 && !job.cancelled; i++) {
+      await sleep(5000);
+      const s = await ad('/v4/link/delayed', { id: d.delayed });
+      if (s.status === 2 && s.link) return { url: s.link, name: d.filename, size: d.filesize };
+      if (s.status === 3) throw new Error('AllDebrid : génération du lien impossible');
+    }
+  }
+  throw new Error('AllDebrid : lien indisponible');
+}
+
+function flattenFiles(nodes, prefix = '') {
+  const out = [];
+  for (const n of nodes || []) {
+    if (n.e) out.push(...flattenFiles(n.e, prefix ? `${prefix}/${n.n}` : n.n));
+    else if (n.l) out.push({ rel: prefix ? `${prefix}/${n.n}` : n.n, link: n.l, size: n.s });
+  }
+  return out;
+}
+
+/** Magnet → attend que AllDebrid l'ait récupéré → liste des fichiers avec leurs liens. */
+async function magnetFiles(magnet, job) {
+  const up = await ad('/v4/magnet/upload', { magnets: [magnet] });
+  const m = up.magnets && up.magnets[0];
+  if (!m || m.error) throw new Error(`AllDebrid : ${(m && m.error && m.error.message) || 'magnet refusé'}`);
+  job.name = m.name || job.name;
+  for (let i = 0; i < 2880 && !job.cancelled; i++) {
+    const st = await ad('/v4.1/magnet/status', { id: m.id });
+    const info = Array.isArray(st.magnets) ? st.magnets[0] : st.magnets;
+    if (info) {
+      job.name = info.filename || job.name;
+      if (info.statusCode === 4) break;
+      if (info.statusCode >= 5) throw new Error(`AllDebrid : ${info.status || 'erreur'}`);
+      job.status = 'debrid';
+      job.size = info.size || job.size;
+      job.done = info.downloaded || 0;
+      job.speed = info.downloadSpeed || 0;
+    }
+    await sleep(job.done ? 5000 : 3000);
+  }
+  if (job.cancelled) return [];
+  const f = await ad('/v4/magnet/files', { id: [m.id] });
+  const mm = f.magnets && f.magnets[0];
+  return flattenFiles(mm && mm.files);
+}
+
+const downloads = [];
+
+async function downloadTo(url, dest, job) {
+  await fs.promises.mkdir(path.dirname(dest), { recursive: true });
+  const part = `${dest}.part`;
+  const ctrl = new AbortController();
+  job.abort = () => ctrl.abort();
+  const r = await fetch(url, { signal: ctrl.signal });
+  if (!r.ok || !r.body) throw new Error(`Téléchargement : HTTP ${r.status}`);
+  const out = fs.createWriteStream(part);
+  let last = Date.now();
+  let lastBytes = job.done;
+  const reader = r.body.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!out.write(Buffer.from(value))) await new Promise((res) => out.once('drain', res));
+      job.done += value.length;
+      const now = Date.now();
+      if (now - last > 1000) {
+        job.speed = Math.round(((job.done - lastBytes) * 1000) / (now - last));
+        last = now;
+        lastBytes = job.done;
+      }
+    }
+  } finally {
+    await new Promise((res) => out.end(res));
+  }
+  await fs.promises.rename(part, dest);
+}
+
+async function runDownload(job) {
+  try {
+    const { full } = safePath(job.root, job.folder);
+    let files;
+    if (/^magnet:\?/i.test(job.link) || /^[a-f0-9]{40}$/i.test(job.link)) {
+      job.status = 'debrid';
+      files = await magnetFiles(job.link, job);
+    } else {
+      files = [{ rel: null, link: job.link }];
+    }
+    job.status = 'downloading';
+    job.done = 0;
+    const unlocked = [];
+    for (const f of files) {
+      if (job.cancelled) break;
+      const u = await unlockLink(f.link, job);
+      unlocked.push({ ...u, rel: f.rel || u.name });
+    }
+    job.size = unlocked.reduce((n, u) => n + (Number(u.size) || 0), 0) || job.size;
+    if (unlocked.length === 1 && !job.name) job.name = unlocked[0].name;
+    for (const u of unlocked) {
+      if (job.cancelled) break;
+      const rel = String(u.rel || 'fichier').replace(/\.\.+/g, '_');
+      job.current = path.basename(rel);
+      await downloadTo(u.url, path.join(full, rel), job);
+    }
+    if (job.cancelled) {
+      job.status = 'cancelled';
+      return;
+    }
+    job.status = 'done';
+    job.finishedAt = new Date().toISOString();
+    // Jellyfin voit les nouveaux fichiers tout de suite
+    if (job.token) fetch(`${JELLYFIN_URL}/Library/Refresh`, { method: 'POST', headers: jfHeaders(job.token) }).catch(() => {});
+    notify({ title: 'Téléchargement terminé', message: job.name || 'Fichier', tags: ['white_check_mark'] }).catch(() => {});
+  } catch (e) {
+    job.status = job.cancelled ? 'cancelled' : 'error';
+    job.error = String((e && e.message) || e);
+  }
+}
+
+const publicJob = (j) => ({
+  id: j.id, name: j.name, link: j.link.slice(0, 120), root: j.root, folder: j.folder, status: j.status,
+  size: j.size || 0, done: j.done || 0, speed: j.speed || 0, current: j.current, error: j.error,
+  createdAt: j.createdAt, finishedAt: j.finishedAt,
+});
+
 const requireAdmin = (user) => {
   if (!user.admin) throw new HttpError(403, 'réservé aux admins Jellyfin');
 };
@@ -893,7 +1096,7 @@ const server = http.createServer(async (req, res) => {
       ok: true,
       version: VERSION,
       messages: messages.length,
-      features: ['chat', 'requests', 'status', 'ideas', 'ratings'],
+      features: ['chat', 'requests', 'status', 'ideas', 'ratings', 'files'],
       radarr: Boolean(arrConfig('radarr')),
       sonarr: Boolean(arrConfig('sonarr')),
     });
@@ -1288,6 +1491,86 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
 
     if (req.method === 'GET' && p === '/api/queue') return send(res, 200, await queue());
     if (req.method === 'GET' && p === '/api/status') return send(res, 200, await status());
+
+
+    // ——— Admin : disques et téléchargements AllDebrid ———
+    if (p.startsWith('/api/files') || p.startsWith('/api/downloads') || p === '/api/alldebrid') {
+      requireAdmin(user);
+      if (req.method === 'GET' && p === '/api/alldebrid') {
+        return send(res, 200, { configured: Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey), disks: disks().length });
+      }
+      if (req.method === 'PUT' && p === '/api/alldebrid') {
+        const b = await readBody(req);
+        config.alldebridKey = String(b.key || '').trim() || undefined;
+        saveConfig();
+        return send(res, 200, { configured: Boolean(config.alldebridKey) });
+      }
+      if (req.method === 'GET' && p === '/api/files/disks') {
+        return send(res, 200, { disks: await Promise.all(disks().map(diskInfo)) });
+      }
+      if (req.method === 'GET' && p === '/api/files') {
+        return send(res, 200, { entries: await listDir(q.get('root'), q.get('path') || '') });
+      }
+      if (req.method === 'POST' && p === '/api/files/mkdir') {
+        const b = await readBody(req);
+        const { full } = safePath(b.root, b.path);
+        await fs.promises.mkdir(full, { recursive: true });
+        return send(res, 200, { ok: true });
+      }
+      if (req.method === 'POST' && p === '/api/files/move') {
+        // Renommer ou déplacer (y compris vers un autre disque)
+        const b = await readBody(req);
+        const from = safePath(b.root, b.from).full;
+        const to = safePath(b.toRoot || b.root, b.to).full;
+        if (fs.existsSync(to)) throw new HttpError(409, 'Un élément porte déjà ce nom');
+        await fs.promises.mkdir(path.dirname(to), { recursive: true });
+        try {
+          await fs.promises.rename(from, to);
+        } catch (e) {
+          if (e.code !== 'EXDEV') throw e;
+          await fs.promises.cp(from, to, { recursive: true });
+          await fs.promises.rm(from, { recursive: true, force: true });
+        }
+        if (user.token) fetch(`${JELLYFIN_URL}/Library/Refresh`, { method: 'POST', headers: jfHeaders(user.token) }).catch(() => {});
+        return send(res, 200, { ok: true });
+      }
+      if (req.method === 'POST' && p === '/api/files/delete') {
+        const b = await readBody(req);
+        const { root, full } = safePath(b.root, b.path);
+        if (full === root.dir) throw new HttpError(400, 'Impossible de supprimer le disque');
+        await fs.promises.rm(full, { recursive: true, force: true });
+        if (user.token) fetch(`${JELLYFIN_URL}/Library/Refresh`, { method: 'POST', headers: jfHeaders(user.token) }).catch(() => {});
+        return send(res, 200, { ok: true });
+      }
+      if (req.method === 'GET' && p === '/api/downloads') {
+        return send(res, 200, { downloads: downloads.map(publicJob).reverse() });
+      }
+      if (req.method === 'POST' && p === '/api/downloads') {
+        const b = await readBody(req);
+        const links = String(b.link || '').split(/\s+/).map((x) => x.trim()).filter(Boolean);
+        if (!links.length) throw new HttpError(400, 'Lien manquant');
+        safePath(b.root, b.folder || '');
+        const created = links.map((link) => {
+          const job = { id: crypto.randomBytes(5).toString('hex'), link, root: b.root, folder: b.folder || '', status: 'queued',
+            name: '', size: 0, done: 0, speed: 0, token: user.token, createdAt: new Date().toISOString() };
+          downloads.push(job);
+          runDownload(job);
+          return publicJob(job);
+        });
+        return send(res, 201, { downloads: created });
+      }
+      const dl = p.match(/^\/api\/downloads\/([\w-]+)$/);
+      if (req.method === 'DELETE' && dl) {
+        const i = downloads.findIndex((x) => x.id === dl[1]);
+        if (i < 0) return send(res, 404, { error: 'introuvable' });
+        const job = downloads[i];
+        if (['queued', 'debrid', 'downloading'].includes(job.status)) {
+          job.cancelled = true;
+          if (job.abort) job.abort();
+        } else downloads.splice(i, 1);
+        return send(res, 200, { ok: true });
+      }
+    }
 
     // ——— Admin : utilisateurs (droits, quotas) ———
     if (req.method === 'GET' && p === '/api/admin/users') {

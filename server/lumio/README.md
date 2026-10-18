@@ -66,3 +66,22 @@ Si Radarr, Sonarr et Jellyfin sont dans le même compose, utilise les noms des s
 | GET / POST / DELETE | `/api/messages`… | Chat |
 
 L'authentification passe par l'en-tête `X-Jellyfin-Token`. C'est le jeton de session Jellyfin, vérifié via `/Users/Me`.
+
+## Disques et téléchargements AllDebrid (admin)
+
+Pour gérer les disques depuis l'appli (parcourir, créer, renommer, déplacer, supprimer) et y télécharger des liens AllDebrid,
+monte les disques dans le conteneur et liste-les dans `LUMIO_DISKS` (« Nom:/chemin », séparés par des virgules) :
+
+```yaml
+  lumio:
+    environment:
+      - LUMIO_DISKS=jellyfin1:/media/jellyfin1,jellyfin2:/media/jellyfin2,jellyfin3:/media/jellyfin3
+    volumes:
+      - ./lumio-server/data:/data
+      - /media/norman/jellyfin1:/media/jellyfin1
+      - /media/norman/jellyfin2:/media/jellyfin2
+      - /media/norman/jellyfin3:/media/jellyfin3
+```
+
+La clé API AllDebrid se saisit dans l'appli (Accueil → icône Téléchargements) : elle est enregistrée sur le serveur seulement.
+Tu peux aussi la mettre dans `.env` (`ALLDEBRID_KEY=…`).

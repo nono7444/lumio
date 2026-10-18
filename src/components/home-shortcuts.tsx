@@ -9,6 +9,7 @@ import { tap } from '@/components/ui';
 import { C } from '@/constants/theme';
 import { useUnreadChat } from '@/lib/chat';
 import { useTabInBar } from '@/lib/home-layout';
+import { useActiveDownloads } from '@/lib/files';
 import { useProblemCount } from '@/lib/ideas';
 import { useSettings } from '@/lib/settings';
 
@@ -43,6 +44,8 @@ function Count({ n, dot }: { n?: number; dot?: boolean }) {
 export function HomeShortcuts({ onCustomize }: { onCustomize: () => void }) {
   const { settings } = useSettings();
   const problems = useProblemCount();
+  const downloads = useActiveDownloads();
+  const admin = settings.jellyfin?.isAdmin === true && Boolean(settings.chatUrl);
   const unread = useUnreadChat();
   const calendarInBar = useTabInBar('calendar');
   const chatInBar = useTabInBar('chat');
@@ -50,10 +53,16 @@ export function HomeShortcuts({ onCustomize }: { onCustomize: () => void }) {
 
   return (
     <View style={styles.row}>
-      {problems > 0 ? (
-        <Btn label={`${problems} problème${problems > 1 ? 's' : ''} signalé${problems > 1 ? 's' : ''}`} onPress={() => router.push({ pathname: '/ideas', params: { filter: 'problems' } })}>
-          <Ionicons name="warning" size={19} color={C.warning} />
+      {admin ? (
+        <Btn label={problems ? `${problems} problème${problems > 1 ? 's' : ''} signalé${problems > 1 ? 's' : ''}` : 'Signalements'} onPress={() => router.push({ pathname: '/ideas', params: { filter: 'problems' } })}>
+          <Ionicons name={problems > 0 ? 'warning' : 'warning-outline'} size={19} color={problems > 0 ? C.warning : C.text} />
           <Count n={problems} />
+        </Btn>
+      ) : null}
+      {admin ? (
+        <Btn label="Téléchargements AllDebrid et disques" onPress={() => router.push('/downloads')}>
+          <Ionicons name="cloud-download-outline" size={19} color={C.text} />
+          <Count n={downloads} />
         </Btn>
       ) : null}
       {!calendarInBar ? (

@@ -132,7 +132,7 @@ export const tmdb = {
 
   movie: (s: Settings, id: number) =>
     cached(`movie:${id}`, () =>
-      tmdbCall<TmdbMovie>(s, `/movie/${id}`, { append_to_response: 'images,credits', include_image_language: imgLangs(s) })
+      tmdbCall<TmdbMovie>(s, `/movie/${id}`, { append_to_response: 'images,credits,release_dates', include_image_language: imgLangs(s) })
     ),
 
   tv: (s: Settings, id: number) =>
@@ -179,3 +179,46 @@ export const tmdbImg = (path?: string | null, size: 'w185' | 'w342' | 'w500' | '
 
 export const itemTitle = (i: TmdbItem) => i.title ?? i.name ?? '';
 export const itemYear = (i: TmdbItem) => (i.release_date || i.first_air_date || '').slice(0, 4);
+
+// ——— « Disponible le … » : prochaine sortie d'un titre pas encore sorti ———
+
+const longDate = (d: Date) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+const dayOf = (iso?: string | null) => {
+  if (!iso) return null;
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+  return y && m && d ? new Date(y, m - 1, d) : null;
+};
+
+/** Texte de la prochaine sortie (numérique pour un film, nouvelle saison / épisode pour une série), ou null si déjà sorti. */
+export function upcomingRelease(kind: 'movie' | 'tv', data: any): string | null {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (kind === 'movie') {
+    const results: { iso_3166_1: string; release_dates: { type: number; release_date: string }[] }[] = data?.release_dates?.results ?? [];
+    const pick = (country: string, types: number[]) =>
+      results
+        .find((r) => r.iso_3166_1 === country)
+        ?.release_dates.filter((d) => types.includes(d.type))
+        .map((d) => dayOf(d.release_date))
+        .filter((d): d is Date => Boolean(d))
+        .sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
+    const digitalFr = pick('FR', [4]);
+    const digital = digitalFr ?? pick('US', [4]);
+    if (digital) return digital >= today ? `Disponible en numérique le ${longDate(digital)}${digitalFr ? '' : ' (date US)'}` : null;
+    // Pas encore de date numérique : la sortie cinéma si elle est à venir
+    const cinema = pick('FR', [2, 3]) ?? dayOf(data?.release_date);
+    if (cinema && cinema >= today) return `Au cinéma le ${longDate(cinema)} · date numérique pas encore annoncée`;
+    if (cinema) return 'Sortie numérique pas encore annoncée';
+    return null;
+  }
+  const first = dayOf(data?.first_air_date);
+  if (first && first >= today) return `Première diffusion le ${longDate(first)}`;
+  const next = data?.next_episode_to_air;
+  const nd = dayOf(next?.air_date);
+  if (next && nd && nd >= today) {
+    return next.episode_number === 1
+      ? `Saison ${next.season_number} le ${longDate(nd)}`
+      : `Prochain épisode (S${next.season_number}E${next.episode_number}) le ${longDate(nd)}`;
+  }
+  return null;
+}

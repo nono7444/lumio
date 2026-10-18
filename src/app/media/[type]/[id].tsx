@@ -27,7 +27,7 @@ import { grab, mediaFlavor } from '@/lib/grab';
 import { useServerRequests } from '@/lib/requests';
 import { chat } from '@/lib/chat';
 import { arrReady, hasTmdb, isManager, useSettings } from '@/lib/settings';
-import { pickLogo, tmdb, tmdbImg, type TmdbMovie, type TmdbTv } from '@/lib/tmdb';
+import { pickLogo, tmdb, tmdbImg, upcomingRelease, type TmdbMovie, type TmdbTv } from '@/lib/tmdb';
 
 type Details =
   | { kind: 'movie'; data: TmdbMovie; arr: RadarrMovie | null; arrError?: string }
@@ -138,6 +138,8 @@ export default function MediaScreen() {
   const d = details.data;
   const title = details.kind === 'movie' ? details.data.title : details.data.name;
   const date = details.kind === 'movie' ? details.data.release_date : details.data.first_air_date;
+  // « Disponible le … » si le titre n'est pas encore sorti (et pas déjà sur le serveur)
+  const upcoming = jfItem ? null : upcomingRelease(details.kind, details.data);
   const state = details.arr ? (details.kind === 'movie' ? movieState(details.arr) : seriesState(details.arr)) : null;
   const seasonsList = details.kind === 'tv' ? details.data.seasons.filter((s) => s.season_number > 0) : [];
 
@@ -233,6 +235,12 @@ export default function MediaScreen() {
               <Text style={styles.genres}>{d.genres.slice(0, 3).map((g) => g.name).join('  •  ')}</Text>
             ) : null}
             {state && <Chip label={state.label} color={state.color} />}
+            {upcoming ? (
+              <View style={styles.upcoming}>
+                <Ionicons name="calendar-outline" size={15} color="#FFC93C" />
+                <Text style={styles.upcomingText}>{upcoming}</Text>
+              </View>
+            ) : null}
           </View>
         </View>
 
@@ -466,6 +474,17 @@ function Notice({ icon, text, color = C.textDim }: { icon: keyof typeof Ionicons
 }
 
 const styles = StyleSheet.create({
+  upcoming: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,201,60,0.14)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    marginTop: 4,
+  },
+  upcomingText: { color: '#FFC93C', fontSize: 13, fontWeight: '700' },
   center: { flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: 24 },
   heroContent: { position: 'absolute', left: 20, right: 20, bottom: 12, alignItems: 'center', gap: 10 },
   title: { color: C.text, fontSize: 34, fontWeight: '900', textAlign: 'center', letterSpacing: -0.8 },
