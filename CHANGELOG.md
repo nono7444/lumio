@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.55 — 19 octobre 2026
+
 - Séries ouvertes depuis la recherche : la fiche affiche les saisons et les épisodes, pour lancer celui qu'on veut (comme dans la Bibliothèque).
 
 - Séries : la fiche affiche les saisons et la liste des épisodes, pour lancer celui qu'on veut.
