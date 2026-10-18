@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.43 — 18 octobre 2026
+
 - Serveur Lumio 3.7.2 : lumio.wawanono.lol/tv donne maintenant la version légère de Lumio TV (≈ 50 Mo, compatible avec toutes les box) au lieu de l'APK de 130 Mo qui faisait planter Downloader ; /tv64 pour la version 64 bits.
 
 ## 1.0.39 — 17 octobre 2026
