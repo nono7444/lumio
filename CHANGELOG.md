@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.52 — 19 octobre 2026
+
 - Séries : quand seule une partie des saisons a été trouvée, la demande passe en « Partiel · 1 saison sur 10 » au lieu de rester en recherche (avec le bouton « Relancer la recherche »).
 - Fiches : boutons Lire et Bande-annonce plus petits, côte à côte ; le bouton Jellyfin est retiré.
 - Bandes-annonces : d'abord celles de l'iTunes Store France (vidéo directe d'Apple, en français), lues dans le lecteur de Lumio ; YouTube seulement en secours.
