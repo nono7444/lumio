@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.48 — 18 octobre 2026
+
 - Notes de la famille en tomates 🍅 sur 10 (les anciennes notes sont converties). Sur les affiches : la note de la famille si le titre est noté, sinon la note Better Posters.
 - Commentaire sur une note : marche maintenant aussi sur Android et la TV.
 - Bande-annonce (en français si elle existe) sous le bouton Lire.
