@@ -33,6 +33,8 @@ export async function serverCall<T>(s: Settings, path: string, init?: RequestIni
     headers: {
       Accept: 'application/json',
       'X-Jellyfin-Token': s.jellyfin.token,
+      // Adresse de Jellyfin vue par l'appli : le serveur la donne aux TV à configurer
+      'X-Jellyfin-Url': s.jellyfin.url,
       ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
     },
   });

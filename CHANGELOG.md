@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Profil → « Connecter une TV » : tape le code affiché par Lumio TV pour la connecter à ton compte, sans rien saisir à la télécommande.
+- Serveur Lumio 3.8.0 : donne aux TV l'adresse de Jellyfin pour leur configuration automatique.
+
 ## 1.0.43 — 18 octobre 2026
 
 - Serveur Lumio 3.7.2 : lumio.wawanono.lol/tv donne maintenant la version légère de Lumio TV (≈ 50 Mo, compatible avec toutes les box) au lieu de l'APK de 130 Mo qui faisait planter Downloader ; /tv64 pour la version 64 bits.

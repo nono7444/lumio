@@ -24,7 +24,7 @@ const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
 const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.7.2';
+const VERSION = '3.8.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -978,10 +978,22 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
     }
   }
 
+  // Lumio TV : au premier lancement, la TV demande l'adresse publique de Jellyfin
+  if (url.pathname === '/tv/setup') {
+    return send(res, 200, { name: 'Lumio', jellyfinUrl: process.env.PUBLIC_JELLYFIN_URL || config.publicJellyfinUrl || null });
+  }
+
   if (!url.pathname.startsWith('/api/')) return send(res, 404, { error: 'introuvable' });
 
   const user = await whoAmI(req.headers['x-jellyfin-token']);
   if (!user) return send(res, 401, { error: 'jeton Jellyfin invalide' });
+
+  // Adresse publique de Jellyfin vue depuis l'appli (pour configurer les TV) : on garde la dernière adresse https
+  const seenJf = String(req.headers['x-jellyfin-url'] || '').trim().replace(/\/+$/, '');
+  if (/^https:\/\//i.test(seenJf) && !/^https:\/\/(localhost|127\.|192\.168\.|10\.)/i.test(seenJf) && config.publicJellyfinUrl !== seenJf) {
+    config.publicJellyfinUrl = seenJf;
+    saveConfig();
+  }
 
   // Adresse publique du serveur (pour les boutons des notifications), vue depuis l'appli
   if (!process.env.PUBLIC_URL) {

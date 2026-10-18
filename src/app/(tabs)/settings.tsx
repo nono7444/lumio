@@ -11,6 +11,7 @@ import { Button, Field, ScreenTitle, Section } from '@/components/ui';
 import { ADDONS_ENABLED } from '@/constants/features';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { AppVersionSection } from '@/components/app-version';
+import { ConnectTvButton } from '@/components/connect-tv';
 import { NowPlayingEntry } from '@/components/now-playing-entry';
 import { useAppUpdate } from '@/lib/app-update';
 import { ChatSection, ThemeSection } from '@/components/extra-sections';
@@ -190,6 +191,7 @@ export default function SettingsScreen() {
                   </Text>
                 </View>
               </View>
+              <ConnectTvButton />
               <Button
                 title="Se déconnecter"
                 icon="log-out-outline"

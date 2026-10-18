@@ -221,6 +221,10 @@ export type JfSession = {
 };
 
 export const jf = {
+  /** Lumio TV : valide le code affiché sur la TV (Jellyfin Quick Connect) avec le compte de ce téléphone. */
+  authorizeTv: (s: Settings, code: string) =>
+    api(s).post<unknown>(`/QuickConnect/Authorize?code=${encodeURIComponent(code.replace(/\s+/g, ''))}`),
+
   /** Admin : sessions actives du serveur (qui regarde quoi). */
   sessions: (s: Settings) => api(s).get<JfSession[]>('/Sessions?ActiveWithinSeconds=900'),
 
