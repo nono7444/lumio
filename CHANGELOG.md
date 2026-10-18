@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.45 — 18 octobre 2026
+
 - Fiche d'un film ou d'une série pas encore sortie : « Disponible en numérique le … » (ou date de sortie au cinéma, nouvelle saison, prochain épisode).
 - Admin : icône ⚠️ toujours visible en haut de l'accueil pour ouvrir les signalements (avec le nombre de nouveaux).
 - Admin : nouvelle icône Téléchargements sur l'accueil : colle un lien d'hébergeur ou un magnet, AllDebrid le récupère et le serveur le télécharge directement sur le disque et le dossier choisis (progression en direct, Jellyfin rafraîchi à la fin).
