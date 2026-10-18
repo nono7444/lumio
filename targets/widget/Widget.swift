@@ -178,13 +178,13 @@ private struct StatusDot: View {
   }
 }
 
-private struct Svc {
+struct Svc {
   let name: String
   let symbol: String
   let state: ServiceState?
 }
 
-private func services(_ e: StatusEntry) -> [Svc] {
+func services(_ e: StatusEntry) -> [Svc] {
   let s = e.status
   var list = [Svc(name: "Lumio", symbol: "sparkles", state: e.reachable ? (s?.lumio ?? ServiceState(ok: true, queue: nil, ms: nil, uptime: nil, bars: nil)) : ServiceState(ok: false, queue: nil, ms: nil, uptime: nil, bars: nil))]
   list.append(Svc(name: "Jellyfin", symbol: "play.circle.fill", state: s?.jellyfin))
