@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Séries ouvertes depuis la recherche : la fiche affiche les saisons et les épisodes, pour lancer celui qu'on veut (comme dans la Bibliothèque).
+
 - Séries : la fiche affiche les saisons et la liste des épisodes, pour lancer celui qu'on veut.
 
 - Bouton Bande-annonce retiré des fiches.
