@@ -5,7 +5,18 @@ import * as RN from 'react-native';
 
 export const IS_TV = Platform.isTV;
 
-const FOCUS_RING = { borderWidth: 3, borderColor: '#FFFFFF', borderRadius: 14, transform: [{ scale: 1.05 }] } as const;
+// Agrandissement léger (ne change pas la mise en page) + contour dessiné par-dessus (ne décale rien)
+const FOCUS_SCALE = { transform: [{ scale: 1.06 }], zIndex: 10 } as const;
+const RING = {
+  position: 'absolute',
+  top: -5,
+  left: -5,
+  right: -5,
+  bottom: -5,
+  borderWidth: 3,
+  borderColor: '#FFFFFF',
+  borderRadius: 16,
+} as const;
 
 type Props = PressableProps & { focusRing?: boolean };
 
@@ -19,10 +30,11 @@ export const FocusPressable = forwardRef<View, Props>(function FocusPressable(
 ) {
   const [focused, setFocused] = useState(false);
   if (!IS_TV) return <RNPressable ref={ref} style={style} onFocus={onFocus} onBlur={onBlur} {...rest} />;
+  const { children, ...others } = rest;
   return (
     <RNPressable
       ref={ref}
-      {...rest}
+      {...others}
       onFocus={(e) => {
         setFocused(true);
         onFocus?.(e);
@@ -33,9 +45,15 @@ export const FocusPressable = forwardRef<View, Props>(function FocusPressable(
       }}
       style={(state) => {
         const base = typeof style === 'function' ? style(state) : style;
-        return [base, focused && focusRing ? FOCUS_RING : null];
-      }}
-    />
+        return [base, focused && focusRing ? FOCUS_SCALE : null];
+      }}>
+      {(state) => (
+        <>
+          {typeof children === 'function' ? children(state) : children}
+          {focused && focusRing ? <RN.View pointerEvents="none" style={RING} /> : null}
+        </>
+      )}
+    </RNPressable>
   );
 });
 

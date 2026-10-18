@@ -8,6 +8,7 @@ import { FocusPressable as Pressable } from '@/components/tv';
 import { FamilyStarBadge, tap } from '@/components/ui';
 import { C, POSTER_W, R } from '@/constants/theme';
 import { useBetterPoster } from '@/lib/better-posters';
+import { useFamilyRatingBadge } from '@/lib/ratings';
 import { jfBackdrop, jfPoster, type JfItem } from '@/lib/jellyfin';
 import { useSettings } from '@/lib/settings';
 
@@ -44,10 +45,16 @@ export function JfPosterCard({ item, width = POSTER_W }: { item: JfItem; width?:
   const pct = progressOf(item);
   const unplayed = item.UserData?.UnplayedItemCount;
   const [failed, setFailed] = useState(false);
+  const fam = useFamilyRatingBadge(
+    settings,
+    item.Type === 'Movie' ? 'movie' : item.Type === 'Series' ? 'tv' : undefined,
+    item.ProviderIds?.Tmdb ? Number(item.ProviderIds.Tmdb) : undefined
+  );
   const better = useBetterPoster(
     item.ProviderIds?.Imdb && (item.Type === 'Movie' || item.Type === 'Series')
       ? { imdb: item.ProviderIds.Imdb, type: item.Type === 'Movie' ? 'movie' : 'tv' }
-      : undefined
+      : undefined,
+    { hideRating: Boolean(fam) }
   );
   const poster = better && !failed ? better : jfPoster(settings, item);
   return (

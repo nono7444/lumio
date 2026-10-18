@@ -2,7 +2,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import type { ReactNode } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import { FocusPressable as Pressable } from '@/components/tv';
 import { tap } from '@/components/ui';
@@ -50,6 +50,9 @@ export function HomeShortcuts({ onCustomize }: { onCustomize: () => void }) {
   const calendarInBar = useTabInBar('calendar');
   const chatInBar = useTabInBar('chat');
   const now = new Date();
+
+  // TV : accueil épuré, pas de raccourcis (calendrier, chat, signalements…)
+  if (Platform.isTV) return null;
 
   return (
     <View style={styles.row}>

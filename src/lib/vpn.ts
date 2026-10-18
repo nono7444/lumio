@@ -14,9 +14,11 @@ const set = (on: boolean) => {
   listeners.forEach((l) => l(on));
 };
 
-function shortcutUrl(name: string) {
+function shortcutUrl(name: string, callback: boolean) {
+  const n = encodeURIComponent(name.trim());
+  if (!callback) return `shortcuts://run-shortcut?name=${n}`;
   const back = encodeURIComponent('lumio://live');
-  return `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(name)}&x-success=${back}&x-cancel=${back}&x-error=${back}`;
+  return `shortcuts://x-callback-url/run-shortcut?name=${n}&x-success=${back}&x-cancel=${back}&x-error=${back}`;
 }
 
 /** Lance le raccourci « VPN On » ou « VPN Off ». Sur Android : ouvre les réglages VPN du téléphone. */
@@ -25,7 +27,13 @@ export async function switchVpn(cfg: LiveVpnConfig, on: boolean) {
     await Linking.sendIntent('android.settings.VPN_SETTINGS').catch(() => Linking.openSettings());
     return;
   }
-  await Linking.openURL(shortcutUrl(on ? cfg.onShortcut : cfg.offShortcut));
+  const name = on ? cfg.onShortcut : cfg.offShortcut;
+  // Lien simple d'abord (le plus fiable), puis la variante qui revient dans Lumio
+  try {
+    await Linking.openURL(shortcutUrl(name, false));
+  } catch {
+    await Linking.openURL(shortcutUrl(name, true));
+  }
   set(on);
 }
 

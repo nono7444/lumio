@@ -48,9 +48,10 @@ async function resolveImdb(s: Settings, ids: PosterIds): Promise<string | null> 
 }
 
 /** URL Better Posters pour ces identifiants, ou null (désactivé / pas d'IMDb). */
-export function useBetterPoster(ids?: PosterIds) {
+export function useBetterPoster(ids?: PosterIds, opts?: { hideRating?: boolean }) {
   const { settings } = useSettings();
-  const cfg = settings.betterPosters;
+  const base = settings.betterPosters;
+  const cfg = opts?.hideRating && base.rating ? { ...base, rating: false } : base;
   const [url, setUrl] = useState<string | null>(() =>
     cfg.enabled && ids?.imdb ? betterPosterUrl(ids.imdb, cfg, settings.language) : null
   );

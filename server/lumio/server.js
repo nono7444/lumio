@@ -24,7 +24,7 @@ const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
 const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.9.2';
+const VERSION = '3.10.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -63,6 +63,13 @@ const saveRequests = () => persist(REQUESTS_FILE, () => requests);
 const saveUsers = () => persist(USERS_FILE, () => userPrefs);
 const saveIdeas = () => persist(IDEAS_FILE, () => ideas);
 const saveRatings = () => persist(RATINGS_FILE, () => ratings);
+// Notes passées de 5 étoiles à 10 tomates : les anciennes notes sont doublées une seule fois
+if (!config.ratingsOn10) {
+  for (const e of Object.values(ratings)) for (const v of Object.values(e.votes || {})) v.stars = Math.min(10, (Number(v.stars) || 0) * 2);
+  config.ratingsOn10 = true;
+  writeJson(RATINGS_FILE, ratings);
+  writeJson(CONFIG_FILE, config);
+}
 const saveConfig = () => writeJson(CONFIG_FILE, config);
 
 class HttpError extends Error {
@@ -662,7 +669,96 @@ async function status() {
   return out;
 }
 
+
+// ——— Supervision façon UptimeRobot : historique des services (24 h) et état de la machine en direct ———
+const UPTIME_FILE = path.join(DATA_DIR, 'uptime.json');
+let uptime = readJson(UPTIME_FILE, {});
+const UPTIME_KEEP = 7 * 24 * 12; // 7 jours, un point toutes les 5 min
+
+async function recordUptime() {
+  try {
+    const st = await status();
+    const t = Date.now();
+    for (const key of ['lumio', 'jellyfin', 'radarr', 'sonarr']) {
+      const e = st[key];
+      if (!e || e.configured === false) continue;
+      const list = (uptime[key] = uptime[key] || []);
+      list.push({ t, ok: Boolean(e.ok), ms: e.ms || 0 });
+      if (list.length > UPTIME_KEEP) list.splice(0, list.length - UPTIME_KEEP);
+    }
+    writeJson(UPTIME_FILE, uptime);
+  } catch {}
+}
+setTimeout(recordUptime, 20_000);
+setInterval(recordUptime, 5 * 60_000);
+
+// Processeur, mémoire, température (lus dans /proc et /sys de la machine)
+let cpuPrev = null;
+const sysHistory = [];
+function readCpu() {
+  try {
+    const line = fs.readFileSync('/proc/stat', 'utf8').split('\n')[0].trim().split(/\s+/).slice(1).map(Number);
+    const idle = line[3] + (line[4] || 0);
+    const total = line.reduce((a, b) => a + b, 0);
+    let pct = null;
+    if (cpuPrev) pct = Math.max(0, Math.min(100, Math.round((1 - (idle - cpuPrev.idle) / (total - cpuPrev.total || 1)) * 100)));
+    cpuPrev = { idle, total };
+    return pct;
+  } catch {
+    return null;
+  }
+}
+function readTemp() {
+  let best = null;
+  try {
+    const base = '/sys/class/thermal';
+    for (const z of fs.readdirSync(base).filter((d) => d.startsWith('thermal_zone'))) {
+      try {
+        const type = fs.readFileSync(`${base}/${z}/type`, 'utf8').trim();
+        const v = Number(fs.readFileSync(`${base}/${z}/temp`, 'utf8').trim()) / 1000;
+        if (!(v > 0 && v < 130)) continue;
+        // Priorité au processeur (x86_pkg_temp, coretemp…)
+        if (/x86_pkg|cpu|core|soc/i.test(type)) return Math.round(v);
+        best = Math.max(best || 0, Math.round(v));
+      } catch {}
+    }
+  } catch {}
+  try {
+    const hw = '/sys/class/hwmon';
+    for (const h of fs.readdirSync(hw)) {
+      const name = fs.readFileSync(`${hw}/${h}/name`, 'utf8').trim();
+      if (!/coretemp|k10temp|cpu/i.test(name)) continue;
+      const v = Number(fs.readFileSync(`${hw}/${h}/temp1_input`, 'utf8').trim()) / 1000;
+      if (v > 0) return Math.round(v);
+    }
+  } catch {}
+  return best;
+}
+function readMem() {
+  try {
+    const m = Object.fromEntries(
+      fs.readFileSync('/proc/meminfo', 'utf8').split('\n').filter(Boolean).map((l) => {
+        const [k, v] = l.split(':');
+        return [k, Number(String(v).trim().split(' ')[0]) * 1024];
+      })
+    );
+    return { total: m.MemTotal, used: m.MemTotal - (m.MemAvailable ?? m.MemFree) };
+  } catch {
+    return null;
+  }
+}
+function sampleSystem() {
+  const cpu = readCpu();
+  if (cpu == null) return;
+  const s = { t: Date.now(), cpu, temp: readTemp() };
+  sysHistory.push(s);
+  if (sysHistory.length > 90) sysHistory.shift();
+}
+readCpu();
+setInterval(sampleSystem, 2000);
+
 let publicStatusCache = null;
+let watchStatsCache = null;
 
 function publicIdea(i, user) {
   const { votes, ...rest } = i;
@@ -931,6 +1027,50 @@ async function runDownload(job) {
     job.status = job.cancelled ? 'cancelled' : 'error';
     job.error = String((e && e.message) || e);
   }
+}
+
+
+// Déplacements entre disques : copie avec progression (le pourcentage s'affiche dans l'appli), puis suppression
+const moveJobs = [];
+async function sizeOf(p) {
+  const st = await fs.promises.stat(p);
+  if (!st.isDirectory()) return st.size;
+  let n = 0;
+  for (const e of await fs.promises.readdir(p)) n += await sizeOf(path.join(p, e));
+  return n;
+}
+async function copyWithProgress(from, to, job) {
+  const st = await fs.promises.stat(from);
+  if (st.isDirectory()) {
+    await fs.promises.mkdir(to, { recursive: true });
+    for (const e of await fs.promises.readdir(from)) await copyWithProgress(path.join(from, e), path.join(to, e), job);
+    return;
+  }
+  await new Promise((resolve, reject) => {
+    const r = fs.createReadStream(from);
+    const w = fs.createWriteStream(to);
+    r.on('data', (c) => (job.done += c.length));
+    r.on('error', reject);
+    w.on('error', reject);
+    w.on('finish', resolve);
+    r.pipe(w);
+  });
+}
+async function runMove(job, from, to, token) {
+  try {
+    job.total = await sizeOf(from);
+    await copyWithProgress(from, to, job);
+    await fs.promises.rm(from, { recursive: true, force: true });
+    job.status = 'done';
+    if (token) fetch(`${JELLYFIN_URL}/Library/Refresh`, { method: 'POST', headers: jfHeaders(token) }).catch(() => {});
+  } catch (e) {
+    job.status = 'error';
+    job.error = String((e && e.message) || e);
+  }
+  setTimeout(() => {
+    const i = moveJobs.indexOf(job);
+    if (i >= 0) moveJobs.splice(i, 1);
+  }, 10 * 60 * 1000);
 }
 
 const publicJob = (j) => ({
@@ -1267,7 +1407,7 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
       const tmdbId = Number(b.tmdbId);
       if (!tmdbId) throw new HttpError(400, 'tmdbId manquant');
       const key = `${type}:${tmdbId}`;
-      const stars = Math.max(0, Math.min(5, Math.round(Number(b.stars) || 0)));
+      const stars = Math.max(0, Math.min(10, Math.round(Number(b.stars) || 0)));
       const entry = ratings[key] || { type, tmdbId, title: '', poster: undefined, votes: {} };
       if (b.title) entry.title = String(b.title).slice(0, 200);
       if (typeof b.poster === 'string' && b.poster.startsWith('https://')) entry.poster = b.poster;
@@ -1502,6 +1642,117 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
       if (req.method === 'GET') return send(res, 200, { key: process.env.TMDB_KEY || config.tmdbKey || null });
     }
 
+
+
+    // ——— Statistiques de visionnage (admin) : qui regarde quoi, tops films et séries ———
+    if (req.method === 'GET' && p === '/api/stats/watch') {
+      requireAdmin(user);
+      if (watchStatsCache && Date.now() - watchStatsCache.at < 10 * 60_000 && q.get('force') !== '1') return send(res, 200, watchStatsCache.data);
+      const h = jfHeaders(user.token);
+      const usersR = await fetch(`${JELLYFIN_URL}/Users`, { headers: h });
+      if (!usersR.ok) throw new HttpError(502, `Jellyfin : HTTP ${usersR.status}`);
+      const users = await usersR.json();
+      const movies = new Map();
+      const series = new Map();
+      const perUser = [];
+      const days = {};
+      const since = Date.now() - 30 * 86400_000;
+      await Promise.all(
+        users.map(async (u) => {
+          const r = await fetch(
+            `${JELLYFIN_URL}/Users/${u.Id}/Items?Recursive=true&IncludeItemTypes=Movie,Episode&Filters=IsPlayed&SortBy=DatePlayed&SortOrder=Descending&Limit=1000&EnableImages=false&Fields=ProviderIds`,
+            { headers: h }
+          );
+          if (!r.ok) return;
+          const items = (await r.json()).Items || [];
+          let minutes = 0;
+          let nMovies = 0;
+          let nEpisodes = 0;
+          const recent = [];
+          for (const it of items) {
+            const plays = Math.max(1, (it.UserData && it.UserData.PlayCount) || 1);
+            minutes += ((it.RunTimeTicks || 0) / 600_000_000) * plays;
+            const last = it.UserData && it.UserData.LastPlayedDate ? Date.parse(it.UserData.LastPlayedDate) : 0;
+            if (last >= since) {
+              const d = new Date(last).toISOString().slice(0, 10);
+              days[d] = (days[d] || 0) + 1;
+            }
+            if (it.Type === 'Movie') {
+              nMovies++;
+              const m = movies.get(it.Id) || { id: it.Id, title: it.Name, year: it.ProductionYear, tmdbId: it.ProviderIds && it.ProviderIds.Tmdb, viewers: [], plays: 0 };
+              m.viewers.push(u.Name);
+              m.plays += plays;
+              movies.set(it.Id, m);
+            } else {
+              nEpisodes++;
+              const key = it.SeriesId || it.SeriesName;
+              const sr = series.get(key) || { id: it.SeriesId, title: it.SeriesName, viewers: new Set(), episodes: 0 };
+              sr.viewers.add(u.Name);
+              sr.episodes += 1;
+              series.set(key, sr);
+            }
+            if (recent.length < 5 && last) recent.push({ title: it.Type === 'Episode' ? `${it.SeriesName} · S${it.ParentIndexNumber}E${it.IndexNumber}` : it.Name, at: new Date(last).toISOString() });
+          }
+          perUser.push({ name: u.Name, minutes: Math.round(minutes), movies: nMovies, episodes: nEpisodes, recent });
+        })
+      );
+      const data = {
+        users: perUser.sort((a, b) => b.minutes - a.minutes),
+        topMovies: [...movies.values()].sort((a, b) => b.viewers.length - a.viewers.length || b.plays - a.plays).slice(0, 10),
+        topSeries: [...series.values()]
+          .map((x) => ({ id: x.id, title: x.title, viewers: [...x.viewers], episodes: x.episodes }))
+          .sort((a, b) => b.episodes - a.episodes)
+          .slice(0, 10),
+        days: Object.entries(days).sort(([a], [b]) => a.localeCompare(b)).map(([day, n]) => ({ day, n })),
+      };
+      watchStatsCache = { at: Date.now(), data };
+      return send(res, 200, data);
+    }
+
+    // ——— Supervision (admin) : services façon UptimeRobot et machine en direct ———
+    if (req.method === 'GET' && p === '/api/uptime') {
+      requireAdmin(user);
+      const st = await status();
+      const names = { lumio: 'Serveur Lumio', jellyfin: 'Jellyfin', radarr: 'Radarr', sonarr: 'Sonarr' };
+      const since = Date.now() - 24 * 3600_000;
+      const services = Object.keys(names)
+        .filter((k) => st[k] && st[k].configured !== false)
+        .map((k) => {
+          const hist = (uptime[k] || []).filter((x) => x.t >= since);
+          // 24 barres d'une heure : vert si tout allait bien, rouge s'il y a eu une panne, gris sans mesure
+          const bars = [];
+          for (let h = 23; h >= 0; h--) {
+            const from = Date.now() - (h + 1) * 3600_000;
+            const pts = hist.filter((x) => x.t >= from && x.t < from + 3600_000);
+            bars.push(pts.length ? (pts.every((x) => x.ok) ? 1 : pts.some((x) => x.ok) ? 0.5 : 0) : -1);
+          }
+          const pct = hist.length ? Math.round((hist.filter((x) => x.ok).length / hist.length) * 1000) / 10 : null;
+          const e = st[k];
+          return { key: k, name: names[k], ok: Boolean(e.ok), ms: e.ms || null, version: e.version || null, error: e.error || null, uptime: pct, bars };
+        });
+      return send(res, 200, { services });
+    }
+    if (req.method === 'GET' && p === '/api/system') {
+      requireAdmin(user);
+      const last = sysHistory[sysHistory.length - 1] || {};
+      let load = null;
+      let up = null;
+      try {
+        load = fs.readFileSync('/proc/loadavg', 'utf8').split(' ').slice(0, 3).map(Number);
+        up = Math.round(Number(fs.readFileSync('/proc/uptime', 'utf8').split(' ')[0]));
+      } catch {}
+      return send(res, 200, {
+        cpu: last.cpu ?? null,
+        temp: last.temp ?? null,
+        cores: require('os').cpus().length,
+        load,
+        uptime: up,
+        mem: readMem(),
+        disks: await Promise.all(disks().map(diskInfo)),
+        history: sysHistory.map((x) => ({ cpu: x.cpu, temp: x.temp })),
+      });
+    }
+
     // ——— Admin : disques et téléchargements AllDebrid ———
     if (p.startsWith('/api/files') || p.startsWith('/api/downloads') || p === '/api/alldebrid') {
       requireAdmin(user);
@@ -1537,11 +1788,17 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
           await fs.promises.rename(from, to);
         } catch (e) {
           if (e.code !== 'EXDEV') throw e;
-          await fs.promises.cp(from, to, { recursive: true });
-          await fs.promises.rm(from, { recursive: true, force: true });
+          // Autre disque : copie en arrière-plan avec pourcentage
+          const job = { id: crypto.randomBytes(5).toString('hex'), name: path.basename(from), dest: b.toRoot || b.root, total: 0, done: 0, status: 'moving' };
+          moveJobs.push(job);
+          runMove(job, from, to, user.token);
+          return send(res, 202, { ok: true, job: job.id });
         }
         if (user.token) fetch(`${JELLYFIN_URL}/Library/Refresh`, { method: 'POST', headers: jfHeaders(user.token) }).catch(() => {});
         return send(res, 200, { ok: true });
+      }
+      if (req.method === 'GET' && p === '/api/files/jobs') {
+        return send(res, 200, { jobs: moveJobs.map(({ id, name, dest, total, done, status, error }) => ({ id, name, dest, total, done, status, error })) });
       }
       if (req.method === 'POST' && p === '/api/files/delete') {
         const b = await readBody(req);

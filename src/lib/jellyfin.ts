@@ -478,10 +478,12 @@ export function jfImage(
   opts: { tag?: string; maxHeight?: number; maxWidth?: number } = {}
 ) {
   if (!s.jellyfin || !itemId) return undefined;
-  const q = new URLSearchParams({ quality: '90' });
+  // TV : images en haute définition (écran 1080p / 4K vu de près)
+  const k = Platform.isTV ? 2.5 : 1;
+  const q = new URLSearchParams({ quality: Platform.isTV ? '95' : '90' });
   if (opts.tag) q.set('tag', opts.tag);
-  if (opts.maxHeight) q.set('maxHeight', String(opts.maxHeight));
-  if (opts.maxWidth) q.set('maxWidth', String(opts.maxWidth));
+  if (opts.maxHeight) q.set('maxHeight', String(Math.round(opts.maxHeight * k)));
+  if (opts.maxWidth) q.set('maxWidth', String(Math.min(3840, Math.round(opts.maxWidth * k))));
   return `${s.jellyfin.url}/Items/${itemId}/Images/${type}?${q}`;
 }
 

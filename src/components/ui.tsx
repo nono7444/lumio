@@ -43,14 +43,14 @@ export function StatusBadge({ badge }: { badge: NonNullable<PosterItem['badge']>
   );
 }
 
-/** Pastille « ★ 4,5 » en bas à gauche de l'affiche : moyenne des notes de la famille. */
+/** Pastille « 🍅 8,5 » en bas à gauche de l'affiche : moyenne des notes de la famille (sur 10). */
 export function FamilyStarBadge({ type, tmdbId }: { type?: 'movie' | 'tv'; tmdbId?: number }) {
   const { settings } = useSettings();
   const r = useFamilyRatingBadge(settings, type, tmdbId);
   if (!r) return null;
   return (
-    <View style={styles.stars} accessibilityLabel={`Note de la famille ${r.avg} sur 5`}>
-      <Ionicons name="star" size={10} color="#FFC93C" />
+    <View style={styles.stars} accessibilityLabel={`Note de la famille ${r.avg} sur 10`}>
+      <Text style={{ fontSize: 10 }}>🍅</Text>
       <Text style={styles.starsText}>{r.avg.toLocaleString('fr-FR', { maximumFractionDigits: 1 })}</Text>
     </View>
   );
@@ -72,9 +72,12 @@ export function SegChip({ label, on, onPress, icon }: { label: string; on: boole
 }
 
 export function PosterCard({ item, width = POSTER_W }: { item: PosterItem; width?: number }) {
+  const { settings } = useSettings();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
-  const better = useBetterPoster(item.ids);
+  // Titre noté par la famille : affiche Better Posters sans sa note (c'est la note de la famille qui s'affiche)
+  const fam = useFamilyRatingBadge(settings, item.ids?.type === 'tv' ? 'tv' : item.ids?.type === 'movie' ? 'movie' : undefined, item.ids?.tmdb);
+  const better = useBetterPoster(item.ids, { hideRating: Boolean(fam) });
   const src = better && !failed ? better : item.poster;
   const height = Math.round(width * 1.5);
   return (

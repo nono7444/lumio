@@ -23,6 +23,7 @@ import { askFolder } from '@/components/folder-picker';
 import { FamilyRating } from '@/components/family-rating';
 import { ReportProblemButton } from '@/components/report-problem';
 import { RequestSection } from '@/components/request-section';
+import { TrailerButton } from '@/components/trailer-button';
 import { grab, mediaFlavor } from '@/lib/grab';
 import { useServerRequests } from '@/lib/requests';
 import { chat } from '@/lib/chat';
@@ -268,6 +269,8 @@ export default function MediaScreen() {
               />
             </View>
           ) : null}
+
+          <TrailerButton type={details.kind} tmdbId={tmdbId} />
 
           {/* ——— Demande façon Seerr (serveur Lumio) ——— */}
           {serverReq ? (

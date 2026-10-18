@@ -6,6 +6,7 @@ import { useSettings, type Settings } from './settings';
 
 export type Disk = { name: string; free: number | null; total: number | null };
 export type FileEntry = { name: string; dir: boolean; size: number; mtime: string | null };
+export type MoveJob = { id: string; name: string; dest: string; total: number; done: number; status: 'moving' | 'done' | 'error'; error?: string };
 export type DownloadJob = {
   id: string;
   name: string;
@@ -34,6 +35,7 @@ export const filesApi = {
   mkdir: (s: Settings, root: string, path: string) => post(s, '/api/files/mkdir', { root, path }),
   move: (s: Settings, root: string, from: string, to: string, toRoot?: string) => post(s, '/api/files/move', { root, from, to, toRoot }),
   remove: (s: Settings, root: string, path: string) => post(s, '/api/files/delete', { root, path }),
+  moveJobs: (s: Settings) => serverCall<{ jobs: MoveJob[] }>(s, '/api/files/jobs').then((r) => r.jobs),
   downloads: (s: Settings) => serverCall<{ downloads: DownloadJob[] }>(s, '/api/downloads').then((r) => r.downloads),
   startDownload: (s: Settings, link: string, root: string, folder: string) => post(s, '/api/downloads', { link, root, folder }),
   cancelDownload: (s: Settings, id: string) => serverCall(s, `/api/downloads/${id}`, { method: 'DELETE' }),

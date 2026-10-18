@@ -1,7 +1,7 @@
 // Petits messages éphémères (ex. résultat d'un téléchargement lancé pendant qu'on regarde).
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -37,7 +37,7 @@ export function Toasts() {
   }, []);
   if (!items.length) return null;
   return (
-    <View pointerEvents="box-none" style={[styles.wrap, { top: insets.top + 56 }]}>
+    <View pointerEvents="box-none" style={[styles.wrap, { bottom: Platform.isTV ? 30 : insets.bottom + 86 }]}>
       {items.map((t) => (
         <Pressable
           key={t.id}

@@ -21,6 +21,7 @@ import {
 } from '@/lib/jellyfin';
 import { FamilyRating } from '@/components/family-rating';
 import { ReportProblemButton } from '@/components/report-problem';
+import { TrailerButton } from '@/components/trailer-button';
 import { useServerRequests } from '@/lib/requests';
 import { useSettings } from '@/lib/settings';
 
@@ -295,6 +296,8 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
               </View>
             </View>
           )}
+
+          <TrailerButton type={isSeries ? 'tv' : 'movie'} tmdbId={tmdbId} />
 
           {/* Notes de la famille et signalement d'un problème (serveur Lumio) */}
           {serverReq && tmdbId ? (

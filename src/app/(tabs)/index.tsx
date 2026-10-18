@@ -229,7 +229,7 @@ function FamilyTopRow({ nonce }: { nonce: number }) {
     title: r.title,
     poster: r.poster,
     ids: { tmdb: r.tmdbId, type: r.type },
-    subtitle: `★ ${r.avg.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} · ${r.count} avis`,
+    subtitle: `🍅 ${r.avg.toLocaleString('fr-FR', { maximumFractionDigits: 1 })}/10 · ${r.count} avis`,
     onPress: () => openMedia(r.type, r.tmdbId),
   }));
   return <Row title="⭐ Coups de cœur de la famille" items={posters} />;
@@ -358,9 +358,8 @@ export default function Home() {
         )}
       </ScrollView>
 
-      {/* Barre du haut : transparente sur le hero, voile noir une fois qu'on a défilé */}
+      {/* Barre du haut : toujours transparente (plus de bandeau noir en défilant) */}
       <View style={[styles.top, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: scrolled || !withHero ? 'rgba(0,0,0,0.88)' : 'transparent' }]} />
         <HeroTopBar title="Lumio" season={season} right={<HomeShortcuts onCustomize={() => router.push('/customize')} />} />
       </View>
     </View>

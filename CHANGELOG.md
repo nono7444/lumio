@@ -6,6 +6,19 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Notes de la famille en tomates 🍅 sur 10 (les anciennes notes sont converties). Sur les affiches : la note de la famille si le titre est noté, sinon la note Better Posters.
+- Commentaire sur une note : marche maintenant aussi sur Android et la TV.
+- Bande-annonce (en français si elle existe) sous le bouton Lire.
+- Fiches : plus de « date numérique pas encore annoncée » pour les films déjà sortis.
+- Disques : le déplacement vers un autre disque affiche sa progression en %.
+- Admin : statistiques de visionnage dans « En cours de lecture » (temps par compte, activité sur 30 jours, top films, top séries).
+- Admin : supervision façon UptimeRobot (historique 24 h de chaque service) et la machine en direct : processeur, température, mémoire, disques.
+- Les notifications s'affichent en bas, juste au-dessus de la barre.
+- Accueil : plus de bandeau noir en faisant défiler.
+- VPN : lancement des raccourcis plus fiable et explications refaites (avec l'automatisation « à l'ouverture de Lumio »).
+- TV : images en haute définition, contour de sélection qui ne décale plus les affiches, barre du haut plus fine et translucide avec seulement Accueil, Bibliothèque, Recherche et Demandes, accueil épuré.
+- Serveur Lumio 3.10.0 requis.
+
 - Clé TMDB partagée : celle de l'admin est confiée au serveur Lumio et les autres comptes (famille, TV) la reçoivent automatiquement, plus rien à saisir (serveur Lumio 3.9.2).
 
 ## 1.0.46 — 18 octobre 2026

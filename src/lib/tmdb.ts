@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 // Client TMDB v3 : recherche, tendances, fiches, correspondance IMDb.
 import type { Settings } from './settings';
 
@@ -174,8 +175,11 @@ export function pickLogo(s: Settings, images?: TmdbImages): string | null {
   return best?.file_path ?? null;
 }
 
-export const tmdbImg = (path?: string | null, size: 'w185' | 'w342' | 'w500' | 'w780' | 'w1280' | 'original' = 'w342') =>
-  path ? `https://image.tmdb.org/t/p/${size}${path}` : undefined;
+type ImgSize = 'w185' | 'w342' | 'w500' | 'w780' | 'w1280' | 'original';
+// TV : une taille au-dessus (voire l'original) pour des images nettes sur grand écran
+const TV_SIZE: Record<ImgSize, ImgSize> = { w185: 'w500', w342: 'w780', w500: 'w780', w780: 'w1280', w1280: 'original', original: 'original' };
+export const tmdbImg = (path?: string | null, size: ImgSize = 'w342') =>
+  path ? `https://image.tmdb.org/t/p/${Platform.isTV ? TV_SIZE[size] : size}${path}` : undefined;
 
 export const itemTitle = (i: TmdbItem) => i.title ?? i.name ?? '';
 export const itemYear = (i: TmdbItem) => (i.release_date || i.first_air_date || '').slice(0, 4);
@@ -205,10 +209,14 @@ export function upcomingRelease(kind: 'movie' | 'tv', data: any): string | null 
     const digitalFr = pick('FR', [4]);
     const digital = digitalFr ?? pick('US', [4]);
     if (digital) return digital >= today ? `Disponible en numérique le ${longDate(digital)}${digitalFr ? '' : ' (date US)'}` : null;
+    // Déjà sorti en numérique (ou en physique) dans un autre pays : rien à annoncer
+    const anyPast = results.some((r) => r.release_dates.some((d) => (d.type === 4 || d.type === 5) && (dayOf(d.release_date) ?? today) < today));
+    if (anyPast) return null;
     // Pas encore de date numérique : la sortie cinéma si elle est à venir
     const cinema = pick('FR', [2, 3]) ?? dayOf(data?.release_date);
     if (cinema && cinema >= today) return `Au cinéma le ${longDate(cinema)} · date numérique pas encore annoncée`;
-    if (cinema) return 'Sortie numérique pas encore annoncée';
+    // Sorti au cinéma il y a moins de 4 mois : la sortie numérique arrive bientôt
+    if (cinema && today.getTime() - cinema.getTime() < 120 * 86_400_000) return 'Au cinéma en ce moment · date numérique pas encore annoncée';
     return null;
   }
   const first = dayOf(data?.first_air_date);
@@ -219,6 +227,29 @@ export function upcomingRelease(kind: 'movie' | 'tv', data: any): string | null 
     return next.episode_number === 1
       ? `Saison ${next.season_number} le ${longDate(nd)}`
       : `Prochain épisode (S${next.season_number}E${next.episode_number}) le ${longDate(nd)}`;
+  }
+  return null;
+}
+
+// ——— Bande-annonce (YouTube), en français si possible ———
+
+type TmdbVideo = { key: string; site: string; type: string; official?: boolean; iso_639_1?: string; name?: string };
+
+export async function trailerKey(s: Settings, type: 'movie' | 'tv', id: number): Promise<string | null> {
+  const pick = (list: TmdbVideo[]) => {
+    const yt = list.filter((v) => v.site === 'YouTube');
+    return (
+      yt.find((v) => v.type === 'Trailer' && v.official) ??
+      yt.find((v) => v.type === 'Trailer') ??
+      yt.find((v) => v.type === 'Teaser') ??
+      yt[0] ??
+      null
+    );
+  };
+  for (const language of ['fr-FR', 'en-US']) {
+    const r = await tmdbCall<{ results: TmdbVideo[] }>(s, `/${type}/${id}/videos`, { language }).catch(() => ({ results: [] }));
+    const v = pick(r.results ?? []);
+    if (v) return v.key;
   }
   return null;
 }

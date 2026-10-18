@@ -10,6 +10,7 @@ import { FocusPressable as Pressable } from '@/components/tv';
 import { C, R } from '@/constants/theme';
 import { jf, jfImage, type JfSession } from '@/lib/jellyfin';
 import { useSettings } from '@/lib/settings';
+import { WatchStats } from '@/components/watch-stats';
 
 const ticks = (t?: number) => (t ?? 0) / 10_000_000;
 const clock = (sec: number) => {
@@ -167,12 +168,15 @@ export default function Sessions() {
             ) : null}
           </>
         )}
+        <Text style={styles.statsTitle}>Statistiques</Text>
+        <WatchStats />
       </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  statsTitle: { color: C.text, fontSize: 22, fontWeight: '800', marginTop: 18, marginBottom: 4 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 8 },
   h1: { color: C.text, fontSize: 28, fontWeight: '800', letterSpacing: -0.6 },
   close: { width: 38, height: 38, borderRadius: 19, backgroundColor: C.surfaceHigh, alignItems: 'center', justifyContent: 'center' },

@@ -1,7 +1,7 @@
 // Admin : disques du serveur — parcourir, créer un dossier, renommer, déplacer (même vers un autre disque), supprimer.
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -10,7 +10,7 @@ import { toast } from '@/components/toast';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { Button, tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
-import { filesApi, formatSize, joinPath, parentPath, type Disk, type FileEntry } from '@/lib/files';
+import { filesApi, formatSize, joinPath, parentPath, type Disk, type FileEntry, type MoveJob } from '@/lib/files';
 import { useSettings } from '@/lib/settings';
 
 type Moving = { root: string; path: string; name: string };
@@ -25,6 +25,31 @@ export default function Files() {
   const [entries, setEntries] = useState<FileEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [moving, setMoving] = useState<Moving | null>(null);
+  const [jobs, setJobs] = useState<MoveJob[]>([]);
+  const loadRef = useRef<() => void>(() => {});
+
+  // Déplacements vers un autre disque : progression en direct
+  useEffect(() => {
+    let alive = true;
+    const tick = () =>
+      filesApi
+        .moveJobs(settings)
+        .then((j) => {
+          if (!alive) return;
+          setJobs((prev) => {
+            if (prev.some((p) => p.status === 'moving') && !j.some((x) => x.status === 'moving')) loadRef.current();
+            return j;
+          });
+        })
+        .catch(() => {});
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const load = useCallback(async () => {
     setError(null);
@@ -36,6 +61,7 @@ export default function Files() {
     }
   }, [settings, root, path]);
 
+  loadRef.current = load;
   useFocusEffect(
     useCallback(() => {
       load();
@@ -99,7 +125,14 @@ export default function Files() {
   const moveHere = () => {
     if (!moving || !root) return;
     const to = joinPath(path, moving.name);
-    act(() => filesApi.move(settings, moving.root, moving.path, to, root), 'Déplacé').then(() => setMoving(null));
+    filesApi
+      .move(settings, moving.root, moving.path, to, root)
+      .then((r) => {
+        toast(r?.job ? 'Déplacement vers l’autre disque en cours…' : 'Déplacé', r?.job ? 'info' : 'ok');
+        setMoving(null);
+        load();
+      })
+      .catch((e) => Alert.alert('Déplacement impossible', e?.message ?? String(e)));
   };
 
   const crumbs = path ? path.split('/') : [];
@@ -128,6 +161,30 @@ export default function Files() {
       {root ? <Text style={styles.crumb} numberOfLines={1}>{[root, ...crumbs].join(' › ')}</Text> : null}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      {jobs.filter((j) => j.status !== 'done').map((j) => {
+        const pct = j.total ? Math.min(1, j.done / j.total) : 0;
+        return (
+          <View key={j.id} style={styles.job}>
+            <Text style={styles.file} numberOfLines={1}>
+              {j.status === 'error' ? '⚠️ ' : '📦 '}
+              {j.name} → {j.dest}
+            </Text>
+            {j.status === 'error' ? (
+              <Text style={[styles.dim, { color: C.danger }]}>{j.error}</Text>
+            ) : (
+              <>
+                <View style={styles.track}>
+                  <View style={[styles.fill, { width: `${pct * 100}%`, backgroundColor: C.accent }]} />
+                </View>
+                <Text style={styles.dim}>
+                  {Math.round(pct * 100)} % · {formatSize(j.done)} / {formatSize(j.total)}
+                </Text>
+              </>
+            )}
+          </View>
+        );
+      })}
 
       {!root ? (
         <FlatList
@@ -218,5 +275,6 @@ const styles = StyleSheet.create({
   fill: { height: 6, borderRadius: 3 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, paddingHorizontal: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
   file: { color: C.text, fontSize: 15 },
+  job: { marginHorizontal: 16, marginBottom: 8, backgroundColor: C.surface, borderRadius: R.md, padding: 12, gap: 6 },
   moveBar: { position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: C.surface, padding: 14, gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.border },
 });

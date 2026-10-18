@@ -16,6 +16,7 @@ import { NowPlayingEntry } from '@/components/now-playing-entry';
 import { useAppUpdate } from '@/lib/app-update';
 import { ChatSection, ThemeSection } from '@/components/extra-sections';
 import { ServerStatusSection } from '@/components/server-status';
+import { UptimeSection } from '@/components/uptime';
 import { Addon, DEFAULT_ADDON, isManager, useSettings } from '@/lib/settings';
 import { RATING_SOURCES } from '@/lib/better-posters';
 import { logout as logoutJellyfin, QUALITIES } from '@/lib/jellyfin';
@@ -174,8 +175,8 @@ export default function SettingsScreen() {
           <ScreenTitle title="Profil" />
         </View>
         {appUpdate ? <AppVersionSection /> : null}
-        <NowPlayingEntry />
-        <ServerStatusSection />
+        {Platform.isTV ? null : <NowPlayingEntry />}
+        {Platform.isTV ? null : settings.jellyfin?.isAdmin && settings.chatUrl ? <UptimeSection /> : <ServerStatusSection />}
         <Section title="Jellyfin">
           {settings.jellyfin ? (
             <View style={{ gap: 12 }}>

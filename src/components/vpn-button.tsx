@@ -64,10 +64,11 @@ export function VpnButton() {
                 (une seule fois à faire).
               </Text>
               <View style={styles.steps}>
-                <Text style={styles.step}>1. Ouvre Raccourcis → « + » → ajoute l’action « Proton VPN › Connexion rapide » (ou « Définir le VPN » → Connecter).</Text>
-                <Text style={styles.step}>2. Nomme-le exactement « {cfg.onShortcut} ».</Text>
-                <Text style={styles.step}>3. Crée un 2ᵉ raccourci avec « Proton VPN › Déconnecter » (ou « Définir le VPN » → Déconnecter), nommé « {cfg.offShortcut} ».</Text>
-                <Text style={styles.step}>4. Active ci-dessous. Le bouton VPN lance et coupe Proton VPN, puis revient dans Lumio.</Text>
+                <Text style={styles.step}>1. Ouvre l’app Raccourcis → onglet Raccourcis → « + » → Ajouter une action → cherche « Proton VPN » → « Se connecter au VPN » (Connect to VPN).</Text>
+                <Text style={styles.step}>2. Touche le nom en haut et renomme le raccourci exactement « {cfg.onShortcut} » (majuscules et espaces compris).</Text>
+                <Text style={styles.step}>3. Crée un 2ᵉ raccourci avec « Proton VPN › Se déconnecter du VPN » (Disconnect from VPN), nommé « {cfg.offShortcut} ».</Text>
+                <Text style={styles.step}>4. Active ci-dessous, puis touche « Démarrer » pour tester : Raccourcis s’ouvre une seconde et lance Proton VPN.</Text>
+                <Text style={styles.step}>💡 Encore plus simple : Raccourcis → Automatisation → « + » → App → Lumio → « Est ouverte » → action « Proton VPN › Se connecter au VPN » → Exécuter immédiatement. Le VPN démarre tout seul à chaque ouverture de Lumio.</Text>
               </View>
               <Button title="Ouvrir Raccourcis" icon="open-outline" variant="secondary" onPress={() => Linking.openURL('shortcuts://').catch(() => {})} />
 

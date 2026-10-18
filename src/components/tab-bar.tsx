@@ -63,7 +63,11 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
     visible.map((r) => r.name),
     settings.tabsLayout
   );
-  const routes = order.map((n) => visible.find((r) => r.name === n)!).filter(Boolean);
+  // TV : expérience épurée, seulement Accueil, Bibliothèque, Recherche, Demandes (et le profil)
+  const TV_TABS = ['index', 'library', 'search', 'activity', 'settings'];
+  const routes = Platform.isTV
+    ? TV_TABS.map((n) => state.routes.find((r) => r.name === n)!).filter(Boolean)
+    : order.map((n) => visible.find((r) => r.name === n)!).filter(Boolean);
   const dense = routes.length > 6;
 
   const customize = () => {
@@ -79,7 +83,13 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
         ) : (
           <>
             {Platform.OS === 'ios' ? <BlurView tint="systemThickMaterialDark" intensity={80} style={StyleSheet.absoluteFill} /> : null}
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: Platform.OS === 'ios' ? 'rgba(30,30,32,0.55)' : 'rgba(30,30,32,0.97)' }]} />
+            <View
+              style={[
+                StyleSheet.absoluteFill,
+                // TV : verre fumé translucide ; téléphone Android : opaque (pas de flou natif)
+                { backgroundColor: Platform.isTV ? 'rgba(255,255,255,0.08)' : Platform.OS === 'ios' ? 'rgba(30,30,32,0.55)' : 'rgba(30,30,32,0.97)' },
+              ]}
+            />
           </>
         )}
         {routes.map((route) => {
@@ -142,14 +152,14 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
 const styles = StyleSheet.create({
   wrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center', paddingHorizontal: 14 },
   // TV : barre en haut de l'écran (comme sur Apple TV), dans le flux pour ne rien recouvrir
-  wrapTv: { alignItems: 'center', paddingTop: 14, paddingBottom: 4, paddingHorizontal: 40, backgroundColor: C.bg },
+  wrapTv: { alignItems: 'center', paddingTop: 12, paddingBottom: 2, paddingHorizontal: 40 },
   pill: {
     flexDirection: 'row',
     alignSelf: 'center',
     width: '100%',
-    maxWidth: Platform.isTV ? 820 : 560,
-    height: 66,
-    borderRadius: 33,
+    maxWidth: Platform.isTV ? 540 : 560,
+    height: Platform.isTV ? 52 : 66,
+    borderRadius: Platform.isTV ? 26 : 33,
     padding: 5,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
