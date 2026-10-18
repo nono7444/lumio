@@ -52,13 +52,23 @@ jobs:
             -destination 'generic/platform=iOS' \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            | tail -n 50
-          test -d build/Build/Products/Release-iphoneos/Lumio.app
+            > xcodebuild.log 2>&1 || {
+              # Échec : les erreurs de compilation remontent en annotations (journaux GitHub parfois illisibles)
+              grep -E "error:|\*\* BUILD FAILED" xcodebuild.log | sort -u | head -30 | while IFS= read -r l; do echo "::error::$l"; done
+              tail -n 80 xcodebuild.log
+              exit 1
+            }
+          tail -n 20 xcodebuild.log
+          test -f build/Build/Products/Release-iphoneos/Lumio.app/Info.plist
       - name: Emballe l'IPA (à resigner avec SideStore / AltStore / Sideloadly)
         run: |
           mkdir Payload
           cp -R build/Build/Products/Release-iphoneos/Lumio.app Payload/
           zip -qry lumio-unsigned.ipa Payload
+          # Garde-fou : une IPA de quelques octets ne doit jamais être publiée
+          size=$(stat -c %s lumio-unsigned.ipa 2>/dev/null || stat -f %z lumio-unsigned.ipa)
+          echo "IPA : $size octets"
+          if [ "$size" -lt 5000000 ]; then echo "::error::IPA anormalement petite ($size octets)"; ls -la Payload/Lumio.app | head -30; exit 1; fi
       - uses: actions/upload-artifact@v4
         with:
           name: lumio-ios
