@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Bandes-annonces : maintenant récupérées et relayées par le serveur Lumio (vidéo YouTube jusqu'en 1080p, piste française si elle existe, sinon iTunes), lues dans le lecteur de Lumio, même en 4G (serveur Lumio 3.13.0).
+- Séries partielles : le compte se fait sur toutes les saisons de la série (« 1 saison sur 10 »).
+
 ## 1.0.52 — 19 octobre 2026
 
 - Séries : quand seule une partie des saisons a été trouvée, la demande passe en « Partiel · 1 saison sur 10 » au lieu de rester en recherche (avec le bouton « Relancer la recherche »).

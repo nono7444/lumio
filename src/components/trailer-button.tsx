@@ -6,7 +6,8 @@ import { router } from 'expo-router';
 import { Linking, Platform } from 'react-native';
 
 import { Button } from '@/components/ui';
-import { hasTmdb, useSettings } from '@/lib/settings';
+import { serverBase, serverCall } from '@/lib/chat';
+import { hasTmdb, useSettings, type Settings } from '@/lib/settings';
 import { trailerKey } from '@/lib/tmdb';
 import { itunesTrailer } from '@/lib/itunes-trailer';
 import { toast } from '@/components/toast';
@@ -48,6 +49,16 @@ export async function playTrailer(key: string, title?: string) {
   });
 }
 
+/** Bande-annonce relayée par le serveur Lumio (YouTube via yt-dlp, sinon iTunes). null si le serveur ne sait pas faire. */
+async function viaServer(settings: Settings, p: { key: string | null; type: string; title?: string; year?: number | string | null }) {
+  if (!settings.chatUrl || !settings.jellyfin || Platform.OS === 'web') return null;
+  const q = new URLSearchParams({ type: p.type, title: p.title ?? '', year: p.year ? String(p.year).slice(0, 4) : '' });
+  if (p.key) q.set('key', p.key);
+  const r = await serverCall<{ source: string; video: string; audio: string | null; height: number | null }>(settings, `/api/trailer?${q}`);
+  const abs = (u: string | null) => (u ? (u.startsWith('/') ? `${serverBase(settings.chatUrl)}${u}` : u) : undefined);
+  return { video: abs(r.video)!, audio: abs(r.audio), height: r.height };
+}
+
 export function TrailerButton({
   type,
   tmdbId,
@@ -81,7 +92,8 @@ export function TrailerButton({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [type, tmdbId, title, year, settings.tmdbKey]);
 
-  if (!key && !direct) return null;
+  const server = Boolean(settings.chatUrl && settings.jellyfin);
+  if (!key && !direct && !server) return null;
   return (
     <Button
       title="Bande-annonce"
@@ -90,11 +102,33 @@ export function TrailerButton({
       small={small}
       loading={busy}
       onPress={async () => {
-        if (direct) return playDirect(direct, title);
-        if (!key) return toast('Pas de bande-annonce trouvée', 'info');
         setBusy(true);
         try {
-          await playTrailer(key, title);
+          // 1) Par le serveur Lumio : le plus fiable (YouTube récupéré et relayé par le serveur)
+          let serverError: string | null = null;
+          try {
+            const r = await viaServer(settings, { key, type, title, year });
+            if (r) {
+              router.push({
+                pathname: '/player',
+                params: {
+                  kind: 'url',
+                  uri: r.video,
+                  audio: r.audio,
+                  title: 'Bande-annonce',
+                  subtitle: [title, r.height ? `${r.height}p` : null].filter(Boolean).join(' · '),
+                  start: '0',
+                },
+              });
+              return;
+            }
+          } catch (e: any) {
+            serverError = e?.message ?? String(e);
+          }
+          // 2) Serveur trop ancien ou injoignable : directement depuis le téléphone
+          if (direct) return playDirect(direct, title);
+          if (key) return await playTrailer(key, title);
+          toast(serverError ?? 'Pas de bande-annonce trouvée', 'info');
         } finally {
           setBusy(false);
         }
