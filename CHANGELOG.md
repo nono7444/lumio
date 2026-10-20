@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.63 — 20 octobre 2026
+
 - TV : réglage « Taille de l'interface » (Très petite à Grande) dans Profil → Télévision ; par défaut tout est plus petit.
 - TV : barre du haut flottante effet verre, posée sur l'image de l'accueil (plus de bandeau noir dessous).
 - TV : sélection à la télécommande façon Apple TV (l'élément grandit, plus de contour blanc) et sons de navigation (désactivables).
