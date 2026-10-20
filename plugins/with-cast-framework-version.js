@@ -16,11 +16,13 @@ module.exports = function withCastFrameworkVersion(config) {
     return c;
   });
   return withAppBuildGradle(config, (c) => {
-    if (!c.modResults.contents.includes('androidx.mediarouter:mediarouter:')) {
+    if (!c.modResults.contents.includes('resolutionStrategy.force "androidx.mediarouter')) {
       c.modResults.contents += `
 // Chromecast : mediarouter stable (la bêta 1.9 exige le SDK 37), voir plugins/with-cast-framework-version.js
 configurations.all {
     resolutionStrategy.force "androidx.mediarouter:mediarouter:${MEDIAROUTER}"
+    resolutionStrategy.force "com.google.android.gms:play-services-cast-framework:${CAST}"
+    resolutionStrategy.force "com.google.android.gms:play-services-cast:${CAST}"
 }
 `;
     }
