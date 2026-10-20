@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.57 — 20 octobre 2026
+
 - Notes en chips 🥔 : 10 petites chips à toucher sur une ligne, encadré plus compact ; sur les affiches, la note de la famille est centrée en bas avec une chips.
 - Nouvelle animation de démarrage façon Google : quatre points rebondissent puis deviennent le logo (sans texte).
 - Demande de saisons : grille compacte, toutes les saisons visibles sans défiler.
