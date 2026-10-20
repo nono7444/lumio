@@ -111,7 +111,7 @@ const styles = StyleSheet.create({
   avgChipText: { color: '#fff', fontSize: 14, fontWeight: '800', fontVariant: ['tabular-nums'] },
   chips: { flex: 1, flexDirection: 'row', gap: Platform.isTV ? 8 : 4 },
   chip: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 2 },
-  chipImg: { width: Platform.isTV ? 34 : 24, height: Platform.isTV ? 34 : 24 },
+  chipImg: { width: 24, height: 24 },
   avgText: { color: C.text, fontSize: 14, fontWeight: '800', fontVariant: ['tabular-nums'] },
   mineNum: { color: C.text, fontSize: 14, fontWeight: '800', minWidth: 20, textAlign: 'center' },
   chipCurrent: { transform: [{ scale: 1.08 }] },

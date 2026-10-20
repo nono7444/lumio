@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 import * as Haptics from 'expo-haptics';
 import { router, type Tabs } from 'expo-router';
@@ -78,7 +79,16 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
   return (
     <View pointerEvents="box-none" style={Platform.isTV ? styles.wrapTv : [styles.wrap, { bottom: Math.max(insets.bottom - 6, 10) }]}>
       <View style={styles.pill}>
-        {glass ? (
+        {Platform.isTV ? (
+          // TV : effet verre (façon iOS 26) — voile fumé translucide, reflet en haut, liseré clair
+          <View style={[StyleSheet.absoluteFill, styles.tvGlass]} pointerEvents="none">
+            <LinearGradient
+              colors={['rgba(255,255,255,0.22)', 'rgba(255,255,255,0.04)', 'rgba(255,255,255,0.10)']}
+              locations={[0, 0.55, 1]}
+              style={StyleSheet.absoluteFill}
+            />
+          </View>
+        ) : glass ? (
           <GlassView glassEffectStyle="regular" colorScheme="dark" tintColor="rgba(20,20,22,0.35)" style={StyleSheet.absoluteFill} />
         ) : (
           <>
@@ -151,8 +161,15 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
 
 const styles = StyleSheet.create({
   wrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center', paddingHorizontal: 14 },
-  // TV : barre en haut de l'écran (comme sur Apple TV), dans le flux pour ne rien recouvrir
-  wrapTv: { alignItems: 'center', paddingTop: 12, paddingBottom: 2, paddingHorizontal: 40 },
+  // TV : barre flottante en haut de l'écran (comme sur Apple TV), posée sur l'image de l'accueil
+  wrapTv: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 50, alignItems: 'center', paddingTop: 14, paddingHorizontal: 40 },
+  tvGlass: {
+    borderRadius: 26,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(24,26,34,0.38)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.24)',
+  },
   pill: {
     flexDirection: 'row',
     alignSelf: 'center',
@@ -161,7 +178,8 @@ const styles = StyleSheet.create({
     height: Platform.isTV ? 52 : 66,
     borderRadius: Platform.isTV ? 26 : 33,
     padding: 5,
-    overflow: 'hidden',
+    // TV : l'onglet sélectionné grandit, il ne doit pas être rogné
+    overflow: Platform.isTV ? 'visible' : 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.18)',
     shadowColor: '#000',

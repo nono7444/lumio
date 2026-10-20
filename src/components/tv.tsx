@@ -3,19 +3,19 @@ import { forwardRef, useState } from 'react';
 import { Platform, Pressable as RNPressable, type PressableProps, type View } from 'react-native';
 import * as RN from 'react-native';
 
+import { playNav } from '@/lib/tv-ui';
+
 export const IS_TV = Platform.isTV;
 
-// Agrandissement léger (ne change pas la mise en page) + contour dessiné par-dessus (ne décale rien)
-const FOCUS_SCALE = { transform: [{ scale: 1.04 }], zIndex: 10 } as const;
-const RING = {
-  position: 'absolute',
-  top: -3,
-  left: -3,
-  right: -3,
-  bottom: -3,
-  borderWidth: 2,
-  borderColor: 'rgba(255,255,255,0.85)',
-  borderRadius: 14,
+// Sélection façon Apple TV : l'élément grandit et passe au premier plan avec une ombre, sans contour blanc
+const FOCUS_SCALE = {
+  transform: [{ scale: 1.08 }],
+  zIndex: 10,
+  elevation: 12,
+  shadowColor: '#000',
+  shadowOpacity: 0.6,
+  shadowRadius: 16,
+  shadowOffset: { width: 0, height: 8 },
 } as const;
 
 type Props = PressableProps & { focusRing?: boolean };
@@ -30,13 +30,22 @@ export const FocusPressable = forwardRef<View, Props>(function FocusPressable(
 ) {
   const [focused, setFocused] = useState(false);
   if (!IS_TV) return <RNPressable ref={ref} style={style} onFocus={onFocus} onBlur={onBlur} {...rest} />;
-  const { children, ...others } = rest;
+  const { children, onPress, ...others } = rest;
   return (
     <RNPressable
       ref={ref}
       {...others}
+      onPress={
+        onPress
+          ? (e) => {
+              playNav('select');
+              onPress(e);
+            }
+          : undefined
+      }
       onFocus={(e) => {
         setFocused(true);
+        playNav('tick');
         onFocus?.(e);
       }}
       onBlur={(e) => {
@@ -50,7 +59,6 @@ export const FocusPressable = forwardRef<View, Props>(function FocusPressable(
       {(state) => (
         <>
           {typeof children === 'function' ? children(state) : children}
-          {focused && focusRing ? <RN.View pointerEvents="none" style={RING} /> : null}
         </>
       )}
     </RNPressable>

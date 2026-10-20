@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, FlatList, Platform, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -207,7 +207,8 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
 
   const isSeries = item.Type === 'Series';
   // Sur TV (paysage), le hero ne dépasse pas l'écran
-  const heroH = Math.min(Math.round(width * 1.2), Math.round(screenH * 0.85));
+  // TV : image moins haute (elle remplissait tout l'écran)
+  const heroH = Platform.isTV ? Math.round(screenH * 0.58) : Math.min(Math.round(width * 1.2), Math.round(screenH * 0.85));
   const logo = jfLogo(settings, item);
   const resumeAt = ticksToSeconds(item.UserData?.PlaybackPositionTicks);
   const cast = (item.People ?? []).filter((p) => p.Type === 'Actor').slice(0, 15);
@@ -256,7 +257,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
           </View>
         </View>
 
-        <View style={{ paddingHorizontal: 16, gap: 18 }}>
+        <View style={[{ paddingHorizontal: 16, gap: 18 }, Platform.isTV && styles.tvColumn]}>
           {!isSeries ? (
             <View style={{ gap: 10 }}>
               <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -454,6 +455,8 @@ export default function JellyfinItemScreen() {
 }
 
 const styles = StyleSheet.create({
+  // TV : colonne centrée et moins large (boutons Lire / Vu moins grands)
+  tvColumn: { width: '100%', maxWidth: 760, alignSelf: 'center' },
   center: { flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: 24 },
   back: {
     position: 'absolute',

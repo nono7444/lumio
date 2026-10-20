@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEventListener } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -59,6 +59,8 @@ export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, on
     <View style={StyleSheet.absoluteFill}>
       <VideoView
         ref={view}
+        // TV : l'appli est réduite par une transformation ; seule une TextureView la suit (une SurfaceView resterait décalée)
+        surfaceType={Platform.isTV ? 'textureView' : undefined}
         player={player}
         style={StyleSheet.absoluteFill}
         nativeControls

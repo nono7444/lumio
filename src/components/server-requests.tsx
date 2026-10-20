@@ -3,7 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Platform, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { toast } from '@/components/toast';
@@ -195,7 +195,8 @@ export function ServerRequests({ header }: { header: React.ReactNode }) {
   const { settings } = useSettings();
   const insets = useSafeAreaInsets();
   const admin = settings.jellyfin?.isAdmin !== false;
-  const [filter, setFilter] = useState<RequestFilter>(admin ? 'pending' : 'all');
+  // TV : tout afficher d'emblée (« À valider » restait souvent vide)
+  const [filter, setFilter] = useState<RequestFilter>(admin && !Platform.isTV ? 'pending' : 'all');
   const [rows, setRows] = useState<Req[]>([]);
   const [total, setTotal] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);

@@ -4,7 +4,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Platform, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FocusPressable as Pressable } from '@/components/tv';
@@ -226,7 +226,7 @@ export default function Library() {
   ).filter((r) => !r.hidden && r.lib && !(lumioColl && r.lib.view.CollectionType === 'boxsets'));
 
   // 2 colonnes sur iPad / TV, 1 sur téléphone
-  const cols = width >= 700 ? 2 : 1;
+  const cols = Platform.isTV ? 3 : width >= 700 ? 2 : 1;
   const cardW = Math.floor((Math.min(width, 1100) - 32 - (cols - 1) * 14) / cols);
 
   return (

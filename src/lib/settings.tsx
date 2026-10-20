@@ -91,6 +91,10 @@ export type Settings = {
   quality: string;
   /** Moteur de lecture : mpv (lit tout, MKV inclus) ou lecteur natif du téléphone */
   player: 'mpv' | 'native';
+  /** TV : taille de l'interface (0,65 à 1) */
+  tvScale?: number;
+  /** TV : sons de navigation façon Apple TV */
+  tvSounds?: boolean;
   /** Clé API v3 ou jeton v4 TMDB (obligatoire : recherche + fiches) */
   tmdbKey: string;
   language: string;

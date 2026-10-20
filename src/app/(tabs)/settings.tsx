@@ -17,6 +17,7 @@ import { useAppUpdate } from '@/lib/app-update';
 import { ChatSection, ThemeSection } from '@/components/extra-sections';
 import { ServerStatusSection } from '@/components/server-status';
 import { UptimeSection } from '@/components/uptime';
+import { DEFAULT_TV_SCALE, TV_SCALES } from '@/lib/tv-ui';
 import { AnnouncementEditor } from '@/components/announcement';
 import { NotifySubscribeSection } from '@/components/notify-subscribe';
 import { Addon, DEFAULT_ADDON, isManager, useSettings } from '@/lib/settings';
@@ -234,6 +235,18 @@ export default function SettingsScreen() {
 
 
         <ThemeSection />
+
+        {Platform.isTV ? (
+          <Section title="Télévision">
+            <Picker
+              label="Taille de l’interface"
+              options={TV_SCALES.map((o) => ({ value: o.value, label: o.label }))}
+              value={settings.tvScale ?? DEFAULT_TV_SCALE}
+              onChange={(v) => update({ tvScale: v })}
+            />
+            <Toggle label="Sons de navigation (comme sur Apple TV)" value={settings.tvSounds !== false} onChange={(v) => update({ tvSounds: v })} />
+          </Section>
+        ) : null}
 
         <Section title="Lecture">
           <Picker

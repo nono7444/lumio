@@ -6,6 +6,11 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- TV : réglage « Taille de l'interface » (Très petite à Grande) dans Profil → Télévision ; par défaut tout est plus petit.
+- TV : barre du haut flottante effet verre, posée sur l'image de l'accueil (plus de bandeau noir dessous).
+- TV : sélection à la télécommande façon Apple TV (l'élément grandit, plus de contour blanc) et sons de navigation (désactivables).
+- TV : fiches plus compactes (image moins haute, boutons Lire / Vu moins larges), bibliothèque sur 3 colonnes, Demandes affiche tout d'emblée.
+
 ## 1.0.57 — 20 octobre 2026
 
 - Notes en chips 🥔 : 10 petites chips à toucher sur une ligne, encadré plus compact ; sur les affiches, la note de la famille est centrée en bas avec une chips.

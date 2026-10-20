@@ -8,6 +8,7 @@
     "@expo/vector-icons": "^15.1.1",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "expo": "~57.0.29",
+    "expo-audio": "~57.0.5",
     "expo-background-task": "~57.0.21",
     "expo-blur": "~57.0.3",
     "expo-build-properties": "~57.0.22",

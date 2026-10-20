@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Platform, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -196,7 +196,7 @@ export default function MediaScreen() {
   const imdbId = details.kind === 'movie' ? details.data.imdb_id : details.data.external_ids?.imdb_id;
   const logo = pickLogo(settings, d.images);
   // Sur TV (paysage), le hero ne dépasse pas l'écran
-  const heroH = Math.min(Math.round(width * 1.2), Math.round(screenH * 0.85));
+  const heroH = Platform.isTV ? Math.round(screenH * 0.58) : Math.min(Math.round(width * 1.2), Math.round(screenH * 0.85));
   const cast = (d.credits?.cast ?? []).slice(0, 15);
   const runtime =
     details.kind === 'movie' ? details.data.runtime : details.data.episode_run_time?.[0];
@@ -245,7 +245,7 @@ export default function MediaScreen() {
           </View>
         </View>
 
-        <View style={{ paddingHorizontal: 16, gap: 20, marginTop: 4 }}>
+        <View style={[{ paddingHorizontal: 16, gap: 20, marginTop: 4 }, Platform.isTV && { width: '100%', maxWidth: 760, alignSelf: 'center' }]}>
           {/* ——— Lecture (depuis Jellyfin) ——— */}
           {jfItem ? (
             <Button
