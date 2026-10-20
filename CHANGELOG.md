@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.64 — 20 octobre 2026
+
 - TV : nouvelle interface inspirée de Nuvio — menu latéral à gauche qui se déploie quand on y entre, accueil avec le titre sélectionné en grand fond (logo, infos, résumé) et les rangées dessous, fiches avec image en fond et infos alignées à gauche.
 - TV : effet de sélection plus fin et animé en douceur, plus de couleur orange sur l'onglet actif.
 - Démarrage plus rapide (animation raccourcie, quasi instantanée sur TV).
