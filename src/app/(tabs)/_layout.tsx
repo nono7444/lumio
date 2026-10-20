@@ -7,9 +7,6 @@ import { C } from '@/constants/theme';
 import { fetchIsAdmin } from '@/lib/jellyfin';
 import { useSettings } from '@/lib/settings';
 
-/** Hauteur réservée à la barre flottante sur TV */
-const TV_BAR = 74;
-
 export default function TabsLayout() {
   const { settings, update } = useSettings();
 
@@ -31,13 +28,13 @@ export default function TabsLayout() {
   return (
     <Tabs
       tabBar={(props) => <FloatingTabBar {...props} />}
-      // TV : la barre flotte en haut ; les pages laissent sa place, sauf l'accueil dont l'image passe dessous
+      // TV : menu latéral à gauche (façon Nuvio)
       screenOptions={{
         headerShown: false,
-        sceneStyle: { backgroundColor: C.bg, paddingTop: Platform.isTV ? TV_BAR : 0 },
-        tabBarPosition: Platform.isTV ? 'top' : 'bottom',
+        sceneStyle: { backgroundColor: C.bg },
+        tabBarPosition: Platform.isTV ? 'left' : 'bottom',
       }}>
-      <Tabs.Screen name="index" options={{ title: 'Accueil', sceneStyle: { backgroundColor: C.bg, paddingTop: 0 } }} />
+      <Tabs.Screen name="index" options={{ title: 'Accueil' }} />
       <Tabs.Screen name="search" options={{ title: 'Recherche' }} />
       <Tabs.Screen name="library" options={{ title: 'Bibliothèque', href: settings.jellyfin ? undefined : null }} />
       <Tabs.Screen name="live" options={{ title: 'Live TV' }} />

@@ -20,6 +20,7 @@ import {
 } from '@/lib/arr';
 import { jf, type JfItem } from '@/lib/jellyfin';
 import { askFolder } from '@/components/folder-picker';
+import { TvBackdropLayer } from '@/components/tv-backdrop';
 import { JfEpisodes } from '@/components/jf-episodes';
 import { FamilyRating } from '@/components/family-rating';
 import { ReportProblemButton } from '@/components/report-problem';
@@ -196,7 +197,7 @@ export default function MediaScreen() {
   const imdbId = details.kind === 'movie' ? details.data.imdb_id : details.data.external_ids?.imdb_id;
   const logo = pickLogo(settings, d.images);
   // Sur TV (paysage), le hero ne dépasse pas l'écran
-  const heroH = Platform.isTV ? Math.round(screenH * 0.58) : Math.min(Math.round(width * 1.2), Math.round(screenH * 0.85));
+  const heroH = Platform.isTV ? Math.round(screenH * 0.7) : Math.min(Math.round(width * 1.2), Math.round(screenH * 0.85));
   const cast = (d.credits?.cast ?? []).slice(0, 15);
   const runtime =
     details.kind === 'movie' ? details.data.runtime : details.data.episode_run_time?.[0];
@@ -206,27 +207,33 @@ export default function MediaScreen() {
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}>
         {/* ——— Hero ——— */}
         <View style={{ height: heroH }}>
-          <Image
-            source={tmdbImg(d.backdrop_path ?? d.poster_path, 'w1280')}
-            style={StyleSheet.absoluteFill}
-            contentFit="cover"
-            transition={250}
-          />
-          <Fade height={heroH * 0.3} top />
-          <Fade height={heroH * 0.7} />
-          <View style={styles.heroContent}>
+          {Platform.isTV ? (
+            <TvBackdropLayer info={{ key: String(tmdbId), title, backdrop: tmdbImg(d.backdrop_path ?? d.poster_path, 'w1280') }} />
+          ) : (
+            <>
+              <Image
+                source={tmdbImg(d.backdrop_path ?? d.poster_path, 'w1280')}
+                style={StyleSheet.absoluteFill}
+                contentFit="cover"
+                transition={250}
+              />
+              <Fade height={heroH * 0.3} top />
+              <Fade height={heroH * 0.7} />
+            </>
+          )}
+          <View style={Platform.isTV ? styles.heroContentTv : styles.heroContent}>
             {logo ? (
               <Image
                 source={tmdbImg(logo, 'w500')}
-                style={{ width: Math.min(width * 0.7, 460), height: 100 }}
+                style={Platform.isTV ? { width: 320, height: 120 } : { width: Math.min(width * 0.7, 460), height: 100 }}
                 contentFit="contain"
-                contentPosition="bottom"
+                contentPosition={Platform.isTV ? 'left bottom' : 'bottom'}
                 transition={250}
               />
             ) : (
-              <Text style={styles.title}>{title}</Text>
+              <Text style={[styles.title, Platform.isTV && { textAlign: 'left' }]}>{title}</Text>
             )}
-            <View style={styles.pills}>
+            <View style={[styles.pills, Platform.isTV && { justifyContent: 'flex-start' }]}>
               {date ? <Pill>{date.slice(0, 4)}</Pill> : null}
               {runtime ? <Pill icon="time-outline">{`${runtime} min`}</Pill> : null}
               {details.kind === 'tv' ? <Pill>{`${seasonsList.length} saison${seasonsList.length > 1 ? 's' : ''}`}</Pill> : null}
@@ -245,7 +252,7 @@ export default function MediaScreen() {
           </View>
         </View>
 
-        <View style={[{ paddingHorizontal: 16, gap: 20, marginTop: 4 }, Platform.isTV && { width: '100%', maxWidth: 760, alignSelf: 'center' }]}>
+        <View style={[{ paddingHorizontal: 16, gap: 20, marginTop: 4 }, Platform.isTV && { width: '100%', maxWidth: 680, alignSelf: 'flex-start', paddingLeft: 48 }]}>
           {/* ——— Lecture (depuis Jellyfin) ——— */}
           {jfItem ? (
             <Button
@@ -469,6 +476,7 @@ function Notice({ icon, text, color = C.textDim }: { icon: keyof typeof Ionicons
 }
 
 const styles = StyleSheet.create({
+  heroContentTv: { position: 'absolute', left: 48, bottom: 16, width: '46%', alignItems: 'flex-start', gap: 10 },
   upcoming: {
     flexDirection: 'row',
     alignItems: 'center',

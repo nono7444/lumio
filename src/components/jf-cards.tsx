@@ -6,6 +6,7 @@ import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 
 import { FamilyStarBadge, tap } from '@/components/ui';
+import { setTvFocus, tvInfoFromJf } from '@/lib/tv-focus';
 import { C, POSTER_W, R } from '@/constants/theme';
 import { useBetterPoster } from '@/lib/better-posters';
 import { useFamilyRatingBadge } from '@/lib/ratings';
@@ -63,6 +64,9 @@ export function JfPosterCard({ item, width = POSTER_W }: { item: JfItem; width?:
         tap();
         openJellyfin(item);
       }}
+      tvFocus="card"
+      // TV : l'accueil affiche en fond le titre sélectionné
+      onFocus={() => setTvFocus(tvInfoFromJf(settings, item))}
       style={({ pressed }) => [{ width, transform: [{ scale: pressed ? 0.96 : 1 }] }]}>
       <View style={[styles.poster, { width, height: Math.round(width * 1.5) }]}>
         {poster ? (

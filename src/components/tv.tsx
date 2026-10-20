@@ -1,5 +1,5 @@
-// Android TV : contour de focus (télécommande) sur tout ce qui est cliquable.
-import { forwardRef, useState } from 'react';
+// Android TV : effet de sélection (télécommande) sur tout ce qui est cliquable.
+import { forwardRef, useRef, useState } from 'react';
 import { Platform, Pressable as RNPressable, type PressableProps, type View } from 'react-native';
 import * as RN from 'react-native';
 
@@ -7,61 +7,93 @@ import { playNav } from '@/lib/tv-ui';
 
 export const IS_TV = Platform.isTV;
 
-// Sélection façon Apple TV : l'élément grandit et passe au premier plan avec une ombre, sans contour blanc
-const FOCUS_SCALE = {
-  transform: [{ scale: 1.08 }],
-  zIndex: 10,
-  elevation: 12,
-  shadowColor: '#000',
-  shadowOpacity: 0.6,
-  shadowRadius: 16,
-  shadowOffset: { width: 0, height: 8 },
-} as const;
+// Sélection façon Nuvio / Apple TV : l'élément grandit en douceur (animation de 180 ms) et passe devant,
+// sans contour. Les cartes (affiches) grandissent un peu plus que les boutons.
+const LAYOUT_KEYS = new Set([
+  'flex', 'flexGrow', 'flexShrink', 'flexBasis', 'width', 'minWidth', 'maxWidth', 'alignSelf',
+  'margin', 'marginTop', 'marginBottom', 'marginLeft', 'marginRight', 'marginHorizontal', 'marginVertical', 'marginStart', 'marginEnd',
+  'position', 'top', 'left', 'right', 'bottom', 'zIndex',
+]);
 
-type Props = PressableProps & { focusRing?: boolean };
+/** Sépare le style : ce qui place l'élément (va sur l'enveloppe animée) et le reste (reste sur le bouton). */
+function splitStyle(style: RN.StyleProp<RN.ViewStyle>) {
+  const flat = (RN.StyleSheet.flatten(style) ?? {}) as Record<string, unknown>;
+  const outer: Record<string, unknown> = {};
+  const inner: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(flat)) (LAYOUT_KEYS.has(k) ? outer : inner)[k] = v;
+  // Le bouton remplit son enveloppe quand celle-ci a une taille imposée (flex, absolu, hauteur)
+  if (outer.flex != null || outer.position === 'absolute' || inner.height != null) inner.flexGrow = 1;
+  if (outer.width != null || outer.flex != null || outer.position === 'absolute') inner.alignSelf = 'stretch';
+  return { outer, inner };
+}
+
+type Props = PressableProps & {
+  /** false : pas d'effet de sélection (l'élément gère lui-même son focus) */
+  focusRing?: boolean;
+  /** « card » : affiche ou vignette (grandit davantage) */
+  tvFocus?: 'lift' | 'card';
+};
 
 /**
  * Pressable qui, sur TV, montre clairement l'élément sélectionné à la télécommande.
  * Sur téléphone, c'est exactement le Pressable de React Native.
  */
 export const FocusPressable = forwardRef<View, Props>(function FocusPressable(
-  { style, onFocus, onBlur, focusRing = true, ...rest },
+  { style, onFocus, onBlur, focusRing = true, tvFocus = 'lift', ...rest },
   ref
 ) {
   const [focused, setFocused] = useState(false);
+  const anim = useRef(new RN.Animated.Value(0)).current;
   if (!IS_TV) return <RNPressable ref={ref} style={style} onFocus={onFocus} onBlur={onBlur} {...rest} />;
   const { children, onPress, ...others } = rest;
+  const go = (to: number) =>
+    RN.Animated.timing(anim, { toValue: to, duration: 180, easing: RN.Easing.out(RN.Easing.cubic), useNativeDriver: true }).start();
+  const max = tvFocus === 'card' ? 1.07 : 1.04;
+  const resolve = (state: { pressed: boolean; focused?: boolean; hovered?: boolean }) =>
+    splitStyle(typeof style === 'function' ? style(state as never) : style);
+  const { outer } = resolve({ pressed: false });
   return (
-    <RNPressable
-      ref={ref}
-      {...others}
-      onPress={
-        onPress
-          ? (e) => {
-              playNav('select');
-              onPress(e);
+    <RN.Animated.View
+      style={[
+        outer,
+        focusRing
+          ? {
+              zIndex: focused ? 10 : (outer.zIndex as number | undefined),
+              transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [1, max] }) }],
+              shadowColor: '#000',
+              shadowOpacity: anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.55] }),
+              shadowRadius: 14,
+              shadowOffset: { width: 0, height: 8 },
+              elevation: focused ? 10 : 0,
             }
-          : undefined
-      }
-      onFocus={(e) => {
-        setFocused(true);
-        playNav('tick');
-        onFocus?.(e);
-      }}
-      onBlur={(e) => {
-        setFocused(false);
-        onBlur?.(e);
-      }}
-      style={(state) => {
-        const base = typeof style === 'function' ? style(state) : style;
-        return [base, focused && focusRing ? FOCUS_SCALE : null];
-      }}>
-      {(state) => (
-        <>
-          {typeof children === 'function' ? children(state) : children}
-        </>
-      )}
-    </RNPressable>
+          : null,
+      ]}>
+      <RNPressable
+        ref={ref}
+        {...others}
+        onPress={
+          onPress
+            ? (e) => {
+                playNav('select');
+                onPress(e);
+              }
+            : undefined
+        }
+        onFocus={(e) => {
+          setFocused(true);
+          if (focusRing) go(1);
+          playNav('tick');
+          onFocus?.(e);
+        }}
+        onBlur={(e) => {
+          setFocused(false);
+          if (focusRing) go(0);
+          onBlur?.(e);
+        }}
+        style={(state) => resolve(state).inner as RN.ViewStyle}>
+        {children as never}
+      </RNPressable>
+    </RN.Animated.View>
   );
 });
 

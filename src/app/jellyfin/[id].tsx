@@ -19,6 +19,7 @@ import {
   ticksToSeconds,
   type JfItem,
 } from '@/lib/jellyfin';
+import { TvBackdropLayer } from '@/components/tv-backdrop';
 import { FamilyRating } from '@/components/family-rating';
 import { ReportProblemButton } from '@/components/report-problem';
 import { useServerRequests } from '@/lib/requests';
@@ -208,7 +209,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
   const isSeries = item.Type === 'Series';
   // Sur TV (paysage), le hero ne dépasse pas l'écran
   // TV : image moins haute (elle remplissait tout l'écran)
-  const heroH = Platform.isTV ? Math.round(screenH * 0.58) : Math.min(Math.round(width * 1.2), Math.round(screenH * 0.85));
+  const heroH = Platform.isTV ? Math.round(screenH * 0.7) : Math.min(Math.round(width * 1.2), Math.round(screenH * 0.85));
   const logo = jfLogo(settings, item);
   const resumeAt = ticksToSeconds(item.UserData?.PlaybackPositionTicks);
   const cast = (item.People ?? []).filter((p) => p.Type === 'Actor').slice(0, 15);
@@ -237,16 +238,28 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}>
         <View style={{ height: heroH }}>
-          <Image source={jfBackdrop(settings, item)} style={StyleSheet.absoluteFill} contentFit="cover" transition={250} />
-          <Fade height={heroH * 0.3} top />
-          <Fade height={heroH * 0.7} />
-          <View style={styles.heroContent}>
+          {Platform.isTV ? (
+            // TV, façon Nuvio : grand fond fondu vers la gauche et le bas, infos alignées à gauche
+            <TvBackdropLayer info={{ key: item.Id, title: item.Name, backdrop: jfBackdrop(settings, item) }} />
+          ) : (
+            <>
+              <Image source={jfBackdrop(settings, item)} style={StyleSheet.absoluteFill} contentFit="cover" transition={250} />
+              <Fade height={heroH * 0.3} top />
+              <Fade height={heroH * 0.7} />
+            </>
+          )}
+          <View style={Platform.isTV ? styles.heroContentTv : styles.heroContent}>
             {logo ? (
-              <Image source={logo} style={{ width: Math.min(width * 0.7, 460), height: 100 }} contentFit="contain" contentPosition="bottom" />
+              <Image
+                source={logo}
+                style={Platform.isTV ? { width: 320, height: 120 } : { width: Math.min(width * 0.7, 460), height: 100 }}
+                contentFit="contain"
+                contentPosition={Platform.isTV ? 'left bottom' : 'bottom'}
+              />
             ) : (
-              <Text style={styles.title}>{item.Name}</Text>
+              <Text style={[styles.title, Platform.isTV && { textAlign: 'left' }]}>{item.Name}</Text>
             )}
-            <View style={styles.pills}>
+            <View style={[styles.pills, Platform.isTV && { justifyContent: 'flex-start' }]}>
               {item.ProductionYear ? <Pill>{String(item.ProductionYear)}</Pill> : null}
               {item.RunTimeTicks && !isSeries ? <Pill icon="time-outline">{formatRuntime(item.RunTimeTicks)}</Pill> : null}
               {item.OfficialRating ? <Pill>{item.OfficialRating}</Pill> : null}
@@ -254,6 +267,11 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
               {isSeries && item.ChildCount ? <Pill>{`${item.ChildCount} saisons`}</Pill> : null}
             </View>
             {item.Genres?.length ? <Text style={styles.genres}>{item.Genres.slice(0, 3).join('  •  ')}</Text> : null}
+            {Platform.isTV && item.Overview ? (
+              <Text style={styles.overviewTv} numberOfLines={4}>
+                {item.Overview}
+              </Text>
+            ) : null}
           </View>
         </View>
 
@@ -313,7 +331,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
             </View>
           ) : null}
 
-          {item.Overview ? <Text style={styles.overview}>{item.Overview}</Text> : null}
+          {item.Overview && !Platform.isTV ? <Text style={styles.overview}>{item.Overview}</Text> : null}
 
           {isSeries && (
             <View>
@@ -455,8 +473,10 @@ export default function JellyfinItemScreen() {
 }
 
 const styles = StyleSheet.create({
-  // TV : colonne centrée et moins large (boutons Lire / Vu moins grands)
-  tvColumn: { width: '100%', maxWidth: 760, alignSelf: 'center' },
+  // TV : colonne alignée à gauche sous les infos (boutons Lire / Vu compacts), comme Nuvio
+  tvColumn: { width: '100%', maxWidth: 680, alignSelf: 'flex-start', paddingLeft: 48 },
+  heroContentTv: { position: 'absolute', left: 48, bottom: 16, width: '46%', alignItems: 'flex-start', gap: 10 },
+  overviewTv: { color: 'rgba(255,255,255,0.75)', fontSize: 15, lineHeight: 22 },
   center: { flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: 24 },
   back: {
     position: 'absolute',
