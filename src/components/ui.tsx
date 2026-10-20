@@ -5,6 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { ReactNode, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
+import { setTvFocus } from '@/lib/tv-focus';
 import { FocusPressable as Pressable } from '@/components/tv';
 
 import { C, POSTER_H, POSTER_W, R } from '@/constants/theme';
@@ -21,6 +22,8 @@ export type PosterItem = {
   /** Identifiants pour l'affiche Better Posters (sinon : poster) */
   ids?: PosterIds;
   subtitle?: string;
+  /** Image large (TV : fond de l'accueil quand l'affiche est sélectionnée) */
+  backdrop?: string;
   badge?: { label: string; color: string; state?: 'available' | 'partial' | 'monitored' | 'missing' | 'pending' } | null;
   onPress: () => void | Promise<void>;
 };
@@ -85,6 +88,8 @@ export function PosterCard({ item, width = POSTER_W }: { item: PosterItem; width
   return (
     <Pressable
       style={({ pressed }) => [{ width, transform: [{ scale: pressed ? 0.96 : 1 }] }]}
+      tvFocus="card"
+      onFocus={() => setTvFocus({ key: item.key, title: item.title, backdrop: item.backdrop ?? item.poster, meta: item.subtitle })}
       onPress={async () => {
         if (busy) return;
         tap();

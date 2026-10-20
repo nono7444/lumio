@@ -2,10 +2,12 @@ import { HomeShortcuts } from '@/components/home-shortcuts';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AnnouncementPopup } from '@/components/announcement';
+import { TvBackdropLayer, TvInfoBlock } from '@/components/tv-backdrop';
+import { tvInfoFromJf, useTvFocus, type TvFocusInfo } from '@/lib/tv-focus';
 import { Hero, heroFromTmdb, HeroTopBar, type HeroItem } from '@/components/hero';
 import { JfRow, openJellyfin, playJellyfin } from '@/components/jf-cards';
 import { isAnime, jf, jfImage, jfLogo, type JfItem } from '@/lib/jellyfin';
@@ -82,6 +84,7 @@ function Trending({ nonce, part }: { nonce: number; part: 'hero' | 'row' }) {
       key: `${type}:${r.id}`,
       title: itemTitle(r),
       poster: tmdbImg(r.poster_path),
+      backdrop: r.backdrop_path ? tmdbImg(r.backdrop_path, 'w1280') : undefined,
       ids: { tmdb: r.id, type },
       subtitle: itemYear(r),
       badge: badge(type, r.id),
@@ -198,6 +201,7 @@ function SeasonTmdbRow({ nonce }: { nonce: number }) {
     key: `movie:${r.id}`,
     title: itemTitle(r),
     poster: tmdbImg(r.poster_path),
+    backdrop: r.backdrop_path ? tmdbImg(r.backdrop_path, 'w1280') : undefined,
     ids: { tmdb: r.id, type: 'movie' },
     subtitle: itemYear(r),
     badge: badge('movie', r.id),
@@ -300,11 +304,65 @@ export default function Home() {
   const withHero = ordered[0]?.kind === 'hero';
   const season = useSeason();
 
+  // ——— TV : accueil façon Nuvio — fond plein écran du titre sélectionné, infos en haut à gauche, rangées dessous ———
+  const { height: screenH } = useWindowDimensions();
+  const [tvInitial, setTvInitial] = useState<TvFocusInfo | null>(null);
+  useEffect(() => {
+    if (!Platform.isTV || !settings.jellyfin) return;
+    jf.recentReleases(settings, { kind: 'both', limit: 8 })
+      .then((items) => {
+        const first = items.find((i) => !isAnime(i) && (i.BackdropImageTags?.length || i.ImageTags?.Primary));
+        if (first) setTvInitial(tvInfoFromJf(settings, first));
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.jellyfin?.token, nonce]);
+  const tvInfo = useTvFocus(tvInitial);
+
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     setNonce((n) => n + 1);
     setTimeout(() => setRefreshing(false), 800);
   }, []);
+
+  if (Platform.isTV)
+    return (
+      <View style={{ flex: 1, backgroundColor: C.bg }}>
+        <TvBackdropLayer info={tvInfo} />
+        <TvInfoBlock info={tvInfo} top={Math.round(screenH * 0.1)} />
+        <ScrollView style={{ flex: 1, marginTop: Math.round(screenH * 0.48) }} contentContainerStyle={{ paddingBottom: 60 }}>
+          {ordered
+            .filter((r) => r.kind !== 'hero')
+            .map((r) => {
+              let el: React.ReactNode = null;
+              switch (r.kind) {
+                case 'season-jf':
+                  el = <SeasonJfRow nonce={nonce} />;
+                  break;
+                case 'season-tmdb':
+                  el = <SeasonTmdbRow nonce={nonce} />;
+                  break;
+                case 'trending':
+                  el = <Trending part="row" nonce={nonce} />;
+                  break;
+                case 'family-top':
+                  el = <FamilyTopRow nonce={nonce} />;
+                  break;
+                case 'jf-reco':
+                  el = <MovieNightRow nonce={nonce} />;
+                  break;
+                case 'catalog':
+                  el = r.addon && r.catalog ? <CatalogRow addon={r.addon} catalog={r.catalog} nonce={nonce} /> : null;
+                  break;
+                default:
+                  el = <JfDynamicRow kind={r.kind as 'continue' | 'nextup' | 'favorites' | 'jf-latest'} view={r.view} nonce={nonce} />;
+              }
+              return <View key={r.id}>{el}</View>;
+            })}
+        </ScrollView>
+        <AnnouncementPopup />
+      </View>
+    );
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
