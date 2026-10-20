@@ -97,7 +97,14 @@ jobs:
         run: cp keystore/lumio-android.keystore android/app/debug.keystore
       - name: Compile l'APK
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
+        run: |
+          ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=armeabi-v7a,arm64-v8a > gradle.log 2>&1 || {
+            # Échec : les erreurs remontent en annotations (journaux GitHub parfois illisibles)
+            grep -E "^e: |error:|What went wrong|> .*(failed|Could not|not found)|Execution failed" -A2 gradle.log | grep -v "^--$" | sort -u | head -30 | while IFS= read -r l; do echo "::error::$l"; done
+            tail -n 60 gradle.log
+            exit 1
+          }
+          tail -n 15 gradle.log
       - name: Renomme l'APK
         run: cp android/app/build/outputs/apk/release/app-release.apk lumio-android.apk
       - uses: actions/upload-artifact@v4
@@ -132,7 +139,14 @@ jobs:
         run: cp keystore/lumio-android.keystore android/app/debug.keystore
       - name: Compile l'APK
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=armeabi-v7a
+        run: |
+          ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=armeabi-v7a > gradle.log 2>&1 || {
+            # Échec : les erreurs remontent en annotations (journaux GitHub parfois illisibles)
+            grep -E "^e: |error:|What went wrong|> .*(failed|Could not|not found)|Execution failed" -A2 gradle.log | grep -v "^--$" | sort -u | head -30 | while IFS= read -r l; do echo "::error::$l"; done
+            tail -n 60 gradle.log
+            exit 1
+          }
+          tail -n 15 gradle.log
       - name: Renomme l'APK
         run: cp android/app/build/outputs/apk/release/app-release.apk lumio-tv.apk
       - uses: actions/upload-artifact@v4
