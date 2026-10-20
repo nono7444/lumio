@@ -77,7 +77,8 @@
         }
       ],
       "@bacons/apple-targets",
-      "expo-background-task"
+      "expo-background-task",
+      "./plugins/with-cast-framework-version.js"
     ],
     "experiments": {
       "typedRoutes": true,

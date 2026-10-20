@@ -21,6 +21,7 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 - Statistiques machine : débit internet en direct (↓ / ↑).
 - TV : tout est plus petit (affiches, bandeau), le bandeau ne déborde plus de l'écran, contour de sélection plus fin ; lecture avec le lecteur Android natif (l'image s'affiche de nouveau).
 - Serveur Lumio 3.14.0 requis.
+- Android : compilation réparée (nouvelle version du module Chromecast de Google incompatible, version précédente figée).
 
 ## 1.0.55 — 19 octobre 2026
 
