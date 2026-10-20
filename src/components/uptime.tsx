@@ -19,7 +19,8 @@ type System = {
   uptime: number | null;
   mem: { total: number; used: number } | null;
   disks: { name: string; free: number | null; total: number | null }[];
-  history: { cpu: number; temp: number | null }[];
+  history: { cpu: number; temp: number | null; rx?: number | null; tx?: number | null }[];
+  net?: { rx: number | null; tx: number | null; host: boolean };
 };
 
 const GREEN = '#4ADE80';
@@ -34,6 +35,9 @@ const ICON: Record<string, keyof typeof Ionicons.glyphMap> = { lumio: 'sparkles'
 const barColor = (v: number) => (v === 1 ? GREEN : v === 0.5 ? '#FFB340' : v === 0 ? '#FF453A' : '#2C2C30');
 const tempColor = (t: number) => (t >= 80 ? '#FF453A' : t >= 65 ? '#FFB340' : GREEN);
 const cpuColor = (c: number) => (c >= 85 ? '#FF453A' : c >= 60 ? '#FFB340' : C.accent);
+
+/** Débit en mégabits par seconde, comme un test de débit */
+const mbps = (bytes?: number | null) => (bytes == null ? '—' : `${((bytes * 8) / 1e6).toLocaleString('fr-FR', { maximumFractionDigits: bytes * 8 < 1e7 ? 1 : 0 })} Mb/s`);
 
 function duration(sec: number) {
   const d = Math.floor(sec / 86400);
@@ -155,7 +159,7 @@ function SystemCard({ sys }: { sys: System }) {
         <Text style={styles.miniName}>Machine</Text>
         <Text style={[styles.mono, { fontSize: 12, color: cpuColor(sys.cpu ?? 0) }]}>{sys.cpu ?? '—'} %</Text>
         {sys.temp != null ? <Text style={[styles.mono, { fontSize: 12, color: tempColor(sys.temp) }]}>{sys.temp} °C</Text> : null}
-        <Text style={[styles.mono, { fontSize: 12, color: C.textDim }]}>{memPct ?? '—'} %</Text>
+        <Text style={[styles.mono, { fontSize: 12, color: C.textDim }]}>↓ {mbps(sys.net?.rx)}</Text>
         {stepper}
       </View>
     );
@@ -196,6 +200,28 @@ function SystemCard({ sys }: { sys: System }) {
             ))}
           </View>
         </>
+      ) : null}
+      {sys.net ? (
+        <View style={{ gap: 6 }}>
+          <View style={styles.row}>
+            <Text style={styles.small}>DÉBIT INTERNET{sys.net.host ? '' : ' (CONTENEUR)'}</Text>
+            <Text style={[styles.mono, { color: C.text }]}>
+              <Text style={{ color: '#64D2FF' }}>↓ {mbps(sys.net.rx)}</Text>   <Text style={{ color: '#FF9F0A' }}>↑ {mbps(sys.net.tx)}</Text>
+            </Text>
+          </View>
+          {(() => {
+            const max = Math.max(1, ...hist.map((h) => Math.max(h.rx ?? 0, h.tx ?? 0)));
+            return (
+              <View style={[styles.spark, { height: level === 2 ? 70 : 34 }]}>
+                {hist.map((h, i) => (
+                  <View key={i} style={{ flex: 1, justifyContent: 'flex-end', height: '100%', gap: 1 }}>
+                    <View style={{ height: `${Math.max(2, ((h.rx ?? 0) / max) * 100)}%`, backgroundColor: '#64D2FF', borderRadius: 2, opacity: 0.85 }} />
+                  </View>
+                ))}
+              </View>
+            );
+          })()}
+        </View>
       ) : null}
       <View style={styles.row}>
         <Text style={styles.faint}>il y a {span * 2} s</Text>

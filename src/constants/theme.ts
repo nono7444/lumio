@@ -21,7 +21,8 @@ export const C = {
 
 export const R = { sm: 8, md: 12, lg: 18, xl: 24 } as const;
 
-export const POSTER_W = 120;
+// TV : affiches plus petites (l'écran fait ~960 × 540 points, tout paraissait trop gros)
+export const POSTER_W = Platform.isTV ? 96 : 120;
 export const POSTER_H = Math.round(POSTER_W * 1.5);
 
 /** Espace à laisser en bas des écrans : la barre d'onglets flotte au-dessus du contenu. */

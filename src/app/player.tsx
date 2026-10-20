@@ -62,7 +62,10 @@ export default function Player() {
   const p = useLocalSearchParams<Params>();
   const { settings } = useSettings();
   const insets = useSafeAreaInsets();
-  const [engine, setEngine] = useState<'mpv' | 'native'>(settings.player ?? 'mpv');
+  const [engine, setEngine] = useState<'mpv' | 'native'>(
+    // TV (Shield…) : le lecteur Android natif décode l'image en matériel ; mpv y donnait le son sans l'image
+    Platform.isTV ? 'native' : (settings.player ?? 'mpv')
+  );
   const [quality, setQuality] = useState(settings.quality || 'original');
   const [qualityOpen, setQualityOpen] = useState(false);
   const [source, setSource] = useState<Source | null>(null);

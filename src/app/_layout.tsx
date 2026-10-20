@@ -15,6 +15,7 @@ import { UpdateBanner } from '@/components/update-banner';
 import { C } from '@/constants/theme';
 import { SettingsProvider, useSettings } from '@/lib/settings';
 import { useSharedTmdbKey } from '@/lib/shared-config';
+import { useAppBadge } from '@/lib/badge';
 import { useWidgetSync } from '@/lib/widget';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -27,6 +28,7 @@ const theme = {
 function Root() {
   const { ready } = useSettings();
   useWidgetSync();
+  useAppBadge();
   useSharedTmdbKey();
   useEffect(() => {
     // L'écran de démarrage natif laisse la place au logo animé, qui reste affiché jusqu'à ce que l'appli soit prête

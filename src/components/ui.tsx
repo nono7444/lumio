@@ -43,15 +43,17 @@ export function StatusBadge({ badge }: { badge: NonNullable<PosterItem['badge']>
   );
 }
 
-/** Pastille « 8,5 » en bas à gauche de l'affiche : moyenne des Notes de la famille (sur 10). */
+/** Pastille « 🥔 8,5 » centrée en bas de l'affiche : moyenne des Notes de la famille (sur 10). */
 export function FamilyStarBadge({ type, tmdbId }: { type?: 'movie' | 'tv'; tmdbId?: number }) {
   const { settings } = useSettings();
   const r = useFamilyRatingBadge(settings, type, tmdbId);
   if (!r) return null;
   return (
-    <View style={styles.stars} accessibilityLabel={`Notes ${r.avg} sur 10`}>
-      <Ionicons name="people" size={10} color="#fff" />
-      <Text style={styles.starsText}>{r.avg.toLocaleString('fr-FR', { maximumFractionDigits: 1 })}</Text>
+    <View style={styles.starsWrap} pointerEvents="none" accessibilityLabel={`Notes ${r.avg} sur 10`}>
+      <View style={styles.stars}>
+        <Image source={require('@/assets/images/chip.png')} style={{ width: 13, height: 13 }} contentFit="contain" />
+        <Text style={styles.starsText}>{r.avg.toLocaleString('fr-FR', { maximumFractionDigits: 1 })}</Text>
+      </View>
     </View>
   );
 }
@@ -345,10 +347,8 @@ export function Fade({ height, top }: { height: number; top?: boolean }) {
 }
 
 const styles = StyleSheet.create({
+  starsWrap: { position: 'absolute', left: 0, right: 0, bottom: 6, alignItems: 'center' },
   stars: {
-    position: 'absolute',
-    left: 6,
-    bottom: 6,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,

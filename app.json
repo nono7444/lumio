@@ -76,7 +76,8 @@
           "expandedController": true
         }
       ],
-      "@bacons/apple-targets"
+      "@bacons/apple-targets",
+      "expo-background-task"
     ],
     "experiments": {
       "typedRoutes": true,

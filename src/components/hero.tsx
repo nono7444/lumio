@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
-import { FlatList, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { FlatList, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 
 import { Button, Fade, tap } from '@/components/ui';
@@ -71,6 +71,9 @@ function Slide({ item, width, height, season }: { item: HeroItem; width: number;
         tap();
         item.onOpen();
       }}
+      // TV : la grande image ne grossit pas au focus (elle débordait de l'écran) ; ce sont Lire / Infos qui se sélectionnent
+      focusable={!Platform.isTV}
+      focusRing={false}
       style={{ width, height }}>
       <Image
         source={item.posterUrl}
@@ -101,8 +104,8 @@ function Slide({ item, width, height, season }: { item: HeroItem; width: number;
           </View>
         )}
         <View style={styles.actions}>
-          <Button title={item.primary.label} icon={item.primary.icon} onPress={item.primary.onPress} style={{ flex: 1 }} />
-          <Button title="Infos" icon="information-circle-outline" variant="glass" onPress={item.onOpen} style={{ flex: 1 }} />
+          <Button title={item.primary.label} icon={item.primary.icon} small={Platform.isTV} onPress={item.primary.onPress} style={{ flex: 1 }} />
+          <Button title="Infos" icon="information-circle-outline" variant="glass" small={Platform.isTV} onPress={item.onOpen} style={{ flex: 1 }} />
         </View>
       </View>
     </Pressable>
@@ -111,7 +114,7 @@ function Slide({ item, width, height, season }: { item: HeroItem; width: number;
 
 export function Hero({ items, season }: { items: HeroItem[]; season?: Season | null }) {
   const { width, height: screenH } = useWindowDimensions();
-  const height = Math.min(Math.round(width * 1.45), Math.round(screenH * 0.72));
+  const height = Platform.isTV ? Math.round(screenH * 0.62) : Math.min(Math.round(width * 1.45), Math.round(screenH * 0.72));
   const [index, setIndex] = useState(0);
   const list = useRef<FlatList<HeroItem>>(null);
   const touching = useRef(false);
@@ -186,7 +189,7 @@ const styles = StyleSheet.create({
   badge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.glass, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
   dot: { width: 7, height: 7, borderRadius: 4 },
   badgeText: { color: C.text, fontSize: 12, fontWeight: '700' },
-  actions: { flexDirection: 'row', gap: 12, alignSelf: 'stretch', marginTop: 8 },
+  actions: { flexDirection: 'row', gap: 12, alignSelf: Platform.isTV ? 'center' : 'stretch', width: Platform.isTV ? 420 : undefined, marginTop: 8 },
   dots: { position: 'absolute', bottom: 10, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 6 },
   pageDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.3)' },
   topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20 },

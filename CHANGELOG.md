@@ -6,6 +6,20 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Notes en chips 🥔 : 10 petites chips à toucher sur une ligne, encadré plus compact ; sur les affiches, la note de la famille est centrée en bas avec une chips.
+- Nouvelle animation de démarrage façon Google : quatre points rebondissent puis deviennent le logo (sans texte).
+- Demande de saisons : grille compacte, toutes les saisons visibles sans défiler.
+- Demandes de séries : saisons repliées sur une ligne, − / + pour les afficher.
+- Widget iOS sur l'écran verrouillé (en ligne, rond et rectangle).
+- Pastille sur l'icône de Lumio (messages non lus, et pour l'admin demandes à valider + signalements) ; notification d'un nouveau message même appli fermée (iPhone et Android, au rythme permis par le système).
+- Profil → Notifications : s'abonner dans ntfy pour être prévenu des messages, des demandes et des titres disponibles ; l'admin reçoit aussi les téléchargements lancés / importés.
+- Profil (admin) → Message sur l'accueil : un message épinglé qui s'ouvre en pop-up chez toute la famille, masqué une fois lu.
+- Bibliothèque : de vraies collections (sagas) rangées par Lumio, à la place des collections Jellyfin.
+- Accueil : le grand bandeau ne montre plus que les nouveaux films, séries et programmes enfants (sans les animés).
+- Statistiques machine : débit internet en direct (↓ / ↑).
+- TV : tout est plus petit (affiches, bandeau), le bandeau ne déborde plus de l'écran, contour de sélection plus fin ; lecture avec le lecteur Android natif (l'image s'affiche de nouveau).
+- Serveur Lumio 3.14.0 requis.
+
 ## 1.0.55 — 19 octobre 2026
 
 - Séries ouvertes depuis la recherche : la fiche affiche les saisons et les épisodes, pour lancer celui qu'on veut (comme dans la Bibliothèque).

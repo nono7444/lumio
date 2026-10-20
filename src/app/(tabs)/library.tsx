@@ -12,6 +12,7 @@ import { Button, ScreenTitle, tap } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { libraryRowDefs, orderLibraryRows } from '@/lib/home-layout';
 import { jf, jfImage, jfPoster, JellyfinError, type JfItem } from '@/lib/jellyfin';
+import { useLumioCollections } from '@/lib/collections';
 import { useSettings } from '@/lib/settings';
 
 type Lib = { view: JfItem; count: number | null; posters: string[] };
@@ -114,6 +115,60 @@ function LibraryCard({ lib, width }: { lib: Lib; width: number }) {
   );
 }
 
+/** Carte « Collections » (sagas rangées par Lumio). */
+function CollectionsCard({ data, width }: { data: { building: boolean; collections: { poster: string | null }[] }; width: number }) {
+  const height = Math.round(width * 0.62);
+  const pw = Math.round(height * 0.62);
+  const posters = data.collections.map((c) => c.poster).filter((p): p is string => Boolean(p)).slice(0, 3);
+  return (
+    <Pressable
+      onPress={() => {
+        tap();
+        router.push('/collections');
+      }}
+      style={({ pressed }) => [styles.card, { width, height, transform: [{ scale: pressed ? 0.98 : 1 }] }]}>
+      <LinearGradient colors={TINT.boxsets} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
+      <View style={[StyleSheet.absoluteFill, { alignItems: 'flex-end', justifyContent: 'center', paddingRight: 18 }]}>
+        {posters.map((p, i, arr) => (
+          <Image
+            key={p}
+            source={p}
+            contentFit="cover"
+            style={[
+              styles.poster,
+              {
+                width: pw,
+                height: Math.round(pw * 1.5),
+                position: 'absolute',
+                right: 18 + (arr.length - 1 - i) * pw * 0.42,
+                transform: [{ rotate: `${(i - (arr.length - 1) / 2) * 7}deg` }, { scale: i === arr.length - 1 ? 1 : 0.9 }],
+                zIndex: i,
+              },
+            ]}
+          />
+        ))}
+      </View>
+      <LinearGradient colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.85)']} start={{ x: 0, y: 0.25 }} end={{ x: 0, y: 1 }} style={StyleSheet.absoluteFill} />
+      <View style={styles.cardText}>
+        <View style={styles.iconWrap}>
+          <Ionicons name="albums" size={18} color="#fff" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.name}>Collections</Text>
+          <Text style={styles.count}>
+            {data.collections.length
+              ? `${data.collections.length} saga${data.collections.length > 1 ? 's' : ''}`
+              : data.building
+                ? 'Rangement en cours…'
+                : 'Aucune saga'}
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
+      </View>
+    </Pressable>
+  );
+}
+
 export default function Library() {
   const { settings, update } = useSettings();
   const insets = useSafeAreaInsets();
@@ -161,11 +216,14 @@ export default function Library() {
     }, [load])
   );
 
+  // Collections propres de Lumio : remplacent les collections Jellyfin (souvent en vrac)
+  const lumioColl = useLumioCollections(settings);
+
   // Ordre et visibilité choisis dans Personnaliser
   const ordered = orderLibraryRows(
     libraryRowDefs(libs.map((l) => l.view)).map((d) => ({ ...d, lib: libs.find((l) => `lib:${l.view.Id}` === d.id)! })),
     settings.libraryLayout
-  ).filter((r) => !r.hidden && r.lib);
+  ).filter((r) => !r.hidden && r.lib && !(lumioColl && r.lib.view.CollectionType === 'boxsets'));
 
   // 2 colonnes sur iPad / TV, 1 sur téléphone
   const cols = width >= 700 ? 2 : 1;
@@ -208,6 +266,7 @@ export default function Library() {
           {ordered.map((r) => (
             <LibraryCard key={r.id} lib={r.lib} width={cardW} />
           ))}
+          {lumioColl ? <CollectionsCard data={lumioColl} width={cardW} /> : null}
           {!ordered.length ? <Text style={{ color: C.textDim, textAlign: 'center', marginTop: 40, width: '100%' }}>Aucune bibliothèque.</Text> : null}
         </View>
       )}

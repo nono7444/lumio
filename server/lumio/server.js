@@ -24,7 +24,7 @@ const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
 const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.12.2';
+const VERSION = '3.14.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -116,21 +116,29 @@ if (!config.hookSecret) {
   config.ntfyTopic = config.ntfyTopic || `lumio-${crypto.randomBytes(8).toString('hex')}`;
   writeJson(CONFIG_FILE, config);
 }
+// Sujet « famille » : messages du chat, nouvelles demandes, titres disponibles (chacun s'y abonne dans ntfy)
+if (!config.familyTopic) {
+  config.familyTopic = `lumio-famille-${crypto.randomBytes(8).toString('hex')}`;
+  writeJson(CONFIG_FILE, config);
+}
 const NTFY_SERVER = (process.env.NTFY_SERVER || 'https://ntfy.sh').replace(/\/+$/, '');
 const ntfyTopic = () => process.env.NTFY_TOPIC || config.ntfyTopic;
 const publicUrl = () => (process.env.PUBLIC_URL || config.publicUrl || '').replace(/\/+$/, '');
 const sign = (id, action) => crypto.createHmac('sha256', config.hookSecret).update(`${action}:${id}`).digest('hex').slice(0, 32);
 
-async function notify({ title, message, tags, image, click, actions }) {
-  if (config.ntfyEnabled === false || !ntfyTopic()) return;
+async function notify({ title, message, tags, image, click, actions, topic }) {
+  const to = topic || ntfyTopic();
+  if (config.ntfyEnabled === false || !to) return;
   try {
     await fetch(NTFY_SERVER, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(process.env.NTFY_TOKEN ? { Authorization: `Bearer ${process.env.NTFY_TOKEN}` } : {}) },
-      body: JSON.stringify({ topic: ntfyTopic(), title, message, tags, attach: image, click: click || 'lumio://activity', actions }),
+      body: JSON.stringify({ topic: to, title, message, tags, attach: image, click: click || 'lumio://activity', actions }),
     });
   } catch {}
 }
+/** Notification pour toute la famille (sujet partagé). */
+const notifyFamily = (o) => notify({ ...o, topic: config.familyTopic });
 
 function notifyRequest(r, what) {
   const base = publicUrl();
@@ -498,6 +506,7 @@ function refreshCompleted(lib) {
       r.completedAt = new Date().toISOString();
       changed = true;
       notify({ title: 'Disponible dans Jellyfin', message: `${r.title} · demandé par ${r.requestedBy.name}`, tags: ['tada'], image: r.poster });
+      notifyFamily({ title: '🎉 Disponible', message: `${r.title} est prêt à regarder`, tags: ['tada'], image: r.poster, click: 'lumio://' });
     }
   }
   if (changed) saveRequests();
@@ -617,7 +626,7 @@ function refreshDownloads(kinds = ['radarr', 'sonarr'], minGap = 10_000) {
 
 // Toutes les 20 s : un téléchargement fini attend d'être importé → on lance l'import tout de suite ;
 // un élément vient de quitter la file (importé) → Jellyfin rescanne sans attendre son propre passage.
-const queueSeen = { radarr: new Set(), sonarr: new Set() };
+const queueSeen = { radarr: null, sonarr: null }; // Map id → titre (null avant le premier passage)
 let jfRefreshAt = 0;
 async function fastImportTick() {
   let imported = false;
@@ -630,9 +639,18 @@ async function fastImportTick() {
       continue;
     }
     const recs = q.records || [];
-    const ids = new Set(recs.map((r) => r.downloadId || r.id));
-    for (const id of queueSeen[kind]) if (!ids.has(id)) imported = true;
-    queueSeen[kind] = ids;
+    const now = new Map(recs.map((r) => [r.downloadId || r.id, r.title || 'Téléchargement']));
+    const before = queueSeen[kind];
+    if (before) {
+      for (const [id, t] of now)
+        if (!before.has(id)) notify({ title: `⬇️ Téléchargement lancé · ${label(kind)}`, message: t, tags: ['arrow_down'], click: 'lumio://activity' });
+      for (const [id, t] of before)
+        if (!now.has(id)) {
+          imported = true;
+          notify({ title: `✅ Importé · ${label(kind)}`, message: t, tags: ['white_check_mark'], click: 'lumio://activity' });
+        }
+    }
+    queueSeen[kind] = now;
     const waiting = recs.some(
       (r) => r.trackedDownloadState === 'importPending' || r.status === 'completed' || (r.size > 0 && r.sizeleft === 0 && r.trackedDownloadState !== 'importing')
     );
@@ -691,6 +709,98 @@ async function recheckRequest(r) {
   if (st && st.status !== 'completed') return { found: false, pending: true, message: `${label(kind)} cherche encore, regarde dans quelques minutes.` };
   return { found: false, message: `Toujours rien de disponible. ${label(kind)} continue de chercher tout seul régulièrement.` };
 }
+
+// ——— Collections : regroupe les films de Jellyfin par saga TMDB (« belongs_to_collection »), au moins 2 films ———
+const COLLECTIONS_FILE = path.join(DATA_DIR, 'collections.json');
+const collCache = readJson(COLLECTIONS_FILE, { movies: {}, sets: {} }); // movies: tmdbId → { c: id|null, at }, sets: id → infos
+let collectionsList = null;
+let collectionsAt = 0;
+let collectionsBuilding = false;
+const tmdbKey = () => process.env.TMDB_KEY || config.tmdbKey || null;
+async function tmdbGet(p2, params = {}) {
+  const key = tmdbKey();
+  if (!key) throw new Error('Clé TMDB manquante');
+  const v4 = key.length > 40;
+  const qs = new URLSearchParams({ language: 'fr-FR', ...params });
+  if (!v4) qs.set('api_key', key);
+  const r = await fetch(`https://api.themoviedb.org/3${p2}?${qs}`, { headers: v4 ? { Authorization: `Bearer ${key}` } : {} });
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`TMDB HTTP ${r.status}`);
+  return r.json();
+}
+async function buildCollections() {
+  if (collectionsBuilding || (collectionsList && Date.now() - collectionsAt < 6 * 3600_000)) return;
+  const token = process.env.JELLYFIN_API_KEY || jfIndexToken;
+  if (!token || !tmdbKey()) return;
+  collectionsBuilding = true;
+  try {
+    const qs = new URLSearchParams({ Recursive: 'true', IncludeItemTypes: 'Movie', Fields: 'ProviderIds,ProductionYear', EnableImages: 'false', EnableUserData: 'false' });
+    const r = await fetch(`${JELLYFIN_URL}/Items?${qs}`, { headers: jfHeaders(token) });
+    if (!r.ok) throw new Error(`Jellyfin HTTP ${r.status}`);
+    const movies = ((await r.json()).Items || []).filter((m) => m.ProviderIds && m.ProviderIds.Tmdb);
+    // Saga de chaque film (en cache ; on revérifie les films « sans saga » tous les 30 jours)
+    const todo = movies.filter((m) => {
+      const c = collCache.movies[m.ProviderIds.Tmdb];
+      return !c || (c.c == null && Date.now() - c.at > 30 * 86400_000);
+    });
+    for (let i = 0; i < todo.length; i += 8) {
+      await Promise.all(
+        todo.slice(i, i + 8).map(async (m) => {
+          const d = await tmdbGet(`/movie/${m.ProviderIds.Tmdb}`).catch(() => undefined);
+          if (d === undefined) return;
+          const b = d && d.belongs_to_collection;
+          collCache.movies[m.ProviderIds.Tmdb] = { c: b ? b.id : null, at: Date.now() };
+        })
+      );
+      if (i % 80 === 0) writeJson(COLLECTIONS_FILE, collCache);
+    }
+    const groups = new Map();
+    for (const m of movies) {
+      const c = (collCache.movies[m.ProviderIds.Tmdb] || {}).c;
+      if (!c) continue;
+      if (!groups.has(c)) groups.set(c, []);
+      groups.get(c).push(m);
+    }
+    const out = [];
+    for (const [id, list] of groups) {
+      if (list.length < 2) continue;
+      let set = collCache.sets[id];
+      if (!set || Date.now() - set.at > 14 * 86400_000) {
+        const d = await tmdbGet(`/collection/${id}`).catch(() => null);
+        if (d) {
+          set = {
+            name: String(d.name || '').replace(/\s*[-–]\s*(Saga|Collection)$/i, '').replace(/^(Saga|Collection)\s+/i, '') || d.name,
+            overview: d.overview || '',
+            poster: d.poster_path ? `https://image.tmdb.org/t/p/w500${d.poster_path}` : null,
+            backdrop: d.backdrop_path ? `https://image.tmdb.org/t/p/w1280${d.backdrop_path}` : null,
+            total: (d.parts || []).length,
+            at: Date.now(),
+          };
+          collCache.sets[id] = set;
+        }
+      }
+      if (!set) continue;
+      out.push({
+        id,
+        name: set.name,
+        overview: set.overview,
+        poster: set.poster,
+        backdrop: set.backdrop,
+        total: set.total,
+        items: list
+          .map((m) => ({ jfId: m.Id, tmdbId: Number(m.ProviderIds.Tmdb), title: m.Name, year: m.ProductionYear || null }))
+          .sort((a, b) => (a.year || 0) - (b.year || 0)),
+      });
+    }
+    out.sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+    collectionsList = out;
+    collectionsAt = Date.now();
+    writeJson(COLLECTIONS_FILE, collCache);
+  } finally {
+    collectionsBuilding = false;
+  }
+}
+setTimeout(() => buildCollections().catch(() => {}), 60_000);
 
 // ——— File de téléchargement ———
 async function queue() {
@@ -847,10 +957,43 @@ function readMem() {
     return null;
   }
 }
+// Débit internet : octets reçus / envoyés par seconde sur les cartes réseau de la machine
+// (pour voir celles de l'hôte et pas seulement du conteneur, monter « /proc:/host/proc:ro »)
+const NET_DEV = ['/host/proc/1/net/dev', '/proc/net/dev'].find((f) => {
+  try {
+    fs.accessSync(f);
+    return true;
+  } catch {
+    return false;
+  }
+});
+let netPrev = null;
+function readNet() {
+  try {
+    let rx = 0;
+    let tx = 0;
+    for (const line of fs.readFileSync(NET_DEV, 'utf8').split('\n').slice(2)) {
+      const [name, rest] = line.split(':');
+      if (!rest) continue;
+      const n = name.trim();
+      if (/^(lo|docker|veth|br-|virbr|tun|wg)/.test(n)) continue;
+      const f = rest.trim().split(/\s+/).map(Number);
+      rx += f[0];
+      tx += f[8];
+    }
+    const t = Date.now();
+    const out = netPrev ? { rx: Math.max(0, Math.round(((rx - netPrev.rx) * 1000) / (t - netPrev.t))), tx: Math.max(0, Math.round(((tx - netPrev.tx) * 1000) / (t - netPrev.t))) } : null;
+    netPrev = { rx, tx, t };
+    return out;
+  } catch {
+    return null;
+  }
+}
 function sampleSystem() {
   const cpu = readCpu();
   if (cpu == null) return;
-  const s = { t: Date.now(), cpu, temp: readTemp() };
+  const net = readNet();
+  const s = { t: Date.now(), cpu, temp: readTemp(), rx: net ? net.rx : null, tx: net ? net.tx : null };
   sysHistory.push(s);
   if (sysHistory.length > 90) sysHistory.shift();
 }
@@ -915,6 +1058,14 @@ function postMessage(user, text, media, kind) {
   messages.push(msg);
   if (messages.length > MAX_MESSAGES) messages = messages.slice(-MAX_MESSAGES);
   saveMessages();
+  if (!kind && user.id !== 'lumio')
+    notifyFamily({
+      title: `💬 ${user.name}`,
+      message: text ? String(text).slice(0, 300) : media ? `Propose « ${media.title} »` : 'Nouveau message',
+      tags: ['speech_balloon'],
+      image: media && media.poster,
+      click: 'lumio://chat',
+    });
   return msg;
 }
 
@@ -1104,6 +1255,7 @@ async function downloadTo(url, dest, job) {
 }
 
 async function runDownload(job) {
+  notify({ title: '⬇️ Téléchargement AllDebrid lancé', message: job.name || job.link.slice(0, 120), tags: ['arrow_down'], click: 'lumio://downloads' });
   try {
     const { full } = safePath(job.root, job.folder);
     let files;
@@ -1320,6 +1472,7 @@ async function createRequest(user, b) {
   const what = type === 'tv' ? ` (${seasons.length > 1 ? `${seasons.length} saisons` : `saison ${seasons[0]}`})` : '';
   // Plus d'annonce dans le chat : notification push pour l'admin (sauf pour ses propres demandes)
   if (!user.admin || r.status === RequestStatus.FAILED) notifyRequest(r, what);
+  notifyFamily({ title: `📥 ${user.name} a demandé`, message: `${r.title}${r.year ? ` (${r.year})` : ''}${what}`, tags: ['inbox_tray'], image: r.poster, click: 'lumio://activity' });
   return r;
 }
 
@@ -1753,6 +1906,61 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
       return send(res, 200, { ...f, profiles: pr ? pr.profiles : [], defaultProfile: pr ? pr.default : null, lockedProfile: pr ? pr.locked : null });
     }
 
+    // ——— Message épinglé sur l'accueil (écrit par l'admin) ———
+    if (p === '/api/announcement') {
+      if (req.method === 'GET') return send(res, 200, { announcement: config.announcement || null });
+      requireAdmin(user);
+      if (req.method === 'DELETE') {
+        config.announcement = null;
+        saveConfig();
+        return send(res, 200, { announcement: null });
+      }
+      if (req.method === 'PUT') {
+        const b = await readBody(req);
+        const text = String(b.text || '').trim().slice(0, 2000);
+        if (!text) return send(res, 400, { error: 'Message vide' });
+        config.announcement = {
+          id: crypto.randomBytes(6).toString('hex'),
+          title: String(b.title || '').trim().slice(0, 120) || 'Message de la maison',
+          text,
+          kind: ['update', 'info', 'warning'].includes(b.kind) ? b.kind : 'info',
+          by: user.name,
+          at: new Date().toISOString(),
+        };
+        saveConfig();
+        if (b.notify !== false) notifyFamily({ title: `📌 ${config.announcement.title}`, message: text.slice(0, 300), tags: ['pushpin'], click: 'lumio://' });
+        return send(res, 200, { announcement: config.announcement });
+      }
+    }
+
+    // ——— Pastille sur l'icône de l'appli : messages non lus, et pour l'admin demandes à valider + signalements ———
+    if (req.method === 'GET' && p === '/api/badge') {
+      const after = String(q.get('after') || '');
+      const unread = chatMessages().filter((m) => m.userId !== user.id && (!after || m.createdAt > after));
+      const pending = user.admin ? requests.filter((r) => r.status === RequestStatus.PENDING).length : 0;
+      const problems = user.admin ? ideas.filter((i) => i.kind === 'bug' && i.status === 'new').length : 0;
+      const last = unread[unread.length - 1];
+      return send(res, 200, {
+        unread: unread.length,
+        pending,
+        problems,
+        total: unread.length + pending + problems,
+        last: last ? { id: last.id, from: last.userName, text: String(last.text || '').slice(0, 200), at: last.createdAt } : null,
+      });
+    }
+
+    // ——— Abonnement aux notifications de la famille (ntfy) ———
+    if (req.method === 'GET' && p === '/api/notify/family') {
+      return send(res, 200, { server: NTFY_SERVER, topic: config.familyTopic, enabled: config.ntfyEnabled !== false, adminTopic: user.admin ? ntfyTopic() : undefined });
+    }
+
+    // ——— Collections propres (sagas TMDB des films présents dans Jellyfin) ———
+    if (req.method === 'GET' && p === '/api/collections') {
+      if (q.get('refresh') === '1' && user.admin) collectionsAt = 0;
+      buildCollections().catch((e) => console.log('Collections :', e.message));
+      return send(res, 200, { building: collectionsBuilding, collections: collectionsList || [] });
+    }
+
     if (req.method === 'GET' && p === '/api/queue') {
       refreshDownloads();
       return send(res, 200, await queue());
@@ -1871,7 +2079,8 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
         uptime: up,
         mem: readMem(),
         disks: await Promise.all(disks().map(diskInfo)),
-        history: sysHistory.map((x) => ({ cpu: x.cpu, temp: x.temp })),
+        history: sysHistory.map((x) => ({ cpu: x.cpu, temp: x.temp, rx: x.rx, tx: x.tx })),
+        net: { rx: last.rx ?? null, tx: last.tx ?? null, host: NET_DEV === '/host/proc/1/net/dev' },
       });
     }
 

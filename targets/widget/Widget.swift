@@ -243,11 +243,58 @@ struct LumioWidgetView: View {
       switch family {
       case .systemSmall: small(list, allOk)
       case .systemLarge: large(list, allOk)
+      case .accessoryInline: inline(list, allOk)
+      case .accessoryCircular: circular(list, allOk)
+      case .accessoryRectangular: rectangular(list, allOk)
       default: medium(list, allOk)
       }
     }
     .widgetURL(URL(string: "lumio://settings"))
-    .modifier(WidgetBackground())
+    .modifier(WidgetBackground(lockScreen: [.accessoryInline, .accessoryCircular, .accessoryRectangular].contains(family)))
+  }
+
+  // ——— Écran verrouillé ———
+
+  /// Une ligne au-dessus de l'heure : « Lumio · tout est en ligne » ou le service en panne
+  func inline(_ list: [Svc], _ allOk: Bool) -> some View {
+    let down = list.filter { !($0.state?.ok ?? false) }.map { $0.name }
+    return Label(allOk ? "Lumio · tout est en ligne" : "\(down.joined(separator: ", ")) hors ligne", systemImage: allOk ? "checkmark.circle" : "exclamationmark.triangle")
+  }
+
+  /// Rond : services en ligne sur le total
+  func circular(_ list: [Svc], _ allOk: Bool) -> some View {
+    let up = list.filter { $0.state?.ok ?? false }.count
+    return ZStack {
+      AccessoryWidgetBackground()
+      VStack(spacing: 1) {
+        Image(systemName: allOk ? "checkmark" : "exclamationmark.triangle.fill").font(.system(size: 13, weight: .bold))
+        Text("\(up)/\(list.count)").font(.system(size: 13, weight: .heavy).monospacedDigit())
+      }
+    }
+  }
+
+  /// Rectangle : un point par service, processeur et chaleur
+  func rectangular(_ list: [Svc], _ allOk: Bool) -> some View {
+    VStack(alignment: .leading, spacing: 2) {
+      HStack(spacing: 4) {
+        Image(systemName: allOk ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+        Text(allOk ? "Lumio en ligne" : "Lumio : panne").font(.system(size: 13, weight: .bold))
+      }
+      HStack(spacing: 6) {
+        ForEach(list, id: \.name) { s in
+          HStack(spacing: 2) {
+            Image(systemName: (s.state?.ok ?? false) ? "circle.fill" : "xmark.circle")
+              .font(.system(size: 7, weight: .bold))
+            Text(String(s.name.prefix(3))).font(.system(size: 11, weight: .semibold))
+          }
+        }
+      }
+      if let m = entry.status?.machine {
+        Text("\(m.cpu.map { "\(Int($0)) %" } ?? "—") CPU · \(m.temp.map { "\(Int($0)) °C" } ?? "—")")
+          .font(.system(size: 11).monospacedDigit())
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   // Petit : état + % par service, machine en bas
@@ -360,9 +407,17 @@ private struct Gauge2: View {
 
 /// Fond du widget (API différente avant / après iOS 17).
 private struct WidgetBackground: ViewModifier {
+  var lockScreen = false
   func body(content: Content) -> some View {
     let bg = LinearGradient(colors: [Color(red: 0.05, green: 0.05, blue: 0.08), Color(red: 0.02, green: 0.02, blue: 0.04)], startPoint: .top, endPoint: .bottom)
-    if #available(iOS 17.0, *) {
+    if lockScreen {
+      // Écran verrouillé : iOS dessine lui-même le fond
+      if #available(iOS 17.0, *) {
+        content.containerBackground(for: .widget) { Color.clear }
+      } else {
+        content
+      }
+    } else if #available(iOS 17.0, *) {
       content.containerBackground(for: .widget) { bg }
     } else {
       content.padding().background(bg)
@@ -380,6 +435,6 @@ struct LumioWidget: Widget {
     }
     .configurationDisplayName("Serveurs Lumio")
     .description("Disponibilité sur 24 h de Jellyfin, Radarr, Sonarr et Lumio, et la machine en direct.")
-    .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
+    .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .accessoryInline, .accessoryCircular, .accessoryRectangular])
   }
 }

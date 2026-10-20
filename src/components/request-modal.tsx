@@ -139,43 +139,41 @@ export function RequestModal({
                   trackColor={{ true: C.accent, false: C.border }}
                 />
                 <Text style={[styles.cell, { flex: 1, fontWeight: '800' }]}>Toutes les saisons</Text>
-                <Text style={[styles.cellDim, { width: 80, textAlign: 'right' }]}>Épisodes</Text>
+                <Text style={[styles.cellDim, { textAlign: 'right' }]}>{selected.size ? `${selected.size} choisie${selected.size > 1 ? 's' : ''}` : ''}</Text>
               </Pressable>
-              {seasons.map((s) => {
-                const st = statusOf(s.season_number);
-                const can = st === MediaStatus.UNKNOWN;
-                const lab = mediaStatusLabel(st);
-                return (
-                  <Pressable
-                    key={s.season_number}
-                    disabled={!can}
-                    onPress={() => {
-                      tap();
-                      const next = new Set(selected);
-                      if (next.has(s.season_number)) next.delete(s.season_number);
-                      else next.add(s.season_number);
-                      setSelected(next);
-                    }}
-                    style={styles.seasonRow}>
-                    <Switch
-                      value={can ? selected.has(s.season_number) : true}
+              {/* Saisons en grille compacte : toutes visibles d'un coup */}
+              <View style={styles.grid}>
+                {seasons.map((s) => {
+                  const st = statusOf(s.season_number);
+                  const can = st === MediaStatus.UNKNOWN;
+                  const lab = mediaStatusLabel(st);
+                  const on = can && selected.has(s.season_number);
+                  return (
+                    <Pressable
+                      key={s.season_number}
                       disabled={!can}
-                      onValueChange={(v) => {
+                      onPress={() => {
+                        tap();
                         const next = new Set(selected);
-                        if (v) next.add(s.season_number);
-                        else next.delete(s.season_number);
+                        if (next.has(s.season_number)) next.delete(s.season_number);
+                        else next.add(s.season_number);
                         setSelected(next);
                       }}
-                      trackColor={{ true: can ? C.accent : (lab?.color ?? C.border), false: C.border }}
-                    />
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.cell}>{s.name && !/^saison \d+$/i.test(s.name) ? s.name : `Saison ${s.season_number}`}</Text>
-                      {lab ? <Text style={[styles.cellDim, { color: lab.color }]}>{lab.label}</Text> : null}
-                    </View>
-                    <Text style={[styles.cellDim, { width: 80, textAlign: 'right' }]}>{s.episode_count}</Text>
-                  </Pressable>
-                );
-              })}
+                      style={[
+                        styles.tile,
+                        on && { backgroundColor: C.accent, borderColor: C.accent },
+                        !can && { borderColor: lab?.color ?? C.border, opacity: 0.75 },
+                      ]}>
+                      <Text style={[styles.tileTitle, on && { color: '#fff' }, !can && { color: lab?.color ?? C.textDim }]}>
+                        S{s.season_number}
+                      </Text>
+                      <Text style={[styles.tileSub, on && { color: 'rgba(255,255,255,0.85)' }]} numberOfLines={1}>
+                        {!can && lab ? lab.label : `${s.episode_count} ép.`}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
             </View>
           )}
 
@@ -305,6 +303,18 @@ const styles = StyleSheet.create({
     borderBottomColor: C.border,
   },
   cell: { color: C.text, fontSize: 15, fontWeight: '600' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, padding: 8 },
+  tile: {
+    width: '23.5%',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.border,
+    paddingVertical: 7,
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  tileTitle: { color: C.text, fontSize: 15, fontWeight: '800' },
+  tileSub: { color: C.textDim, fontSize: 10, marginTop: 1 },
   cellDim: { color: C.textDim, fontSize: 12, marginTop: 1 },
   note: {
     flexDirection: 'row',

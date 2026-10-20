@@ -18,6 +18,8 @@ export type JfItem = {
   CommunityRating?: number;
   RunTimeTicks?: number;
   Genres?: string[];
+  Tags?: string[];
+  Path?: string;
   SeriesId?: string;
   SeriesName?: string;
   SeasonId?: string;
@@ -187,7 +189,7 @@ export async function logout(s: Settings) {
 
 // ——— Bibliothèque ———
 
-const FIELDS = 'PrimaryImageAspectRatio,ProductionYear,Overview,Genres,ProviderIds,CommunityRating,OfficialRating,ChildCount';
+const FIELDS = 'PrimaryImageAspectRatio,ProductionYear,Overview,Genres,Tags,Path,ProviderIds,CommunityRating,OfficialRating,ChildCount';
 
 function api(s: Settings) {
   const j = s.jellyfin;
@@ -486,6 +488,12 @@ export function jfImage(
   if (opts.maxWidth) q.set('maxWidth', String(Math.min(3840, Math.round(opts.maxWidth * k))));
   return `${s.jellyfin.url}/Items/${itemId}/Images/${type}?${q}`;
 }
+
+/** Animé japonais (dossier « Animés », genre ou tag « Anime ») — les dessins animés pour enfants ne comptent pas. */
+export const isAnime = (i: JfItem) =>
+  /[\\/]anim[eé]s?([\\/]|$)/i.test(i.Path ?? '') ||
+  (i.Genres ?? []).some((g) => /^anim[eé]$/i.test(g)) ||
+  (i.Tags ?? []).some((t) => /^anim[eé]$/i.test(t));
 
 /** Affiche d'un élément (pour un épisode : l'affiche de la série). */
 export function jfPoster(s: Settings, i: JfItem, maxHeight = 450) {

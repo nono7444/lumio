@@ -5,9 +5,10 @@ import { StatusBar } from 'expo-status-bar';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AnnouncementPopup } from '@/components/announcement';
 import { Hero, heroFromTmdb, HeroTopBar, type HeroItem } from '@/components/hero';
 import { JfRow, openJellyfin, playJellyfin } from '@/components/jf-cards';
-import { jf, jfImage, jfLogo, type JfItem } from '@/lib/jellyfin';
+import { isAnime, jf, jfImage, jfLogo, type JfItem } from '@/lib/jellyfin';
 import { useSeason } from '@/lib/seasons';
 
 import { PosterItem, Row } from '@/components/ui';
@@ -99,10 +100,11 @@ function JfHero({ nonce }: { nonce: number }) {
   useEffect(() => {
     let alive = true;
     // Uniquement les sorties récentes (année en cours et suivantes), dans l'ordre d'ajout
-    jf.recentReleases(settings, { kind: 'both', limit: 14 })
+    jf.recentReleases(settings, { kind: 'both', limit: 24 })
       .then((Items) => {
         if (!alive) return;
-        const withArt = Items.filter((i) => i.ImageTags?.Primary).slice(0, 7);
+        // Nouveautés films, séries et enfants : sans les animés
+        const withArt = Items.filter((i) => i.ImageTags?.Primary && !isAnime(i)).slice(0, 7);
         setItems(
           withArt.map((i) => {
             const tmdbId = i.ProviderIds?.Tmdb ? Number(i.ProviderIds.Tmdb) : undefined;
@@ -363,6 +365,8 @@ export default function Home() {
       <View style={[styles.top, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
         <HeroTopBar title="Lumio" season={season} right={<HomeShortcuts onCustomize={() => router.push('/customize')} />} />
       </View>
+      {/* Message épinglé par l'admin, tant qu'il n'a pas été lu */}
+      <AnnouncementPopup />
     </View>
   );
 }

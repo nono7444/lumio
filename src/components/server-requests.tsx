@@ -43,6 +43,41 @@ function Badge({ label, color }: { label: string; color: string }) {
   );
 }
 
+/** Saisons d'une demande : repliées sur une ligne (− / + pour les afficher toutes). */
+function SeasonChips({ r }: { r: Req }) {
+  const seasons = r.seasons ?? [];
+  const [open, setOpen] = useState(seasons.length <= 4);
+  const avail = seasons.filter((n) => r.seasonStatuses.find((x) => x.seasonNumber === n)?.status === 5).length;
+  const toggle = (
+    <Pressable onPress={() => setOpen((o) => !o)} hitSlop={8} style={styles.seasonToggle} accessibilityLabel={open ? 'Réduire' : 'Voir les saisons'}>
+      <Ionicons name={open ? 'remove' : 'add'} size={14} color={C.text} />
+    </Pressable>
+  );
+  if (!open)
+    return (
+      <View style={[styles.seasons, { alignItems: 'center' }]}>
+        <Text style={styles.meta}>
+          {seasons.length} saison{seasons.length > 1 ? 's' : ''} (S{Math.min(...seasons)}–S{Math.max(...seasons)}){avail ? ` · ${avail} dispo` : ''}
+        </Text>
+        {toggle}
+      </View>
+    );
+  return (
+    <View style={[styles.seasons, { alignItems: 'center' }]}>
+      {seasons.map((n) => {
+        const ss = r.seasonStatuses.find((x) => x.seasonNumber === n);
+        const l = ss ? mediaStatusLabel(ss.status) : null;
+        return (
+          <View key={n} style={[styles.season, l && { borderColor: l.color }]}>
+            <Text style={[styles.seasonText, l && { color: l.color }]}>S{n}</Text>
+          </View>
+        );
+      })}
+      {seasons.length > 4 ? toggle : null}
+    </View>
+  );
+}
+
 function RequestCard({ r, admin, meId, onChanged }: { r: Req; admin: boolean; meId?: string; onChanged: () => void }) {
   const { settings } = useSettings();
   const [busy, setBusy] = useState<string | null>(null);
@@ -97,19 +132,7 @@ function RequestCard({ r, admin, meId, onChanged }: { r: Req; admin: boolean; me
           <Text style={styles.title} numberOfLines={2}>
             {r.title}
           </Text>
-          {r.type === 'tv' && r.seasons?.length ? (
-            <View style={styles.seasons}>
-              {r.seasons.map((n) => {
-                const ss = r.seasonStatuses.find((x) => x.seasonNumber === n);
-                const l = ss ? mediaStatusLabel(ss.status) : null;
-                return (
-                  <View key={n} style={[styles.season, l && { borderColor: l.color }]}>
-                    <Text style={[styles.seasonText, l && { color: l.color }]}>S{n}</Text>
-                  </View>
-                );
-              })}
-            </View>
-          ) : null}
+          {r.type === 'tv' && r.seasons?.length ? <SeasonChips r={r} /> : null}
           <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
             <Badge label={st.label} color={st.color} />
             {media ? <Badge label={media.label} color={media.color} /> : null}
@@ -266,6 +289,7 @@ export function ServerRequests({ header }: { header: React.ReactNode }) {
 }
 
 const styles = StyleSheet.create({
+  seasonToggle: { width: 24, height: 22, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
   card: { borderRadius: R.lg, overflow: 'hidden', backgroundColor: C.surface },
   cardBody: { flexDirection: 'row', gap: 14, padding: 14 },
   poster: { width: 74, height: 111, borderRadius: 10, overflow: 'hidden', backgroundColor: C.surfaceHigh },

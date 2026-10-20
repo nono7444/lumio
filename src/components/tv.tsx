@@ -6,16 +6,16 @@ import * as RN from 'react-native';
 export const IS_TV = Platform.isTV;
 
 // Agrandissement léger (ne change pas la mise en page) + contour dessiné par-dessus (ne décale rien)
-const FOCUS_SCALE = { transform: [{ scale: 1.06 }], zIndex: 10 } as const;
+const FOCUS_SCALE = { transform: [{ scale: 1.04 }], zIndex: 10 } as const;
 const RING = {
   position: 'absolute',
-  top: -5,
-  left: -5,
-  right: -5,
-  bottom: -5,
-  borderWidth: 3,
-  borderColor: '#FFFFFF',
-  borderRadius: 16,
+  top: -3,
+  left: -3,
+  right: -3,
+  bottom: -3,
+  borderWidth: 2,
+  borderColor: 'rgba(255,255,255,0.85)',
+  borderRadius: 14,
 } as const;
 
 type Props = PressableProps & { focusRing?: boolean };
