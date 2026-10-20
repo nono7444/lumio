@@ -1,7 +1,7 @@
 // Animation de lancement, façon logo Google : quatre points de couleur rebondissent en vague,
 // se rassemblent au centre, et le symbole Lumio (Λ) apparaît à leur place. Pas de texte.
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, StyleSheet, View } from 'react-native';
+import { Animated, Easing, Platform, StyleSheet, View } from 'react-native';
 
 const BG = '#0B0D12';
 const DOT = 16;
@@ -9,7 +9,8 @@ const GAP = 14;
 const COLORS = ['#3D8BFF', '#7B4DFF', '#5AC8FA', '#FFFFFF'];
 const MARK_W = 120;
 const MARK_H = Math.round((MARK_W * 442) / 480);
-const MIN_MS = 2000;
+// Démarrage rapide : une seule vague de rebonds ; sur TV, à peine le temps de voir le logo
+const MIN_MS = Platform.isTV ? 500 : 1100;
 
 export function AnimatedSplash({ ready, onDone }: { ready: boolean; onDone?: () => void }) {
   const [gone, setGone] = useState(false);
@@ -21,15 +22,14 @@ export function AnimatedSplash({ ready, onDone }: { ready: boolean; onDone?: () 
   useEffect(() => {
     const hop = (v: Animated.Value) =>
       Animated.sequence([
-        Animated.timing(v, { toValue: 1, duration: 220, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-        Animated.timing(v, { toValue: 0, duration: 220, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+        Animated.timing(v, { toValue: 1, duration: 150, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+        Animated.timing(v, { toValue: 0, duration: 150, easing: Easing.in(Easing.quad), useNativeDriver: true }),
       ]);
     Animated.sequence([
       // Deux vagues de rebonds
-      Animated.stagger(90, bounce.map(hop)),
-      Animated.stagger(90, bounce.map(hop)),
+      Animated.stagger(60, bounce.map(hop)),
       // Les points se rejoignent…
-      Animated.timing(gather, { toValue: 1, duration: 280, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(gather, { toValue: 1, duration: 180, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
       // … et le symbole prend leur place
       Animated.spring(mark, { toValue: 1, friction: 6, tension: 70, useNativeDriver: true }),
     ]).start();
@@ -41,7 +41,7 @@ export function AnimatedSplash({ ready, onDone }: { ready: boolean; onDone?: () 
     if (!ready) return;
     const wait = Math.max(0, MIN_MS - (Date.now() - started.current));
     const t = setTimeout(() => {
-      Animated.timing(out, { toValue: 0, duration: 320, easing: Easing.in(Easing.quad), useNativeDriver: true }).start(() => {
+      Animated.timing(out, { toValue: 0, duration: 220, easing: Easing.in(Easing.quad), useNativeDriver: true }).start(() => {
         setGone(true);
         onDone?.();
       });

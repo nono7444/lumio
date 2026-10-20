@@ -9,6 +9,7 @@ import { LayoutAnimation, Platform, StyleSheet, Text, View } from 'react-native'
 import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { TvSidebar } from '@/components/tv-sidebar';
 import { tap } from '@/components/ui';
 import { C } from '@/constants/theme';
 import { useUnreadChat } from '@/lib/chat';
@@ -46,7 +47,26 @@ const glass = Platform.OS === 'ios' && isLiquidGlassAvailable();
 
 /** Barre d'onglets flottante façon iOS 26+ (« Liquid Glass ») : icône + libellé, bulle sur l'onglet actif.
  *  Appui long : personnaliser les raccourcis de la barre. */
-export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) {
+export function FloatingTabBar(props: TabBarProps) {
+  // TV : menu latéral façon Nuvio
+  if (Platform.isTV) {
+    const { state, navigation } = props;
+    const current = state.routes[state.index]?.name ?? 'index';
+    return (
+      <TvSidebar
+        current={current}
+        onNavigate={(name) => {
+          const route = state.routes.find((r) => r.name === name);
+          if (!route || name === current) return;
+          navigation.navigate(name, route.params);
+        }}
+      />
+    );
+  }
+  return <PhoneTabBar {...props} />;
+}
+
+function PhoneTabBar({ state, descriptors, navigation }: TabBarProps) {
   const insets = useSafeAreaInsets();
   const { settings } = useSettings();
   const season = useSeason();
