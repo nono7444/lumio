@@ -100,7 +100,9 @@ jobs:
         run: |
           ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=armeabi-v7a,arm64-v8a > gradle.log 2>&1 || {
             # Échec : les erreurs remontent en annotations (journaux GitHub parfois illisibles)
-            { grep -E "^e: |error:|What went wrong|> .*(failed|Could not|not found)|Execution failed" -A2 gradle.log; grep -A14 "issues were found when checking AAR metadata" gradle.log; } | grep -v "^--$" | awk '!seen[$0]++' | head -40 | while IFS= read -r l; do echo "::error::$l"; done
+            # GitHub ne garde que 10 annotations par étape : tout est réuni en une seule
+            msg=$( { grep -A14 "issues were found when checking AAR metadata" gradle.log; grep -E "^e: |error:|What went wrong|Execution failed" -A2 gradle.log; } | grep -v "^--$" | awk '!seen[$0]++' | head -40 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error::$msg"
             tail -n 60 gradle.log
             exit 1
           }
@@ -142,7 +144,9 @@ jobs:
         run: |
           ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=armeabi-v7a > gradle.log 2>&1 || {
             # Échec : les erreurs remontent en annotations (journaux GitHub parfois illisibles)
-            { grep -E "^e: |error:|What went wrong|> .*(failed|Could not|not found)|Execution failed" -A2 gradle.log; grep -A14 "issues were found when checking AAR metadata" gradle.log; } | grep -v "^--$" | awk '!seen[$0]++' | head -40 | while IFS= read -r l; do echo "::error::$l"; done
+            # GitHub ne garde que 10 annotations par étape : tout est réuni en une seule
+            msg=$( { grep -A14 "issues were found when checking AAR metadata" gradle.log; grep -E "^e: |error:|What went wrong|Execution failed" -A2 gradle.log; } | grep -v "^--$" | awk '!seen[$0]++' | head -40 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error::$msg"
             tail -n 60 gradle.log
             exit 1
           }
