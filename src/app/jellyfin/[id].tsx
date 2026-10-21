@@ -22,6 +22,7 @@ import {
 import { TvBackdropLayer } from '@/components/tv-backdrop';
 import { toast } from '@/components/toast';
 import { filesApi } from '@/lib/files';
+import { TvActionRow, TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { MetadataEditor } from '@/components/metadata-editor';
 import { FamilyRating } from '@/components/family-rating';
 import { ReportProblemButton } from '@/components/report-problem';
@@ -197,6 +198,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
   const [loadingEps, setLoadingEps] = useState(false);
   const [similar, setSimilar] = useState<JfItem[]>([]);
   const [fav, setFav] = useState(Boolean(item.UserData?.IsFavorite));
+  const [showRate, setShowRate] = useState(false);
 
   useEffect(() => {
     jf.similar(settings, item.Id).then(setSimilar).catch(() => {});
@@ -213,10 +215,11 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
   // Sur TV (paysage), le hero ne dépasse pas l'écran
   // TV : image moins haute (elle remplissait tout l'écran)
   // Téléphone : l'affiche entière (son titre fait partie de l'image, on n'en rajoute pas par-dessus)
-  const heroH = Platform.isTV ? Math.round(screenH * 0.7) : Math.round(width * 1.5);
+  const heroH = Platform.isTV ? Math.round(screenH * 0.94) : Math.round(width * 1.5);
   const logo = jfLogo(settings, item);
   const resumeAt = ticksToSeconds(item.UserData?.PlaybackPositionTicks);
   const cast = (item.People ?? []).filter((p) => p.Type === 'Actor').slice(0, 15);
+  const director = (item.People ?? []).filter((p) => p.Type === 'Director' || p.Type === 'Creator').slice(0, 2).map((p) => p.Name).join(', ');
 
   useEffect(() => {
     if (!isSeries) return;
@@ -252,35 +255,85 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
               <Fade height={heroH * 0.7} />
             </>
           )}
-          <View style={Platform.isTV ? styles.heroContentTv : styles.heroContent}>
-            {!Platform.isTV ? null : logo ? (
-              <Image
-                source={logo}
-                style={Platform.isTV ? { width: 320, height: 120 } : { width: Math.min(width * 0.7, 460), height: 100 }}
-                contentFit="contain"
-                contentPosition={Platform.isTV ? 'left bottom' : 'bottom'}
-              />
-            ) : (
-              <Text style={[styles.title, Platform.isTV && { textAlign: 'left' }]}>{item.Name}</Text>
-            )}
-            <View style={[styles.pills, Platform.isTV && { justifyContent: 'flex-start' }]}>
-              {item.ProductionYear ? <Pill>{String(item.ProductionYear)}</Pill> : null}
-              {item.RunTimeTicks && !isSeries ? <Pill icon="time-outline">{formatRuntime(item.RunTimeTicks)}</Pill> : null}
-              {item.OfficialRating ? <Pill>{item.OfficialRating}</Pill> : null}
-              {item.CommunityRating ? <Pill icon="star">{item.CommunityRating.toFixed(1)}</Pill> : null}
-              {isSeries && item.ChildCount ? <Pill>{`${item.ChildCount} saisons`}</Pill> : null}
-            </View>
-            {item.Genres?.length ? <Text style={styles.genres}>{item.Genres.slice(0, 3).join('  •  ')}</Text> : null}
-            {Platform.isTV && item.Overview ? (
-              <Text style={styles.overviewTv} numberOfLines={4}>
-                {item.Overview}
+          {Platform.isTV ? (
+            // TV, comme Nuvio : logo, boutons juste dessous, puis réalisateur, résumé et infos
+            <View style={styles.heroContentTv}>
+              {logo ? (
+                <Image source={logo} style={{ width: 340, height: 120 }} contentFit="contain" contentPosition="left bottom" />
+              ) : (
+                <Text style={[styles.title, { textAlign: 'left' }]}>{item.Name}</Text>
+              )}
+                <TvActionRow>
+                  {isSeries ? (
+                    nextEpisode ? (
+                      <TvPill hasTVPreferredFocus icon="play" label={`Regarder S${nextEpisode.ParentIndexNumber}E${nextEpisode.IndexNumber}`} onPress={() => playJellyfin(nextEpisode)} />
+                    ) : null
+                  ) : (
+                    <TvPill
+                      hasTVPreferredFocus
+                      icon="play"
+                      label={resumeAt > 30 ? `Reprendre · ${formatRuntime(item.UserData?.PlaybackPositionTicks)}` : 'Regarder'}
+                      onPress={() => playJellyfin(item)}
+                    />
+                  )}
+                  {!isSeries && resumeAt > 30 ? <TvRound icon="refresh" label="Depuis le début" onPress={() => playJellyfin(item, true)} /> : null}
+                  <TvRound
+                    icon="checkmark"
+                    iconOn="checkmark-done"
+                    on={item.UserData?.Played}
+                    color={C.success}
+                    label={item.UserData?.Played ? 'Vu' : 'Marquer vu'}
+                    onPress={async () => {
+                      await jf.setPlayed(settings, item.Id, !item.UserData?.Played).catch(() => {});
+                      reload();
+                    }}
+                  />
+                  {serverReq && tmdbId ? <TvRound icon="star-outline" iconOn="star" on={showRate} color={TV_GOLD} label="Noter" onPress={() => setShowRate((v) => !v)} /> : null}
+                  <TvRound icon="heart-outline" iconOn="heart" on={fav} color="#FF375F" label="J'aime" onPress={toggleFav} />
+                </TvActionRow>
+              {director ? <Text style={styles.tvLine}>{isSeries ? 'Créée par' : 'Réalisateur'} : {director}</Text> : null}
+              {item.Overview ? (
+                <Text style={styles.overviewTv} numberOfLines={3}>
+                  {item.Overview}
+                </Text>
+              ) : null}
+              <Text style={styles.tvLine}>
+                {[item.Genres?.slice(0, 2).join(' • '), item.PremiereDate ? new Date(item.PremiereDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) : item.ProductionYear ? String(item.ProductionYear) : null, item.CommunityRating ? `Note ${item.CommunityRating.toFixed(1)}` : null]
+                  .filter(Boolean)
+                  .join('   •   ')}
               </Text>
-            ) : null}
-          </View>
+              <Text style={styles.tvLine}>
+                {[!isSeries && item.RunTimeTicks ? formatRuntime(item.RunTimeTicks) : null, isSeries && item.ChildCount ? `${item.ChildCount} saison${item.ChildCount > 1 ? 's' : ''}` : null, item.OfficialRating]
+                  .filter(Boolean)
+                  .join('   •   ')}
+              </Text>
+            </View>
+          ) : (
+          <View style={styles.heroContent}>
+              {!Platform.isTV ? null : logo ? (
+                <Image
+                  source={logo}
+                  style={Platform.isTV ? { width: 320, height: 120 } : { width: Math.min(width * 0.7, 460), height: 100 }}
+                  contentFit="contain"
+                  contentPosition={Platform.isTV ? 'left bottom' : 'bottom'}
+                />
+              ) : (
+                <Text style={[styles.title, Platform.isTV && { textAlign: 'left' }]}>{item.Name}</Text>
+              )}
+              <View style={[styles.pills, Platform.isTV && { justifyContent: 'flex-start' }]}>
+                {item.ProductionYear ? <Pill>{String(item.ProductionYear)}</Pill> : null}
+                {item.RunTimeTicks && !isSeries ? <Pill icon="time-outline">{formatRuntime(item.RunTimeTicks)}</Pill> : null}
+                {item.OfficialRating ? <Pill>{item.OfficialRating}</Pill> : null}
+                {item.CommunityRating ? <Pill icon="star">{item.CommunityRating.toFixed(1)}</Pill> : null}
+                {isSeries && item.ChildCount ? <Pill>{`${item.ChildCount} saisons`}</Pill> : null}
+              </View>
+              {item.Genres?.length ? <Text style={styles.genres}>{item.Genres.slice(0, 3).join('  •  ')}</Text> : null}
+            </View>
+          )}
         </View>
 
         <View style={[{ paddingHorizontal: 16, gap: 18 }, Platform.isTV && styles.tvColumn]}>
-          {!isSeries ? (
+          {Platform.isTV ? null : !isSeries ? (
             <View style={{ gap: 10 }}>
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 <Button
@@ -331,7 +384,9 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
           {settings.jellyfin?.isAdmin === true && !Platform.isTV ? <AdminItemActions item={item} reload={reload} /> : null}
 
           {/* Notes de la famille et signalement d'un problème (serveur Lumio) */}
-          {serverReq && tmdbId ? (
+          {serverReq && tmdbId && Platform.isTV ? (
+            showRate ? <FamilyRating type={isSeries ? 'tv' : 'movie'} tmdbId={tmdbId} title={item.Name} poster={jfPoster(settings, item, 342)} /> : null
+          ) : serverReq && tmdbId ? (
             <View style={{ gap: 6 }}>
               <FamilyRating type={isSeries ? 'tv' : 'movie'} tmdbId={tmdbId} title={item.Name} poster={jfPoster(settings, item, 342)} />
               <ReportProblemButton type={isSeries ? 'tv' : 'movie'} tmdbId={tmdbId} title={item.Name} poster={jfPoster(settings, item, 342)} />
@@ -542,7 +597,8 @@ export default function JellyfinItemScreen() {
 const styles = StyleSheet.create({
   // TV : colonne alignée à gauche sous les infos (boutons Lire / Vu compacts), comme Nuvio
   tvColumn: { width: '100%', maxWidth: 680, alignSelf: 'flex-start', paddingLeft: 48 },
-  heroContentTv: { position: 'absolute', left: 48, bottom: 16, width: '46%', alignItems: 'flex-start', gap: 10 },
+  heroContentTv: { position: 'absolute', left: 48, bottom: 36, width: '48%', alignItems: 'flex-start', gap: 10 },
+  tvLine: { color: 'rgba(255,255,255,0.85)', fontSize: 15, fontWeight: '600' },
   overviewTv: { color: 'rgba(255,255,255,0.75)', fontSize: 15, lineHeight: 22 },
   center: { flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: 24 },
   back: {

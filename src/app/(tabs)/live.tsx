@@ -3,7 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, RefreshControl, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, FlatList, RefreshControl, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { toast } from '@/components/toast';
@@ -272,7 +272,7 @@ export default function Live() {
         windowSize={7}
         removeClippedSubviews
         keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={false} onRefresh={() => load(true)} tintColor={C.text} />}
+        refreshControl={Platform.isTV ? undefined : <RefreshControl refreshing={false} onRefresh={() => load(true)} tintColor={C.text} />}
         renderItem={({ item }) => (
           <View>
             <ChannelTile ch={item} width={tileW} fav={favs.has(item.key)} onPress={() => play(item)} onLong={() => toggleFav(item)} />

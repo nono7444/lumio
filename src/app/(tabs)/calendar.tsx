@@ -3,7 +3,7 @@ import { useTabInBar } from '@/lib/home-layout';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, RefreshControl, SectionList, StyleSheet, Text, View, Platform as RNPlatform } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -167,7 +167,7 @@ export default function Calendar() {
           keyExtractor={(r) => r.id}
           stickySectionHeadersEnabled
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: TAB_SPACE }}
-          refreshControl={<RefreshControl refreshing={loading} onRefresh={() => load(true)} tintColor={C.text} />}
+          refreshControl={RNPlatform.isTV ? undefined : <RefreshControl refreshing={loading} onRefresh={() => load(true)} tintColor={C.text} />}
           onScrollToIndexFailed={() => {}}
           renderSectionHeader={({ section }) => (
             <View style={styles.sectionHead}>

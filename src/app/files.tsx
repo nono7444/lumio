@@ -3,7 +3,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, TextInput, View, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { usePrompt } from '@/components/prompt-modal';
@@ -325,7 +325,7 @@ export default function Files() {
           data={disks ?? []}
           keyExtractor={(d) => d.name}
           contentContainerStyle={{ padding: 16, gap: 12 }}
-          refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}
+          refreshControl={Platform.isTV ? undefined : <RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}
           ListEmptyComponent={
             disks ? (
               <Text style={styles.dim}>
@@ -359,7 +359,7 @@ export default function Files() {
           data={entries ?? []}
           keyExtractor={(e) => e.name}
           contentContainerStyle={{ padding: 12, paddingBottom: insets.bottom + (moving || selecting ? 120 : 30) }}
-          refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}
+          refreshControl={Platform.isTV ? undefined : <RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}
           ListEmptyComponent={entries ? <Text style={styles.dim}>Dossier vide</Text> : <ActivityIndicator color={C.text} style={{ margin: 30 }} />}
           renderItem={({ item: e }) => (
             <Pressable

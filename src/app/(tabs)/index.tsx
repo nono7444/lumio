@@ -371,7 +371,7 @@ export default function Home() {
         contentContainerStyle={{ paddingTop: withHero ? 0 : insets.top + 60, paddingBottom: TAB_SPACE }}
         scrollEventThrottle={32}
         onScroll={(e) => setScrolled(e.nativeEvent.contentOffset.y > 40)}
-        refreshControl={
+        refreshControl={Platform.isTV ? undefined :
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.text} progressViewOffset={insets.top} />
         }>
         {ordered.map((r, idx) => {

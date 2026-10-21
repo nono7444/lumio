@@ -4,7 +4,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FocusPressable as Pressable } from '@/components/tv';
@@ -94,7 +94,7 @@ export default function Collections() {
     <ScrollView
       style={{ flex: 1, backgroundColor: C.bg }}
       contentContainerStyle={{ paddingTop: insets.top, paddingBottom: 60 }}
-      refreshControl={<RefreshControl refreshing={false} onRefresh={() => load(true)} tintColor={C.text} />}>
+      refreshControl={Platform.isTV ? undefined : <RefreshControl refreshing={false} onRefresh={() => load(true)} tintColor={C.text} />}>
       <ScreenTitle title="Collections" onBack={() => router.back()} />
       {error ? <Text style={[styles.dim, { padding: 16 }]}>{error}</Text> : null}
       {!list ? <ActivityIndicator color={C.text} style={{ marginTop: 40 }} /> : null}

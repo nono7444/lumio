@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, RefreshControl, StyleSheet, Text, View, Platform } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -118,7 +118,7 @@ export function Requests({ header, admin }: { header: React.ReactNode; admin: bo
       keyExtractor={(r) => String(r.id)}
       renderItem={({ item }) => <RequestRow r={item} admin={admin} onChanged={load} />}
       contentContainerStyle={{ paddingTop: insets.top, paddingHorizontal: 16, paddingBottom: TAB_SPACE, gap: 12 }}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.text} />}
+      refreshControl={Platform.isTV ? undefined : <RefreshControl refreshing={loading} onRefresh={load} tintColor={C.text} />}
       ListHeaderComponent={
         <View style={{ marginHorizontal: -16 }}>
           {header}

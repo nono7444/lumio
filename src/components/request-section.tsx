@@ -1,8 +1,9 @@
 // Bloc « demande » de la fiche, comme sur Seerr : statut du média, demandes en cours, boutons.
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text, View, Platform } from 'react-native';
 
+import { TvPill } from '@/components/tv-actions';
 import { RequestModal, type RequestTarget } from '@/components/request-modal';
 import { toast } from '@/components/toast';
 import { Button } from '@/components/ui';
@@ -183,7 +184,15 @@ export function RequestSection({
         );
       })}
 
-      {canRequest && !active ? (
+      {canRequest && !active && Platform.isTV ? (
+        // TV, façon Nuvio : bouton ovale
+        <TvPill
+          hasTVPreferredFocus
+          icon="paper-plane-outline"
+          label={isTv && status !== MediaStatus.UNKNOWN ? 'Autres saisons' : 'Demander'}
+          onPress={() => setOpen(true)}
+        />
+      ) : canRequest && !active ? (
         <Button
           title={isTv && status !== MediaStatus.UNKNOWN ? 'Demander d’autres saisons' : 'Demander'}
           icon="paper-plane-outline"

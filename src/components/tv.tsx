@@ -43,6 +43,9 @@ export const FocusPressable = forwardRef<View, Props>(function FocusPressable(
 ) {
   const [focused, setFocused] = useState(false);
   const anim = useRef(new RN.Animated.Value(0)).current;
+  // TV : l'appui « OK » qui ouvre un écran se termine parfois sur le premier bouton du nouvel écran
+  // (ex. le lecteur se refermait aussitôt) → on ignore les appuis pendant 700 ms après l'apparition
+  const mountedAt = useRef(Date.now()).current;
   if (!IS_TV) return <RNPressable ref={ref} style={style} onFocus={onFocus} onBlur={onBlur} {...rest} />;
   const { children, onPress, ...others } = rest;
   const go = (to: number) =>
@@ -65,7 +68,7 @@ export const FocusPressable = forwardRef<View, Props>(function FocusPressable(
       <RNPressable
         ref={ref}
         {...others}
-        onPress={onPress}
+        onPress={onPress ? (e) => Date.now() - mountedAt > 700 && onPress(e) : undefined}
         onFocus={(e) => {
           setFocused(true);
           if (focusRing) go(1);

@@ -305,7 +305,7 @@ export function ServerRequests({ header }: { header: React.ReactNode }) {
       keyExtractor={(r) => r.id}
       renderItem={({ item }) => <RequestCard r={item} admin={admin} meId={settings.jellyfin?.userId} onChanged={() => load()} />}
       contentContainerStyle={{ paddingTop: insets.top, paddingHorizontal: 16, paddingBottom: TAB_SPACE, gap: 12 }}
-      refreshControl={<RefreshControl refreshing={false} onRefresh={() => load()} tintColor={C.text} />}
+      refreshControl={Platform.isTV ? undefined : <RefreshControl refreshing={false} onRefresh={() => load()} tintColor={C.text} />}
       onEndReached={more}
       onEndReachedThreshold={0.4}
       ListHeaderComponent={

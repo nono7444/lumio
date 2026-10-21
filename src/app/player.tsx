@@ -413,7 +413,8 @@ export default function Player() {
         </View>
       )}
 
-      {(!source || error) && (
+      {/* TV : pas de bouton fermer pendant le chargement (il prenait le focus et l'appui « OK » refermait le lecteur) ; le bouton Retour suffit */}
+      {(!source || error) && (!Platform.isTV || error) && (
         <Pressable onPress={() => router.back()} hitSlop={12} style={[styles.close, { top: insets.top + 8, left: insets.left + 12 }]}>
           <Ionicons name="close" size={24} color="#fff" />
         </Pressable>

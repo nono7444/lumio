@@ -25,6 +25,7 @@ import { JfEpisodes } from '@/components/jf-episodes';
 import { FamilyRating } from '@/components/family-rating';
 import { ReportProblemButton } from '@/components/report-problem';
 import { RequestSection } from '@/components/request-section';
+import { TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { grab, mediaFlavor } from '@/lib/grab';
 import { useServerRequests } from '@/lib/requests';
 import { chat } from '@/lib/chat';
@@ -58,6 +59,7 @@ export default function MediaScreen() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [jfItem, setJfItem] = useState<JfItem | null>(null);
+  const [showRate, setShowRate] = useState(false);
 
   const tmdbId = Number(id);
   const isTv = type === 'tv';
@@ -198,8 +200,24 @@ export default function MediaScreen() {
   const logo = pickLogo(settings, d.images);
   // Sur TV (paysage), le hero ne dépasse pas l'écran
   // Téléphone : l'affiche entière (son titre fait partie de l'image, on n'en rajoute pas par-dessus)
-  const heroH = Platform.isTV ? Math.round(screenH * 0.7) : Math.round(width * 1.5);
+  const heroH = Platform.isTV ? Math.round(screenH * 0.94) : Math.round(width * 1.5);
   const cast = (d.credits?.cast ?? []).slice(0, 15);
+  const crew: { job?: string; name: string }[] = (d.credits as any)?.crew ?? [];
+  const director =
+    details.kind === 'tv'
+      ? ((details.data as any).created_by ?? []).slice(0, 2).map((p: { name: string }) => p.name).join(', ')
+      : crew.filter((p) => p.job === 'Director').slice(0, 2).map((p) => p.name).join(', ');
+  const tvTarget = {
+    type: details.kind,
+    tmdbId,
+    tvdbId: details.kind === 'tv' ? details.data.external_ids?.tvdb_id : undefined,
+    title,
+    year: date?.slice(0, 4),
+    poster: tmdbImg(d.poster_path, 'w342'),
+    backdrop: tmdbImg(d.backdrop_path, 'w780'),
+    seasons: details.kind === 'tv' ? details.data.seasons : [],
+    flavor: mediaFlavor(details.data),
+  };
   const runtime =
     details.kind === 'movie' ? details.data.runtime : details.data.episode_run_time?.[0];
 
@@ -223,7 +241,52 @@ export default function MediaScreen() {
               <Fade height={heroH * 0.7} />
             </>
           )}
-          <View style={Platform.isTV ? styles.heroContentTv : styles.heroContent}>
+          {Platform.isTV ? (
+            // TV, comme Nuvio : logo, boutons (Regarder ou Demander, ovale) + ronds, puis réalisateur, résumé, infos
+            <View style={styles.heroContentTv}>
+              {logo ? (
+                <Image source={tmdbImg(logo, 'w500')} style={{ width: 340, height: 120 }} contentFit="contain" contentPosition="left bottom" />
+              ) : (
+                <Text style={[styles.title, { textAlign: 'left' }]}>{title}</Text>
+              )}
+              <View style={{ flexDirection: 'row', gap: 12, alignItems: 'flex-start', marginTop: 4, marginBottom: 6 }}>
+                {jfItem ? (
+                  <TvPill
+                    hasTVPreferredFocus
+                    icon="play"
+                    label="Regarder"
+                    onPress={() => router.push({ pathname: '/watch', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title } })}
+                  />
+                ) : serverReq ? (
+                  <RequestSection inJellyfin={false} onAvailable={refreshJf} target={tvTarget} />
+                ) : null}
+                {serverReq ? <TvRound icon="star-outline" iconOn="star" on={showRate} color={TV_GOLD} label="Noter" onPress={() => setShowRate((v) => !v)} /> : null}
+              </View>
+              {upcoming ? (
+                <View style={styles.upcoming}>
+                  <Ionicons name="calendar-outline" size={15} color="#FFC93C" />
+                  <Text style={styles.upcomingText}>{upcoming}</Text>
+                </View>
+              ) : null}
+              {director ? <Text style={styles.tvLine}>{details.kind === 'tv' ? 'Créée par' : 'Réalisateur'} : {director}</Text> : null}
+              {d.overview ? (
+                <Text style={styles.overviewTv} numberOfLines={3}>
+                  {d.overview}
+                </Text>
+              ) : null}
+              <Text style={styles.tvLine}>
+                {[d.genres?.slice(0, 2).map((g) => g.name).join(' • '), date ? new Date(date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) : null, d.vote_average ? `TMDB ${d.vote_average.toFixed(1)}` : null]
+                  .filter(Boolean)
+                  .join('   •   ')}
+              </Text>
+              <Text style={styles.tvLine}>
+                {[runtime ? `${Math.floor(runtime / 60) ? `${Math.floor(runtime / 60)}h ` : ''}${runtime % 60}m` : null, details.kind === 'tv' ? `${seasonsList.length} saison${seasonsList.length > 1 ? 's' : ''}` : null]
+                  .filter(Boolean)
+                  .join('   •   ')}
+              </Text>
+            </View>
+          ) : (
+          <View style={styles.heroContent}>
             {!Platform.isTV ? null : logo ? (
               <Image
                 source={tmdbImg(logo, 'w500')}
@@ -252,11 +315,12 @@ export default function MediaScreen() {
               </View>
             ) : null}
           </View>
+          )}
         </View>
 
         <View style={[{ paddingHorizontal: 16, gap: 20, marginTop: 4 }, Platform.isTV && { width: '100%', maxWidth: 680, alignSelf: 'flex-start', paddingLeft: 48 }]}>
           {/* ——— Lecture (depuis Jellyfin) ——— */}
-          {jfItem ? (
+          {jfItem && !Platform.isTV ? (
             <Button
               title="Lire"
               icon="play"
@@ -274,7 +338,7 @@ export default function MediaScreen() {
           {jfItem && details.kind === 'tv' ? <JfEpisodes seriesId={jfItem.Id} /> : null}
 
           {/* ——— Demande façon Seerr (serveur Lumio) ——— */}
-          {serverReq ? (
+          {serverReq && !Platform.isTV ? (
             <RequestSection
               inJellyfin={Boolean(jfItem)}
               onAvailable={refreshJf}
@@ -293,7 +357,9 @@ export default function MediaScreen() {
           ) : null}
 
           {/* ——— Notes de la famille + signalement d'un problème ——— */}
-          {serverReq ? (
+          {serverReq && Platform.isTV ? (
+            showRate ? <FamilyRating type={details.kind} tmdbId={tmdbId} title={title} poster={tmdbImg(d.poster_path, 'w342')} /> : null
+          ) : serverReq ? (
             <View style={{ gap: 6 }}>
               <FamilyRating type={details.kind} tmdbId={tmdbId} title={title} poster={tmdbImg(d.poster_path, 'w342')} />
               {jfItem ? (
@@ -304,7 +370,7 @@ export default function MediaScreen() {
 
           {/* ——— Proposer le titre dans le chat famille ——— */}
           {/* Proposer : seulement pour un titre pas encore sur le serveur */}
-          {settings.chatUrl && settings.jellyfin && !jfItem ? (
+          {settings.chatUrl && settings.jellyfin && !jfItem && !Platform.isTV ? (
             <Button
               title="Proposer"
               icon="chatbubbles-outline"
@@ -376,7 +442,7 @@ export default function MediaScreen() {
             />
           )}
 
-          {d.overview ? <Text style={styles.overview}>{d.overview}</Text> : null}
+          {d.overview && !Platform.isTV ? <Text style={styles.overview}>{d.overview}</Text> : null}
 
           {/* ——— Saisons ——— */}
           {details.kind === 'tv' && (
@@ -478,7 +544,9 @@ function Notice({ icon, text, color = C.textDim }: { icon: keyof typeof Ionicons
 }
 
 const styles = StyleSheet.create({
-  heroContentTv: { position: 'absolute', left: 48, bottom: 16, width: '46%', alignItems: 'flex-start', gap: 10 },
+  heroContentTv: { position: 'absolute', left: 48, bottom: 36, width: '48%', alignItems: 'flex-start', gap: 10 },
+  tvLine: { color: 'rgba(255,255,255,0.85)', fontSize: 15, fontWeight: '600' },
+  overviewTv: { color: 'rgba(255,255,255,0.78)', fontSize: 15, lineHeight: 22 },
   upcoming: {
     flexDirection: 'row',
     alignItems: 'center',

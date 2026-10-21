@@ -3,7 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FocusPressable as Pressable } from '@/components/tv';
@@ -141,7 +141,7 @@ export default function Sessions() {
       </View>
       <ScrollView
         contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40, gap: 12 }}
-        refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
+        refreshControl={Platform.isTV ? undefined : <RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
         {error ? (
           <Text style={[styles.dim, { textAlign: 'center', marginTop: 20 }]}>{error}</Text>
         ) : !list ? (

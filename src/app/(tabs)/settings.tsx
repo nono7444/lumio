@@ -212,19 +212,20 @@ export default function SettingsScreen() {
           )}
         </Section>
 
-        <ChatSection />
+        {/* TV : profil épuré (serveur, demandes, idées, clés et options téléphone masqués) */}
+        {Platform.isTV ? null : <ChatSection />}
 
         {serverReq && !Platform.isTV ? <NotifySubscribeSection /> : null}
         {serverReq && settings.jellyfin?.isAdmin !== false && !Platform.isTV ? <AnnouncementEditor /> : null}
 
-        {serverReq && settings.jellyfin?.isAdmin !== false ? (
+        {serverReq && settings.jellyfin?.isAdmin !== false && !Platform.isTV ? (
           <Section title="Demandes">
             <Text style={styles.help}>Notifications push des demandes, validation automatique ou par toi, quotas de films et de saisons.</Text>
             <Button title="Utilisateurs, droits et notifications" icon="people-outline" variant="secondary" onPress={() => router.push('/users')} />
           </Section>
         ) : null}
 
-        {serverReq ? (
+        {serverReq && !Platform.isTV ? (
           <Section title="Idées & signalements">
             <Text style={styles.help}>
               Propose une idée ou signale un bug. L’admin la reçoit en notification et peut la faire développer par Claude.
@@ -248,6 +249,7 @@ export default function SettingsScreen() {
         ) : null}
 
         <Section title="Lecture">
+          {Platform.isTV ? null : (
           <Picker
             label="Lecteur vidéo"
             options={[
@@ -257,6 +259,7 @@ export default function SettingsScreen() {
             value={settings.player}
             onChange={(v) => update({ player: v as 'mpv' | 'native' })}
           />
+          )}
           <Picker
             label="Qualité par défaut (Jellyfin)"
             options={QUALITIES.map((q) => ({ value: q.id, label: q.label }))}
@@ -270,6 +273,7 @@ export default function SettingsScreen() {
           <Button title="Accueil et onglets" icon="options-outline" variant="secondary" onPress={() => router.push('/customize')} />
         </Section>
 
+        {Platform.isTV ? null : (
         <Section title="Affiches">
           <Toggle
             label="Better Posters (note et tags sur les affiches)"
@@ -301,7 +305,9 @@ export default function SettingsScreen() {
             </>
           )}
         </Section>
+        )}
 
+        {Platform.isTV ? null : (
         <Section title="TMDB">
           <Field
             label="Clé API"
@@ -313,6 +319,7 @@ export default function SettingsScreen() {
           />
           <Button title="Enregistrer et tester" icon="flash-outline" onPress={saveTmdb} loading={testing} disabled={!tmdb.trim()} />
         </Section>
+        )}
 
         <Section title="Accueil">
           <View style={styles.catRow}>
@@ -325,7 +332,7 @@ export default function SettingsScreen() {
           </View>
         </Section>
 
-        {ADDONS_ENABLED ? (
+        {ADDONS_ENABLED && !Platform.isTV ? (
         <Section title="Addons Stremio">
           <Text style={styles.help}>
             Colle l'URL du manifest d'un addon de catalogue (stremio://… ou https://…/manifest.json). Ses catalogues

@@ -80,6 +80,8 @@ export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, on
           <ActivityIndicator size="large" color="#fff" />
         </View>
       )}
+{Platform.isTV ? null : (
+        <>
       <Pressable onPress={onClose} hitSlop={12} style={[styles.close, { top: insets.top + 8, left: insets.left + 12 }]}>
         <Ionicons name="close" size={24} color="#fff" />
       </Pressable>
@@ -95,6 +97,8 @@ export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, on
         style={[styles.close, { top: insets.top + 8, left: insets.left + 108 }]}>
         <Ionicons name={fill ? 'contract' : 'expand'} size={18} color="#fff" />
       </Pressable>
+        </>
+      )}
       {stats ? (
         <View pointerEvents="none" style={[styles.stats, { top: insets.top + 56, left: insets.left + 12 }]}>
           {(statsInfo ?? []).map((l) => (

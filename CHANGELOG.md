@@ -6,6 +6,11 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- TV : fiches film / série comme Nuvio — logo, bouton ovale « Regarder » (ou « Demander » si le titre n'est pas dispo), boutons ronds Vu, Note et J'aime, puis réalisateur, résumé, genres, date, note et durée.
+- TV : le lecteur ne se referme plus tout seul au premier appui sur « Regarder ».
+- TV : l'onglet Téléchargements des Demandes ne devient plus noir (et plus aucun « tirer pour actualiser » sur TV).
+- TV : Profil épuré — sans serveur Lumio, demandes, idées & signalements, clé TMDB, affiches et addons.
+
 ## 1.0.71 — 21 octobre 2026
 
 - TV : accueil sur fond uni (plus d'image de fond) avec un bandeau d'infos compact du titre sélectionné ; les rangées remontent et on passe directement d'une rangée d'affiches à l'autre.

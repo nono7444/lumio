@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Platform, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -162,6 +162,35 @@ function Downloads({ header, viaServer }: { header: React.ReactNode; viaServer?:
       </View>
     );
 
+  // TV : liste défilante simple (la FlatList avec « tirer pour actualiser » s'affichait toute noire)
+  if (Platform.isTV)
+    return (
+      <ScrollView style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ paddingBottom: 80 }}>
+        {header}
+        {errors.map((e) => (
+          <Text key={e} style={[styles.dim, { color: C.danger, marginHorizontal: 16, marginBottom: 4 }]}>
+            {e}
+          </Text>
+        ))}
+        {loading && !rows.length ? (
+          <ActivityIndicator color={C.textDim} style={{ marginTop: 40 }} />
+        ) : !rows.length ? (
+          <View style={{ alignItems: 'center', marginTop: 50, gap: 10 }}>
+            <Ionicons name="checkmark-done-outline" size={36} color={C.textFaint} />
+            <Text style={styles.dim}>Rien en cours de téléchargement.</Text>
+          </View>
+        ) : (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, paddingHorizontal: 16 }}>
+            {rows.map((q) => (
+              <View key={`${q.source}:${q.id}`} style={{ width: '48.5%' }}>
+                <QueueRow q={q} />
+              </View>
+            ))}
+          </View>
+        )}
+      </ScrollView>
+    );
+
   return (
     <FlatList
       style={{ flex: 1, backgroundColor: C.bg }}
@@ -169,7 +198,7 @@ function Downloads({ header, viaServer }: { header: React.ReactNode; viaServer?:
       keyExtractor={(q) => `${q.source}:${q.id}`}
       renderItem={({ item }) => <QueueRow q={item} />}
       contentContainerStyle={{ paddingTop: insets.top, paddingHorizontal: 16, paddingBottom: TAB_SPACE, gap: 12 }}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={() => load(true)} tintColor={C.accent} />}
+      refreshControl={Platform.isTV ? undefined : <RefreshControl refreshing={loading} onRefresh={() => load(true)} tintColor={C.accent} />}
       ListHeaderComponent={
         <View style={{ marginHorizontal: -16 }}>
           {header}

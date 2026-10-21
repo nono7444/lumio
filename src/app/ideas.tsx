@@ -208,7 +208,7 @@ export default function Ideas() {
       <ScrollView
         contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40, gap: 14 }}
         keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
+        refreshControl={Platform.isTV ? undefined : <RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
         <Text style={styles.dim}>
           {admin
             ? 'Les idées de la famille arrivent ici (et en notification). « Envoyer à Claude » ouvre claude.ai avec un prompt prêt, qui contient le contexte du projet : Claude propose et code la fonctionnalité, tu relis puis tu publies.'

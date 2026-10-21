@@ -243,7 +243,7 @@ export default function Library() {
     <ScrollView
       style={{ flex: 1, backgroundColor: C.bg }}
       contentContainerStyle={{ paddingTop: insets.top, paddingBottom: TAB_SPACE }}
-      refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
+      refreshControl={Platform.isTV ? undefined : <RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
       <ScreenTitle
         title="Bibliothèque"
         right={
