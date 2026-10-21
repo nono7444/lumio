@@ -4,7 +4,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { ReactNode, useState } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
+import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle , Platform } from 'react-native';
 import { verdict } from '@/lib/ratings';
 import { setTvFocus } from '@/lib/tv-focus';
 import { FocusPressable as Pressable } from '@/components/tv';
@@ -192,7 +192,8 @@ export function Row({
           keyExtractor={(i) => i.key}
           renderItem={({ item }) => <PosterCard item={item} />}
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}
+          // TV : marge autour des affiches, sinon l'agrandissement au focus est rogné
+          contentContainerStyle={Platform.isTV ? { paddingHorizontal: 24, paddingVertical: 12, gap: 14 } : { paddingHorizontal: 16, gap: 12 }}
           initialNumToRender={6}
           windowSize={5}
         />

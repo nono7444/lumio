@@ -6,6 +6,10 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- TV : les affiches ne sont plus coupées quand elles s'agrandissent (marge autour des rangées).
+- TV : appli plus fluide — sélection sans ombre (seul l'agrandissement reste), images moins lourdes, et seul le fond de l'accueil se redessine quand on change d'affiche.
+- TV : Demandes vide corrigé — si l'adresse du serveur Lumio manquait (connexion par code), l'appli prend celle de la maison automatiquement.
+
 - Notes : retour des étoiles (1 à 10) ; sur les affiches, la note de la famille s'affiche en haut avec un verdict « Top », « Moyen » ou « Bouse ».
 - Fiches : l'affiche entière en haut, sans le titre blanc rajouté par-dessus.
 - Admin, sur la fiche d'un titre : « Voir dans le disque » (ouvre la gestion des disques sur son dossier) et « Supprimer » (titre et fichiers).

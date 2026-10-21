@@ -22,6 +22,17 @@ export default function TabsLayout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.jellyfin?.token]);
 
+  // Serveur Lumio pas renseigné (ex. TV connectée par code) : on prend celui de la maison s'il répond,
+  // sinon les demandes, la file et les messages restent vides
+  useEffect(() => {
+    if (!settings.jellyfin || settings.chatUrl) return;
+    const home = 'https://lumio.wawanono.lol';
+    fetch(`${home}/health`)
+      .then((r) => (r.ok ? update({ chatUrl: home }) : null))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.jellyfin?.token, settings.chatUrl]);
+
   // Premier lancement : écran de connexion Jellyfin (on peut le passer)
   if (!settings.jellyfin && !settings.skipJellyfin) return <Redirect href="/login" />;
 

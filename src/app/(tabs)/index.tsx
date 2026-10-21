@@ -6,8 +6,8 @@ import { Platform, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimens
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AnnouncementPopup } from '@/components/announcement';
-import { TvBackdropLayer, TvInfoBlock } from '@/components/tv-backdrop';
-import { tvInfoFromJf, useTvFocus, type TvFocusInfo } from '@/lib/tv-focus';
+import { TvFocusHero } from '@/components/tv-backdrop';
+import { tvInfoFromJf, type TvFocusInfo } from '@/lib/tv-focus';
 import { Hero, heroFromTmdb, HeroTopBar, type HeroItem } from '@/components/hero';
 import { JfRow, openJellyfin, playJellyfin } from '@/components/jf-cards';
 import { isAnime, jf, jfImage, jfLogo, type JfItem } from '@/lib/jellyfin';
@@ -317,7 +317,6 @@ export default function Home() {
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.jellyfin?.token, nonce]);
-  const tvInfo = useTvFocus(tvInitial);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -328,8 +327,7 @@ export default function Home() {
   if (Platform.isTV)
     return (
       <View style={{ flex: 1, backgroundColor: C.bg }}>
-        <TvBackdropLayer info={tvInfo} />
-        <TvInfoBlock info={tvInfo} top={Math.round(screenH * 0.1)} />
+        <TvFocusHero initial={tvInitial} top={Math.round(screenH * 0.1)} />
         <ScrollView style={{ flex: 1, marginTop: Math.round(screenH * 0.48) }} contentContainerStyle={{ paddingBottom: 60 }}>
           {ordered
             .filter((r) => r.kind !== 'hero')

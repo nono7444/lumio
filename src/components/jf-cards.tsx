@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { FlatList, StyleSheet, Text, View } from 'react-native';
+import { FlatList, StyleSheet, Text, View , Platform } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 
 import { FamilyStarBadge, tap } from '@/components/ui';
@@ -176,7 +176,8 @@ export function JfRow({
         keyExtractor={(i) => i.Id}
         renderItem={({ item }) => (wide ? <JfWideCard item={item} /> : <JfPosterCard item={item} />)}
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}
+        // TV : marge autour des affiches, sinon l'agrandissement au focus est rogné
+          contentContainerStyle={Platform.isTV ? { paddingHorizontal: 24, paddingVertical: 12, gap: 14 } : { paddingHorizontal: 16, gap: 12 }}
       />
     </View>
   );

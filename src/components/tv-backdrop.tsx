@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { C } from '@/constants/theme';
-import type { TvFocusInfo } from '@/lib/tv-focus';
+import { useTvFocus, type TvFocusInfo } from '@/lib/tv-focus';
 
 const BG = C.bg;
 const a = (o: number) => {
@@ -72,3 +72,14 @@ const styles = StyleSheet.create({
   meta: { color: 'rgba(255,255,255,0.82)', fontSize: 15, fontWeight: '700' },
   overview: { color: 'rgba(255,255,255,0.72)', fontSize: 15, lineHeight: 22 },
 });
+
+/** Fond + infos qui suivent l'affiche sélectionnée (seul ce bloc se redessine, pas l'accueil). */
+export function TvFocusHero({ initial, top }: { initial: TvFocusInfo | null; top: number }) {
+  const info = useTvFocus(initial);
+  return (
+    <>
+      <TvBackdropLayer info={info} />
+      <TvInfoBlock info={info} top={top} />
+    </>
+  );
+}

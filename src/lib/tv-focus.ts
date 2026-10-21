@@ -19,7 +19,7 @@ const listeners = new Set<(i: TvFocusInfo | null) => void>();
 let timer: ReturnType<typeof setTimeout> | null = null;
 
 /** Annonce l'élément sélectionné (avec un petit délai : on ne change pas l'image à chaque affiche survolée en vitesse). */
-export function setTvFocus(info: TvFocusInfo | null, delay = 160) {
+export function setTvFocus(info: TvFocusInfo | null, delay = 260) {
   if (!Platform.isTV) return;
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => {

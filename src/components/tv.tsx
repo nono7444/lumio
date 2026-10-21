@@ -60,11 +60,6 @@ export const FocusPressable = forwardRef<View, Props>(function FocusPressable(
           ? {
               zIndex: focused ? 10 : (outer.zIndex as number | undefined),
               transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [1, max] }) }],
-              shadowColor: '#000',
-              shadowOpacity: anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.55] }),
-              shadowRadius: 14,
-              shadowOffset: { width: 0, height: 8 },
-              elevation: focused ? 10 : 0,
             }
           : null,
       ]}>
