@@ -6,6 +6,11 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- TV : lecteur fiabilisé — à la maison, la vidéo est lue directement sur l'adresse locale de Jellyfin (plus par le tunnel internet, qui provoquait les arrêts / reprises) ; réserve de lecture ramenée à une taille adaptée aux box TV.
+- TV : fiches comme Nuvio — l'image de fond reste fixe en plein écran et la page défile par-dessus (plus rien de coupé en bas) ; casting en grands ronds, accessible à la télécommande.
+- TV : affiches à la même taille que Nuvio.
+- Serveur 3.16.0 : `/tv/setup` donne aussi l'adresse locale de Jellyfin (variable `LOCAL_JELLYFIN_URL`).
+
 ## 1.0.73 — 21 octobre 2026
 
 - TV : sur la fiche d'un film ou d'une série de la bibliothèque, l'image de fond vient de TMDB (nette, sans texte) au lieu de celle de Jellyfin qui était zoomée et pixelisée ; la rangée « Dans le même genre » est retirée (elle était coupée en bas).

@@ -260,12 +260,13 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}>
+      {/* TV, comme Nuvio : le fond reste fixe en plein écran, la page défile par-dessus */}
+      {Platform.isTV ? (
+        <TvBackdropLayer info={{ key: item.Id, title: item.Name, backdrop: tmdbBackdrop ?? (settings.tmdbKey && tmdbId ? undefined : jfBackdrop(settings, item, 1920)) }} />
+      ) : null}
+      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + (Platform.isTV ? 120 : 40) }}>
         <View style={{ height: heroH }}>
-          {Platform.isTV ? (
-            // TV, façon Nuvio : grand fond fondu vers la gauche et le bas, infos alignées à gauche
-            <TvBackdropLayer info={{ key: item.Id, title: item.Name, backdrop: tmdbBackdrop ?? (settings.tmdbKey && tmdbId ? undefined : jfBackdrop(settings, item, 1920)) }} />
-          ) : (
+          {Platform.isTV ? null : (
             <>
               <Image source={jfPoster(settings, item, 1400)} style={StyleSheet.absoluteFill} contentFit="cover" contentPosition="center" transition={250} />
               <Fade height={heroH * 0.3} top />
@@ -487,7 +488,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ gap: 14 }}
                 renderItem={({ item: c }) => (
-                  <View style={styles.castItem}>
+                  <Pressable focusable={Platform.isTV} tvFocus="card" onPress={() => {}} style={styles.castItem}>
                     <View style={styles.castPhoto}>
                       {c.PrimaryImageTag ? (
                         <Image
@@ -507,7 +508,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                         {c.Role}
                       </Text>
                     ) : null}
-                  </View>
+                  </Pressable>
                 )}
               />
             </View>
@@ -613,7 +614,7 @@ export default function JellyfinItemScreen() {
 
 const styles = StyleSheet.create({
   // TV : colonne alignée à gauche sous les infos (boutons Lire / Vu compacts), comme Nuvio
-  tvColumn: { width: '100%', maxWidth: 680, alignSelf: 'flex-start', paddingLeft: 48 },
+  tvColumn: { width: '100%', maxWidth: 1100, alignSelf: 'flex-start', paddingLeft: 48 },
   heroContentTv: { position: 'absolute', left: 48, bottom: 36, width: '48%', alignItems: 'flex-start', gap: 10 },
   tvLine: { color: 'rgba(255,255,255,0.85)', fontSize: 15, fontWeight: '600' },
   overviewTv: { color: 'rgba(255,255,255,0.75)', fontSize: 15, lineHeight: 22 },
@@ -666,16 +667,16 @@ const styles = StyleSheet.create({
   epBarFill: { height: 3, backgroundColor: C.text },
   epTitle: { color: C.text, fontSize: 14, fontWeight: '700' },
   epOverview: { color: C.textDim, fontSize: 12, lineHeight: 17 },
-  castItem: { width: 84, alignItems: 'center' },
+  castItem: { width: Platform.isTV ? 130 : 84, alignItems: 'center' },
   castPhoto: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
+    width: Platform.isTV ? 112 : 76,
+    height: Platform.isTV ? 112 : 76,
+    borderRadius: Platform.isTV ? 56 : 38,
     overflow: 'hidden',
     backgroundColor: C.surfaceHigh,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  castName: { color: C.text, fontSize: 12, fontWeight: '700', textAlign: 'center', marginTop: 8 },
-  castRole: { color: C.textDim, fontSize: 11, textAlign: 'center', marginTop: 2 },
+  castName: { color: C.text, fontSize: Platform.isTV ? 15 : 12, fontWeight: '700', textAlign: 'center', marginTop: 8 },
+  castRole: { color: C.textDim, fontSize: Platform.isTV ? 13 : 11, textAlign: 'center', marginTop: 2 },
 });

@@ -116,7 +116,7 @@ export function JfPosterCard({ item, width = POSTER_W }: { item: JfItem; width?:
 export function JfWideCard({ item }: { item: JfItem }) {
   const { settings } = useSettings();
   const pct = progressOf(item);
-  const w = 250;
+  const w = Platform.isTV ? 320 : 250;
   return (
     <Pressable
       onPress={() => {

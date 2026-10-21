@@ -32,10 +32,10 @@ export function TvBackdropLayer({ info }: { info: TvFocusInfo | null }) {
       />
       {/* Fondu vers le bas : les rangées d'affiches se posent sur un fond uni */}
       <LinearGradient
-        colors={[a(0), a(0.35), a(0.85), BG]}
-        locations={[0, 0.3, 0.62, 1]}
-        start={{ x: 0, y: 0.35 }}
-        end={{ x: 0, y: 0.72 }}
+        colors={[a(0), a(0.3), a(0.62), a(0.82)]}
+        locations={[0, 0.35, 0.7, 1]}
+        start={{ x: 0, y: 0.4 }}
+        end={{ x: 0, y: 1 }}
         style={StyleSheet.absoluteFill}
       />
     </View>

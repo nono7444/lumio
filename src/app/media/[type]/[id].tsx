@@ -223,12 +223,12 @@ export default function MediaScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}>
+      {/* TV, comme Nuvio : fond fixe en plein écran, la page défile par-dessus */}
+      {Platform.isTV ? <TvBackdropLayer info={{ key: String(tmdbId), title, backdrop: tmdbImg(d.backdrop_path ?? d.poster_path, 'w1280') }} /> : null}
+      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + (Platform.isTV ? 120 : 40) }}>
         {/* ——— Hero ——— */}
         <View style={{ height: heroH }}>
-          {Platform.isTV ? (
-            <TvBackdropLayer info={{ key: String(tmdbId), title, backdrop: tmdbImg(d.backdrop_path ?? d.poster_path, 'w1280') }} />
-          ) : (
+          {Platform.isTV ? null : (
             <>
               <Image
                 source={tmdbImg(d.poster_path ?? d.backdrop_path, 'original')}
@@ -318,7 +318,7 @@ export default function MediaScreen() {
           )}
         </View>
 
-        <View style={[{ paddingHorizontal: 16, gap: 20, marginTop: 4 }, Platform.isTV && { width: '100%', maxWidth: 680, alignSelf: 'flex-start', paddingLeft: 48 }]}>
+        <View style={[{ paddingHorizontal: 16, gap: 20, marginTop: 4 }, Platform.isTV && { width: '100%', maxWidth: 1100, alignSelf: 'flex-start', paddingLeft: 48 }]}>
           {/* ——— Lecture (depuis Jellyfin) ——— */}
           {jfItem && !Platform.isTV ? (
             <Button
@@ -502,7 +502,7 @@ export default function MediaScreen() {
                 ListHeaderComponent={<View style={{ width: 2 }} />}
                 ListFooterComponent={<View style={{ width: 2 }} />}
                 renderItem={({ item: c }) => (
-                  <View style={styles.castItem}>
+                  <Pressable focusable={Platform.isTV} tvFocus="card" onPress={() => {}} style={styles.castItem}>
                     <View style={styles.castPhoto}>
                       {c.profile_path ? (
                         <Image source={tmdbImg(c.profile_path, 'w185')} style={StyleSheet.absoluteFill} contentFit="cover" />
@@ -518,7 +518,7 @@ export default function MediaScreen() {
                         {c.character}
                       </Text>
                     ) : null}
-                  </View>
+                  </Pressable>
                 )}
               />
             </View>
@@ -577,18 +577,18 @@ const styles = StyleSheet.create({
     borderBottomColor: C.border,
   },
   seasonName: { color: C.text, fontSize: 15, fontWeight: '700' },
-  castItem: { width: 84, alignItems: 'center' },
+  castItem: { width: Platform.isTV ? 130 : 84, alignItems: 'center' },
   castPhoto: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
+    width: Platform.isTV ? 112 : 76,
+    height: Platform.isTV ? 112 : 76,
+    borderRadius: Platform.isTV ? 56 : 38,
     overflow: 'hidden',
     backgroundColor: C.surfaceHigh,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  castName: { color: C.text, fontSize: 12, fontWeight: '700', textAlign: 'center', marginTop: 8 },
-  castRole: { color: C.textDim, fontSize: 11, textAlign: 'center', marginTop: 2 },
+  castName: { color: C.text, fontSize: Platform.isTV ? 15 : 12, fontWeight: '700', textAlign: 'center', marginTop: 8 },
+  castRole: { color: C.textDim, fontSize: Platform.isTV ? 13 : 11, textAlign: 'center', marginTop: 2 },
   back: {
     position: 'absolute',
     left: 14,

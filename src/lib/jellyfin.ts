@@ -782,6 +782,53 @@ export const QUALITIES: Quality[] = [
   { id: '480', label: '480p · 1,5 Mb/s', bitrate: 1_500_000, maxHeight: 480 },
 ];
 
+// ——— Lecture en local (même réseau que le serveur) ———
+// Par le tunnel Cloudflare, un film lourd se lit par à-coups (démarre, s'arrête, redémarre…).
+// À la maison, on lit directement sur l'adresse locale de Jellyfin si elle répond et que c'est bien le même serveur.
+const LAN_DEFAULTS = ['http://192.168.1.71:8096'];
+let lanCache: { key: string; at: number; base: string | null } | null = null;
+
+async function probe(base: string, ms: number): Promise<{ Id?: string } | null> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const r = await fetch(`${trimUrl(base)}/System/Info/Public`, { signal: ctrl.signal });
+    return r.ok ? await r.json() : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+export async function playbackBase(s: Settings): Promise<string> {
+  const j = s.jellyfin!;
+  if (/^http:\/\/(192\.168|10\.|172\.(1[6-9]|2\d|3[01])\.|localhost|127\.)/.test(j.url)) return trimUrl(j.url);
+  const key = `${j.url}|${s.chatUrl}`;
+  if (lanCache && lanCache.key === key && Date.now() - lanCache.at < 5 * 60_000) return lanCache.base ?? trimUrl(j.url);
+  let candidates = [...LAN_DEFAULTS];
+  try {
+    if (s.chatUrl) {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 2500);
+      const r = await fetch(`${trimUrl(s.chatUrl)}/tv/setup`, { signal: ctrl.signal }).finally(() => clearTimeout(t));
+      const cfg = r.ok ? ((await r.json()) as { localJellyfinUrl?: string | null }) : null;
+      if (cfg?.localJellyfinUrl) candidates = [cfg.localJellyfinUrl, ...candidates];
+    }
+  } catch {}
+  let found: string | null = null;
+  const remote = await probe(j.url, 4000);
+  for (const c of candidates) {
+    const info = await probe(c, 1500);
+    if (info && (!remote?.Id || info.Id === remote.Id)) {
+      found = trimUrl(c);
+      break;
+    }
+  }
+  lanCache = { key, at: Date.now(), base: found };
+  return found ?? trimUrl(j.url);
+}
+
 export async function getPlayback(
   s: Settings,
   itemId: string,
@@ -808,6 +855,8 @@ export async function getPlayback(
   if (!src) throw new JellyfinError('Aucune source vidéo pour cet élément');
 
   const common = { itemId, mediaSourceId: src.Id, playSessionId: info.PlaySessionId };
+  // TV : vidéo lue sur l'adresse locale quand on est à la maison
+  const base = Platform.isTV ? await playbackBase(s) : trimUrl(j.url);
   if (!forced && (src.SupportsDirectPlay || src.SupportsDirectStream)) {
     const p = new URLSearchParams({
       static: 'true',
@@ -819,13 +868,13 @@ export async function getPlayback(
     const ext = (src.Container ?? 'mp4').split(',')[0];
     return {
       ...common,
-      uri: `${j.url}/Videos/${itemId}/stream.${ext}?${p}`,
+      uri: `${base}/Videos/${itemId}/stream.${ext}?${p}`,
       isHls: false,
       playMethod: src.SupportsDirectPlay ? 'DirectPlay' : 'DirectStream',
     };
   }
   if (src.TranscodingUrl) {
-    let uri = `${j.url}${src.TranscodingUrl}`;
+    let uri = `${base}${src.TranscodingUrl}`;
     const add = (k: string, v: string) => {
       uri = /[?&]/.test(uri) && new RegExp(`[?&]${k}=`, 'i').test(uri)
         ? uri.replace(new RegExp(`([?&]${k}=)[^&]*`, 'i'), `$1${v}`)

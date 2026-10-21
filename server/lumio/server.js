@@ -24,7 +24,7 @@ const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
 const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.15.0';
+const VERSION = '3.16.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1609,7 +1609,12 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
 
   // Lumio TV : au premier lancement, la TV demande l'adresse publique de Jellyfin
   if (url.pathname === '/tv/setup') {
-    return send(res, 200, { name: 'Lumio', jellyfinUrl: process.env.PUBLIC_JELLYFIN_URL || config.publicJellyfinUrl || null });
+    return send(res, 200, {
+      name: 'Lumio',
+      jellyfinUrl: process.env.PUBLIC_JELLYFIN_URL || config.publicJellyfinUrl || null,
+      // Adresse locale (réseau de la maison) : la TV lit les vidéos en direct, sans passer par le tunnel
+      localJellyfinUrl: process.env.LOCAL_JELLYFIN_URL || null,
+    });
   }
 
   if (!url.pathname.startsWith('/api/')) return send(res, 404, { error: 'introuvable' });

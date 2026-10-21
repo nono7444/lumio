@@ -22,11 +22,11 @@ export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, on
     pl.timeUpdateEventInterval = 1;
     pl.staysActiveInBackground = true;
     pl.showNowPlayingNotification = true;
-    // Plus de réserve d'avance : moins de saccades quand le réseau ou le serveur ralentit
+    // Réserve modérée : assez pour absorber un ralentissement, sans saturer la mémoire d'une box TV
     pl.bufferOptions = {
-      preferredForwardBufferDuration: 60,
-      minBufferForPlayback: 4,
-      prioritizeTimeOverSizeThreshold: true,
+      preferredForwardBufferDuration: 30,
+      minBufferForPlayback: 3,
+      prioritizeTimeOverSizeThreshold: false,
       maxBufferBytes: 0,
     };
   });
