@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.69 — 21 octobre 2026
+
 - Admin : bouton « Corriger les infos » sur la fiche d'un film ou d'une série de la bibliothèque. « Identifier » cherche la bonne fiche (titre, année, ou lien TMDB / IMDb collé) et remplace titre, résumé et affiche. « Modifier » change titre, année et résumé à la main (verrouillés pour ne pas être écrasés), avec un bouton pour tout actualiser depuis Internet.
 
 ## 1.0.68 — 21 octobre 2026
