@@ -23,7 +23,7 @@ export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, on
     pl.staysActiveInBackground = true;
     pl.showNowPlayingNotification = true;
     // Réserve modérée : assez pour absorber un ralentissement, sans saturer la mémoire d'une box TV
-    pl.bufferOptions = {
+    if (Platform.isTV) pl.bufferOptions = {
       preferredForwardBufferDuration: 30,
       minBufferForPlayback: 3,
       prioritizeTimeOverSizeThreshold: false,
