@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.72 — 21 octobre 2026
+
 - TV : fiches film / série comme Nuvio — logo, bouton ovale « Regarder » (ou « Demander » si le titre n'est pas dispo), boutons ronds Vu, Note et J'aime, puis réalisateur, résumé, genres, date, note et durée.
 - TV : le lecteur ne se referme plus tout seul au premier appui sur « Regarder ».
 - TV : l'onglet Téléchargements des Demandes ne devient plus noir (et plus aucun « tirer pour actualiser » sur TV).
