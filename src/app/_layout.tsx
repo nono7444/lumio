@@ -1,7 +1,7 @@
 // En tout premier : fetch plus robuste (requêtes coupées par iOS relancées)
 import '@/lib/net';
 // TV : taille de l'interface (doit passer avant les écrans)
-import { TvScaleRoot, useTvSounds } from '@/lib/tv-ui';
+import { TvScaleRoot } from '@/lib/tv-ui';
 import { DarkTheme, Stack, ThemeProvider } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as SplashScreen from 'expo-splash-screen';
@@ -29,7 +29,6 @@ const theme = {
 
 function Root() {
   const { ready, settings } = useSettings();
-  useTvSounds(settings.tvSounds);
   useWidgetSync();
   useAppBadge();
   useSharedTmdbKey();

@@ -83,3 +83,38 @@ export function TvFocusHero({ initial, top }: { initial: TvFocusInfo | null; top
     </>
   );
 }
+
+/**
+ * Accueil TV : bandeau d'infos sur fond uni (pas d'image de fond, plus rapide et plus lisible).
+ * Titre, année / durée / note et résumé du titre sélectionné. Seul ce bloc se redessine au focus.
+ */
+export function TvHomeHeader({ initial, height }: { initial: TvFocusInfo | null; height: number }) {
+  const info = useTvFocus(initial);
+  const { width } = useWindowDimensions();
+  return (
+    <View style={[headerStyles.wrap, { height }]} pointerEvents="none">
+      {info ? (
+        <View style={{ width: Math.min(width * 0.62, 900), gap: 8 }}>
+          <Text style={headerStyles.title} numberOfLines={1}>
+            {info.title}
+          </Text>
+          {info.meta ? <Text style={headerStyles.meta}>{info.meta}</Text> : null}
+          {info.overview ? (
+            <Text style={headerStyles.overview} numberOfLines={2}>
+              {info.overview}
+            </Text>
+          ) : null}
+        </View>
+      ) : (
+        <Text style={headerStyles.title}>Accueil</Text>
+      )}
+    </View>
+  );
+}
+
+const headerStyles = StyleSheet.create({
+  wrap: { justifyContent: 'flex-end', paddingLeft: 48, paddingBottom: 14, backgroundColor: C.bg },
+  title: { color: C.text, fontSize: 34, fontWeight: '900', letterSpacing: -0.6 },
+  meta: { color: 'rgba(255,255,255,0.75)', fontSize: 15, fontWeight: '700' },
+  overview: { color: 'rgba(255,255,255,0.62)', fontSize: 15, lineHeight: 22 },
+});

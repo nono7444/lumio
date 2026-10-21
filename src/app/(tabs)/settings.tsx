@@ -244,7 +244,6 @@ export default function SettingsScreen() {
               value={settings.tvScale ?? DEFAULT_TV_SCALE}
               onChange={(v) => update({ tvScale: v })}
             />
-            <Toggle label="Sons de navigation (comme sur Apple TV)" value={settings.tvSounds !== false} onChange={(v) => update({ tvSounds: v })} />
           </Section>
         ) : null}
 

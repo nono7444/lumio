@@ -5,6 +5,7 @@
 // donc tout (affiches, barres, textes) rapetisse ou grandit ensemble, sans retoucher chaque page.
 import { useEffect, type ReactNode } from 'react';
 import { Dimensions, Platform, View } from 'react-native';
+import { usePathname } from 'expo-router';
 
 import { C } from '@/constants/theme';
 
@@ -29,7 +30,11 @@ if (Platform.isTV) {
 
 /** Enveloppe l'appli : sur TV, écran virtuel réduit à la taille choisie (sur téléphone, ne fait rien). */
 export function TvScaleRoot({ value, children }: { value?: number; children: ReactNode }) {
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const path = Platform.isTV ? usePathname() : '';
   if (!Platform.isTV) return <>{children}</>;
+  // Lecteur : pas de réduction (la vidéo s'affiche alors dans une SurfaceView, bien plus fluide qu'une TextureView)
+  const full = path === '/player' || path === '/watch';
   scale = value && value > 0.4 && value <= 1 ? value : DEFAULT_TV_SCALE;
   const { width: W, height: H } = realGet('window');
   const w = W / scale;
@@ -39,7 +44,11 @@ export function TvScaleRoot({ value, children }: { value?: number; children: Rea
       {/* key : changer de taille recrée l'interface pour qu'elle relise les dimensions */}
       <View
         key={scale}
-        style={{ width: w, height: h, transform: [{ translateX: (W - w) / 2 }, { translateY: (H - h) / 2 }, { scale }] }}>
+        style={
+          full
+            ? { width: W, height: H }
+            : { width: w, height: h, transform: [{ translateX: (W - w) / 2 }, { translateY: (H - h) / 2 }, { scale }] }
+        }>
         {children}
       </View>
     </View>

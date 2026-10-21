@@ -3,7 +3,6 @@ import { forwardRef, useRef, useState } from 'react';
 import { Platform, Pressable as RNPressable, type PressableProps, type View } from 'react-native';
 import * as RN from 'react-native';
 
-import { playNav } from '@/lib/tv-ui';
 
 export const IS_TV = Platform.isTV;
 
@@ -47,8 +46,8 @@ export const FocusPressable = forwardRef<View, Props>(function FocusPressable(
   if (!IS_TV) return <RNPressable ref={ref} style={style} onFocus={onFocus} onBlur={onBlur} {...rest} />;
   const { children, onPress, ...others } = rest;
   const go = (to: number) =>
-    RN.Animated.timing(anim, { toValue: to, duration: 180, easing: RN.Easing.out(RN.Easing.cubic), useNativeDriver: true }).start();
-  const max = tvFocus === 'card' ? 1.07 : 1.04;
+    RN.Animated.timing(anim, { toValue: to, duration: 120, easing: RN.Easing.out(RN.Easing.cubic), useNativeDriver: true }).start();
+  const max = tvFocus === 'card' ? 1.06 : 1.03;
   const resolve = (state: { pressed: boolean; focused?: boolean; hovered?: boolean }) =>
     splitStyle(typeof style === 'function' ? style(state as never) : style);
   const { outer } = resolve({ pressed: false });
@@ -66,18 +65,10 @@ export const FocusPressable = forwardRef<View, Props>(function FocusPressable(
       <RNPressable
         ref={ref}
         {...others}
-        onPress={
-          onPress
-            ? (e) => {
-                playNav('select');
-                onPress(e);
-              }
-            : undefined
-        }
+        onPress={onPress}
         onFocus={(e) => {
           setFocused(true);
           if (focusRing) go(1);
-          playNav('tick');
           onFocus?.(e);
         }}
         onBlur={(e) => {

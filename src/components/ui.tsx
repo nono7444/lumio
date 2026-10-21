@@ -84,7 +84,8 @@ export function PosterCard({ item, width = POSTER_W }: { item: PosterItem; width
   const [failed, setFailed] = useState(false);
   // Titre noté par la famille : affiche Better Posters sans sa note (c'est la note de la famille qui s'affiche)
   const fam = useFamilyRatingBadge(settings, item.ids?.type === 'tv' ? 'tv' : item.ids?.type === 'movie' ? 'movie' : undefined, item.ids?.tmdb);
-  const better = useBetterPoster(item.ids, { hideRating: Boolean(fam) });
+  // TV : affiches TMDB directes (le service d'affiches améliorées ajoute une requête et du délai)
+  const better = useBetterPoster(Platform.isTV ? undefined : item.ids, { hideRating: Boolean(fam) });
   const src = better && !failed ? better : item.poster;
   const height = Math.round(width * 1.5);
   return (
@@ -108,7 +109,8 @@ export function PosterCard({ item, width = POSTER_W }: { item: PosterItem; width
             source={src}
             style={StyleSheet.absoluteFill}
             contentFit="cover"
-            transition={200}
+            transition={Platform.isTV ? 0 : 200}
+            cachePolicy="memory-disk"
             recyclingKey={item.key}
             onError={() => better && setFailed(true)}
           />
@@ -194,8 +196,10 @@ export function Row({
           showsHorizontalScrollIndicator={false}
           // TV : marge autour des affiches, sinon l'agrandissement au focus est rogné
           contentContainerStyle={Platform.isTV ? { paddingHorizontal: 24, paddingVertical: 12, gap: 14 } : { paddingHorizontal: 16, gap: 12 }}
-          initialNumToRender={6}
-          windowSize={5}
+          initialNumToRender={Platform.isTV ? 8 : 6}
+          maxToRenderPerBatch={8}
+          windowSize={Platform.isTV ? 7 : 5}
+          removeClippedSubviews={!Platform.isTV}
         />
       )}
     </View>

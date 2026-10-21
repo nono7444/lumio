@@ -567,7 +567,7 @@ export function jfImage(
   if (!s.jellyfin || !itemId) return undefined;
   // TV : images en haute définition (écran 1080p / 4K vu de près)
   // TV : un peu plus net que le téléphone, sans images géantes qui saturent la mémoire de la box
-  const k = Platform.isTV ? 1.4 : 1;
+  const k = 1;
   const q = new URLSearchParams({ quality: String(opts.quality ?? (Platform.isTV ? 95 : 90)) });
   if (opts.tag) q.set('tag', opts.tag);
   if (opts.maxHeight) q.set('maxHeight', String(Math.round(opts.maxHeight * k)));

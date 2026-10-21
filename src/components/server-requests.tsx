@@ -244,6 +244,60 @@ export function ServerRequests({ header }: { header: React.ReactNode }) {
     } catch {}
   }
 
+
+  const filtersBar = (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 16 }} style={{ marginBottom: 14 }}>
+      {FILTERS.map((f) => (
+        <SegChip
+          key={f.id}
+          label={f.id === 'pending' && pendingCount ? `${f.label} (${pendingCount})` : f.label}
+          on={filter === f.id}
+          onPress={() => {
+            tap();
+            setFilter(f.id);
+            load(f.id);
+          }}
+        />
+      ))}
+    </ScrollView>
+  );
+
+  // TV : simple liste défilante (pas de FlatList ni de « tirer pour actualiser », qui restaient vides sur certaines box)
+  if (Platform.isTV)
+    return (
+      <ScrollView style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ paddingBottom: 80 }}>
+        {header}
+        {filtersBar}
+        <Text style={[styles.meta, { marginHorizontal: 16, marginBottom: 10 }]}>
+          {settings.jellyfin?.userName ?? ''}
+          {admin ? ' · admin : toutes les demandes' : ' · tes demandes (et celles de la famille si l’option est activée)'}
+          {total ? ` · ${total} demande${total > 1 ? 's' : ''}` : ''}
+        </Text>
+        {error ? <Text style={[styles.meta, { color: C.danger, marginHorizontal: 16, marginBottom: 10 }]}>Erreur : {error}</Text> : null}
+        {loading && !rows.length ? (
+          <ActivityIndicator color={C.textDim} style={{ marginTop: 40 }} />
+        ) : !rows.length ? (
+          <View style={{ alignItems: 'center', marginTop: 40, gap: 10, paddingHorizontal: 40 }}>
+            <Ionicons name="paper-plane-outline" size={36} color={C.textFaint} />
+            <Text style={[styles.meta, { textAlign: 'center' }]}>
+              {admin
+                ? 'Aucune demande ici.'
+                : 'Aucune demande faite depuis ce compte. Pour voir celles de toute la famille : sur le téléphone admin, Profil → Utilisateurs → « Les utilisateurs voient toutes les demandes ».'}
+            </Text>
+          </View>
+        ) : (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 14, paddingHorizontal: 16 }}>
+            {rows.map((r) => (
+              <View key={r.id} style={{ width: '48.5%' }}>
+                <RequestCard r={r} admin={admin} meId={settings.jellyfin?.userId} onChanged={() => load()} />
+              </View>
+            ))}
+          </View>
+        )}
+        {rows.length < total ? <Button title="Voir plus" variant="secondary" onPress={more} style={{ margin: 16, alignSelf: 'center' }} /> : null}
+      </ScrollView>
+    );
+
   return (
     <FlatList
       style={{ flex: 1, backgroundColor: C.bg }}

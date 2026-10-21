@@ -195,7 +195,7 @@ export function pickLogo(s: Settings, images?: TmdbImages): string | null {
 
 type ImgSize = 'w185' | 'w342' | 'w500' | 'w780' | 'w1280' | 'original';
 // TV : une taille au-dessus (voire l'original) pour des images nettes sur grand écran
-const TV_SIZE: Record<ImgSize, ImgSize> = { w185: 'w342', w342: 'w500', w500: 'w500', w780: 'w780', w1280: 'w1280', original: 'w1280' };
+const TV_SIZE: Record<ImgSize, ImgSize> = { w185: 'w342', w342: 'w342', w500: 'w500', w780: 'w780', w1280: 'w1280', original: 'w1280' };
 export const tmdbImg = (path?: string | null, size: ImgSize = 'w342') =>
   path ? `https://image.tmdb.org/t/p/${Platform.isTV ? TV_SIZE[size] : size}${path}` : undefined;
 

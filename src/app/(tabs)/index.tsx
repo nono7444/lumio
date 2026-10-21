@@ -6,7 +6,7 @@ import { Platform, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimens
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AnnouncementPopup } from '@/components/announcement';
-import { TvFocusHero } from '@/components/tv-backdrop';
+import { TvHomeHeader } from '@/components/tv-backdrop';
 import { tvInfoFromJf, type TvFocusInfo } from '@/lib/tv-focus';
 import { Hero, heroFromTmdb, HeroTopBar, type HeroItem } from '@/components/hero';
 import { JfRow, openJellyfin, playJellyfin } from '@/components/jf-cards';
@@ -311,7 +311,7 @@ export default function Home() {
     if (!Platform.isTV || !settings.jellyfin) return;
     jf.recentReleases(settings, { kind: 'both', limit: 8 })
       .then((items) => {
-        const first = items.find((i) => !isAnime(i) && (i.BackdropImageTags?.length || i.ImageTags?.Primary));
+        const first = items.find((i) => !isAnime(i));
         if (first) setTvInitial(tvInfoFromJf(settings, first));
       })
       .catch(() => {});
@@ -327,8 +327,9 @@ export default function Home() {
   if (Platform.isTV)
     return (
       <View style={{ flex: 1, backgroundColor: C.bg }}>
-        <TvFocusHero initial={tvInitial} top={Math.round(screenH * 0.1)} />
-        <ScrollView style={{ flex: 1, marginTop: Math.round(screenH * 0.48) }} contentContainerStyle={{ paddingBottom: 60 }}>
+        {/* Fond uni : bandeau d'infos du titre sélectionné, puis les rangées */}
+        <TvHomeHeader initial={tvInitial} height={Math.round(screenH * 0.27)} />
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 4, paddingBottom: 80 }} showsVerticalScrollIndicator={false}>
           {ordered
             .filter((r) => r.kind !== 'hero')
             .map((r) => {

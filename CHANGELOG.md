@@ -6,6 +6,12 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- TV : accueil sur fond uni (plus d'image de fond) avec un bandeau d'infos compact du titre sélectionné ; les rangées remontent et on passe directement d'une rangée d'affiches à l'autre.
+- TV : affiches instantanées (affiches du serveur sans service externe, sans fondu, gardées en cache) et sélection plus vive.
+- TV : sons de navigation retirés.
+- TV : page Demandes refaite (liste simple sur deux colonnes, avec le compte connecté et la raison si elle est vide).
+- TV : lecteur plus fluide — vidéo affichée sans réduction de l'interface (rendu direct) et réserve d'avance plus grande contre les saccades.
+
 ## 1.0.70 — 21 octobre 2026
 
 - Corriger les infos : après « Identifier », l'affiche et le fond sont téléchargés directement (la couverture ne reste plus noire). Nouveau bouton « Récupérer l'affiche et le fond » dans « Modifier » pour les titres déjà corrigés.

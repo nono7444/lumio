@@ -22,6 +22,13 @@ export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, on
     pl.timeUpdateEventInterval = 1;
     pl.staysActiveInBackground = true;
     pl.showNowPlayingNotification = true;
+    // Plus de réserve d'avance : moins de saccades quand le réseau ou le serveur ralentit
+    pl.bufferOptions = {
+      preferredForwardBufferDuration: 60,
+      minBufferForPlayback: 4,
+      prioritizeTimeOverSizeThreshold: true,
+      maxBufferBytes: 0,
+    };
   });
 
   useEffect(() => {
@@ -59,8 +66,8 @@ export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, on
     <View style={StyleSheet.absoluteFill}>
       <VideoView
         ref={view}
-        // TV : l'appli est réduite par une transformation ; seule une TextureView la suit (une SurfaceView resterait décalée)
-        surfaceType={Platform.isTV ? 'textureView' : undefined}
+        // TV : le lecteur est affiché sans réduction (voir TvScaleRoot) → SurfaceView, la plus fluide
+        surfaceType="surfaceView"
         player={player}
         style={StyleSheet.absoluteFill}
         nativeControls

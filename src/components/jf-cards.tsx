@@ -52,7 +52,7 @@ export function JfPosterCard({ item, width = POSTER_W }: { item: JfItem; width?:
     item.ProviderIds?.Tmdb ? Number(item.ProviderIds.Tmdb) : undefined
   );
   const better = useBetterPoster(
-    item.ProviderIds?.Imdb && (item.Type === 'Movie' || item.Type === 'Series')
+    !Platform.isTV && item.ProviderIds?.Imdb && (item.Type === 'Movie' || item.Type === 'Series')
       ? { imdb: item.ProviderIds.Imdb, type: item.Type === 'Movie' ? 'movie' : 'tv' }
       : undefined,
     { hideRating: Boolean(fam) }
@@ -74,7 +74,9 @@ export function JfPosterCard({ item, width = POSTER_W }: { item: JfItem; width?:
             source={poster}
             style={StyleSheet.absoluteFill}
             contentFit="cover"
-            transition={200}
+            transition={Platform.isTV ? 0 : 200}
+            cachePolicy="memory-disk"
+            priority="high"
             recyclingKey={item.Id}
             onError={() => better && setFailed(true)}
           />
@@ -124,7 +126,7 @@ export function JfWideCard({ item }: { item: JfItem }) {
       }}
       style={({ pressed }) => [{ width: w, transform: [{ scale: pressed ? 0.97 : 1 }] }]}>
       <View style={[styles.poster, { width: w, height: Math.round(w * 0.5625) }]}>
-        <Image source={jfBackdrop(settings, item, 600)} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
+        <Image source={jfBackdrop(settings, item, 600)} style={StyleSheet.absoluteFill} contentFit="cover" transition={Platform.isTV ? 0 : 200} cachePolicy="memory-disk" recyclingKey={item.Id} />
         <View style={styles.playBadge}>
           <Ionicons name="play" size={16} color="#000" />
         </View>
@@ -160,7 +162,8 @@ export function JfRow({
   if (!items.length) return null;
   return (
     <View style={{ marginBottom: 28 }}>
-      <Pressable style={styles.rowHead} onPress={onSeeAll} disabled={!onSeeAll}>
+      {/* TV : le titre de rangée n'est pas une étape de navigation (on passe direct d'une rangée d'affiches à l'autre) */}
+      <Pressable style={styles.rowHead} onPress={onSeeAll} disabled={!onSeeAll || Platform.isTV} focusable={!Platform.isTV && Boolean(onSeeAll)}>
         <Text style={[styles.rowTitle, accent ? { color: accent } : null]} numberOfLines={1}>
           {title}
         </Text>
@@ -176,6 +179,10 @@ export function JfRow({
         keyExtractor={(i) => i.Id}
         renderItem={({ item }) => (wide ? <JfWideCard item={item} /> : <JfPosterCard item={item} />)}
         showsHorizontalScrollIndicator={false}
+        initialNumToRender={Platform.isTV ? 8 : 6}
+        maxToRenderPerBatch={8}
+        windowSize={Platform.isTV ? 7 : 5}
+        removeClippedSubviews={!Platform.isTV}
         // TV : marge autour des affiches, sinon l'agrandissement au focus est rogné
           contentContainerStyle={Platform.isTV ? { paddingHorizontal: 24, paddingVertical: 12, gap: 14 } : { paddingHorizontal: 16, gap: 12 }}
       />
