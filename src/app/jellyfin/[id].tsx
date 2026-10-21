@@ -22,6 +22,7 @@ import {
 import { TvBackdropLayer } from '@/components/tv-backdrop';
 import { toast } from '@/components/toast';
 import { filesApi } from '@/lib/files';
+import { tmdb, tmdbImg } from '@/lib/tmdb';
 import { TvActionRow, TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { MetadataEditor } from '@/components/metadata-editor';
 import { FamilyRating } from '@/components/family-rating';
@@ -201,8 +202,24 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
   const [showRate, setShowRate] = useState(false);
 
   useEffect(() => {
+    // TV : pas de rangée « Dans le même genre » (elle était coupée en bas de l'écran)
+    if (Platform.isTV) return;
     jf.similar(settings, item.Id).then(setSimilar).catch(() => {});
   }, [settings, item.Id]);
+
+  // TV : image de fond TMDB (nette, en 16:9, sans texte) plutôt que celle de Jellyfin, souvent petite ou recadrée
+  const [tmdbBackdrop, setTmdbBackdrop] = useState<string | undefined>();
+  useEffect(() => {
+    if (!Platform.isTV || !tmdbId || !settings.tmdbKey) return;
+    const get = item.Type === 'Series' ? tmdb.tv(settings, tmdbId) : tmdb.movie(settings, tmdbId);
+    get
+      .then((d: any) => {
+        const clean = (d.images?.backdrops ?? []).find((b: { iso_639_1?: string | null }) => !b.iso_639_1)?.file_path;
+        setTmdbBackdrop(tmdbImg(clean ?? d.backdrop_path, 'w1280') ?? jfBackdrop(settings, item, 1920));
+      })
+      .catch(() => setTmdbBackdrop(jfBackdrop(settings, item, 1920)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tmdbId, item.Type]);
 
 
   async function toggleFav() {
@@ -247,7 +264,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
         <View style={{ height: heroH }}>
           {Platform.isTV ? (
             // TV, façon Nuvio : grand fond fondu vers la gauche et le bas, infos alignées à gauche
-            <TvBackdropLayer info={{ key: item.Id, title: item.Name, backdrop: jfBackdrop(settings, item) }} />
+            <TvBackdropLayer info={{ key: item.Id, title: item.Name, backdrop: tmdbBackdrop ?? (settings.tmdbKey && tmdbId ? undefined : jfBackdrop(settings, item, 1920)) }} />
           ) : (
             <>
               <Image source={jfPoster(settings, item, 1400)} style={StyleSheet.absoluteFill} contentFit="cover" contentPosition="center" transition={250} />
@@ -454,7 +471,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
             </View>
           )}
 
-          {similar.length > 0 && (
+          {similar.length > 0 && !Platform.isTV && (
             <View style={{ marginHorizontal: -16 }}>
               <JfRow title="Dans le même genre" items={similar} />
             </View>
