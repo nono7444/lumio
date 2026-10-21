@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.73 — 21 octobre 2026
+
 - TV : sur la fiche d'un film ou d'une série de la bibliothèque, l'image de fond vient de TMDB (nette, sans texte) au lieu de celle de Jellyfin qui était zoomée et pixelisée ; la rangée « Dans le même genre » est retirée (elle était coupée en bas).
 
 ## 1.0.72 — 21 octobre 2026
