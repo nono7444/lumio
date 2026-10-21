@@ -190,8 +190,38 @@ jobs:
           path: lumio-mac.dmg
 
   # Publie une Release à chaque build de main : liens de téléchargement directs, sans connexion
+  # Test de démarrage de l'APK sur un téléphone virtuel : une version qui plante à l'ouverture n'est pas publiée
+  android-smoke:
+    needs: android
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Accélération matérielle de l'émulateur
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: actions/download-artifact@v4
+        with:
+          name: lumio-android
+      - name: Ouvre l'appli 40 s sur un téléphone virtuel (Android 14)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: |
+            adb install -r lumio-android.apk
+            adb logcat -c
+            adb shell monkey -p lol.wawanono.lumio -c android.intent.category.LAUNCHER 1
+            sleep 40
+            adb logcat -d > logcat.txt || true
+            if adb shell pidof lol.wawanono.lumio > /dev/null; then echo "::notice::L'appli tourne toujours après 40 s"; else msg=$(grep -A30 "FATAL EXCEPTION" logcat.txt | head -32 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}'); echo "::error::Plantage au démarrage%0A$msg"; exit 1; fi
+
   release:
-    needs: [ios, android, android-tv, mac]
+    needs: [ios, android, android-smoke, android-tv, mac]
     # Publie dès que l'iPhone est prêt, même si l'APK Android a échoué
     if: ${{ always() && needs.ios.result == 'success' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-latest
@@ -204,6 +234,9 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
+      - name: APK Android non publié s'il plante au démarrage
+        if: ${{ needs.android-smoke.result != 'success' }}
+        run: rm -f lumio-android.apk
       - name: Notes de version (section « À venir » du CHANGELOG, sinon message du commit)
         env:
           COMMIT_MSG: ${{ github.event.head_commit.message }}

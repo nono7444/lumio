@@ -6,7 +6,7 @@
 const { withAppBuildGradle, withProjectBuildGradle } = require('expo/config-plugins');
 
 const CAST = '22.1.0';
-const MEDIAROUTER = '1.7.0';
+const MEDIAROUTER = '1.8.0';
 
 module.exports = function withCastFrameworkVersion(config) {
   config = withProjectBuildGradle(config, (c) => {
