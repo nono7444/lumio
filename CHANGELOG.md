@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- APK : bouton « Installer la dernière version » toujours présent dans Profil → Application.
+
 ## 1.0.76 — 21 octobre 2026
 
 - Serveur 3.16.1 : lien d'installation `lumio.wawanono.lol/tvnuvio` pour Lumio TV (version Nuvio), `/tvnuvio64` pour la version 64 bits.

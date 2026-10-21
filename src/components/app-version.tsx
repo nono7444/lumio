@@ -67,6 +67,15 @@ export function AppVersionSection() {
             ) : null}
           </View>
         ) : null}
+        {/* APK : bouton toujours là, qui télécharge la dernière version depuis la bonne adresse */}
+        {Platform.OS === "android" && !Platform.isTV && !update ? (
+          <Button
+            title="Installer la dernière version"
+            icon="download-outline"
+            variant="secondary"
+            onPress={() => Linking.openURL(ANDROID_APK_URL)}
+          />
+        ) : null}
         <View style={{ flexDirection: "row", gap: 10 }}>
           <Button
             title="Vérifier"
