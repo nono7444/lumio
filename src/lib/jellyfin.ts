@@ -465,6 +465,11 @@ export const jf = {
     return r.Items.find((e) => e.Id !== episode.Id) ?? null;
   },
 
+  /** Admin : supprime le titre de Jellyfin ET ses fichiers sur le disque */
+  deleteItem: (s: Settings, id: string) => {
+    const { j } = api(s);
+    return call(j.url, s.deviceId, j.token, `/Items/${id}`, { method: 'DELETE' });
+  },
   setPlayed: (s: Settings, id: string, played: boolean) => {
     const { j } = api(s);
     return call(j.url, s.deviceId, j.token, `/Users/${j.userId}/PlayedItems/${id}`, { method: played ? 'POST' : 'DELETE' });

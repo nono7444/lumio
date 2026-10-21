@@ -24,7 +24,7 @@ const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
 const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.14.0';
+const VERSION = '3.15.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -251,9 +251,18 @@ async function arr(kind, p, init = {}) {
 async function folders(kind) {
   const list = await arr(kind, '/rootfolder');
   const c = arrConfig(kind);
+  // Ordre de préférence : Films d'abord (Kids en dernier) ; pour les séries, Séries puis Animés
+  const last = (p2) => String(p2).replace(/\/+$/, '').split('/').pop().toLowerCase();
+  const score = (p2) => {
+    const n = last(p2);
+    if (/kid|enfant|jeunesse|famil/.test(n)) return 9;
+    if (kind === 'radarr') return /film|movie/.test(n) ? 0 : /anim/.test(n) ? 2 : 1;
+    return /s[eé]rie|tv|show/.test(n) ? 0 : /anim/.test(n) ? 1 : 2;
+  };
+  const sorted = [...list].sort((a, b) => score(a.path) - score(b.path));
   return {
-    folders: list.map((f) => ({ path: f.path, freeSpace: f.freeSpace, accessible: f.accessible !== false })),
-    default: c.rootFolderPath || (list[0] && list[0].path) || null,
+    folders: sorted.map((f) => ({ path: f.path, freeSpace: f.freeSpace, accessible: f.accessible !== false })),
+    default: c.rootFolderPath || (sorted[0] && sorted[0].path) || null,
   };
 }
 
@@ -1542,18 +1551,28 @@ const server = http.createServer(async (req, res) => {
     const deep = `lumio://invite${url.search}`;
     const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
     const name = url.searchParams.get('name');
+    const flare = process.env.FLARESTORE_URL || config.flarestoreUrl || '';
+    const SOURCE = 'https://github.com/nono7444/lumio/releases/latest/download/altstore.json';
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     return res.end(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Invitation Lumio</title><style>
 body{margin:0;font-family:-apple-system,system-ui,sans-serif;background:#0B0D12;color:#fff;display:flex;min-height:100vh;align-items:center;justify-content:center}
 main{max-width:420px;padding:28px;text-align:center}h1{font-size:30px;margin:0 0 8px}p{color:#A1A1A6;line-height:1.5}
 a.b{display:block;margin:12px 0;padding:15px;border-radius:14px;background:#fff;color:#000;text-decoration:none;font-weight:700}
-a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1.6;padding-left:20px}</style></head><body><main>
+a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1.6;padding-left:20px}h2{font-size:18px;text-align:left;margin:26px 0 6px}b{color:#fff}.src{margin:8px 0;padding:10px;border-radius:10px;background:#1C1C1E;color:#fff;font-size:12px;word-break:break-all;text-align:left}ol a{color:#5AA2FF}</style></head><body><main>
 <h1>Lumio</h1><p>${name ? `${esc(name)} t'invite sur son serveur.` : 'Tu es invité sur un serveur Lumio.'}</p>
-<ol><li>Installe l'appli (bouton ci-dessous).</li><li>Reviens ici et touche « Ouvrir dans Lumio » : tout se configure.</li><li>Connecte-toi avec l'identifiant Jellyfin qu'on t'a donné.</li></ol>
-<a class="b" href="${esc(deep)}">Ouvrir dans Lumio</a>
+<h2>📱 iPhone (avec FlareStore)</h2>
+<ol><li>${flare ? `Installe <b>FlareStore</b> : <a href="${esc(flare)}">ouvrir le lien d'installation</a>.` : 'Installe <b>FlareStore</b> (demande le lien à la personne qui t\'invite).'}</li>
+<li>Dans FlareStore, va dans <b>Sources</b>, touche <b>+</b> et colle cette adresse :<div class="src" id="src">${esc(SOURCE)}</div><a class="b s" href="#" onclick="navigator.clipboard&&navigator.clipboard.writeText(document.getElementById('src').textContent);this.textContent='Adresse copiée ✅';return false">Copier l'adresse de la source</a></li>
+<li>Dans la source, installe <b>Lumio</b>. Les mises à jour arriveront ensuite toutes seules dans FlareStore.</li>
+<li>Reviens sur cette page et touche « Ouvrir dans Lumio ».</li></ol>
+<h2>🤖 Android</h2>
+<ol><li>Touche « Installer sur Android », ouvre le fichier téléchargé et autorise l'installation si on te le demande.</li>
+<li>Reviens sur cette page et touche « Ouvrir dans Lumio ».</li></ol>
 <a class="b s" href="/android">Installer sur Android (APK)</a>
-<a class="b s" href="https://github.com/nono7444/lumio/releases/latest">iPhone : via FlareStore / SideStore</a>
+<h2>Ensuite</h2>
+<p>« Ouvrir dans Lumio » règle les serveurs tout seul : il ne te reste qu'à entrer l'identifiant et le mot de passe qu'on t'a donnés.</p>
+<a class="b" href="${esc(deep)}">Ouvrir dans Lumio</a>
 </main></body></html>`);
   }
 
@@ -2095,6 +2114,58 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
         config.alldebridKey = String(b.key || '').trim() || undefined;
         saveConfig();
         return send(res, 200, { configured: Boolean(config.alldebridKey) });
+      }
+      // Recherche d'un fichier ou dossier par son nom, dans un disque (ou tous), jusqu'à 300 résultats
+      if (req.method === 'GET' && p === '/api/files/search') {
+        const term = String(q.get('q') || '').trim().toLowerCase();
+        if (term.length < 2) return send(res, 200, { results: [] });
+        const words = term.split(/\s+/).filter(Boolean);
+        const norm = (x) => x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[._-]+/g, ' ');
+        const wanted = words.map(norm);
+        const roots = q.get('root') ? [q.get('root')] : disks().map((d) => d.name);
+        const results = [];
+        const started = Date.now();
+        for (const rootName of roots) {
+          const { full: base } = safePath(rootName, q.get('path') || '');
+          const d = disks().find((x) => x.name === rootName);
+          const stack = [base];
+          while (stack.length && results.length < 300 && Date.now() - started < 8000) {
+            const dir = stack.pop();
+            let entries = [];
+            try {
+              entries = await fs.promises.readdir(dir, { withFileTypes: true });
+            } catch {
+              continue;
+            }
+            for (const e of entries) {
+              if (e.name.startsWith('.')) continue;
+              const fullPath = path.join(dir, e.name);
+              if (e.isDirectory()) stack.push(fullPath);
+              const n = norm(e.name);
+              if (wanted.every((w) => n.includes(w))) {
+                let size = 0;
+                try {
+                  if (!e.isDirectory()) size = (await fs.promises.stat(fullPath)).size;
+                } catch {}
+                results.push({ root: rootName, path: path.relative(d.dir, fullPath), name: e.name, dir: e.isDirectory(), size });
+                if (results.length >= 300) break;
+              }
+            }
+          }
+        }
+        return send(res, 200, { results });
+      }
+      // « Voir dans le disque » : chemin d'un fichier Jellyfin → disque + dossier (mêmes montages que Jellyfin)
+      if (req.method === 'GET' && p === '/api/files/locate') {
+        const abs = path.resolve(String(q.get('path') || '/'));
+        const d = disks().find((x) => abs === x.dir || abs.startsWith(x.dir + path.sep));
+        if (!d) return send(res, 404, { error: 'Ce fichier n’est sur aucun disque connu du serveur Lumio' });
+        const rel = path.relative(d.dir, abs);
+        let isDir = false;
+        try {
+          isDir = (await fs.promises.stat(abs)).isDirectory();
+        } catch {}
+        return send(res, 200, { root: d.name, folder: isDir ? rel : path.dirname(rel) === '.' ? '' : path.dirname(rel), name: isDir ? null : path.basename(rel) });
       }
       if (req.method === 'GET' && p === '/api/files/disks') {
         return send(res, 200, { disks: await Promise.all(disks().map(diskInfo)) });

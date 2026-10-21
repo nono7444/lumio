@@ -1,7 +1,7 @@
 // État des serveurs : Jellyfin, Radarr, Sonarr, serveur Lumio, Seerr (en ligne, version, latence, disques).
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 
@@ -187,3 +187,33 @@ const styles = StyleSheet.create({
   diskFree: { color: C.textDim, fontSize: 12, fontWeight: '600' },
   at: { color: C.textFaint, fontSize: 11, textAlign: 'right' },
 });
+
+/** Comptes de la famille : juste un point vert « Serveur en ligne » (ou rouge), sans détails techniques. */
+export function SimpleServerDot() {
+  const { settings } = useSettings();
+  const [ok, setOk] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const check = () => {
+      const url = settings.jellyfin?.url;
+      if (!url) return setOk(false);
+      fetch(`${url.replace(/\/+$/, '')}/System/Info/Public`)
+        .then((r) => alive && setOk(r.ok))
+        .catch(() => alive && setOk(false));
+    };
+    check();
+    const t = setInterval(check, 60_000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [settings.jellyfin?.url]);
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingVertical: 14 }}>
+      <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: ok == null ? C.textFaint : ok ? '#30D158' : C.danger }} />
+      <Text style={{ color: C.text, fontSize: 15, fontWeight: '700' }}>
+        {ok == null ? 'Vérification du serveur…' : ok ? 'Serveur en ligne' : 'Serveur injoignable'}
+      </Text>
+    </View>
+  );
+}

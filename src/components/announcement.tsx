@@ -1,6 +1,6 @@
-// Message épinglé par l'admin (mise à jour, info…) : pop-up sur l'accueil, masquable une fois lu.
+// Message épinglé par l'admin (mise à jour, info…) : pop-up sur l'accueil, à chaque ouverture de Lumio tant qu'il est épinglé.
+// Aussi : la mise à jour de l'appli disponible, rappelée à chaque ouverture tant qu'elle n'est pas installée.
 // L'admin l'écrit depuis le Profil (AnnouncementEditor).
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
@@ -16,7 +16,8 @@ import { useSettings } from '@/lib/settings';
 type Kind = 'update' | 'info' | 'warning';
 export type Announcement = { id: string; title: string; text: string; kind: Kind; by: string; at: string };
 
-const READ_KEY = 'lumio-announcement:read';
+// Lu pendant cette session seulement : le message revient à chaque ouverture de Lumio tant qu'il est épinglé
+let readThisSession: string | null = null;
 const KIND: Record<Kind, { label: string; icon: keyof typeof Ionicons.glyphMap; color: string }> = {
   update: { label: 'Mise à jour', icon: 'arrow-down-circle', color: '#3D8BFF' },
   info: { label: 'Info', icon: 'information-circle', color: '#30D158' },
@@ -39,8 +40,9 @@ export function AnnouncementPopup() {
     useCallback(() => {
       if (!settings.chatUrl || !settings.jellyfin) return;
       let alive = true;
-      Promise.all([announcementApi.get(settings), AsyncStorage.getItem(READ_KEY).catch(() => null)])
-        .then(([r, read]) => alive && setA(r.announcement && r.announcement.id !== read ? r.announcement : null))
+      announcementApi
+        .get(settings)
+        .then((r) => alive && setA(r.announcement && r.announcement.id !== readThisSession ? r.announcement : null))
         .catch(() => {});
       return () => {
         alive = false;
@@ -52,7 +54,7 @@ export function AnnouncementPopup() {
   if (!a) return null;
   const k = KIND[a.kind] ?? KIND.info;
   const close = () => {
-    AsyncStorage.setItem(READ_KEY, a.id).catch(() => {});
+    readThisSession = a.id;
     setA(null);
   };
   return (

@@ -91,6 +91,8 @@ export type Settings = {
   quality: string;
   /** Moteur de lecture : mpv (lit tout, MKV inclus) ou lecteur natif du téléphone */
   player: 'mpv' | 'native';
+  /** Bibliothèque : image choisie pour chaque carte (id de bibliothèque → URL) */
+  libraryCovers?: Record<string, string>;
   /** TV : taille de l'interface (0,65 à 1) */
   tvScale?: number;
   /** TV : sons de navigation façon Apple TV */

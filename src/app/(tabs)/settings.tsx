@@ -15,7 +15,7 @@ import { ConnectTvButton } from '@/components/connect-tv';
 import { NowPlayingEntry } from '@/components/now-playing-entry';
 import { useAppUpdate } from '@/lib/app-update';
 import { ChatSection, ThemeSection } from '@/components/extra-sections';
-import { ServerStatusSection } from '@/components/server-status';
+import { ServerStatusSection, SimpleServerDot } from '@/components/server-status';
 import { UptimeSection } from '@/components/uptime';
 import { DEFAULT_TV_SCALE, TV_SCALES } from '@/lib/tv-ui';
 import { AnnouncementEditor } from '@/components/announcement';
@@ -179,7 +179,7 @@ export default function SettingsScreen() {
         </View>
         {appUpdate ? <AppVersionSection /> : null}
         {Platform.isTV ? null : <NowPlayingEntry />}
-        {Platform.isTV ? null : settings.jellyfin?.isAdmin && settings.chatUrl ? <UptimeSection /> : <ServerStatusSection />}
+        {Platform.isTV ? null : settings.jellyfin?.isAdmin && settings.chatUrl ? <UptimeSection /> : isManager(settings) ? <ServerStatusSection /> : <SimpleServerDot />}
         <Section title="Jellyfin">
           {settings.jellyfin ? (
             <View style={{ gap: 12 }}>

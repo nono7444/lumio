@@ -1,7 +1,7 @@
-// Fiche : « Notes » (moyenne de la famille), ma note en puces 1 à 10 sur une ligne, et les avis des autres.
+// Fiche : « Notes » (moyenne de la famille), ma note en étoiles (1 à 10) sur une ligne, et les avis des autres.
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useState } from 'react';
-import { Image, Platform, StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import { usePrompt } from '@/components/prompt-modal';
 
@@ -14,7 +14,9 @@ import { timeAgo } from '@/lib/requests';
 import { useSettings } from '@/lib/settings';
 
 /** Couleur d'une note : rouge (bas), orange (moyen), vert (haut) */
-export const CHIP = require('@/assets/images/chip.png');
+export const GOLD = '#FFC93C';
+
+export { verdict } from '@/lib/ratings';
 
 export const scoreColor = (n: number) => (n >= 7 ? '#34C759' : n >= 4 ? '#FF9F0A' : '#FF453A');
 
@@ -57,7 +59,7 @@ export function FamilyRating({ type, tmdbId, title, poster }: { type: 'movie' | 
         <Text style={styles.title}>Notes</Text>
         {info.avg != null ? (
           <View style={styles.avg}>
-            <Image source={CHIP} style={{ width: 16, height: 16 }} />
+            <Ionicons name="star" size={15} color={GOLD} />
             <Text style={styles.avgText}>{info.avg.toLocaleString('fr-FR', { maximumFractionDigits: 1 })}</Text>
             <Text style={styles.dim}>/10 · {info.count} avis</Text>
           </View>
@@ -73,7 +75,7 @@ export function FamilyRating({ type, tmdbId, title, poster }: { type: 'movie' | 
             const on = mine > 0 && n <= mine;
             return (
               <Pressable key={n} hitSlop={3} onPress={() => rate(n === mine ? 0 : n)} accessibilityLabel={`Noter ${n} sur 10`} style={styles.chip}>
-                <Image source={CHIP} style={[styles.chipImg, { opacity: on ? 1 : 0.2 }]} resizeMode="contain" />
+                <Ionicons name={on ? 'star' : 'star-outline'} size={22} color={on ? GOLD : 'rgba(255,255,255,0.28)'} />
               </Pressable>
             );
           })}
@@ -90,7 +92,7 @@ export function FamilyRating({ type, tmdbId, title, poster }: { type: 'movie' | 
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Text style={styles.name}>{v.name}</Text>
             <View style={styles.avg}>
-              <Image source={CHIP} style={{ width: 13, height: 13 }} />
+              <Ionicons name="star" size={12} color={GOLD} />
               <Text style={[styles.miniChipText, { color: scoreColor(v.stars) }]}>{v.stars}/10</Text>
             </View>
             <Text style={styles.dim}>{timeAgo(v.at)}</Text>

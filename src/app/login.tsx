@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -11,6 +11,9 @@ import { C, R } from '@/constants/theme';
 import { login, serverInfo } from '@/lib/jellyfin';
 import { seerr } from '@/lib/seerr';
 import { useSettings } from '@/lib/settings';
+
+/** Serveur Lumio de la maison : donne l'adresse de Jellyfin, la famille n'a que son identifiant à taper. */
+const HOME_LUMIO = 'https://lumio.wawanono.lol';
 
 export default function Login() {
   const { settings, update } = useSettings();
@@ -26,6 +29,32 @@ export default function Login() {
   const [showPass, setShowPass] = useState(false);
   // TV : connexion par code d'abord, identifiant / mot de passe sur demande
   const [tvPassword, setTvPassword] = useState(false);
+  // Adresse du serveur trouvée toute seule (lien d'invitation, ou serveur Lumio de la maison) : champ masqué
+  const [autoServer, setAutoServer] = useState(false);
+  const [editServer, setEditServer] = useState(false);
+
+  useEffect(() => {
+    if (url.trim()) {
+      setAutoServer(true);
+      checkServer();
+      return;
+    }
+    const lumio = (settings.chatUrl || HOME_LUMIO).replace(/\/+$/, '');
+    fetch(`${lumio}/tv/setup`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then(async (j: { jellyfinUrl?: string | null } | null) => {
+        if (!j?.jellyfinUrl) return;
+        setUrl(j.jellyfinUrl);
+        setAutoServer(true);
+        if (!settings.chatUrl) await update({ chatUrl: lumio });
+        try {
+          const info = await serverInfo(j.jellyfinUrl, settings.deviceId);
+          setServer(`${info.ServerName} · Jellyfin ${info.Version}`);
+        } catch {}
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function checkServer() {
     if (!url.trim()) return;
@@ -86,7 +115,7 @@ export default function Login() {
             <Ionicons name="play" size={30} color="#000" />
           </View>
           <Text style={styles.brand}>Lumio</Text>
-          <Text style={styles.tagline}>Connecte-toi à ton serveur Jellyfin</Text>
+          <Text style={styles.tagline}>Connecte-toi avec ton identifiant</Text>
         </View>
 
         {Platform.isTV && !tvPassword ? (
@@ -96,6 +125,16 @@ export default function Login() {
               setTvPassword(true);
             }}
           />
+        ) : (
+        <>
+        {autoServer && !editServer ? (
+          <Pressable onPress={() => setEditServer(true)} style={styles.serverChip} hitSlop={6}>
+            <Ionicons name="checkmark-circle" size={18} color={C.success} />
+            <Text style={styles.serverChipText} numberOfLines={1}>
+              {server ?? 'Serveur de la maison'}
+            </Text>
+            <Text style={styles.serverChange}>Changer</Text>
+          </Pressable>
         ) : (
         <>
         <Text style={styles.label}>Serveur</Text>
@@ -122,6 +161,8 @@ export default function Login() {
           ) : null}
         </View>
         {server ? <Text style={styles.server}>{server}</Text> : null}
+        </>
+        )}
 
         <Text style={styles.label}>Utilisateur</Text>
         <View style={styles.inputRow}>
@@ -177,6 +218,9 @@ export default function Login() {
 }
 
 const styles = StyleSheet.create({
+  serverChip: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(48,209,88,0.1)', borderRadius: R.md, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 4 },
+  serverChipText: { flex: 1, color: C.text, fontSize: 14, fontWeight: '600' },
+  serverChange: { color: C.accent, fontSize: 13, fontWeight: '700' },
   brandWrap: { alignItems: 'center', marginBottom: 36 },
   mark: { width: 64, height: 64, borderRadius: 18, backgroundColor: C.text, alignItems: 'center', justifyContent: 'center', paddingLeft: 4 },
   brand: { color: C.text, fontSize: 36, fontWeight: '900', letterSpacing: -1, marginTop: 14 },

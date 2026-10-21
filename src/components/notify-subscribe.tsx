@@ -1,7 +1,8 @@
 // Profil : recevoir les notifications de la famille (messages, demandes, titres disponibles) via l'appli gratuite ntfy.
 // Pour l'admin : aussi le sujet « admin » (demandes à valider, téléchargements, signalements).
 import { useEffect, useState } from 'react';
-import { Linking, Platform, StyleSheet, Text, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import { Alert, Linking, Platform, StyleSheet, Text, View } from 'react-native';
 
 import { Button, Section } from '@/components/ui';
 import { C } from '@/constants/theme';
@@ -14,7 +15,20 @@ const STORE = Platform.OS === 'ios' ? 'https://apps.apple.com/app/ntfy/id1625396
 
 function subscribe(server: string, topic: string) {
   const host = server.replace(/^https?:\/\//, '');
-  // Ouvre l'appli ntfy directement sur l'abonnement ; sinon la page web du sujet (bouton « S'abonner »)
+  if (Platform.OS === 'ios') {
+    // L'appli ntfy pour iPhone ne sait pas s'ouvrir depuis un lien : on copie le nom du sujet et on explique
+    Clipboard.setStringAsync(topic).catch(() => {});
+    Alert.alert(
+      'Nom copié ✅',
+      `Dans l'appli ntfy :\n\n1. Touche « + » en haut à droite\n2. Colle le nom du sujet :\n${topic}\n3. Touche « Subscribe »${host !== 'ntfy.sh' ? `\n\n(Serveur : ${server} — active « Use another server »)` : ''}`,
+      [
+        { text: 'OK', style: 'cancel' },
+        { text: 'Installer ntfy', onPress: () => Linking.openURL(STORE).catch(() => {}) },
+      ]
+    );
+    return;
+  }
+  // Android : l'appli ntfy s'ouvre directement sur l'abonnement
   Linking.openURL(`ntfy://${host}/${topic}`).catch(() => Linking.openURL(`${server}/${topic}`).catch(() => {}));
 }
 

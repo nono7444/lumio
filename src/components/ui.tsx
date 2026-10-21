@@ -5,6 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { ReactNode, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
+import { verdict } from '@/lib/ratings';
 import { setTvFocus } from '@/lib/tv-focus';
 import { FocusPressable as Pressable } from '@/components/tv';
 
@@ -46,7 +47,7 @@ export function StatusBadge({ badge }: { badge: NonNullable<PosterItem['badge']>
   );
 }
 
-/** Pastille « 🥔 8,5 » centrée en bas de l'affiche : moyenne des Notes de la famille (sur 10). */
+/** Pastille « ★ 8,5 · Top » en haut à gauche de l'affiche : moyenne des Notes de la famille (sur 10) et son verdict. */
 export function FamilyStarBadge({ type, tmdbId }: { type?: 'movie' | 'tv'; tmdbId?: number }) {
   const { settings } = useSettings();
   const r = useFamilyRatingBadge(settings, type, tmdbId);
@@ -54,8 +55,9 @@ export function FamilyStarBadge({ type, tmdbId }: { type?: 'movie' | 'tv'; tmdbI
   return (
     <View style={styles.starsWrap} pointerEvents="none" accessibilityLabel={`Notes ${r.avg} sur 10`}>
       <View style={styles.stars}>
-        <Image source={require('@/assets/images/chip.png')} style={{ width: 13, height: 13 }} contentFit="contain" />
+        <Ionicons name="star" size={10} color="#FFC93C" />
         <Text style={styles.starsText}>{r.avg.toLocaleString('fr-FR', { maximumFractionDigits: 1 })}</Text>
+        <Text style={[styles.starsText, { color: verdict(r.avg).color }]}>· {verdict(r.avg).label}</Text>
       </View>
     </View>
   );
@@ -352,7 +354,7 @@ export function Fade({ height, top }: { height: number; top?: boolean }) {
 }
 
 const styles = StyleSheet.create({
-  starsWrap: { position: 'absolute', left: 0, right: 0, bottom: 6, alignItems: 'center' },
+  starsWrap: { position: 'absolute', left: 6, top: 6, alignItems: 'flex-start' },
   stars: {
     flexDirection: 'row',
     alignItems: 'center',

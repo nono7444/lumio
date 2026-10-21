@@ -116,6 +116,24 @@ export const tmdb = {
 
   trending: (s: Settings) => tmdbCall<{ results: TmdbItem[] }>(s, '/trending/all/week'),
 
+  /** Les mieux notés d'un thème (genre ou mot-clé comme « christmas »), pour la recherche rapide. */
+  best: async (s: Settings, type: MediaType, opts: { genre?: number; keyword?: string; page?: number }) => {
+    let kw: number | undefined;
+    if (opts.keyword) {
+      const k = await tmdbCall<{ results: { id: number; name: string }[] }>(s, '/search/keyword', { query: opts.keyword });
+      kw = (k.results.find((x) => x.name.toLowerCase() === opts.keyword!.toLowerCase()) ?? k.results[0])?.id;
+    }
+    const r = await tmdbCall<{ results: TmdbItem[] }>(s, `/discover/${type}`, {
+      sort_by: 'vote_average.desc',
+      'vote_count.gte': type === 'movie' ? (opts.keyword ? 150 : 1500) : opts.keyword ? 60 : 400,
+      include_adult: 'false',
+      page: opts.page ?? 1,
+      ...(opts.genre ? { with_genres: String(opts.genre) } : {}),
+      ...(kw ? { with_keywords: String(kw) } : {}),
+    });
+    return r.results.map((i) => ({ ...i, media_type: type }));
+  },
+
   /** Découverte filtrée (genres / mot-clé), du plus récent au plus ancien. */
   discover: (s: Settings, type: MediaType, opts: { genres?: number[]; keyword?: number; page?: number }) => {
     const today = new Date().toISOString().slice(0, 10);

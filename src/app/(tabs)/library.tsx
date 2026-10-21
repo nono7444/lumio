@@ -4,18 +4,18 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Platform, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Modal, Platform, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FocusPressable as Pressable } from '@/components/tv';
 import { Button, ScreenTitle, tap } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { libraryRowDefs, orderLibraryRows } from '@/lib/home-layout';
-import { jf, jfImage, jfPoster, JellyfinError, type JfItem } from '@/lib/jellyfin';
+import { jf, jfBackdrop, jfImage, jfPoster, JellyfinError, type JfItem } from '@/lib/jellyfin';
 import { useLumioCollections } from '@/lib/collections';
 import { useSettings } from '@/lib/settings';
 
-type Lib = { view: JfItem; count: number | null; posters: string[] };
+type Lib = { view: JfItem; count: number | null; posters: string[]; backdrops: string[] };
 
 const TYPES: Record<string, string> = {
   movies: 'Movie',
@@ -44,15 +44,17 @@ const TINT: Record<string, [string, string]> = {
   boxsets: ['#3A2A12', '#1A120B'],
 };
 
-function LibraryCard({ lib, width }: { lib: Lib; width: number }) {
+function LibraryCard({ lib, width, onChooseCover }: { lib: Lib; width: number; onChooseCover: () => void }) {
   const { settings } = useSettings();
+  // Image de la carte : celle choisie, sinon l'image large du dernier titre ajouté
+  const cover = settings.libraryCovers?.[lib.view.Id] ?? lib.backdrops[0];
   const type = lib.view.CollectionType ?? 'mixed';
   const height = Math.round(width * 0.62);
   const [a, b] = TINT[type] ?? ['#1C1C1E', '#0E0E10'];
   const unit = UNIT[type] ?? ['titre', 'titres'];
-  const own = lib.view.ImageTags?.Primary
+  const own = cover ?? (lib.view.ImageTags?.Primary
     ? jfImage(settings, lib.view.Id, 'Primary', { tag: lib.view.ImageTags.Primary, maxWidth: 900 })
-    : undefined;
+    : undefined);
   const pw = Math.round(height * 0.62);
 
   return (
@@ -61,6 +63,9 @@ function LibraryCard({ lib, width }: { lib: Lib; width: number }) {
         tap();
         router.push({ pathname: '/jellyfin/[id]', params: { id: lib.view.Id } });
       }}
+      // Appui long : choisir l'image de la carte
+      onLongPress={onChooseCover}
+      delayLongPress={400}
       style={({ pressed }) => [styles.card, { width, height, transform: [{ scale: pressed ? 0.98 : 1 }] }]}>
       <LinearGradient colors={[a, b]} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
       {own ? (
@@ -191,13 +196,15 @@ export default function Library() {
               types: TYPES[v.CollectionType ?? ''] ?? 'Movie,Series',
               sort: 'PremiereDate,ProductionYear,SortName',
               order: 'Descending',
-              limit: 3,
+              limit: 12,
             })
             .catch(() => null);
+          const items = r?.Items ?? [];
           return {
             view: v,
             count: r?.TotalRecordCount ?? null,
-            posters: (r?.Items ?? []).map((i) => jfPoster(settings, i, 420)).filter((x): x is string => Boolean(x)).reverse(),
+            posters: items.slice(0, 3).map((i) => jfPoster(settings, i, 420)).filter((x): x is string => Boolean(x)).reverse(),
+            backdrops: items.filter((i) => i.BackdropImageTags?.length).map((i) => jfBackdrop(settings, i, 1280)!),
           };
         })
       );
@@ -215,6 +222,9 @@ export default function Library() {
       load();
     }, [load])
   );
+
+  // Choix de l'image d'une carte (appui long)
+  const [choosing, setChoosing] = useState<Lib | null>(null);
 
   // Collections propres de Lumio : remplacent les collections Jellyfin (souvent en vrac)
   const lumioColl = useLumioCollections(settings);
@@ -264,17 +274,57 @@ export default function Library() {
       ) : (
         <View style={styles.grid}>
           {ordered.map((r) => (
-            <LibraryCard key={r.id} lib={r.lib} width={cardW} />
+            <LibraryCard key={r.id} lib={r.lib} width={cardW} onChooseCover={() => setChoosing(r.lib)} />
           ))}
           {lumioColl ? <CollectionsCard data={lumioColl} width={cardW} /> : null}
           {!ordered.length ? <Text style={{ color: C.textDim, textAlign: 'center', marginTop: 40, width: '100%' }}>Aucune bibliothèque.</Text> : null}
         </View>
       )}
+      <Modal visible={Boolean(choosing)} transparent animationType="slide" onRequestClose={() => setChoosing(null)}>
+        <View style={styles.sheetBg}>
+          <View style={styles.sheet}>
+            <Text style={styles.sheetTitle}>Image de « {choosing?.view.Name} »</Text>
+            <ScrollView contentContainerStyle={{ gap: 10, paddingBottom: 10 }}>
+              {(choosing?.backdrops ?? []).map((b) => {
+                const on = settings.libraryCovers?.[choosing!.view.Id] === b;
+                return (
+                  <Pressable
+                    key={b}
+                    onPress={() => {
+                      tap();
+                      update({ libraryCovers: { ...(settings.libraryCovers ?? {}), [choosing!.view.Id]: b } });
+                      setChoosing(null);
+                    }}
+                    style={[styles.choice, on && { borderColor: C.accent }]}>
+                    <Image source={b} style={StyleSheet.absoluteFill} contentFit="cover" />
+                  </Pressable>
+                );
+              })}
+              {!choosing?.backdrops.length ? <Text style={{ color: C.textDim }}>Aucune image large dans cette bibliothèque.</Text> : null}
+            </ScrollView>
+            <Button
+              title="Image automatique"
+              variant="secondary"
+              onPress={() => {
+                const next = { ...(settings.libraryCovers ?? {}) };
+                if (choosing) delete next[choosing.view.Id];
+                update({ libraryCovers: next });
+                setChoosing(null);
+              }}
+            />
+            <Button title="Fermer" variant="secondary" onPress={() => setChoosing(null)} style={{ marginTop: 8 }} />
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
+  sheetBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  sheet: { maxHeight: '80%', backgroundColor: C.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, paddingBottom: 34 },
+  sheetTitle: { color: C.text, fontSize: 18, fontWeight: '800', marginBottom: 12 },
+  choice: { height: 150, borderRadius: R.md, overflow: 'hidden', borderWidth: 3, borderColor: 'transparent', backgroundColor: C.surfaceHigh },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, paddingHorizontal: 16, maxWidth: 1132, alignSelf: 'center', width: '100%' },
   card: {
     borderRadius: R.lg,

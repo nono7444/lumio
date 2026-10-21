@@ -1,8 +1,9 @@
-// Admin : disques du serveur — parcourir, créer un dossier, renommer, déplacer (même vers un autre disque), supprimer.
+// Admin : disques du serveur — parcourir, rechercher, créer un dossier, renommer, déplacer (même vers un autre disque,
+// un ou plusieurs éléments à la fois), supprimer. Peut s'ouvrir directement sur un dossier (« Voir dans le disque »).
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { usePrompt } from '@/components/prompt-modal';
@@ -13,18 +14,28 @@ import { C, R } from '@/constants/theme';
 import { filesApi, formatSize, joinPath, parentPath, type Disk, type FileEntry, type MoveJob } from '@/lib/files';
 import { useSettings } from '@/lib/settings';
 
-type Moving = { root: string; path: string; name: string };
+type Item = { root: string; path: string; name: string };
+type Hit = Item & { dir: boolean; size: number };
 
 export default function Files() {
   const { settings } = useSettings();
   const insets = useSafeAreaInsets();
   const { prompt, element } = usePrompt();
+  const params = useLocalSearchParams<{ root?: string; folder?: string; highlight?: string }>();
   const [disks, setDisks] = useState<Disk[] | null>(null);
-  const [root, setRoot] = useState<string | null>(null);
-  const [path, setPath] = useState('');
+  const [root, setRoot] = useState<string | null>(params.root ?? null);
+  const [path, setPath] = useState(params.folder ?? '');
+  const [highlight, setHighlight] = useState<string | null>(params.highlight ?? null);
+  // Recherche par nom
+  const [query, setQuery] = useState('');
+  const [hits, setHits] = useState<Hit[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  // Sélection de plusieurs éléments
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const [entries, setEntries] = useState<FileEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [moving, setMoving] = useState<Moving | null>(null);
+  const [moving, setMoving] = useState<Item[] | null>(null);
   const [jobs, setJobs] = useState<MoveJob[]>([]);
   const loadRef = useRef<() => void>(() => {});
 
@@ -73,6 +84,57 @@ export default function Files() {
     setEntries(null);
     setRoot(r);
     setPath(p);
+    setHighlight(null);
+    setPicked(new Set());
+  };
+
+  // Recherche (0,4 s après la dernière lettre), dans le disque ouvert ou dans tous
+  useEffect(() => {
+    const term = query.trim();
+    if (term.length < 2) {
+      setHits(null);
+      return;
+    }
+    setSearching(true);
+    const t = setTimeout(() => {
+      filesApi
+        .search(settings, term, root)
+        .then(setHits)
+        .catch((e) => setError(e?.message ?? String(e)))
+        .finally(() => setSearching(false));
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, root]);
+
+  const togglePick = (name: string) => {
+    tap();
+    setPicked((prev) => {
+      const n = new Set(prev);
+      if (n.has(name)) n.delete(name);
+      else n.add(name);
+      return n;
+    });
+  };
+  const pickedItems = (): Item[] => (root ? [...picked].map((name) => ({ root, path: joinPath(path, name), name })) : []);
+
+  const removePicked = () => {
+    const items = pickedItems();
+    if (!items.length) return;
+    Alert.alert(`Supprimer ${items.length} élément${items.length > 1 ? 's' : ''} ?`, 'Ils seront supprimés définitivement.', [
+      { text: 'Annuler', style: 'cancel' },
+      {
+        text: 'Supprimer',
+        style: 'destructive',
+        onPress: async () => {
+          for (const it of items) await filesApi.remove(settings, it.root, it.path).catch((e) => toast(`${it.name} : ${e?.message ?? e}`, 'error'));
+          toast(`${items.length} élément${items.length > 1 ? 's' : ''} supprimé${items.length > 1 ? 's' : ''}`);
+          setSelecting(false);
+          setPicked(new Set());
+          load();
+        },
+      },
+    ]);
   };
 
   const act = async (fn: () => Promise<unknown>, msg: string) => {
@@ -99,7 +161,7 @@ export default function Files() {
       {
         text: 'Déplacer…',
         onPress: () => {
-          setMoving({ root, path: p, name: e.name });
+          setMoving([{ root, path: p, name: e.name }]);
           toast('Va dans le dossier de destination puis touche « Déplacer ici »', 'info', 4000);
         },
       },
@@ -122,17 +184,23 @@ export default function Files() {
     if (name) act(() => filesApi.mkdir(settings, root, joinPath(path, name)), 'Dossier créé');
   };
 
-  const moveHere = () => {
-    if (!moving || !root) return;
-    const to = joinPath(path, moving.name);
-    filesApi
-      .move(settings, moving.root, moving.path, to, root)
-      .then((r) => {
-        toast(r?.job ? 'Déplacement vers l’autre disque en cours…' : 'Déplacé', r?.job ? 'info' : 'ok');
-        setMoving(null);
-        load();
-      })
-      .catch((e) => Alert.alert('Déplacement impossible', e?.message ?? String(e)));
+  // Déplace un ou plusieurs éléments dans le dossier ouvert (un par un)
+  const moveHere = async () => {
+    if (!moving?.length || !root) return;
+    let background = false;
+    let done = 0;
+    for (const m of moving) {
+      try {
+        const r = await filesApi.move(settings, m.root, m.path, joinPath(path, m.name), root);
+        if (r?.job) background = true;
+        done++;
+      } catch (e: any) {
+        Alert.alert('Déplacement impossible', `${m.name} : ${e?.message ?? String(e)}`);
+      }
+    }
+    toast(background ? 'Déplacement vers l’autre disque en cours…' : `${done} élément${done > 1 ? 's' : ''} déplacé${done > 1 ? 's' : ''}`, background ? 'info' : 'ok');
+    setMoving(null);
+    load();
   };
 
   const crumbs = path ? path.split('/') : [];
@@ -150,6 +218,19 @@ export default function Files() {
           {root ? (crumbs[crumbs.length - 1] ?? root) : 'Disques'}
         </Text>
         {root ? (
+          <Pressable
+            onPress={() => {
+              tap();
+              setSelecting((v) => !v);
+              setPicked(new Set());
+            }}
+            hitSlop={10}
+            style={[styles.round, selecting && { backgroundColor: C.accent }]}
+            accessibilityLabel="Sélectionner plusieurs">
+            <Ionicons name="checkmark-done" size={19} color={C.text} />
+          </Pressable>
+        ) : null}
+        {root ? (
           <Pressable onPress={newFolder} hitSlop={10} style={styles.round} accessibilityLabel="Nouveau dossier">
             <Ionicons name="folder-open-outline" size={19} color={C.text} />
           </Pressable>
@@ -159,6 +240,26 @@ export default function Files() {
         </Pressable>
       </View>
       {root ? <Text style={styles.crumb} numberOfLines={1}>{[root, ...crumbs].join(' › ')}</Text> : null}
+
+      <View style={styles.search}>
+        <Ionicons name="search" size={16} color={C.textDim} />
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder={root ? `Chercher dans ${root}…` : 'Chercher dans tous les disques…'}
+          placeholderTextColor={C.textFaint}
+          style={styles.searchInput}
+          autoCorrect={false}
+          autoCapitalize="none"
+          returnKeyType="search"
+        />
+        {searching ? <ActivityIndicator size="small" color={C.textDim} /> : null}
+        {query ? (
+          <Pressable onPress={() => setQuery('')} hitSlop={10}>
+            <Ionicons name="close-circle" size={18} color={C.textDim} />
+          </Pressable>
+        ) : null}
+      </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -186,7 +287,40 @@ export default function Files() {
         );
       })}
 
-      {!root ? (
+      {hits ? (
+        <FlatList
+          data={hits}
+          keyExtractor={(h) => `${h.root}:${h.path}`}
+          contentContainerStyle={{ padding: 12, paddingBottom: insets.bottom + 30 }}
+          ListEmptyComponent={<Text style={styles.dim}>Rien trouvé pour « {query} ».</Text>}
+          ListHeaderComponent={<Text style={[styles.dim, { marginBottom: 6 }]}>{hits.length >= 300 ? '300 premiers résultats' : `${hits.length} résultat${hits.length > 1 ? 's' : ''}`}</Text>}
+          renderItem={({ item: h }) => (
+            <Pressable
+              onPress={() => {
+                // Ouvre le dossier qui contient le résultat (ou le dossier lui-même)
+                setQuery('');
+                setHits(null);
+                if (h.dir) open(h.root, h.path);
+                else {
+                  open(h.root, parentPath(h.path));
+                  setHighlight(h.name);
+                }
+              }}
+              style={styles.row}>
+              <Ionicons name={h.dir ? 'folder' : 'film-outline'} size={22} color={h.dir ? '#FFC93C' : C.textDim} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.file} numberOfLines={2}>
+                  {h.name}
+                </Text>
+                <Text style={styles.dim} numberOfLines={1}>
+                  {[h.root, ...parentPath(h.path).split('/').filter(Boolean)].join(' › ')}
+                  {!h.dir ? ` · ${formatSize(h.size)}` : ''}
+                </Text>
+              </View>
+            </Pressable>
+          )}
+        />
+      ) : !root ? (
         <FlatList
           data={disks ?? []}
           keyExtractor={(d) => d.name}
@@ -224,14 +358,23 @@ export default function Files() {
         <FlatList
           data={entries ?? []}
           keyExtractor={(e) => e.name}
-          contentContainerStyle={{ padding: 12, paddingBottom: insets.bottom + (moving ? 110 : 30) }}
+          contentContainerStyle={{ padding: 12, paddingBottom: insets.bottom + (moving || selecting ? 120 : 30) }}
           refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}
           ListEmptyComponent={entries ? <Text style={styles.dim}>Dossier vide</Text> : <ActivityIndicator color={C.text} style={{ margin: 30 }} />}
           renderItem={({ item: e }) => (
             <Pressable
-              onPress={() => (e.dir ? open(root, joinPath(path, e.name)) : menu(e))}
-              onLongPress={() => menu(e)}
-              style={styles.row}>
+              onPress={() => (selecting ? togglePick(e.name) : e.dir ? open(root, joinPath(path, e.name)) : menu(e))}
+              onLongPress={() => {
+                // Appui long : passe en sélection multiple avec cet élément
+                if (!selecting) {
+                  setSelecting(true);
+                  setPicked(new Set([e.name]));
+                } else togglePick(e.name);
+              }}
+              style={[styles.row, (picked.has(e.name) || highlight === e.name) && styles.rowOn]}>
+              {selecting ? (
+                <Ionicons name={picked.has(e.name) ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={picked.has(e.name) ? C.accent : C.textDim} />
+              ) : null}
               <Ionicons name={e.dir ? 'folder' : /\.(mkv|mp4|avi|mov|m4v|ts)$/i.test(e.name) ? 'film-outline' : 'document-outline'} size={22} color={e.dir ? '#FFC93C' : C.textDim} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.file} numberOfLines={2}>
@@ -247,10 +390,38 @@ export default function Files() {
         />
       )}
 
+      {selecting && !moving ? (
+        <View style={[styles.moveBar, { paddingBottom: insets.bottom + 12 }]}>
+          <Text style={styles.dim}>
+            {picked.size ? `${picked.size} sélectionné${picked.size > 1 ? 's' : ''}` : 'Touche les éléments à sélectionner'}
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <Button
+              title="Tout"
+              variant="secondary"
+              onPress={() => setPicked(picked.size === (entries?.length ?? 0) ? new Set() : new Set((entries ?? []).map((x) => x.name)))}
+              style={{ flex: 0.8 }}
+            />
+            <Button
+              title="Déplacer"
+              icon="arrow-redo"
+              disabled={!picked.size}
+              onPress={() => {
+                setMoving(pickedItems());
+                setSelecting(false);
+                setPicked(new Set());
+              }}
+              style={{ flex: 1.2 }}
+            />
+            <Button title="" icon="trash-outline" variant="danger" disabled={!picked.size} onPress={removePicked} style={{ width: 54, paddingHorizontal: 0 }} />
+          </View>
+        </View>
+      ) : null}
+
       {moving ? (
         <View style={[styles.moveBar, { paddingBottom: insets.bottom + 12 }]}>
           <Text style={styles.dim} numberOfLines={1}>
-            Déplacer « {moving.name} »
+            {moving.length === 1 ? `Déplacer « ${moving[0].name} »` : `Déplacer ${moving.length} éléments`} : ouvre le dossier de destination
           </Text>
           <View style={{ flexDirection: 'row', gap: 10 }}>
             <Button title="Annuler" variant="secondary" onPress={() => setMoving(null)} style={{ flex: 1 }} />
@@ -273,6 +444,9 @@ const styles = StyleSheet.create({
   name: { color: C.text, fontSize: 17, fontWeight: '700' },
   track: { height: 6, borderRadius: 3, backgroundColor: C.surfaceHigh, overflow: 'hidden' },
   fill: { height: 6, borderRadius: 3 },
+  rowOn: { backgroundColor: 'rgba(61,139,255,0.14)', borderRadius: 10 },
+  search: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 8, backgroundColor: C.surfaceHigh, borderRadius: 12, paddingHorizontal: 12, height: 40 },
+  searchInput: { flex: 1, color: C.text, fontSize: 15 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, paddingHorizontal: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
   file: { color: C.text, fontSize: 15 },
   job: { marginHorizontal: 16, marginBottom: 8, backgroundColor: C.surface, borderRadius: R.md, padding: 12, gap: 6 },

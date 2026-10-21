@@ -35,6 +35,13 @@ export const filesApi = {
   mkdir: (s: Settings, root: string, path: string) => post(s, '/api/files/mkdir', { root, path }),
   move: (s: Settings, root: string, from: string, to: string, toRoot?: string) => post(s, '/api/files/move', { root, from, to, toRoot }),
   remove: (s: Settings, root: string, path: string) => post(s, '/api/files/delete', { root, path }),
+  search: (s: Settings, q: string, root?: string | null) =>
+    serverCall<{ results: { root: string; path: string; name: string; dir: boolean; size: number }[] }>(
+      s,
+      `/api/files/search?${new URLSearchParams({ q, ...(root ? { root } : {}) })}`
+    ).then((r) => r.results),
+  locate: (s: Settings, path: string) =>
+    serverCall<{ root: string; folder: string; name: string | null }>(s, `/api/files/locate?${new URLSearchParams({ path })}`),
   moveJobs: (s: Settings) => serverCall<{ jobs: MoveJob[] }>(s, '/api/files/jobs').then((r) => r.jobs),
   downloads: (s: Settings) => serverCall<{ downloads: DownloadJob[] }>(s, '/api/downloads').then((r) => r.downloads),
   startDownload: (s: Settings, link: string, root: string, folder: string) => post(s, '/api/downloads', { link, root, folder }),

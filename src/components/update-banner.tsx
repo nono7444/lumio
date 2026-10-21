@@ -1,29 +1,29 @@
-// Bannière « Nouvelle version disponible », en haut de l'écran, une fois par version (jusqu'à ce qu'on la ferme).
+// Bannière « Nouvelle version disponible », épinglée en haut de l'écran. On peut la fermer,
+// mais elle revient à chaque ouverture de Lumio tant que la mise à jour n'est pas installée.
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Linking, Platform, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FocusPressable as Pressable } from '@/components/tv';
 import { tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
-import { ANDROID_APK_URL, MAC_DMG_URL, APP_VERSION, cleanNotes, dismissedVersion, dismissVersion, useAppUpdate } from '@/lib/app-update';
+import { ANDROID_APK_URL, MAC_DMG_URL, APP_VERSION, cleanNotes, useAppUpdate } from '@/lib/app-update';
+
+/** Fermée pour cette session seulement */
+let dismissedThisSession: string | null = null;
 
 export function UpdateBanner() {
   const insets = useSafeAreaInsets();
   const update = useAppUpdate();
-  const [dismissed, setDismissed] = useState<string | null | undefined>(undefined);
+  const [dismissed, setDismissed] = useState<string | null>(dismissedThisSession);
 
-  useEffect(() => {
-    dismissedVersion().then(setDismissed);
-  }, []);
-
-  if (Platform.isTV || !update || dismissed === undefined || dismissed === update.version) return null;
+  if (Platform.isTV || !update || dismissed === update.version) return null;
   const notes = cleanNotes(update.notes);
   const close = () => {
+    dismissedThisSession = update.version;
     setDismissed(update.version);
-    dismissVersion(update.version);
   };
 
   return (

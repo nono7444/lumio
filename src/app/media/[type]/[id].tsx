@@ -197,7 +197,8 @@ export default function MediaScreen() {
   const imdbId = details.kind === 'movie' ? details.data.imdb_id : details.data.external_ids?.imdb_id;
   const logo = pickLogo(settings, d.images);
   // Sur TV (paysage), le hero ne dépasse pas l'écran
-  const heroH = Platform.isTV ? Math.round(screenH * 0.7) : Math.min(Math.round(width * 1.2), Math.round(screenH * 0.85));
+  // Téléphone : l'affiche entière (son titre fait partie de l'image, on n'en rajoute pas par-dessus)
+  const heroH = Platform.isTV ? Math.round(screenH * 0.7) : Math.round(width * 1.5);
   const cast = (d.credits?.cast ?? []).slice(0, 15);
   const runtime =
     details.kind === 'movie' ? details.data.runtime : details.data.episode_run_time?.[0];
@@ -212,9 +213,10 @@ export default function MediaScreen() {
           ) : (
             <>
               <Image
-                source={tmdbImg(d.backdrop_path ?? d.poster_path, 'w1280')}
+                source={tmdbImg(d.poster_path ?? d.backdrop_path, 'original')}
                 style={StyleSheet.absoluteFill}
                 contentFit="cover"
+                contentPosition="center"
                 transition={250}
               />
               <Fade height={heroH * 0.3} top />
@@ -222,7 +224,7 @@ export default function MediaScreen() {
             </>
           )}
           <View style={Platform.isTV ? styles.heroContentTv : styles.heroContent}>
-            {logo ? (
+            {!Platform.isTV ? null : logo ? (
               <Image
                 source={tmdbImg(logo, 'w500')}
                 style={Platform.isTV ? { width: 320, height: 120 } : { width: Math.min(width * 0.7, 460), height: 100 }}

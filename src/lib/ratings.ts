@@ -65,3 +65,7 @@ export function useFamilyRatingBadge(s: Settings, type: 'movie' | 'tv' | undefin
   if (!type || !tmdbId) return null;
   return summary[`${type}:${tmdbId}`] ?? null;
 }
+
+/** Verdict d'une note sur 10 : Top, Moyen ou Bouse */
+export const verdict = (n: number) =>
+  n >= 7.5 ? { label: 'Top', color: '#34C759' } : n >= 5 ? { label: 'Moyen', color: '#FF9F0A' } : { label: 'Bouse', color: '#B5651D' };

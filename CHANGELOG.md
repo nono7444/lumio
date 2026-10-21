@@ -6,6 +6,20 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Notes : retour des étoiles (1 à 10) ; sur les affiches, la note de la famille s'affiche en haut avec un verdict « Top », « Moyen » ou « Bouse ».
+- Fiches : l'affiche entière en haut, sans le titre blanc rajouté par-dessus.
+- Admin, sur la fiche d'un titre : « Voir dans le disque » (ouvre la gestion des disques sur son dossier) et « Supprimer » (titre et fichiers).
+- Disques : recherche par nom dans un disque ou dans tous ; sélection de plusieurs éléments pour les déplacer ou les supprimer d'un coup (appui long pour commencer).
+- Bibliothèque : cartes avec une grande image du dernier ajout ; appui long pour choisir l'image.
+- Recherche : menu « Thèmes » (Noël, Halloween, Saint-Valentin, Action, Comédie, Horreur…) qui montre les films ou séries les mieux notés du thème.
+- Connexion : l'adresse du serveur est trouvée toute seule, il suffit d'entrer son identifiant et son mot de passe.
+- Message épinglé et mise à jour disponible : ils reviennent à chaque ouverture de Lumio tant qu'ils sont d'actualité.
+- Notifications sur iPhone : le nom du sujet ntfy est copié avec les étapes pour s'abonner (l'appli ntfy ne s'ouvre pas depuis un lien sur iPhone).
+- Demandes : le dossier Films est proposé en premier (Kids en dernier) ; pour les séries, Séries puis Animés.
+- Lien d'invitation : tutoriel FlareStore pour iPhone et étapes pour Android.
+- Comptes de la famille : dans Profil, juste « Serveur en ligne » avec un point vert.
+- Serveur Lumio 3.15.0 requis.
+
 ## 1.0.66 — 21 octobre 2026
 
 - Android : corrigé le plantage à l'ouverture (module Chromecast) ; chaque APK est désormais testé sur un téléphone virtuel avant d'être publié.

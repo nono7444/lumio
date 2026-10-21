@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Platform, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Platform, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -20,6 +20,8 @@ import {
   type JfItem,
 } from '@/lib/jellyfin';
 import { TvBackdropLayer } from '@/components/tv-backdrop';
+import { toast } from '@/components/toast';
+import { filesApi } from '@/lib/files';
 import { FamilyRating } from '@/components/family-rating';
 import { ReportProblemButton } from '@/components/report-problem';
 import { useServerRequests } from '@/lib/requests';
@@ -209,7 +211,8 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
   const isSeries = item.Type === 'Series';
   // Sur TV (paysage), le hero ne dépasse pas l'écran
   // TV : image moins haute (elle remplissait tout l'écran)
-  const heroH = Platform.isTV ? Math.round(screenH * 0.7) : Math.min(Math.round(width * 1.2), Math.round(screenH * 0.85));
+  // Téléphone : l'affiche entière (son titre fait partie de l'image, on n'en rajoute pas par-dessus)
+  const heroH = Platform.isTV ? Math.round(screenH * 0.7) : Math.round(width * 1.5);
   const logo = jfLogo(settings, item);
   const resumeAt = ticksToSeconds(item.UserData?.PlaybackPositionTicks);
   const cast = (item.People ?? []).filter((p) => p.Type === 'Actor').slice(0, 15);
@@ -243,13 +246,13 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
             <TvBackdropLayer info={{ key: item.Id, title: item.Name, backdrop: jfBackdrop(settings, item) }} />
           ) : (
             <>
-              <Image source={jfBackdrop(settings, item)} style={StyleSheet.absoluteFill} contentFit="cover" transition={250} />
+              <Image source={jfPoster(settings, item, 1400)} style={StyleSheet.absoluteFill} contentFit="cover" contentPosition="center" transition={250} />
               <Fade height={heroH * 0.3} top />
               <Fade height={heroH * 0.7} />
             </>
           )}
           <View style={Platform.isTV ? styles.heroContentTv : styles.heroContent}>
-            {logo ? (
+            {!Platform.isTV ? null : logo ? (
               <Image
                 source={logo}
                 style={Platform.isTV ? { width: 320, height: 120 } : { width: Math.min(width * 0.7, 460), height: 100 }}
@@ -322,6 +325,9 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
             </View>
           )}
 
+
+          {/* Admin : voir le fichier dans la gestion des disques, ou supprimer le titre */}
+          {settings.jellyfin?.isAdmin === true && !Platform.isTV ? <AdminItemActions item={item} /> : null}
 
           {/* Notes de la famille et signalement d'un problème (serveur Lumio) */}
           {serverReq && tmdbId ? (
@@ -436,6 +442,61 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
         </View>
       </ScrollView>
       <BackButton />
+    </View>
+  );
+}
+
+/** Admin : « Voir dans le disque » (ouvre la gestion des disques sur le dossier du titre) et « Supprimer ». */
+function AdminItemActions({ item }: { item: JfItem }) {
+  const { settings } = useSettings();
+  const [busy, setBusy] = useState<string | null>(null);
+  const isSeries = item.Type === 'Series';
+
+  const showOnDisk = async () => {
+    if (!item.Path) return toast('Chemin du fichier inconnu', 'error');
+    setBusy('disk');
+    try {
+      // Série : son dossier ; film : le dossier qui contient le fichier
+      const loc = await filesApi.locate(settings, item.Path);
+      router.push({ pathname: '/files', params: { root: loc.root, folder: loc.folder, highlight: loc.name ?? '' } });
+    } catch (e: any) {
+      toast(e?.message ?? String(e), 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const remove = () =>
+    Alert.alert(
+      `Supprimer « ${item.Name} » ?`,
+      isSeries
+        ? 'La série, toutes ses saisons et leurs fichiers seront supprimés du disque. Pense à la retirer aussi de Sonarr pour qu’elle ne revienne pas.'
+        : 'Le film et son fichier seront supprimés du disque. Pense à le retirer aussi de Radarr pour qu’il ne revienne pas.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            setBusy('delete');
+            try {
+              await jf.deleteItem(settings, item.Id);
+              toast(`« ${item.Name} » supprimé`);
+              router.back();
+            } catch (e: any) {
+              toast(e?.message ?? String(e), 'error');
+            } finally {
+              setBusy(null);
+            }
+          },
+        },
+      ]
+    );
+
+  return (
+    <View style={{ flexDirection: 'row', gap: 10 }}>
+      <Button title="Voir dans le disque" icon="folder-open-outline" variant="secondary" small loading={busy === 'disk'} onPress={showOnDisk} style={{ flex: 1 }} />
+      <Button title="Supprimer" icon="trash-outline" variant="danger" small loading={busy === 'delete'} onPress={remove} style={{ flex: 1 }} />
     </View>
   );
 }
