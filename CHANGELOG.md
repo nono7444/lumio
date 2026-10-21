@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.65 — 21 octobre 2026
+
 - Android : bibliothèques natives extraites à l'installation (démarrage plus fiable sur certains téléphones).
 
 ## 1.0.64 — 20 octobre 2026
