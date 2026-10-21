@@ -1,7 +1,7 @@
 // Live TV : ajouter / retirer des sources (liste M3U, compte Xtream Codes, addon Stremio de chaînes).
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -9,7 +9,7 @@ import { toast } from '@/components/toast';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { Button, SegChip } from '@/components/ui';
 import { C, R } from '@/constants/theme';
-import { forgetChannels, newSourceId, probeSource, xtreamM3u } from '@/lib/live';
+import { forgetChannels, newSourceId, probeSource, xtreamM3u, syncLiveSources } from '@/lib/live';
 import { useSettings, type LiveSource } from '@/lib/settings';
 
 type Kind = 'm3u' | 'xtream' | 'stremio';
@@ -18,6 +18,8 @@ const KIND_LABEL: Record<LiveSource['kind'], string> = { m3u: 'Liste IPTV', stre
 
 export default function LiveSources() {
   const { settings, update } = useSettings();
+  // Lumio TV : les sources suivent sur la TV (via le serveur Lumio)
+  useEffect(() => syncLiveSources(settings), [settings.liveSources, settings.chatUrl, settings.jellyfin?.token]); // eslint-disable-line react-hooks/exhaustive-deps
   const insets = useSafeAreaInsets();
   const [kind, setKind] = useState<Kind>('m3u');
   const [name, setName] = useState('');

@@ -22,9 +22,10 @@ const REQUESTS_FILE = path.join(DATA_DIR, 'requests.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
 const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
+const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.16.1';
+const VERSION = '3.18.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -52,6 +53,8 @@ let requests = readJson(REQUESTS_FILE, []);
 let userPrefs = readJson(USERS_FILE, {});
 let ideas = readJson(IDEAS_FILE, []);
 let ratings = readJson(RATINGS_FILE, {});
+// Sources Live TV de chaque utilisateur (envoyées par son téléphone, lues par Lumio TV) — restent sur ce serveur
+let liveSources = readJson(LIVE_FILE, {});
 
 const timers = {};
 function persist(file, getData) {
@@ -63,6 +66,7 @@ const saveRequests = () => persist(REQUESTS_FILE, () => requests);
 const saveUsers = () => persist(USERS_FILE, () => userPrefs);
 const saveIdeas = () => persist(IDEAS_FILE, () => ideas);
 const saveRatings = () => persist(RATINGS_FILE, () => ratings);
+const saveLive = () => persist(LIVE_FILE, () => liveSources);
 // Notes passées de 5 étoiles à 10 tomates : les anciennes notes sont doublées une seule fois
 if (!config.ratingsOn10) {
   for (const e of Object.values(ratings)) for (const v of Object.values(e.votes || {})) v.stars = Math.min(10, (Number(v.stars) || 0) * 2);
@@ -737,6 +741,25 @@ async function tmdbGet(p2, params = {}) {
   if (!r.ok) throw new Error(`TMDB HTTP ${r.status}`);
   return r.json();
 }
+// Notes : complète l'identifiant IMDb des titres notés (pour les pastilles de Lumio TV), en arrière-plan
+let ratingImdbFilling = false;
+async function fillRatingImdb() {
+  if (ratingImdbFilling || !tmdbKey()) return;
+  const todo = Object.values(ratings).filter((e) => !e.imdb && !e.imdbChecked).slice(0, 25);
+  if (!todo.length) return;
+  ratingImdbFilling = true;
+  try {
+    for (const e of todo) {
+      const ext = await tmdbGet(`/${e.type === 'tv' ? 'tv' : 'movie'}/${e.tmdbId}/external_ids`).catch(() => null);
+      if (ext && ext.imdb_id) e.imdb = ext.imdb_id;
+      else e.imdbChecked = true;
+    }
+    saveRatings();
+  } finally {
+    ratingImdbFilling = false;
+  }
+}
+
 async function buildCollections() {
   if (collectionsBuilding || (collectionsList && Date.now() - collectionsAt < 6 * 3600_000)) return;
   const token = process.env.JELLYFIN_API_KEY || jfIndexToken;
@@ -1576,6 +1599,22 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
 </main></body></html>`);
   }
 
+  // QR code de Lumio TV : ouvre l'appli Lumio du téléphone sur « Connecter la TV » avec le code
+  if (url.pathname === '/tvlink') {
+    const code = String(url.searchParams.get('code') || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 12);
+    const deep = `lumio://connect-tv?code=${code}`;
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connecter la TV</title><style>body{margin:0;font-family:-apple-system,system-ui,sans-serif;background:#0B0D12;color:#fff;display:flex;min-height:100vh;align-items:center;justify-content:center}
+main{max-width:420px;padding:28px;text-align:center}h1{font-size:28px;margin:0 0 8px}p{color:#A1A1A6;line-height:1.5}.code{font-size:40px;font-weight:900;letter-spacing:6px;margin:18px 0}
+a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;color:#000;text-decoration:none;font-weight:700}</style></head><body><main>
+<h1>📺 Connecter la TV</h1><p>Lumio va s'ouvrir pour connecter la TV à ton compte.</p><div class="code">${code.replace(/(.{3})/g, '$1 ').trim()}</div>
+<a class="b" href="${deep}">Ouvrir dans Lumio</a>
+<p>Si rien ne s'ouvre : dans Lumio → Profil → « Connecter une TV », tape le code ci-dessus.</p>
+<script>setTimeout(function(){location.href=${JSON.stringify(deep)}},300)</script>
+</main></body></html>`);
+  }
+
   // Raccourci pour installer l'appli TV : taper « lumio.tondomaine/tv » dans Downloader
   // Lumio TV : par défaut la version 32 bits (≈ 50 Mo), qui s'installe sur toutes les box et clés TV Android,
   // même les 64 bits ; l'APK universel (≈ 130 Mo) fait planter Downloader sur les petites box.
@@ -1714,6 +1753,7 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
       const stars = Math.max(0, Math.min(10, Math.round(Number(b.stars) || 0)));
       const entry = ratings[key] || { type, tmdbId, title: '', poster: undefined, votes: {} };
       if (b.title) entry.title = String(b.title).slice(0, 200);
+      if (typeof b.imdb === 'string' && /^tt\d+$/.test(b.imdb)) entry.imdb = b.imdb;
       if (typeof b.poster === 'string' && b.poster.startsWith('https://')) entry.poster = b.poster;
       if (!stars) delete entry.votes[user.id];
       else entry.votes[user.id] = { name: user.name, stars, comment: String(b.comment || '').trim().slice(0, 600) || undefined, at: new Date().toISOString() };
@@ -1729,7 +1769,10 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
         const v = Object.values(e.votes);
         if (!v.length) continue;
         items[key] = { avg: Math.round((v.reduce((n, x) => n + x.stars, 0) / v.length) * 10) / 10, count: v.length };
+        // Lumio TV : mêmes notes, retrouvées par l'identifiant IMDb des affiches
+        if (e.imdb) items[`imdb:${e.imdb}`] = items[key];
       }
+      fillRatingImdb();
       return send(res, 200, { items });
     }
     // Coups de cœur : titres les mieux notés par la famille
@@ -1986,6 +2029,21 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
     }
 
     // ——— Collections propres (sagas TMDB des films présents dans Jellyfin) ———
+    // ——— Live TV : sources IPTV / Stremio du compte (le téléphone les envoie, la TV les lit) ———
+    if (p === '/api/live/sources') {
+      if (req.method === 'PUT') {
+        const b = await readBody(req);
+        const list = Array.isArray(b.sources) ? b.sources : [];
+        liveSources[user.id] = list
+          .filter((x) => x && typeof x.url === 'string' && /^https?:\/\//i.test(x.url))
+          .slice(0, 20)
+          .map((x) => ({ id: String(x.id || '').slice(0, 60), name: String(x.name || 'Source').slice(0, 80), kind: x.kind === 'stremio' ? 'stremio' : 'm3u', url: String(x.url).slice(0, 2000) }));
+        saveLive();
+        return send(res, 200, { ok: true });
+      }
+      if (req.method === 'GET') return send(res, 200, { sources: liveSources[user.id] || [] });
+    }
+
     if (req.method === 'GET' && p === '/api/collections') {
       if (q.get('refresh') === '1' && user.admin) collectionsAt = 0;
       buildCollections().catch((e) => console.log('Collections :', e.message));

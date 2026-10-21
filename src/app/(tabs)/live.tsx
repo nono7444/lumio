@@ -11,7 +11,7 @@ import { FocusPressable as Pressable } from '@/components/tv';
 import { Button, ScreenTitle, SegChip, tap } from '@/components/ui';
 import { VpnButton } from '@/components/vpn-button';
 import { C, R, TAB_SPACE } from '@/constants/theme';
-import { channelStreams, COUNTRIES, countryOf, FRENCH, loadChannels, THEMES, themeOf, type Channel, type Theme } from '@/lib/live';
+import { channelStreams, COUNTRIES, countryOf, FRENCH, loadChannels, THEMES, themeOf, type Channel, type Theme, syncLiveSources } from '@/lib/live';
 import { useSettings } from '@/lib/settings';
 
 const ALL = 'Tous les groupes';
@@ -40,6 +40,8 @@ function ChannelTile({ ch, width, fav, onPress, onLong }: { ch: Channel; width: 
 
 export default function Live() {
   const { settings, update } = useSettings();
+  // Lumio TV : les sources suivent sur la TV (via le serveur Lumio)
+  useEffect(() => syncLiveSources(settings), [settings.liveSources, settings.chatUrl, settings.jellyfin?.token]); // eslint-disable-line react-hooks/exhaustive-deps
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const sources = settings.liveSources;

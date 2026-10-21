@@ -3,6 +3,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { LiveSource } from './settings';
 import { getJson, resolveAddon, type StremioManifest } from './stremio';
+import { serverCall } from './chat';
+import type { Settings } from './settings';
 
 export type Channel = {
   /** Clé unique « source:id » (favoris) */
@@ -370,4 +372,17 @@ export function themeOf(ch: Channel): Theme {
     for (const [t, re] of THEME_RULES) if (re.test(text)) return t;
   }
   return 'general';
+}
+
+// ——— Lumio TV : les sources sont envoyées au serveur Lumio (sur ton compte), la TV les lit de là ———
+let lastSynced = '';
+export function syncLiveSources(s: Settings) {
+  if (!s.chatUrl || !s.jellyfin) return;
+  const body = JSON.stringify({ sources: s.liveSources });
+  if (body === lastSynced) return;
+  serverCall(s, '/api/live/sources', { method: 'PUT', body })
+    .then(() => {
+      lastSynced = body;
+    })
+    .catch(() => {});
 }

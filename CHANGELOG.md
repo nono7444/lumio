@@ -6,6 +6,10 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- QR code de Lumio TV : scanner le QR affiché par la TV ouvre Lumio sur « Connecter la TV » (un appui suffit).
+- Live TV : tes sources IPTV sont envoyées au serveur Lumio (sur ton compte) pour apparaître dans Lumio TV.
+- Serveur 3.18.0 : page `/tvlink` (QR code de la TV), sources Live TV par compte (`/api/live/sources`), notes retrouvées aussi par identifiant IMDb (pastilles de Lumio TV).
+
 - APK : bouton « Installer la dernière version » toujours présent dans Profil → Application.
 
 ## 1.0.76 — 21 octobre 2026
