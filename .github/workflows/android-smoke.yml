@@ -1,0 +1,53 @@
+# Test de démarrage de l'APK Android : installe la dernière version publiée sur un téléphone virtuel,
+# l'ouvre, et remonte l'erreur en cas de plantage (annotation).
+name: Test de démarrage Android
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version à tester (vide = la dernière)'
+        required: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Accélération matérielle de l'émulateur
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Télécharge l'APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then gh release download "${{ inputs.tag }}" -R ${{ github.repository }} -p lumio-android.apk; else gh release download -R ${{ github.repository }} -p lumio-android.apk; fi
+          ls -la lumio-android.apk
+      - name: Lance l'appli sur un téléphone virtuel (Android 14)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: |
+            adb install -r lumio-android.apk
+            adb logcat -c
+            adb shell monkey -p lol.wawanono.lumio -c android.intent.category.LAUNCHER 1
+            sleep 40
+            adb logcat -d > logcat.txt || true
+            adb shell pidof lol.wawanono.lumio > pid.txt || true
+            echo "PID: $(cat pid.txt)"
+            grep -nE "FATAL EXCEPTION|AndroidRuntime|Caused by|ReactNativeJS|E/unknown|SoLoader|UnsatisfiedLink|ClassNotFound|NoSuchMethod|lumio" logcat.txt | head -150 > crash.txt || true
+            cat crash.txt
+            if ! [ -s pid.txt ]; then msg=$(grep -A40 "FATAL EXCEPTION" logcat.txt | head -45 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}'); echo "::error::Plantage au démarrage%0A$msg"; else echo "::notice::L'appli tourne toujours après 40 s"; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logcat
+          path: |
+            logcat.txt
+            crash.txt
