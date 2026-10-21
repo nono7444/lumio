@@ -53,7 +53,8 @@
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true
+            "usesCleartextTraffic": true,
+            "useLegacyPackaging": true
           },
           "ios": {
             "deploymentTarget": "16.4"

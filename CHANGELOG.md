@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Android : bibliothèques natives extraites à l'installation (démarrage plus fiable sur certains téléphones).
+
 ## 1.0.64 — 20 octobre 2026
 
 - TV : nouvelle interface inspirée de Nuvio — menu latéral à gauche qui se déploie quand on y entre, accueil avec le titre sélectionné en grand fond (logo, infos, résumé) et les rangées dessous, fiches avec image en fond et infos alignées à gauche.
