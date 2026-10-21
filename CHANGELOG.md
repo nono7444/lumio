@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.71 — 21 octobre 2026
+
 - TV : accueil sur fond uni (plus d'image de fond) avec un bandeau d'infos compact du titre sélectionné ; les rangées remontent et on passe directement d'une rangée d'affiches à l'autre.
 - TV : affiches instantanées (affiches du serveur sans service externe, sans fondu, gardées en cache) et sélection plus vive.
 - TV : sons de navigation retirés.
