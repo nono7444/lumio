@@ -22,6 +22,7 @@ import {
 import { TvBackdropLayer } from '@/components/tv-backdrop';
 import { toast } from '@/components/toast';
 import { filesApi } from '@/lib/files';
+import { MetadataEditor } from '@/components/metadata-editor';
 import { FamilyRating } from '@/components/family-rating';
 import { ReportProblemButton } from '@/components/report-problem';
 import { useServerRequests } from '@/lib/requests';
@@ -327,7 +328,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
 
 
           {/* Admin : voir le fichier dans la gestion des disques, ou supprimer le titre */}
-          {settings.jellyfin?.isAdmin === true && !Platform.isTV ? <AdminItemActions item={item} /> : null}
+          {settings.jellyfin?.isAdmin === true && !Platform.isTV ? <AdminItemActions item={item} reload={reload} /> : null}
 
           {/* Notes de la famille et signalement d'un problème (serveur Lumio) */}
           {serverReq && tmdbId ? (
@@ -447,9 +448,10 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
 }
 
 /** Admin : « Voir dans le disque » (ouvre la gestion des disques sur le dossier du titre) et « Supprimer ». */
-function AdminItemActions({ item }: { item: JfItem }) {
+function AdminItemActions({ item, reload }: { item: JfItem; reload: () => void }) {
   const { settings } = useSettings();
   const [busy, setBusy] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
   const isSeries = item.Type === 'Series';
 
   const showOnDisk = async () => {
@@ -494,9 +496,13 @@ function AdminItemActions({ item }: { item: JfItem }) {
     );
 
   return (
-    <View style={{ flexDirection: 'row', gap: 10 }}>
-      <Button title="Voir dans le disque" icon="folder-open-outline" variant="secondary" small loading={busy === 'disk'} onPress={showOnDisk} style={{ flex: 1 }} />
-      <Button title="Supprimer" icon="trash-outline" variant="danger" small loading={busy === 'delete'} onPress={remove} style={{ flex: 1 }} />
+    <View style={{ gap: 10 }}>
+      <View style={{ flexDirection: 'row', gap: 10 }}>
+        <Button title="Voir dans le disque" icon="folder-open-outline" variant="secondary" small loading={busy === 'disk'} onPress={showOnDisk} style={{ flex: 1 }} />
+        <Button title="Supprimer" icon="trash-outline" variant="danger" small loading={busy === 'delete'} onPress={remove} style={{ flex: 1 }} />
+      </View>
+      <Button title="Corriger les infos" icon="create-outline" variant="secondary" small onPress={() => setEditing(true)} />
+      <MetadataEditor item={item} visible={editing} onClose={() => setEditing(false)} onDone={reload} />
     </View>
   );
 }

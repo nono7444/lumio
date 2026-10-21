@@ -470,10 +470,61 @@ export const jf = {
     const { j } = api(s);
     return call(j.url, s.deviceId, j.token, `/Items/${id}`, { method: 'DELETE' });
   },
+  // ——— Admin : corriger les métadonnées ———
+
+  /** Cherche les correspondances possibles (TMDB, IMDb…) pour un film ou une série mal identifié */
+  remoteSearch: (s: Settings, item: JfItem, q: { name?: string; year?: number; tmdb?: string; imdb?: string; tvdb?: string }) => {
+    const { post } = api(s);
+    const kind = item.Type === 'Series' ? 'Series' : 'Movie';
+    const ProviderIds: Record<string, string> = {};
+    if (q.tmdb) ProviderIds.Tmdb = q.tmdb;
+    if (q.imdb) ProviderIds.Imdb = q.imdb;
+    if (q.tvdb) ProviderIds.Tvdb = q.tvdb;
+    return post<JfRemoteResult[]>(`/Items/RemoteSearch/${kind}`, {
+      ItemId: item.Id,
+      IncludeDisabledProviders: true,
+      SearchInfo: { Name: q.name || undefined, Year: q.year || undefined, ProviderIds },
+    });
+  },
+  /** Applique la correspondance choisie (titre, résumé, affiche… sont remplacés) */
+  applyMatch: (s: Settings, id: string, result: JfRemoteResult) => {
+    const { post } = api(s);
+    providerCache = null;
+    return post(`/Items/RemoteSearch/Apply/${id}?ReplaceAllImages=true`, result);
+  },
+  /** Recharge toutes les métadonnées et images depuis Internet */
+  refreshMetadata: (s: Settings, id: string) => {
+    const { post } = api(s);
+    return post(
+      `/Items/${id}/Refresh?Recursive=true&MetadataRefreshMode=FullRefresh&ImageRefreshMode=FullRefresh&ReplaceAllMetadata=true&ReplaceAllImages=true`
+    );
+  },
+  /** Modifie à la main titre / année / résumé (champs verrouillés pour ne pas être écrasés) */
+  editMetadata: async (s: Settings, id: string, patch: { Name?: string; OriginalTitle?: string; ProductionYear?: number | null; Overview?: string }) => {
+    const { j, get, post } = api(s);
+    const full = await get<Record<string, any>>(`/Users/${j.userId}/Items/${id}`);
+    const locked = new Set<string>(full.LockedFields ?? []);
+    if (patch.Name !== undefined) locked.add('Name');
+    if (patch.Overview !== undefined) locked.add('Overview');
+    if (patch.ProductionYear !== undefined) locked.add('ProductionYear');
+    providerCache = null;
+    return post(`/Items/${id}`, { ...full, ...patch, LockedFields: [...locked] });
+  },
+
   setPlayed: (s: Settings, id: string, played: boolean) => {
     const { j } = api(s);
     return call(j.url, s.deviceId, j.token, `/Users/${j.userId}/PlayedItems/${id}`, { method: played ? 'POST' : 'DELETE' });
   },
+};
+
+export type JfRemoteResult = {
+  Name: string;
+  ProductionYear?: number;
+  PremiereDate?: string;
+  Overview?: string;
+  ImageUrl?: string;
+  SearchProviderName?: string;
+  ProviderIds?: Record<string, string>;
 };
 
 // ——— Images ———
