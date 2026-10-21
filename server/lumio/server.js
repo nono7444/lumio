@@ -24,7 +24,7 @@ const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
 const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.16.0';
+const VERSION = '3.16.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1582,6 +1582,13 @@ a.s{background:#1C1C1E;color:#fff}ol{text-align:left;color:#A1A1A6;line-height:1
   // Lumio TV : même appli que l'iPhone, compilée pour Android TV (publiée avec chaque version de Lumio)
   if (url.pathname === '/tv' || url.pathname === '/tv.apk') {
     res.writeHead(302, { Location: process.env.TV_APK_URL || 'https://github.com/nono7444/lumio/releases/latest/download/lumio-tv.apk' });
+    return res.end();
+  }
+
+  // Lumio TV (fork de NuvioTV, dépôt nono7444/lumio-tv) : /tvnuvio = 32 bits (toutes les box), /tvnuvio64 = 64 bits
+  if (url.pathname === '/tvnuvio' || url.pathname === '/tvnuvio.apk' || url.pathname === '/tvnuvio64') {
+    const file = url.pathname === '/tvnuvio64' ? 'lumio-tv-arm64-v8a.apk' : 'lumio-tv-armeabi-v7a.apk';
+    res.writeHead(302, { Location: `https://github.com/nono7444/lumio-tv/releases/latest/download/${file}` });
     return res.end();
   }
 

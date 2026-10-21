@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Serveur 3.16.1 : lien d'installation `lumio.wawanono.lol/tvnuvio` pour Lumio TV (version Nuvio), `/tvnuvio64` pour la version 64 bits.
+
 ## 1.0.74 — 21 octobre 2026
 
 - TV : lecteur fiabilisé — à la maison, la vidéo est lue directement sur l'adresse locale de Jellyfin (plus par le tunnel internet, qui provoquait les arrêts / reprises) ; réserve de lecture ramenée à une taille adaptée aux box TV.
