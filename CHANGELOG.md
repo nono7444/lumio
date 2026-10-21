@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.68 — 21 octobre 2026
+
 - TV : les affiches ne sont plus coupées quand elles s'agrandissent (marge autour des rangées).
 - TV : appli plus fluide — sélection sans ombre (seul l'agrandissement reste), images moins lourdes, et seul le fond de l'accueil se redessine quand on change d'affiche.
 - TV : Demandes vide corrigé — si l'adresse du serveur Lumio manquait (connexion par code), l'appli prend celle de la maison automatiquement.
