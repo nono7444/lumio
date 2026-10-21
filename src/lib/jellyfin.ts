@@ -86,10 +86,11 @@ async function call<T>(
   deviceId: string,
   token: string | undefined,
   path: string,
-  init?: RequestInit
+  init?: RequestInit,
+  timeoutMs = 20000
 ): Promise<T> {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 20000);
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(`${trimUrl(base)}${path}`, {
       ...init,
@@ -487,15 +488,43 @@ export const jf = {
     });
   },
   /** Applique la correspondance choisie (titre, résumé, affiche… sont remplacés) */
-  applyMatch: (s: Settings, id: string, result: JfRemoteResult) => {
-    const { post } = api(s);
+  applyMatch: async (s: Settings, id: string, result: JfRemoteResult) => {
+    const { j } = api(s);
     providerCache = null;
-    return post(`/Items/RemoteSearch/Apply/${id}?ReplaceAllImages=true`, result);
+    // Jellyfin recharge toute la fiche pendant cet appel : on lui laisse le temps
+    await call(j.url, s.deviceId, j.token, `/Items/RemoteSearch/Apply/${id}?ReplaceAllImages=true`, {
+      method: 'POST',
+      body: JSON.stringify(result),
+    }, 90000).catch((e) => {
+      // Délai dépassé : la correspondance est souvent appliquée quand même, on continue
+      if (!(e instanceof JellyfinError) || e.status) throw e;
+    });
+    await jf.ensureImages(s, id, result.ImageUrl);
+  },
+  /** Affiche (et fond) manquants après une correction : on les télécharge nous-mêmes */
+  ensureImages: async (s: Settings, id: string, posterUrl?: string, force = false) => {
+    const { j, get } = api(s);
+    const item = await get<JfItem>(`/Users/${j.userId}/Items/${id}`).catch(() => null);
+    const dl = (type: string, url: string) =>
+      call(j.url, s.deviceId, j.token, `/Items/${id}/RemoteImages/Download?Type=${type}&ImageUrl=${encodeURIComponent(url)}`, { method: 'POST' }, 60000);
+    const first = async (type: string) => {
+      const r = await get<{ Images?: { Url: string; Language?: string }[] }>(`/Items/${id}/RemoteImages?Type=${type}&Limit=10&IncludeAllLanguages=true`);
+      const imgs = r.Images ?? [];
+      return (imgs.find((i) => i.Language === 'fr') ?? imgs.find((i) => !i.Language || i.Language === 'en') ?? imgs[0])?.Url;
+    };
+    if (force || !item?.ImageTags?.Primary) {
+      const url = posterUrl || (await first('Primary').catch(() => undefined));
+      if (url) await dl('Primary', url);
+    }
+    if (force || !item?.BackdropImageTags?.length) {
+      const url = await first('Backdrop').catch(() => undefined);
+      if (url) await dl('Backdrop', url).catch(() => {});
+    }
   },
   /** Recharge toutes les métadonnées et images depuis Internet */
-  refreshMetadata: (s: Settings, id: string) => {
+  refreshMetadata: async (s: Settings, id: string) => {
     const { post } = api(s);
-    return post(
+    await post(
       `/Items/${id}/Refresh?Recursive=true&MetadataRefreshMode=FullRefresh&ImageRefreshMode=FullRefresh&ReplaceAllMetadata=true&ReplaceAllImages=true`
     );
   },

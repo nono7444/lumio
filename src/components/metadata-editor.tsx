@@ -71,8 +71,7 @@ export function MetadataEditor({ item, visible, onClose, onDone }: { item: JfIte
       await jf.applyMatch(settings, item.Id, r);
       toast(`Corrigé : ${r.Name}${r.ProductionYear ? ` (${r.ProductionYear})` : ''}`);
       onClose();
-      // Jellyfin télécharge les nouvelles infos / images en arrière-plan : on recharge un peu après
-      setTimeout(onDone, 2500);
+      onDone();
     } catch (e: any) {
       toast(e?.message ?? String(e), 'error');
     } finally {
@@ -95,6 +94,21 @@ export function MetadataEditor({ item, visible, onClose, onDone }: { item: JfIte
       toast(e?.message ?? String(e), 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const [fetchingImg, setFetchingImg] = useState(false);
+  const fetchImages = async () => {
+    setFetchingImg(true);
+    try {
+      await jf.ensureImages(settings, item.Id, undefined, true);
+      toast('Affiche et fond récupérés');
+      onClose();
+      onDone();
+    } catch (e: any) {
+      toast(e?.message ?? String(e), 'error');
+    } finally {
+      setFetchingImg(false);
     }
   };
 
@@ -182,6 +196,7 @@ export function MetadataEditor({ item, visible, onClose, onDone }: { item: JfIte
               <TextInput value={overview} onChangeText={setOverview} multiline style={[styles.input, { minHeight: 110, textAlignVertical: 'top' }]} placeholderTextColor={C.textFaint} />
               <Text style={styles.faint}>Ces champs sont verrouillés : une actualisation ne les écrasera pas.</Text>
               <Button title="Enregistrer" icon="save-outline" loading={saving} onPress={save} />
+              <Button title="Récupérer l'affiche et le fond" icon="image-outline" variant="secondary" loading={fetchingImg} onPress={fetchImages} />
               <Button title="Tout actualiser depuis Internet" icon="refresh" variant="secondary" loading={refreshing} onPress={refresh} />
             </ScrollView>
           )}
