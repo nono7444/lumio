@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.70 — 21 octobre 2026
+
 - Corriger les infos : après « Identifier », l'affiche et le fond sont téléchargés directement (la couverture ne reste plus noire). Nouveau bouton « Récupérer l'affiche et le fond » dans « Modifier » pour les titres déjà corrigés.
 
 ## 1.0.69 — 21 octobre 2026
