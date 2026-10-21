@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.66 — 21 octobre 2026
+
 - Android : corrigé le plantage à l'ouverture (module Chromecast) ; chaque APK est désormais testé sur un téléphone virtuel avant d'être publié.
 
 ## 1.0.65 — 21 octobre 2026
