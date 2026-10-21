@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.74 — 21 octobre 2026
+
 - TV : lecteur fiabilisé — à la maison, la vidéo est lue directement sur l'adresse locale de Jellyfin (plus par le tunnel internet, qui provoquait les arrêts / reprises) ; réserve de lecture ramenée à une taille adaptée aux box TV.
 - TV : fiches comme Nuvio — l'image de fond reste fixe en plein écran et la page défile par-dessus (plus rien de coupé en bas) ; casting en grands ronds, accessible à la télécommande.
 - TV : affiches à la même taille que Nuvio.
