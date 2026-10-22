@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.22.1';
+const VERSION = '3.23.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -743,6 +743,27 @@ async function tmdbGet(p2, params = {}) {
   if (!r.ok) throw new Error(`TMDB HTTP ${r.status}`);
   return r.json();
 }
+// Affiches TMDB (en français si possible) : chemin gardé en mémoire 7 jours, une seule requête TMDB à la fois par titre
+const posterCache = new Map(); // "movie:603" → { p: '/xyz.jpg' | null, at }
+const posterPending = new Map();
+async function tmdbPosterPath(type, id) {
+  const k = `${type}:${id}`;
+  const hit = posterCache.get(k);
+  if (hit && Date.now() - hit.at < 7 * 86400e3) return hit.p;
+  if (posterPending.has(k)) return posterPending.get(k);
+  const job = (async () => {
+    const d = await tmdbGet(`/${type}/${id}`, { append_to_response: 'images', include_image_language: 'fr,null,en' });
+    const imgs = (d && d.images && d.images.posters) || [];
+    const fr = imgs.find((x) => x.iso_639_1 === 'fr');
+    const p = (fr && fr.file_path) || (d && d.poster_path) || null;
+    if (posterCache.size > 20000) posterCache.clear();
+    posterCache.set(k, { p, at: Date.now() });
+    return p;
+  })().finally(() => posterPending.delete(k));
+  posterPending.set(k, job);
+  return job;
+}
+
 // Notes : complète l'identifiant IMDb des titres notés (pour les pastilles de Lumio TV), en arrière-plan
 let ratingImdbFilling = false;
 async function fillRatingImdb() {
@@ -1674,6 +1695,20 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
   if (url.pathname === '/tvnuvio' || url.pathname === '/tvnuvio.apk' || url.pathname === '/tvnuvio64') {
     const file = url.pathname === '/tvnuvio64' ? 'lumio-tv-arm64-v8a.apk' : 'lumio-tv-armeabi-v7a.apk';
     res.writeHead(302, { Location: `https://github.com/nono7444/lumio-tv/releases/latest/download/${file}` });
+    return res.end();
+  }
+
+  // Affiche TMDB d'un titre (Lumio TV) : redirection vers image.tmdb.org, sans jeton (ce n'est qu'une image publique).
+  // /poster/movie/603 ou /poster/tv/1399 ; ?w=w342 par défaut. 404 si TMDB n'a pas d'affiche : l'appli garde alors celle de Jellyfin.
+  const posterM = url.pathname.match(/^\/poster\/(movie|tv)\/(\d{1,9})$/);
+  if (req.method === 'GET' && posterM) {
+    const w = /^w(92|154|185|342|500|780)$/.test(url.searchParams.get('w') || '') ? url.searchParams.get('w') : 'w342';
+    const posterPath = await tmdbPosterPath(posterM[1], Number(posterM[2])).catch(() => null);
+    if (!posterPath) {
+      res.writeHead(404, { 'Cache-Control': 'max-age=3600' });
+      return res.end();
+    }
+    res.writeHead(302, { Location: `https://image.tmdb.org/t/p/${w}${posterPath}`, 'Cache-Control': 'public, max-age=604800' });
     return res.end();
   }
 
