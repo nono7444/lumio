@@ -335,7 +335,7 @@ export default function MediaScreen() {
           ) : null}
 
           {/* ——— Admin : liens Lumio Secour → AllDebrid → disques du serveur ——— */}
-          {settings.chatUrl && settings.jellyfin?.isAdmin === true && !Platform.isTV ? (
+          {settings.chatUrl && settings.jellyfin?.isAdmin === true && !Platform.isTV && Platform.OS !== 'ios' ? (
             <Button
               title="Liens"
               icon="link-outline"
