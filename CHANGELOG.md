@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.89 — 22 octobre 2026
+
 - iPhone (admin) : Profil → Serveur → « Remplacer toutes les métadonnées par TMDB » (titres, résumés, affiches et fonds de tous les films et séries retéléchargés depuis TMDB).
 - Serveur Lumio 3.24.0 : un film ou une série supprimé dans Jellyfin est retiré de Radarr / Sonarr (une saison supprimée seule n'est plus surveillée), et la fiche propose de nouveau « Demander ». La fiche recharge son statut à chaque retour dessus.
 
