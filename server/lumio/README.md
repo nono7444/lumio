@@ -63,6 +63,9 @@ Si Radarr, Sonarr et Jellyfin sont dans le même compose, utilise les noms des s
 | POST | `/hooks/approve` · `/hooks/decline` | Boutons des notifications (lien signé HMAC) |
 | POST | `/api/admin/notify-test` | Admin : notification de test |
 | POST | `/api/admin/arr` | Admin : config Radarr / Sonarr |
+| GET / PUT | `/api/secour` | Admin : état et config de Lumio Secour `{ url, key }` |
+| GET | `/api/secour/links?type&imdb|tmdbId&season&episode` | Admin : liens trouvés par Lumio Secour |
+| POST | `/api/secour/download` | Admin : `{ link, hoster, source, season, episode, type, root, folder, name }` → téléchargement sur un disque |
 | GET / POST / DELETE | `/api/messages`… | Chat |
 
 L'authentification passe par l'en-tête `X-Jellyfin-Token`. C'est le jeton de session Jellyfin, vérifié via `/Users/Me`.
@@ -85,3 +88,18 @@ monte les disques dans le conteneur et liste-les dans `LUMIO_DISKS` (« Nom:/che
 
 La clé API AllDebrid se saisit dans l'appli (Accueil → icône Téléchargements) : elle est enregistrée sur le serveur seulement.
 Tu peux aussi la mettre dans `.env` (`ALLDEBRID_KEY=…`).
+
+
+## Lumio Secour (liens d'hébergeurs, admin)
+
+Lumio Secour (service à part, dans `/data/lumio-secour` sur le serveur) cherche des liens pour un film ou un épisode.
+Dans l'appli, sur une fiche, le bouton **Liens** (admin) les affiche ; un appui lance le téléchargement :
+Lumio Secour convertit le lien avec la clé AllDebrid du serveur Lumio, puis le fichier arrive sur le disque choisi
+et Jellyfin rescanne. Rien n'est lu en streaming dans l'appli.
+
+```yaml
+  lumio:
+    environment:
+      - LUMIO_SECOUR_URL=http://lumio-secour:7000   # ou depuis l'appli (Liens → Réglages)
+      - LUMIO_SECOUR_KEY=${LUMIO_SECOUR_KEY}
+```

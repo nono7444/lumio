@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.19.0';
+const VERSION = '3.20.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1254,6 +1254,44 @@ async function magnetFiles(magnet, job) {
   return flattenFiles(mm && mm.files);
 }
 
+// ——— Lumio Secour : liens d'hébergeurs pour un film ou un épisode ———
+// Adresse et clé : LUMIO_SECOUR_URL / LUMIO_SECOUR_KEY, ou envoyées par l'appli de l'admin.
+// La clé AllDebrid reste ici : elle est transmise à Lumio Secour à chaque appel, jamais à l'appli.
+const secourUrl = () => (process.env.LUMIO_SECOUR_URL || config.secourUrl || '').replace(/\/+$/, '');
+const secourKey = () => process.env.LUMIO_SECOUR_KEY || config.secourKey || '';
+async function secour(pathname, { method = 'GET', body, timeout = 60000 } = {}) {
+  if (!secourUrl() || !secourKey()) throw new HttpError(400, 'Lumio Secour n’est pas configuré');
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeout);
+  try {
+    const adKey = process.env.ALLDEBRID_KEY || config.alldebridKey;
+    const r = await fetch(`${secourUrl()}${pathname}`, {
+      method,
+      signal: ctrl.signal,
+      headers: { 'X-Lumio-Key': secourKey(), ...(adKey ? { 'X-Debrid-Key': adKey } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const j = await r.json().catch(() => null);
+    if (!r.ok) throw new HttpError(r.status === 401 ? 502 : r.status >= 500 ? 502 : r.status, `Lumio Secour : ${(j && (j.detail || j.error)) || `HTTP ${r.status}`}`);
+    return j;
+  } catch (e) {
+    if (e instanceof HttpError) throw e;
+    throw new HttpError(502, e && e.name === 'AbortError' ? 'Lumio Secour ne répond pas (délai dépassé)' : `Lumio Secour injoignable : ${(e && e.message) || e}`);
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/** Nom de fichier lisible à partir d'un lien direct (…/Film.2024.1080p.mkv). */
+function fileNameFromUrl(u) {
+  try {
+    const last = decodeURIComponent(new URL(u).pathname.split('/').pop() || '');
+    return last && /\.\w{2,4}$/.test(last) ? last : '';
+  } catch {
+    return '';
+  }
+}
+
 const downloads = [];
 
 async function downloadTo(url, dest, job) {
@@ -1263,6 +1301,7 @@ async function downloadTo(url, dest, job) {
   job.abort = () => ctrl.abort();
   const r = await fetch(url, { signal: ctrl.signal });
   if (!r.ok || !r.body) throw new Error(`Téléchargement : HTTP ${r.status}`);
+  if (!job.size) job.size = Number(r.headers.get('content-length')) || 0;
   const out = fs.createWriteStream(part);
   let last = Date.now();
   let lastBytes = job.done;
@@ -1291,7 +1330,12 @@ async function runDownload(job) {
   try {
     const { full } = safePath(job.root, job.folder);
     let files;
-    if (/^magnet:\?/i.test(job.link) || /^[a-f0-9]{40}$/i.test(job.link)) {
+    if (job.secour) {
+      job.status = 'debrid';
+      const r = await secour('/lumio/resolve', { method: 'POST', body: job.secour, timeout: 180000 });
+      const name = job.fileName || fileNameFromUrl(r.url) || `${job.name || 'fichier'}.mkv`;
+      files = [{ rel: name, direct: r.url }];
+    } else if (/^magnet:\?/i.test(job.link) || /^[a-f0-9]{40}$/i.test(job.link)) {
       job.status = 'debrid';
       files = await magnetFiles(job.link, job);
     } else {
@@ -1302,7 +1346,7 @@ async function runDownload(job) {
     const unlocked = [];
     for (const f of files) {
       if (job.cancelled) break;
-      const u = await unlockLink(f.link, job);
+      const u = f.direct ? { url: f.direct, name: f.rel, size: 0 } : await unlockLink(f.link, job);
       unlocked.push({ ...u, rel: f.rel || u.name });
     }
     job.size = unlocked.reduce((n, u) => n + (Number(u.size) || 0), 0) || job.size;
@@ -2357,6 +2401,63 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         } else downloads.splice(i, 1);
         return send(res, 200, { ok: true });
       }
+    }
+
+    // ——— Admin : Lumio Secour (liens d'hébergeurs → AllDebrid → disques) ———
+    if (p === '/api/secour' || p.startsWith('/api/secour/')) {
+      requireAdmin(user);
+      if (req.method === 'GET' && p === '/api/secour') {
+        const out = { configured: Boolean(secourUrl() && secourKey()), url: secourUrl() || null, fromEnv: Boolean(process.env.LUMIO_SECOUR_URL),
+          alldebrid: Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey), disks: disks().length };
+        if (out.configured) {
+          try {
+            const ping = await secour('/lumio/ping', { timeout: 8000 });
+            Object.assign(out, { online: true, version: ping.version, sources: ping.sources || [], tmdb: ping.tmdb });
+          } catch (e) {
+            Object.assign(out, { online: false, error: e.message });
+          }
+        }
+        return send(res, 200, out);
+      }
+      if (req.method === 'PUT' && p === '/api/secour') {
+        const b = await readBody(req);
+        if (b.url !== undefined) config.secourUrl = String(b.url || '').trim().replace(/\/+$/, '') || undefined;
+        if (b.key !== undefined && String(b.key).trim()) config.secourKey = String(b.key).trim();
+        if (b.url === '') delete config.secourKey;
+        saveConfig();
+        return send(res, 200, { configured: Boolean(secourUrl() && secourKey()) });
+      }
+      if (req.method === 'GET' && p === '/api/secour/links') {
+        const type = q.get('type') === 'tv' || q.get('type') === 'series' ? 'series' : 'movie';
+        let imdb = String(q.get('imdb') || '');
+        if (!/^tt\d+$/.test(imdb) && q.get('tmdbId')) {
+          const ext = await tmdbGet(`/${type === 'series' ? 'tv' : 'movie'}/${Number(q.get('tmdbId'))}/external_ids`).catch(() => null);
+          imdb = (ext && ext.imdb_id) || '';
+        }
+        if (!/^tt\d+$/.test(imdb)) throw new HttpError(400, 'Identifiant IMDb introuvable pour ce titre');
+        const qs = new URLSearchParams({ imdb, type });
+        if (type === 'series') {
+          qs.set('season', String(Number(q.get('season')) || 1));
+          qs.set('episode', String(Number(q.get('episode')) || 1));
+        }
+        return send(res, 200, await secour(`/lumio/links?${qs}`, { timeout: 90000 }));
+      }
+      if (req.method === 'POST' && p === '/api/secour/download') {
+        if (!(process.env.ALLDEBRID_KEY || config.alldebridKey)) throw new HttpError(400, 'Clé AllDebrid non configurée (Téléchargements)');
+        const b = await readBody(req);
+        const link = String(b.link || '').trim();
+        if (!/^https?:\/\//.test(link)) throw new HttpError(400, 'Lien invalide');
+        safePath(b.root, b.folder || '');
+        const job = { id: crypto.randomBytes(5).toString('hex'), link, root: b.root, folder: b.folder || '', status: 'queued',
+          name: String(b.name || '').slice(0, 200), size: Number(b.sizeBytes) || 0, done: 0, speed: 0, token: user.token,
+          createdAt: new Date().toISOString(),
+          secour: pick(b, ['link', 'hoster', 'source', 'season', 'episode', 'type']) };
+        job.secour.link = link;
+        downloads.push(job);
+        runDownload(job);
+        return send(res, 201, { download: publicJob(job) });
+      }
+      return send(res, 404, { error: 'introuvable' });
     }
 
     // ——— Admin : utilisateurs (droits, quotas) ———

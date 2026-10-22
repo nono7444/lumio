@@ -334,6 +334,22 @@ export default function MediaScreen() {
             />
           ) : null}
 
+          {/* ——— Admin : liens Lumio Secour → AllDebrid → disques du serveur ——— */}
+          {settings.chatUrl && settings.jellyfin?.isAdmin === true && !Platform.isTV ? (
+            <Button
+              title="Liens"
+              icon="link-outline"
+              variant="secondary"
+              small
+              onPress={() =>
+                router.push({
+                  pathname: '/secour',
+                  params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title },
+                })
+              }
+            />
+          ) : null}
+
           {/* ——— Série dans Jellyfin : choix de la saison et de l'épisode ——— */}
           {jfItem && details.kind === 'tv' ? <JfEpisodes seriesId={jfItem.Id} /> : null}
 

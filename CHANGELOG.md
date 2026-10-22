@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Fiche d'un film ou d'une série (admin) : nouveau bouton « Liens » qui affiche les liens trouvés par Lumio Secour (qualité, langue, taille, dispo AllDebrid) ; un appui télécharge le fichier sur le disque choisi.
+
 ## 1.0.80 — 22 octobre 2026
 
 - Addons Stremio de catalogue réactivés (Profil → Addons Stremio) : leurs listes apparaissent en rangées sur l'accueil, les titres absents du serveur se demandent comme d'habitude. Les flux des addons ne sont pas utilisés.
