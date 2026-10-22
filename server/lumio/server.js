@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.23.0';
+const VERSION = '3.24.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -532,6 +532,123 @@ setInterval(() => {
   if (!requests.some((r) => r.status === RequestStatus.APPROVED)) return;
   loadLibrary(true).then(refreshCompleted).catch(() => {});
 }, 2 * 60 * 1000);
+
+// ——— Suppression dans Jellyfin → suppression dans Radarr / Sonarr ———
+// Un film ou une série supprimé(e) dans Jellyfin (fichiers effacés) restait dans Radarr / Sonarr, qui le retéléchargeait.
+// Toutes les 10 minutes : ce qui était dans Jellyfin et n'y est plus, ET n'a plus aucun fichier dans Radarr / Sonarr,
+// est retiré de Radarr / Sonarr (sans exclusion : on peut le redemander). Saison supprimée seule : elle n'est plus surveillée.
+// Les demandes correspondantes sont closes : la fiche affiche de nouveau « Demander ».
+// Garde-fous : rien si Jellyfin ne répond pas ou semble vide, et au plus 10 suppressions par passage (disque débranché…).
+const JF_SEEN_FILE = path.join(DATA_DIR, 'jellyfin-seen.json');
+let jfSeen = readJson(JF_SEEN_FILE, null); // { movies: [tmdbId], series: { tvdbId: [saisons] } }
+async function syncJellyfinDeletions() {
+  if (config.jfDeleteSync === false) return;
+  const idx = await loadJfIndex().catch(() => null);
+  if (!idx) return;
+  const nowMovies = new Set(idx.movies);
+  const nowSeries = new Map([...idx.seriesTvdb.entries()].map(([k, v]) => [Number(k), v]));
+  const prev = jfSeen;
+  jfSeen = { movies: [...nowMovies], series: Object.fromEntries([...nowSeries].map(([k, v]) => [k, [...v]])) };
+  writeJson(JF_SEEN_FILE, jfSeen);
+  if (!prev) return; // premier passage : on mémorise seulement
+  const prevCount = prev.movies.length + Object.keys(prev.series).length;
+  if (nowMovies.size + nowSeries.size < prevCount * 0.7) {
+    console.log('Suppressions Jellyfin : bibliothèque soudain plus petite, rien n’est supprimé (Jellyfin en cours de scan ou disque absent ?)');
+    jfSeen = prev;
+    writeJson(JF_SEEN_FILE, prev);
+    return;
+  }
+  const goneMovies = prev.movies.filter((id) => !nowMovies.has(id));
+  const goneSeries = Object.keys(prev.series).map(Number).filter((id) => !nowSeries.has(id));
+  const goneSeasons = [];
+  for (const [id, now] of nowSeries) {
+    const before = prev.series[id];
+    if (before) for (const n of before) if (!now.has(n)) goneSeasons.push([id, n]);
+  }
+  if (!goneMovies.length && !goneSeries.length && !goneSeasons.length) return;
+  if (goneMovies.length + goneSeries.length > 10) {
+    console.log(`Suppressions Jellyfin : ${goneMovies.length + goneSeries.length} titres disparus d'un coup, rien n'est supprimé par sécurité`);
+    return;
+  }
+  const closeRequests = (type, match) => {
+    for (const r of requests) {
+      if (r.type !== type || !match(r)) continue;
+      if (r.status === RequestStatus.APPROVED || r.status === RequestStatus.COMPLETED) {
+        r.status = RequestStatus.COMPLETED;
+        r.deletedAt = new Date().toISOString();
+        r.closed = true;
+      }
+    }
+  };
+  const done = [];
+  if (goneMovies.length && arrConfig('radarr')) {
+    const movies = await arr('radarr', '/movie').catch(() => []);
+    for (const tmdbId of goneMovies) {
+      const m = movies.find((x) => x.tmdbId === tmdbId);
+      if (m && m.hasFile) continue; // fichier encore là : Jellyfin le retrouvera au prochain scan
+      if (m) await arr('radarr', `/movie/${m.id}?deleteFiles=false&addImportExclusion=false`, { method: 'DELETE' }).catch(() => null);
+      closeRequests('movie', (r) => r.tmdbId === tmdbId);
+      done.push(m ? m.title : `film ${tmdbId}`);
+    }
+  }
+  if ((goneSeries.length || goneSeasons.length) && arrConfig('sonarr')) {
+    const series = await arr('sonarr', '/series').catch(() => []);
+    for (const tvdbId of goneSeries) {
+      const sr = series.find((x) => x.tvdbId === tvdbId);
+      if (sr && sr.statistics && sr.statistics.episodeFileCount > 0) continue;
+      if (sr) await arr('sonarr', `/series/${sr.id}?deleteFiles=false&addImportListExclusion=false`, { method: 'DELETE' }).catch(() => null);
+      closeRequests('tv', (r) => Number(r.tvdbId) === tvdbId || (sr && r.tmdbId === sr.tmdbId));
+      done.push(sr ? sr.title : `série ${tvdbId}`);
+    }
+    // Saisons supprimées seules : plus surveillées (sinon Sonarr les retélécharge)
+    const bySeries = new Map();
+    for (const [id, n] of goneSeasons) bySeries.set(id, [...(bySeries.get(id) || []), n]);
+    for (const [tvdbId, nums] of bySeries) {
+      const sr = series.find((x) => x.tvdbId === tvdbId);
+      if (!sr) continue;
+      const off = nums.filter((n) => {
+        const se = (sr.seasons || []).find((x) => x.seasonNumber === n);
+        return se && se.monitored && !(se.statistics && se.statistics.episodeFileCount > 0);
+      });
+      if (!off.length) continue;
+      const full = await arr('sonarr', `/series/${sr.id}`).catch(() => null);
+      if (!full) continue;
+      for (const se of full.seasons || []) if (off.includes(se.seasonNumber)) se.monitored = false;
+      await arr('sonarr', `/series/${sr.id}`, { method: 'PUT', body: JSON.stringify(full) }).catch(() => null);
+      closeRequests('tv', (r) => (Number(r.tvdbId) === tvdbId || r.tmdbId === sr.tmdbId) && (r.seasons || []).every((n) => off.includes(n)));
+      done.push(`${sr.title} (saison${off.length > 1 ? 's' : ''} ${off.join(', ')})`);
+    }
+  }
+  if (done.length) {
+    saveRequests();
+    libraryAt = 0; // statuts recalculés tout de suite : « Demander » réapparaît dans l'appli
+    console.log(`Supprimé dans Jellyfin, retiré de Radarr / Sonarr : ${done.join(' · ')}`);
+    notify({ title: 'Supprimé de Radarr / Sonarr', message: `Supprimé dans Jellyfin : ${done.join(', ')}`, tags: ['wastebasket'] });
+  }
+}
+setTimeout(() => syncJellyfinDeletions().catch((e) => console.log('Suppressions Jellyfin :', e.message)), 60_000);
+setInterval(() => syncJellyfinDeletions().catch((e) => console.log('Suppressions Jellyfin :', e.message)), 10 * 60_000);
+
+// ——— Jellyfin : toutes les métadonnées et images remplacées par TMDB (Paramètres → Serveur sur iPhone) ———
+async function jellyfinReplaceAllMetadata(token) {
+  const r = await fetch(`${JELLYFIN_URL}/Library/VirtualFolders`, { headers: jfHeaders(token) });
+  if (!r.ok) throw new HttpError(502, `Jellyfin a refusé (HTTP ${r.status})`);
+  const libs = (await r.json()).filter((l) => ['movies', 'tvshows', 'mixed', undefined, null, ''].includes(l.CollectionType) && l.ItemId);
+  const q = new URLSearchParams({
+    Recursive: 'true',
+    MetadataRefreshMode: 'FullRefresh',
+    ImageRefreshMode: 'FullRefresh',
+    ReplaceAllMetadata: 'true',
+    ReplaceAllImages: 'true',
+  });
+  let ok = 0;
+  for (const l of libs) {
+    const x = await fetch(`${JELLYFIN_URL}/Items/${l.ItemId}/Refresh?${q}`, { method: 'POST', headers: jfHeaders(token) }).catch(() => null);
+    if (x && x.ok) ok++;
+  }
+  if (!ok) throw new HttpError(502, 'Jellyfin n’a lancé aucune actualisation');
+  return libs.filter((l) => l.ItemId).map((l) => l.Name);
+}
 
 // Nouvelle version de l'appli iOS publiée → notification push à l'admin (ntfy)
 const APP_SOURCE = process.env.APP_SOURCE_URL || 'https://github.com/nono7444/lumio/releases/latest/download/altstore.json';
@@ -2141,6 +2258,11 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       const r = await fetch(`${JELLYFIN_URL}/Library/Refresh`, { method: 'POST', headers: jfHeaders(user.token) });
       if (!r.ok) throw new HttpError(502, `Jellyfin a refusé le scan (HTTP ${r.status})`);
       return send(res, 200, { ok: true, message: 'Scan des bibliothèques lancé.' });
+    }
+    if (req.method === 'POST' && p === '/api/admin/jellyfin/replace-metadata') {
+      requireAdmin(user);
+      const names = await jellyfinReplaceAllMetadata(user.token);
+      return send(res, 200, { ok: true, message: `Métadonnées et images remplacées par TMDB : ${names.join(', ')}. Jellyfin travaille en arrière-plan (de quelques minutes à une heure selon la taille).` });
     }
     if (req.method === 'POST' && p === '/api/admin/jellyfin/restart') {
       requireAdmin(user);

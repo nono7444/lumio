@@ -1,4 +1,4 @@
-// Profil → Serveur (admin) : scan des bibliothèques, redémarrage de Jellyfin, mise à jour du serveur Lumio, redémarrage du PC.
+// Profil → Serveur (admin) : scan des bibliothèques, métadonnées remplacées par TMDB (iPhone), redémarrage de Jellyfin, mise à jour du serveur Lumio, redémarrage du PC.
 import { useState } from 'react';
 import { Alert, Platform, StyleSheet, Text, View } from 'react-native';
 
@@ -8,10 +8,16 @@ import { C } from '@/constants/theme';
 import { serverCall } from '@/lib/chat';
 import { useSettings } from '@/lib/settings';
 
-type Action = 'scan' | 'jellyfin' | 'reboot' | 'update';
+type Action = 'scan' | 'tmdb' | 'jellyfin' | 'reboot' | 'update';
 
 const ASK: Record<Action, { title: string; text: string; ok: string; path: string }> = {
   scan: { title: 'Scanner les bibliothèques ?', text: 'Jellyfin va chercher les nouveaux fichiers sur les disques.', ok: 'Scanner', path: '/api/admin/jellyfin/scan' },
+  tmdb: {
+    title: 'Tout remplacer par TMDB ?',
+    text: 'Jellyfin efface les métadonnées et les images de tous les films et séries, puis les retélécharge depuis TMDB (titres, résumés, affiches, fonds). Cela peut prendre de quelques minutes à une heure ; les modifications faites à la main seront perdues.',
+    ok: 'Tout remplacer',
+    path: '/api/admin/jellyfin/replace-metadata',
+  },
   jellyfin: { title: 'Redémarrer Jellyfin ?', text: 'Les lectures en cours seront coupées environ 1 minute.', ok: 'Redémarrer', path: '/api/admin/jellyfin/restart' },
   update: {
     title: 'Mettre à jour le serveur Lumio ?',
@@ -73,6 +79,15 @@ export function ServerActionsSection() {
       <Text style={styles.help}>Actions réservées à l’admin.</Text>
       <View style={{ gap: 10 }}>
         <Button title="Scanner les bibliothèques" icon="refresh" variant="secondary" loading={busy === 'scan'} onPress={() => confirm('scan')} />
+        {Platform.OS === 'ios' ? (
+          <Button
+            title="Remplacer toutes les métadonnées par TMDB"
+            icon="images-outline"
+            variant="secondary"
+            loading={busy === 'tmdb'}
+            onPress={() => confirm('tmdb')}
+          />
+        ) : null}
         <Button title="Redémarrer Jellyfin" icon="reload-circle-outline" variant="secondary" loading={busy === 'jellyfin'} onPress={() => confirm('jellyfin')} />
         <Button title="Mettre à jour le serveur Lumio" icon="cloud-download-outline" variant="secondary" loading={busy === 'update'} onPress={() => confirm('update')} />
         <Button title="Redémarrer le PC serveur" icon="power" variant="danger" loading={busy === 'reboot'} onPress={() => confirm('reboot')} />

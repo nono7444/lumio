@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Platform, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -64,6 +64,14 @@ export default function MediaScreen() {
   // Statut de chaque saison (serveur Lumio) et demande d'une saison en cours d'envoi
   // Une saison demandée depuis la liste : le bloc de demande se recharge (et inversement)
   const [mediaKey, setMediaKey] = useState(0);
+  // Retour sur la fiche : statut rechargé (ex. titre supprimé dans Jellyfin → « Demander » réapparaît)
+  const focusedOnce = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (focusedOnce.current) setMediaKey((k) => k + 1);
+      focusedOnce.current = true;
+    }, [])
+  );
 
   const tmdbId = Number(id);
   const isTv = type === 'tv';
