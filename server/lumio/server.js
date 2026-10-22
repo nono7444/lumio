@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.18.0';
+const VERSION = '3.19.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2029,6 +2029,55 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
     }
 
     // ——— Collections propres (sagas TMDB des films présents dans Jellyfin) ———
+    // ——— Admin : actions sur le serveur (Paramètres → Serveur) ———
+    // Jellyfin : redémarrage et scan via son API, avec le jeton de l'admin.
+    // Machine : le conteneur ne peut pas redémarrer le PC lui-même ; il dépose une demande dans DATA_DIR/host-actions/,
+    // qu'un petit service systemd de la machine surveille (voir README du serveur : lumio-host-actions).
+    if (req.method === 'POST' && p === '/api/admin/jellyfin/scan') {
+      requireAdmin(user);
+      const r = await fetch(`${JELLYFIN_URL}/Library/Refresh`, { method: 'POST', headers: jfHeaders(user.token) });
+      if (!r.ok) throw new HttpError(502, `Jellyfin a refusé le scan (HTTP ${r.status})`);
+      return send(res, 200, { ok: true, message: 'Scan des bibliothèques lancé.' });
+    }
+    if (req.method === 'POST' && p === '/api/admin/jellyfin/restart') {
+      requireAdmin(user);
+      // Dans Docker, Jellyfin ne sait pas toujours se relancer lui-même : on passe alors par le service de la machine
+      const r = await fetch(`${JELLYFIN_URL}/System/Restart`, { method: 'POST', headers: jfHeaders(user.token) }).catch(() => null);
+      if (!r || !r.ok) {
+        const dir = path.join(DATA_DIR, 'host-actions');
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, 'restart-jellyfin'), new Date().toISOString());
+      }
+      return send(res, 200, { ok: true, message: 'Jellyfin redémarre (environ 1 minute).' });
+    }
+    if (req.method === 'POST' && p === '/api/admin/host/reboot') {
+      requireAdmin(user);
+      const dir = path.join(DATA_DIR, 'host-actions');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'reboot'), JSON.stringify({ by: user.name, at: new Date().toISOString() }));
+      console.log(`Redémarrage de la machine demandé par ${user.name}`);
+      // Le service de la machine efface ce fichier en le prenant : s'il est encore là après 20 s, il n'est pas installé
+      return send(res, 200, { ok: true, message: 'Redémarrage demandé : le serveur sera indisponible 2 à 3 minutes.' });
+    }
+    if (req.method === 'POST' && p === '/api/admin/server/update') {
+      requireAdmin(user);
+      const dir = path.join(DATA_DIR, 'host-actions');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'update'), JSON.stringify({ by: user.name, at: new Date().toISOString(), from: VERSION }));
+      console.log(`Mise à jour du serveur demandée par ${user.name}`);
+      return send(res, 200, { ok: true, message: 'Mise à jour lancée : Lumio sera indisponible environ 1 minute.' });
+    }
+    if (req.method === 'GET' && p === '/api/admin/host/status') {
+      requireAdmin(user);
+      const pending = fs.existsSync(path.join(DATA_DIR, 'host-actions', 'reboot'));
+      return send(res, 200, {
+        rebootPending: pending,
+        updatePending: fs.existsSync(path.join(DATA_DIR, 'host-actions', 'update')),
+        helperInstalled: fs.existsSync(path.join(DATA_DIR, 'host-actions', '.helper')),
+        version: VERSION,
+      });
+    }
+
     // ——— Live TV : sources IPTV / Stremio du compte (le téléphone les envoie, la TV les lit) ———
     if (p === '/api/live/sources') {
       if (req.method === 'PUT') {

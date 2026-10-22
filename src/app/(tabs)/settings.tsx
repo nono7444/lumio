@@ -20,6 +20,7 @@ import { UptimeSection } from '@/components/uptime';
 import { DEFAULT_TV_SCALE, TV_SCALES } from '@/lib/tv-ui';
 import { AnnouncementEditor } from '@/components/announcement';
 import { NotifySubscribeSection } from '@/components/notify-subscribe';
+import { ServerActionsSection } from '@/components/server-actions';
 import { Addon, DEFAULT_ADDON, isManager, useSettings } from '@/lib/settings';
 import { RATING_SOURCES } from '@/lib/better-posters';
 import { logout as logoutJellyfin, QUALITIES } from '@/lib/jellyfin';
@@ -217,6 +218,8 @@ export default function SettingsScreen() {
 
         {serverReq && !Platform.isTV ? <NotifySubscribeSection /> : null}
         {serverReq && settings.jellyfin?.isAdmin !== false && !Platform.isTV ? <AnnouncementEditor /> : null}
+
+        <ServerActionsSection />
 
         {serverReq && settings.jellyfin?.isAdmin !== false && !Platform.isTV ? (
           <Section title="Demandes">

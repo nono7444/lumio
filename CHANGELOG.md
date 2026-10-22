@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Admin, Profil → Serveur : scanner les bibliothèques, redémarrer Jellyfin, mettre à jour le serveur Lumio et redémarrer le PC serveur (avec confirmation).
+- Serveur 3.19.0 : actions admin (`/api/admin/…`) ; script `server/lumio/host/install-host-actions.sh` à lancer une fois sur la machine pour le redémarrage et la mise à jour.
+
 ## 1.0.78 — 22 octobre 2026
 
 - QR code de Lumio TV : scanner le QR affiché par la TV ouvre Lumio sur « Connecter la TV » (un appui suffit).
