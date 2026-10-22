@@ -79,7 +79,15 @@
       ],
       "@bacons/apple-targets",
       "expo-background-task",
-      "./plugins/with-cast-framework-version.js"
+      "./plugins/with-cast-framework-version.js",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Lumio utilise une photo de ta galerie comme fond de l'accueil, seulement si tu en choisis une.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

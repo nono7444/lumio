@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.26.0';
+const VERSION = '3.28.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -181,6 +181,7 @@ async function whoAmI(token) {
     sessions.set(token, { user, until: Date.now() + 10 * 60 * 1000 });
     // Jeton gardé en mémoire pour lire le contenu de Jellyfin (celui d'un admin de préférence)
     if (user.admin || !jfIndexToken) jfIndexToken = token;
+    if (user.admin) jfAdminToken = token;
     return user;
   } catch {
     return null;
@@ -317,6 +318,7 @@ async function sendToArr(r) {
       if (existing.hasFile) return;
       if (!existing.monitored) await arr('radarr', `/movie/${existing.id}`, { method: 'PUT', body: JSON.stringify({ ...existing, monitored: true }) });
       await arr('radarr', '/command', { method: 'POST', body: JSON.stringify({ name: 'MoviesSearch', movieIds: [existing.id] }) });
+      console.log(`Radarr : ${r.title} déjà présent, surveillé, recherche lancée`);
       return;
     }
     const found = await arr('radarr', `/movie/lookup/tmdb?tmdbId=${r.tmdbId}`);
@@ -331,9 +333,11 @@ async function sendToArr(r) {
         rootFolderPath: r.rootFolderPath,
         monitored: true,
         minimumAvailability: c.minimumAvailability || 'released',
-        addOptions: { searchForMovie: c.searchOnAdd !== false, monitor: 'movieOnly' },
+        // Toujours chercher à l'ajout : une demande doit partir en téléchargement
+        addOptions: { searchForMovie: true, monitor: 'movieOnly' },
       }),
     });
+    console.log(`Radarr : ${r.title} ajouté dans ${r.rootFolderPath}, recherche lancée`);
     return;
   }
 
@@ -342,17 +346,24 @@ async function sendToArr(r) {
   const seasons = (r.seasons || []).map(Number).filter((n) => n > 0);
   const existing = (await arr('sonarr', `/series?tvdbId=${r.tvdbId}`))[0];
   if (existing) {
-    const missing = seasons.filter((n) => !(existing.seasons.find((s) => s.seasonNumber === n) || {}).monitored);
-    if (!missing.length) return;
-    const set = new Set(missing);
-    await arr('sonarr', `/series/${existing.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ ...existing, monitored: true, seasons: existing.seasons.map((s) => (set.has(s.seasonNumber) ? { ...s, monitored: true } : s)) }),
-    });
-    if (c.searchOnAdd !== false) {
-      for (const n of missing)
-        await arr('sonarr', '/command', { method: 'POST', body: JSON.stringify({ name: 'SeasonSearch', seriesId: existing.id, seasonNumber: n }) });
+    const seasonOf = (n) => existing.seasons.find((s) => s.seasonNumber === n) || {};
+    const missing = seasons.filter((n) => !seasonOf(n).monitored);
+    if (missing.length || !existing.monitored) {
+      const set = new Set(missing);
+      await arr('sonarr', `/series/${existing.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ ...existing, monitored: true, seasons: existing.seasons.map((s) => (set.has(s.seasonNumber) ? { ...s, monitored: true } : s)) }),
+      });
     }
+    // Recherche lancée pour toutes les saisons demandées qui n'ont pas encore tous leurs épisodes
+    // (avant : une saison déjà surveillée mais vide n'était jamais recherchée, la demande restait sans effet)
+    const toSearch = seasons.filter((n) => {
+      const st = seasonOf(n).statistics || {};
+      return !(st.episodeFileCount > 0 && st.episodeFileCount >= (st.episodeCount || 0));
+    });
+    for (const n of toSearch)
+      await arr('sonarr', '/command', { method: 'POST', body: JSON.stringify({ name: 'SeasonSearch', seriesId: existing.id, seasonNumber: n }) });
+    console.log(`Sonarr : ${r.title} — saisons ${seasons.join(', ')} surveillées, recherche lancée pour ${toSearch.join(', ') || 'aucune (déjà complètes)'}`);
     return;
   }
   const list = await arr('sonarr', `/series/lookup?term=${encodeURIComponent(`tvdb:${r.tvdbId}`)}`);
@@ -374,13 +385,14 @@ async function sendToArr(r) {
       seriesType: isAnimeFolder(r.rootFolderPath) ? 'anime' : found.seriesType || 'standard',
       seasons: found.seasons.map((s) => ({ seasonNumber: s.seasonNumber, monitored: wanted.has(s.seasonNumber) })),
       addOptions: {
-        searchForMissingEpisodes: c.searchOnAdd !== false,
+        searchForMissingEpisodes: true,
         searchForCutoffUnmetEpisodes: false,
         ignoreEpisodesWithFiles: true,
         ignoreEpisodesWithoutFiles: false,
       },
     }),
   });
+  console.log(`Sonarr : ${r.title} ajouté dans ${r.rootFolderPath} (saisons ${seasons.join(', ')}), recherche lancée`);
 }
 
 // ——— Bibliothèque Radarr / Sonarr (cache 60 s) pour les statuts ———
@@ -390,6 +402,7 @@ let libraryPending = null;
 
 // ——— Contenu déjà présent dans Jellyfin (y compris ce qui n'est pas géré par Radarr / Sonarr) ———
 let jfIndexToken = null;
+let jfAdminToken = null; // jeton d'un admin (sous-titres : il faut le droit de les gérer)
 async function loadJfIndex() {
   const token = process.env.JELLYFIN_API_KEY || jfIndexToken;
   if (!token) return null;
@@ -527,6 +540,24 @@ function refreshCompleted(lib) {
   if (changed) saveRequests();
 }
 
+// Demandes en échec (Radarr / Sonarr injoignable un instant…) : renvoyées automatiquement, 3 essais sur 24 h
+setInterval(async () => {
+  const day = Date.now() - 24 * 3600e3;
+  for (const r of requests) {
+    if (r.status !== RequestStatus.FAILED || Date.parse(r.createdAt) < day || (r.autoRetries || 0) >= 3) continue;
+    r.autoRetries = (r.autoRetries || 0) + 1;
+    try {
+      await sendToArr(r);
+      r.status = RequestStatus.APPROVED;
+      delete r.error;
+      console.log(`Demande « ${r.title} » renvoyée avec succès (essai ${r.autoRetries})`);
+    } catch (e) {
+      r.error = String(e.message || e);
+    }
+    saveRequests();
+  }
+}, 10 * 60_000);
+
 // Vérifie régulièrement l'arrivée des médias demandés
 setInterval(() => {
   if (!requests.some((r) => r.status === RequestStatus.APPROVED)) return;
@@ -649,6 +680,80 @@ async function jellyfinReplaceAllMetadata(token) {
   if (!ok) throw new HttpError(502, 'Jellyfin n’a lancé aucune actualisation');
   return libs.filter((l) => l.ItemId).map((l) => l.Name);
 }
+
+// ——— Sous-titres français (OpenSubtitles via le plugin « Open Subtitles » de Jellyfin) ———
+// Recherche / téléchargement à la demande depuis le lecteur, et automatiquement pour les nouveaux films et épisodes
+// sans sous-titres français (le fichier est enregistré par Jellyfin : il apparaît ensuite partout, TV comprise).
+const subToken = () => process.env.JELLYFIN_API_KEY || jfAdminToken;
+const FR_LANGS = new Set(['fre', 'fra', 'fr', 'french']);
+async function jfItemStreams(token, itemId) {
+  const r = await fetch(`${JELLYFIN_URL}/Items?Ids=${encodeURIComponent(itemId)}&Fields=MediaSources,MediaStreams,Path`, { headers: jfHeaders(token) });
+  if (!r.ok) throw new HttpError(502, `Jellyfin a refusé (HTTP ${r.status})`);
+  const it = ((await r.json()).Items || [])[0];
+  if (!it) throw new HttpError(404, 'Titre introuvable dans Jellyfin');
+  const ms = (it.MediaSources || [])[0] || {};
+  return { item: it, mediaSourceId: ms.Id || it.Id, streams: ms.MediaStreams || it.MediaStreams || [] };
+}
+const frSubs = (streams) => streams.filter((x) => x.Type === 'Subtitle' && FR_LANGS.has(String(x.Language || '').toLowerCase()));
+async function searchFrSubtitles(token, itemId) {
+  const r = await fetch(`${JELLYFIN_URL}/Items/${encodeURIComponent(itemId)}/RemoteSearch/Subtitles/fre?IsPerfectMatch=false`, { headers: jfHeaders(token) });
+  if (!r.ok) throw new HttpError(502, r.status === 404 ? 'Recherche indisponible : installe le plugin « Open Subtitles » dans Jellyfin' : `Jellyfin a refusé (HTTP ${r.status})`);
+  const list = (await r.json()) || [];
+  return list
+    .map((x) => ({
+      id: x.Id,
+      name: x.Name || x.Comment || 'Sous-titres',
+      provider: x.ProviderName || '',
+      format: x.Format || '',
+      downloads: x.DownloadCount || 0,
+      rating: x.CommunityRating || 0,
+      hearingImpaired: Boolean(x.HearingImpaired),
+      forced: Boolean(x.Forced),
+      perfect: Boolean(x.IsHashMatch),
+    }))
+    .sort((a, b) => Number(b.perfect) - Number(a.perfect) || Number(a.hearingImpaired) - Number(b.hearingImpaired) || b.downloads - a.downloads)
+    .slice(0, 30);
+}
+/** Télécharge le sous-titre dans Jellyfin et renvoie la piste créée (pour l'ajouter tout de suite au lecteur). */
+async function downloadSubtitle(token, itemId, subtitleId) {
+  const before = new Set(frSubs((await jfItemStreams(token, itemId)).streams).map((x) => x.Index));
+  const r = await fetch(`${JELLYFIN_URL}/Items/${encodeURIComponent(itemId)}/RemoteSearch/Subtitles/${encodeURIComponent(subtitleId)}`, { method: 'POST', headers: jfHeaders(token) });
+  if (!r.ok) throw new HttpError(502, `Téléchargement refusé par Jellyfin (HTTP ${r.status})`);
+  // Jellyfin enregistre le fichier puis actualise le titre : on attend la nouvelle piste (20 s max)
+  for (let i = 0; i < 10; i++) {
+    await new Promise((ok) => setTimeout(ok, 2000));
+    const st = await jfItemStreams(token, itemId).catch(() => null);
+    const added = st && frSubs(st.streams).find((x) => !before.has(x.Index) && x.IsExternal);
+    if (added) return { mediaSourceId: st.mediaSourceId, index: added.Index, codec: added.Codec || 'srt', title: added.DisplayTitle || 'Français' };
+  }
+  return { mediaSourceId: null, index: null, pending: true };
+}
+// Automatique : nouveaux films / épisodes (7 derniers jours) sans sous-titres français ni audio français
+const subTried = new Set();
+async function autoFrenchSubtitles() {
+  const token = subToken();
+  if (!token || config.autoFrenchSubs === false) return;
+  const since = new Date(Date.now() - 7 * 86400e3).toISOString();
+  const q = new URLSearchParams({ Recursive: 'true', IncludeItemTypes: 'Movie,Episode', MinDateLastSaved: since, Fields: 'MediaStreams,DateCreated', SortBy: 'DateCreated', SortOrder: 'Descending', Limit: '60' });
+  const r = await fetch(`${JELLYFIN_URL}/Items?${q}`, { headers: jfHeaders(token) });
+  if (!r.ok) return;
+  let done = 0;
+  for (const it of (await r.json()).Items || []) {
+    if (done >= 15 || subTried.has(it.Id)) continue;
+    const streams = it.MediaStreams || [];
+    const frAudio = streams.some((x) => x.Type === 'Audio' && FR_LANGS.has(String(x.Language || '').toLowerCase()));
+    if (frSubs(streams).length || frAudio) continue;
+    subTried.add(it.Id);
+    const list = await searchFrSubtitles(token, it.Id).catch(() => []);
+    const best = list.find((x) => !x.forced);
+    if (!best) continue;
+    await fetch(`${JELLYFIN_URL}/Items/${it.Id}/RemoteSearch/Subtitles/${encodeURIComponent(best.id)}`, { method: 'POST', headers: jfHeaders(token) }).catch(() => null);
+    done++;
+  }
+  if (done) console.log(`Sous-titres français ajoutés automatiquement : ${done}`);
+}
+setTimeout(() => autoFrenchSubtitles().catch(() => {}), 3 * 60_000);
+setInterval(() => autoFrenchSubtitles().catch(() => {}), 60 * 60_000);
 
 // Nouvelle version de l'appli iOS publiée → notification push à l'admin (ntfy)
 const APP_SOURCE = process.env.APP_SOURCE_URL || 'https://github.com/nono7444/lumio/releases/latest/download/altstore.json';
@@ -1695,6 +1800,7 @@ async function createRequest(user, b) {
     } catch (e) {
       r.status = RequestStatus.FAILED;
       r.error = String(e.message || e);
+      console.log(`Demande « ${r.title} » : envoi à ${r.type === 'movie' ? 'Radarr' : 'Sonarr'} impossible — ${r.error}`);
     }
   }
   requests.unshift(r);
@@ -1726,6 +1832,11 @@ async function approveRequest(admin, r, b) {
   library = null;
   return r;
 }
+
+// Une erreur oubliée dans une tâche de fond ne doit jamais arrêter le serveur (Docker le relançait :
+// « serveur injoignable / redémarrage » dans l'appli, et une demande en cours d'envoi pouvait être perdue).
+process.on('unhandledRejection', (e) => console.log('Erreur ignorée (promesse) :', e && e.stack ? e.stack : e));
+process.on('uncaughtException', (e) => console.log('Erreur ignorée :', e && e.stack ? e.stack : e));
 
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') return send(res, 204);
@@ -2273,6 +2384,19 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       const data = await tmdbGet(`/${tmdbProxy[1]}`, params);
       if (data == null) return send(res, 404, { status_message: 'introuvable' });
       return send(res, 200, data);
+    }
+
+    // ——— Sous-titres français (lecteur) ———
+    if (req.method === 'GET' && p === '/api/subtitles/search') {
+      const token = user.admin ? user.token : subToken();
+      if (!token) throw new HttpError(503, 'Un admin doit d’abord ouvrir Lumio une fois');
+      return send(res, 200, { results: await searchFrSubtitles(token, String(q.get('itemId') || '')) });
+    }
+    if (req.method === 'POST' && p === '/api/subtitles/download') {
+      const token = user.admin ? user.token : subToken();
+      if (!token) throw new HttpError(503, 'Un admin doit d’abord ouvrir Lumio une fois');
+      const b = await readBody(req);
+      return send(res, 200, await downloadSubtitle(token, String(b.itemId || ''), String(b.subtitleId || '')));
     }
 
     // ——— Admin : actions sur le serveur (Paramètres → Serveur) ———

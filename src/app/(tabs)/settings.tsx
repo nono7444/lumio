@@ -21,7 +21,8 @@ import { DEFAULT_TV_SCALE, TV_SCALES } from '@/lib/tv-ui';
 import { AnnouncementEditor } from '@/components/announcement';
 import { NotifySubscribeSection } from '@/components/notify-subscribe';
 import { ServerActionsSection } from '@/components/server-actions';
-import { Addon, DEFAULT_ADDON, isManager, useSettings } from '@/lib/settings';
+import { HOME_BACKGROUNDS, pickHomePhoto } from '@/components/home-backdrop';
+import { Addon, DEFAULT_ADDON, isManager, useSettings, type HomeBackground } from '@/lib/settings';
 import { logout as logoutJellyfin, QUALITIES } from '@/lib/jellyfin';
 import { useServerRequests } from '@/lib/requests';
 import { tmdb as tmdbApi } from '@/lib/tmdb';
@@ -271,6 +272,43 @@ export default function SettingsScreen() {
 
         <Section title="Personnalisation">
           <Button title="Accueil et onglets" icon="options-outline" variant="secondary" onPress={() => router.push('/customize')} />
+          {Platform.isTV ? null : (
+            <View style={{ marginTop: 12, gap: 10 }}>
+              <Picker
+                label="Fond de l'accueil"
+                options={HOME_BACKGROUNDS}
+                value={settings.homeBackground ?? 'titles'}
+                onChange={async (v) => {
+                  if (v === 'photo' && !settings.homeBackgroundPhoto) {
+                    try {
+                      const uri = await pickHomePhoto();
+                      if (uri) update({ homeBackground: 'photo', homeBackgroundPhoto: uri });
+                    } catch (e: any) {
+                      Alert.alert('Photo', e?.message ?? String(e));
+                    }
+                    return;
+                  }
+                  update({ homeBackground: v as HomeBackground });
+                }}
+              />
+              {settings.homeBackground === 'photo' ? (
+                <Button
+                  title="Changer de photo"
+                  icon="image-outline"
+                  variant="secondary"
+                  small
+                  onPress={async () => {
+                    try {
+                      const uri = await pickHomePhoto();
+                      if (uri) update({ homeBackground: 'photo', homeBackgroundPhoto: uri });
+                    } catch (e: any) {
+                      Alert.alert('Photo', e?.message ?? String(e));
+                    }
+                  }}
+                />
+              ) : null}
+            </View>
+          )}
         </Section>
 
         {Platform.isTV ? null : (

@@ -9,6 +9,7 @@ import { AnnouncementPopup } from '@/components/announcement';
 import { TvHomeHeader } from '@/components/tv-backdrop';
 import { tvInfoFromJf, type TvFocusInfo } from '@/lib/tv-focus';
 import { Hero, heroFromTmdb, HeroTopBar, type HeroItem } from '@/components/hero';
+import { HomeBackdrop, homeBackdropSource } from '@/components/home-backdrop';
 import { JfRow, openJellyfin, playJellyfin } from '@/components/jf-cards';
 import { isAnime, jf, jfImage, jfLogo, type JfItem } from '@/lib/jellyfin';
 import { useSeason } from '@/lib/seasons';
@@ -378,9 +379,12 @@ export default function Home() {
           const spacer = idx === 1 && withHero ? <View key="sp" style={{ height: 20 }} /> : null;
           let el: React.ReactNode = null;
           switch (r.kind) {
-            case 'hero':
-              el = settings.jellyfin ? <JfHero nonce={nonce} /> : <Trending part="hero" nonce={nonce} />;
+            case 'hero': {
+              // Fond choisi (Halloween, Noël, photo) à la place du carrousel des titres
+              const bg = homeBackdropSource(settings, season);
+              el = bg ? <HomeBackdrop source={bg} /> : settings.jellyfin ? <JfHero nonce={nonce} /> : <Trending part="hero" nonce={nonce} />;
               break;
+            }
             case 'season-jf':
               el = <SeasonJfRow nonce={nonce} />;
               break;

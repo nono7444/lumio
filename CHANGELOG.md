@@ -6,6 +6,11 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Sous-titres français : dans le lecteur (bouton des pistes), « Chercher des sous-titres français » trouve et ajoute des sous-titres OpenSubtitles en direct. Le serveur Lumio en ajoute aussi tout seul aux nouveaux films et épisodes sans sous-titres ni audio français (plugin « Open Subtitles » de Jellyfin requis) ; ils apparaissent ensuite partout, Lumio TV comprise.
+- Fond de l'accueil au choix (Profil → Personnalisation) : titres du serveur, selon la saison, Halloween, Noël ou une photo de la galerie.
+- iPhone : appui long sur la barre d'onglets → loupe en verre façon iOS 26 qui suit le doigt ; on relâche sur l'onglet voulu. (Personnaliser la barre : Profil → Personnalisation → Accueil et onglets.)
+- Demandes plus fiables : une saison déjà surveillée mais vide est de nouveau recherchée par Sonarr, les demandes en échec sont renvoyées automatiquement (3 essais sur 24 h), et le serveur ne s'arrête plus sur une erreur imprévue (c'est ce qui donnait « serveur injoignable / redémarrage »). L'appli ne bascule plus en mode hors serveur sur une coupure brève (serveur Lumio 3.28.0).
+
 ## 1.0.91 — 22 octobre 2026
 
 - Profil → Serveur : pourcentage d'avancement de Jellyfin pendant le remplacement des métadonnées par TMDB (et pendant un scan), bibliothèque par bibliothèque (serveur Lumio 3.26.0).

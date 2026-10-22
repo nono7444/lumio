@@ -16,6 +16,8 @@ import { Button } from '@/components/ui';
 import { C } from '@/constants/theme';
 import { getPlayback, jf, jfImage, playback, QUALITIES, type PlaybackTarget } from '@/lib/jellyfin';
 import { QualitySheet } from '@/components/players/quality';
+import type { SubtitleFinder } from '@/components/players/types';
+import { serverCall } from '@/lib/chat';
 import { tmdbNextEpisode } from '@/lib/smart-play';
 import { useSettings } from '@/lib/settings';
 
@@ -275,6 +277,34 @@ export default function Player() {
     DirectStream: 'Flux direct (remuxé par le serveur)',
     Transcode: 'Conversion par le serveur',
   };
+  // Sous-titres français à télécharger (Jellyfin + plugin Open Subtitles, via le serveur Lumio)
+  const subtitleFinder: SubtitleFinder | undefined =
+    p.kind === 'jellyfin' && p.itemId && settings.chatUrl && settings.jellyfin
+      ? {
+          search: async () => {
+            const r = await serverCall<{ results: { id: string; name: string; provider: string; format: string; downloads: number; hearingImpaired: boolean; perfect: boolean }[] }>(
+              settings,
+              `/api/subtitles/search?itemId=${encodeURIComponent(p.itemId!)}`
+            );
+            return r.results.map((x) => ({
+              id: x.id,
+              label: x.name,
+              detail: [x.perfect ? 'correspond au fichier' : null, x.provider, x.format?.toUpperCase(), x.downloads ? `${x.downloads} téléchargements` : null, x.hearingImpaired ? 'sourds et malentendants' : null]
+                .filter(Boolean)
+                .join(' · '),
+            }));
+          },
+          pick: async (id) => {
+            const r = await serverCall<{ mediaSourceId: string | null; index: number | null; title?: string }>(settings, '/api/subtitles/download', {
+              method: 'POST',
+              body: JSON.stringify({ itemId: p.itemId, subtitleId: id }),
+            });
+            if (r.index == null || !r.mediaSourceId || !settings.jellyfin) return null;
+            const url = `${settings.jellyfin.url}/Videos/${p.itemId}/${r.mediaSourceId}/Subtitles/${r.index}/0/Stream.srt?api_key=${settings.jellyfin.token}`;
+            return { url, title: r.title ?? 'Français' };
+          },
+        }
+      : undefined;
   const statsInfo = [
     p.kind === 'jellyfin'
       ? `Méthode : ${METHOD[target.current?.playMethod ?? ''] ?? '…'}`
@@ -323,6 +353,7 @@ export default function Player() {
             onEnded={onEnded}
             extra={castBtn}
             statsInfo={statsInfo}
+            subtitleFinder={subtitleFinder}
             onPip={
               Platform.OS === 'ios' && !p.audio
                 ? () => {

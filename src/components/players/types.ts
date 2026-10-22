@@ -25,6 +25,15 @@ export type PlayerProps = {
   audioUri?: string;
   /** Lecteur natif : démarrer directement en image dans l'image */
   autoPip?: boolean;
+  /** Sous-titres français à télécharger (OpenSubtitles via Jellyfin et le serveur Lumio) */
+  subtitleFinder?: SubtitleFinder;
+};
+
+export type RemoteSubtitle = { id: string; label: string; detail: string };
+export type SubtitleFinder = {
+  search: () => Promise<RemoteSubtitle[]>;
+  /** Télécharge et renvoie l'adresse du fichier à ajouter au lecteur (null : pas encore prêt) */
+  pick: (id: string) => Promise<{ url: string; title: string } | null>;
 };
 
 export function formatTime(sec: number) {

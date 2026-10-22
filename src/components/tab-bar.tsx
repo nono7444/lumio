@@ -3,9 +3,9 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 import * as Haptics from 'expo-haptics';
-import { router, type Tabs } from 'expo-router';
-import type { ComponentProps } from 'react';
-import { LayoutAnimation, Platform, StyleSheet, Text, View } from 'react-native';
+import { type Tabs } from 'expo-router';
+import { useRef, useState, type ComponentProps } from 'react';
+import { Animated, LayoutAnimation, Platform, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -48,7 +48,8 @@ const SHORT: Record<string, string> = {
 const glass = Platform.OS === 'ios' && isLiquidGlassAvailable();
 
 /** Barre d'onglets flottante façon iOS 26+ (« Liquid Glass ») : icône + libellé, bulle sur l'onglet actif.
- *  Appui long : personnaliser les raccourcis de la barre. */
+ *  Appui long : une loupe en verre apparaît sous le doigt et le suit ; on glisse jusqu'à l'onglet voulu et on relâche,
+ *  comme la barre d'onglets d'iOS 26. (Personnaliser les onglets : Profil → Personnalisation.) */
 export function FloatingTabBar(props: TabBarProps) {
   // TV : menu latéral façon Nuvio
   if (Platform.isTV) {
@@ -95,14 +96,87 @@ function PhoneTabBar({ state, descriptors, navigation }: TabBarProps) {
     : order.map((n) => visible.find((r) => r.name === n)!).filter(Boolean);
   const dense = routes.length > 6;
 
-  const customize = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    router.push('/customize-tabs');
+  // ——— Loupe « Liquid Glass » à l'appui long ———
+  const pillRef = useRef<View>(null);
+  const pillBox = useRef({ x: 0, width: 1 });
+  const wrapRef = useRef<View>(null);
+  const wrapX = useRef(0);
+  const lensX = useRef(new Animated.Value(0)).current;
+  const lensScale = useRef(new Animated.Value(0)).current;
+  const [lensOn, setLensOn] = useState(false);
+  const lens = useRef({ on: false, timer: null as ReturnType<typeof setTimeout> | null, idx: -1, startX: 0, moved: false });
+  const slot = pillBox.current.width / Math.max(1, routes.length);
+  const lensW = Math.min(110, slot * 1.35);
+  const indexAt = (pageX: number) =>
+    Math.max(0, Math.min(routes.length - 1, Math.floor(((pageX - pillBox.current.x) / pillBox.current.width) * routes.length)));
+  const placeLens = (pageX: number) => {
+    const x = Math.max(0, Math.min(pillBox.current.width, pageX - pillBox.current.x));
+    lensX.setValue(x - lensW / 2);
+    const i = indexAt(pageX);
+    if (i !== lens.current.idx) {
+      if (lens.current.idx !== -1) Haptics.selectionAsync().catch(() => {});
+      lens.current.idx = i;
+    }
+  };
+  const onTouchStart = (e: GestureResponderEvent) => {
+    if (Platform.isTV) return;
+    const pageX = e.nativeEvent.pageX;
+    lens.current.startX = pageX;
+    lens.current.moved = false;
+    pillRef.current?.measureInWindow((x, _y, w) => {
+      pillBox.current = { x, width: w || 1 };
+    });
+    wrapRef.current?.measureInWindow((x) => (wrapX.current = x));
+    lens.current.timer = setTimeout(() => {
+      lens.current.on = true;
+      lens.current.idx = -1;
+      setLensOn(true);
+      placeLens(lens.current.startX);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+      Animated.spring(lensScale, { toValue: 1, useNativeDriver: true, speed: 18, bounciness: 9 }).start();
+    }, 280);
+  };
+  const onTouchMove = (e: GestureResponderEvent) => {
+    const pageX = e.nativeEvent.pageX;
+    if (!lens.current.on) {
+      // Le doigt glisse avant l'appui long : on démarre la loupe tout de suite (comme iOS 26)
+      if (Math.abs(pageX - lens.current.startX) > 12 && lens.current.timer) {
+        clearTimeout(lens.current.timer);
+        lens.current.timer = null;
+        lens.current.on = true;
+        lens.current.idx = -1;
+        setLensOn(true);
+        Animated.spring(lensScale, { toValue: 1, useNativeDriver: true, speed: 18, bounciness: 9 }).start();
+      } else return;
+    }
+    lens.current.moved = true;
+    placeLens(pageX);
+  };
+  const onTouchEnd = () => {
+    if (lens.current.timer) clearTimeout(lens.current.timer);
+    lens.current.timer = null;
+    if (!lens.current.on) return;
+    lens.current.on = false;
+    const route = routes[lens.current.idx];
+    Animated.timing(lensScale, { toValue: 0, duration: 160, useNativeDriver: true }).start(() => setLensOn(false));
+    if (route && state.routes[state.index]?.key !== route.key) {
+      tap();
+      LayoutAnimation.configureNext(LayoutAnimation.create(200, 'easeInEaseOut', 'opacity'));
+      navigation.navigate(route.name, route.params);
+    }
   };
 
+
   return (
-    <View pointerEvents="box-none" style={Platform.isTV ? styles.wrapTv : [styles.wrap, { bottom: Math.max(insets.bottom - 6, 10) }]}>
-      <View style={styles.pill}>
+    <View ref={wrapRef} pointerEvents="box-none" style={Platform.isTV ? styles.wrapTv : [styles.wrap, { bottom: Math.max(insets.bottom - 6, 10) }]}>
+      <View
+        ref={pillRef}
+        style={styles.pill}
+        onLayout={() => pillRef.current?.measureInWindow((x, _y, w) => (pillBox.current = { x, width: w || 1 }))}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}>
         {Platform.isTV ? (
           // TV : effet verre (façon iOS 26) — voile fumé translucide, reflet en haut, liseré clair
           <View style={[StyleSheet.absoluteFill, styles.tvGlass]} pointerEvents="none">
@@ -141,8 +215,9 @@ function PhoneTabBar({ state, descriptors, navigation }: TabBarProps) {
               accessibilityRole="tab"
               accessibilityState={{ selected: focused }}
               accessibilityLabel={label}
-              onLongPress={customize}
-              delayLongPress={450}
+              // Appui long : c'est la loupe qui choisit l'onglet (pas de clic en plus au relâcher)
+              onLongPress={() => {}}
+              delayLongPress={280}
               onPress={() => {
                 const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
                 if (!focused && !event.defaultPrevented) {
@@ -179,6 +254,29 @@ function PhoneTabBar({ state, descriptors, navigation }: TabBarProps) {
           );
         })}
       </View>
+      {/* Loupe en verre sous le doigt (iOS 26 : Liquid Glass ; ailleurs : flou) */}
+      {lensOn ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.lens,
+            {
+              width: lensW,
+              left: pillBox.current.x - wrapX.current,
+              transform: [{ translateX: lensX }, { scale: lensScale.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) }],
+              opacity: lensScale,
+            },
+          ]}>
+          {glass ? (
+            <GlassView glassEffectStyle="clear" isInteractive colorScheme="dark" style={StyleSheet.absoluteFill} />
+          ) : Platform.OS === 'ios' ? (
+            <BlurView tint="systemUltraThinMaterialLight" intensity={40} style={StyleSheet.absoluteFill} />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(255,255,255,0.16)' }]} />
+          )}
+          <LinearGradient colors={['rgba(255,255,255,0.35)', 'rgba(255,255,255,0.02)']} style={[StyleSheet.absoluteFill, { bottom: '55%' }]} />
+        </Animated.View>
+      ) : null}
     </View>
   );
 }
@@ -212,6 +310,19 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
   },
   item: { flex: 1, minWidth: 0 },
+  lens: {
+    position: 'absolute',
+    top: -8,
+    height: 82,
+    borderRadius: 41,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.45)',
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+  },
   bubble: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2, borderRadius: 28, paddingHorizontal: 2 },
   bubbleOn: { backgroundColor: 'rgba(255,255,255,0.14)' },
   label: { fontSize: 10, fontWeight: '700', letterSpacing: -0.1 },

@@ -59,6 +59,8 @@ export type LiveVpnConfig = {
   offShortcut: string;
 };
 
+export type HomeBackground = 'titles' | 'auto' | 'halloween' | 'christmas' | 'photo';
+
 export type BetterPostersConfig = {
   enabled: boolean;
   rating: boolean;
@@ -76,6 +78,10 @@ export type Settings = {
   betterPosters: BetterPostersConfig;
   seerr: SeerrConfig | null;
   homeLayout: HomeRow[];
+  /** Fond du haut de l'accueil : titres du serveur, selon la saison, Halloween, Noël ou une photo choisie */
+  homeBackground: HomeBackground;
+  /** Photo choisie (copiée dans les fichiers de l'appli) */
+  homeBackgroundPhoto?: string;
   tabsLayout: TabPref[];
   /** Rangées de l'onglet Bibliothèque : ordre et visibilité */
   libraryLayout: HomeRow[];
@@ -141,6 +147,7 @@ const DEFAULTS: Settings = {
   quality: 'original',
   seerr: null,
   homeLayout: [],
+  homeBackground: 'titles',
   tabsLayout: [],
   libraryLayout: [],
   autoNext: true,

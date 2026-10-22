@@ -30,21 +30,33 @@ export const invalidateHealth = () => {
   healthCache = null;
 };
 
+// Dernière réponse valide : gardée en cas de coupure brève (sinon l'appli affichait « serveur injoignable / redémarrage »
+// et la fiche basculait sur l'ancien mode sans serveur, où la demande ne partait pas)
+let lastGood: { url: string; at: number; value: ServerHealth } | null = null;
+
+async function fetchHealth(url: string, timeoutMs: number): Promise<ServerHealth | null> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${serverBase(url)}/health`, { signal: ctrl.signal });
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 export async function serverHealth(s: Settings, force = false): Promise<ServerHealth | null> {
   if (!s.chatUrl) return null;
   // Réponse gardée 60 s ; un échec seulement 5 s, pour réessayer vite après une coupure
   if (!force && healthCache && healthCache.url === s.chatUrl && Date.now() - healthCache.at < (healthCache.value ? 60_000 : 5_000))
     return healthCache.value;
-  let value: ServerHealth | null = null;
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 10000);
-    const res = await fetch(`${serverBase(s.chatUrl)}/health`, { signal: ctrl.signal });
-    clearTimeout(t);
-    value = res.ok ? await res.json() : null;
-  } catch {
-    value = null;
-  }
+  // Deux essais (le tunnel met parfois plusieurs secondes à répondre)
+  let value = await fetchHealth(s.chatUrl, 12000);
+  if (!value) value = await fetchHealth(s.chatUrl, 15000);
+  if (value) lastGood = { url: s.chatUrl, at: Date.now(), value };
+  else if (lastGood && lastGood.url === s.chatUrl && Date.now() - lastGood.at < 15 * 60_000) value = lastGood.value;
   healthCache = { url: s.chatUrl, at: Date.now(), value };
   return value;
 }

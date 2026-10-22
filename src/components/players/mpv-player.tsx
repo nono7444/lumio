@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { tap } from '@/components/ui';
 import { C } from '@/constants/theme';
 
-import { formatTime, type PlayerProps } from './types';
+import { formatTime, type PlayerProps, type RemoteSubtitle } from './types';
 
 const HIDE_AFTER_MS = 3500;
 const SPEEDS = [1, 1.25, 1.5, 2, 0.75];
@@ -23,7 +23,7 @@ function trackLabel(t: TrackInfo) {
 }
 
 /** Lecteur mpv avec contrôles maison (lecture, barre de progression, pistes, vitesse, zoom). */
-export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onReady, onError, onClose, onEnded, extra, statsInfo, onPip, audioUri }: PlayerProps) {
+export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onReady, onError, onClose, onEnded, extra, statsInfo, onPip, audioUri, subtitleFinder }: PlayerProps) {
   const insets = useSafeAreaInsets();
   const ref = useRef<ExpoMpvViewRef>(null);
   const [source, setSource] = useState<string | undefined>();
@@ -47,6 +47,34 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
     return () => clearInterval(t);
   }, [stats]);
   const [sheet, setSheet] = useState<null | { audio: TrackInfo[]; subs: TrackInfo[] }>(null);
+  // Recherche de sous-titres français en ligne
+  const [remote, setRemote] = useState<null | { loading: boolean; list: RemoteSubtitle[]; error?: string; busy?: string; note?: string }>(null);
+  async function searchRemote() {
+    if (!subtitleFinder) return;
+    tap();
+    setRemote({ loading: true, list: [] });
+    try {
+      const list = await subtitleFinder.search();
+      setRemote({ loading: false, list, error: list.length ? undefined : 'Aucun sous-titre français trouvé pour ce titre.' });
+    } catch (e: any) {
+      setRemote({ loading: false, list: [], error: e?.message ?? String(e) });
+    }
+  }
+  async function pickRemote(id: string) {
+    if (!subtitleFinder) return;
+    tap();
+    setRemote((r) => (r ? { ...r, busy: id, note: undefined } : r));
+    try {
+      const got = await subtitleFinder.pick(id);
+      if (got) {
+        await ref.current?.addSubtitle(got.url, 'select', got.title, 'fr');
+        setRemote(null);
+        openTracks();
+      } else setRemote((r) => (r ? { ...r, busy: undefined, note: 'Téléchargé : Jellyfin le prépare, relance la lecture dans une minute.' } : r));
+    } catch (e: any) {
+      setRemote((r) => (r ? { ...r, busy: undefined, note: e?.message ?? String(e) } : r));
+    }
+  }
   const [scrub, setScrub] = useState<number | null>(null);
   const [barWidth, setBarWidth] = useState(1);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -340,7 +368,7 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
 
       {/* Feuille des pistes audio / sous-titres */}
       {sheet && (
-        <Pressable style={styles.sheetBackdrop} onPress={() => setSheet(null)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => (setSheet(null), setRemote(null))}>
           <Pressable style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]} onPress={() => {}}>
             <ScrollView contentContainerStyle={{ gap: 6 }}>
               <Text style={styles.sheetTitle}>Audio</Text>
@@ -391,6 +419,38 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
                   </Text>
                 </Pressable>
               ))}
+              {subtitleFinder ? (
+                remote ? (
+                  <View style={{ gap: 6, marginTop: 8 }}>
+                    <Text style={styles.sheetTitle}>Sous-titres français en ligne</Text>
+                    {remote.loading ? <ActivityIndicator color="#fff" style={{ marginVertical: 10 }} /> : null}
+                    {remote.error ? <Text style={styles.sheetEmpty}>{remote.error}</Text> : null}
+                    {remote.note ? <Text style={styles.sheetEmpty}>{remote.note}</Text> : null}
+                    {remote.list.map((x) => (
+                      <Pressable key={x.id} style={styles.trackRow} onPress={() => pickRemote(x.id)}>
+                        {remote.busy === x.id ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <Ionicons name="cloud-download-outline" size={20} color={C.textFaint} />
+                        )}
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.trackText} numberOfLines={1}>
+                            {x.label}
+                          </Text>
+                          <Text style={styles.sheetEmpty} numberOfLines={1}>
+                            {x.detail}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : (
+                  <Pressable style={styles.trackRow} onPress={searchRemote}>
+                    <Ionicons name="search" size={20} color={C.accent} />
+                    <Text style={[styles.trackText, { color: C.accent }]}>Chercher des sous-titres français</Text>
+                  </Pressable>
+                )
+              ) : null}
             </ScrollView>
           </Pressable>
         </Pressable>
