@@ -29,7 +29,6 @@ import { tmdb as tmdbApi } from '@/lib/tmdb';
 import {
   catalogKey,
   fetchManifest,
-  hasResource,
   isBrowsable,
   resolveAddon,
   type StremioManifest,
@@ -61,7 +60,6 @@ function AddonCard({ addon, onChange, onRemove }: { addon: Addon; onChange: (a: 
                   catalogs.length
                     ? `${catalogs.length - [...hidden].filter((h) => catalogs.some((c) => catalogKey(c) === h)).length}/${catalogs.length} catalogues`
                     : null,
-                  manifest && hasResource(manifest, 'stream') ? 'Streams' : null,
                 ]
                   .filter(Boolean)
                   .join(' · ') || '…'}
@@ -144,9 +142,9 @@ export default function SettingsScreen() {
         return;
       }
       const browsable = (m.catalogs ?? []).filter(isBrowsable);
-      const streams = hasResource(m, 'stream');
-      if (browsable.length === 0 && !streams) {
-        Alert.alert('Addon non pris en charge', `« ${m.name} » ne propose ni catalogue ni stream.`);
+      // Lumio n'utilise que les catalogues des addons (listes de titres) ; la lecture et les téléchargements passent par Jellyfin / Radarr / Sonarr
+      if (browsable.length === 0) {
+        Alert.alert('Addon non pris en charge', `« ${m.name} » ne propose pas de catalogue. Lumio n'utilise que les catalogues des addons, pas leurs flux.`);
         return;
       }
       await update({ addons: [...settings.addons, { base, name: m.name }] });
@@ -339,7 +337,7 @@ export default function SettingsScreen() {
         <Section title="Addons Stremio">
           <Text style={styles.help}>
             Colle l'URL du manifest d'un addon de catalogue (stremio://… ou https://…/manifest.json). Ses catalogues
-            apparaissent en lignes sur l'accueil.
+            apparaissent en lignes sur l'accueil ; un titre absent du serveur se demande comme d'habitude.
           </Text>
           <Field label="URL de l'addon" value={addonUrl} onChangeText={setAddonUrl} placeholder="https://…/manifest.json" keyboardType="url" />
           <Button title="Ajouter" icon="add" onPress={addAddon} loading={adding} disabled={!addonUrl.trim()} />
