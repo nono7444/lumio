@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- iPhone : l'onglet Lumio Secour est vraiment retiré de la barre d'onglets.
+
 ## 1.0.84 — 22 octobre 2026
 
 - iPhone : la partie Addons Stremio et Lumio Secour (onglet et bouton « Liens ») est retirée.

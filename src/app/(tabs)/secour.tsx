@@ -1,6 +1,6 @@
 // Onglet Lumio Secour (admin) : connexion au fork, clé AllDebrid, état des sources et réglages du fork.
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, Redirect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -49,6 +49,8 @@ function fromText(f: SecourField, text: string): unknown {
 const fmtDate = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) : '');
 
 export default function SecourTab() {
+  // iPhone : Lumio Secour retiré
+  if (Platform.OS === 'ios') return <Redirect href="/" />;
   const { settings } = useSettings();
   const insets = useSafeAreaInsets();
   const admin = settings.jellyfin?.isAdmin === true;

@@ -79,6 +79,8 @@ function PhoneTabBar({ state, descriptors, navigation }: TabBarProps) {
   const initial = (settings.jellyfin?.userName ?? 'L').slice(0, 1).toUpperCase();
 
   const visible = state.routes.filter((r) => {
+    // iPhone : pas d'onglet Lumio Secour
+    if (Platform.OS === 'ios' && r.name === 'secour') return false;
     const opts = descriptors[r.key].options as { href?: string | null };
     return opts.href !== null;
   });
