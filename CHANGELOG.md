@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Serveur 3.22.0 : recherche TMDB pour Lumio TV (`/api/tmdb/search`, avec le statut sur le serveur) et relais TMDB (`/api/tmdb/proxy/…`) ; `/health` indique si la clé TMDB est configurée.
+
 ## 1.0.82 — 22 octobre 2026
 
 - Nouvel onglet « Lumio Secour » (admin) : connexion au service, clé et compte AllDebrid, état des sources, et tous les réglages de Lumio Secour (sources, jeton TMDB, cache…) modifiables depuis l'appli.

@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.21.0';
+const VERSION = '3.22.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1580,7 +1580,7 @@ const server = http.createServer(async (req, res) => {
       ok: true,
       version: VERSION,
       messages: messages.length,
-      features: ['chat', 'requests', 'status', 'ideas', 'ratings', 'files'],
+      features: ['chat', 'requests', 'status', 'ideas', 'ratings', 'files', ...(tmdbKey() ? ['tmdb'] : [])],
       radarr: Boolean(arrConfig('radarr')),
       sonarr: Boolean(arrConfig('sonarr')),
     });
@@ -2073,6 +2073,28 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
     }
 
     // ——— Collections propres (sagas TMDB des films présents dans Jellyfin) ———
+    // ——— TMDB via le serveur (Lumio TV) : la clé reste ici ———
+    if (req.method === 'GET' && p === '/api/tmdb/search') {
+      const type = q.get('type') === 'tv' ? 'tv' : 'movie';
+      const query = String(q.get('q') || '').trim().slice(0, 200);
+      if (!query) return send(res, 200, { results: [] });
+      const data = await tmdbGet(`/search/${type}`, { query, include_adult: 'false', page: q.get('page') || '1' });
+      const lib = await loadLibrary().catch(() => null);
+      const results = ((data && data.results) || []).map((r) => {
+        const st = lib ? mediaStatus(lib, type, r.id, null, null).status : MediaStatus.UNKNOWN;
+        return { ...r, lumioStatus: st };
+      });
+      return send(res, 200, { results });
+    }
+    const tmdbProxy = p.match(/^\/api\/tmdb\/proxy\/((?:movie|tv|find|search|genre|collection|person|discover|trending|configuration|company|network|keyword|list)\/[\w\/.-]*)$/);
+    if (req.method === 'GET' && tmdbProxy) {
+      const params = {};
+      for (const [k, v] of q.entries()) if (k !== 'api_key') params[k] = v;
+      const data = await tmdbGet(`/${tmdbProxy[1]}`, params);
+      if (data == null) return send(res, 404, { status_message: 'introuvable' });
+      return send(res, 200, data);
+    }
+
     // ——— Admin : actions sur le serveur (Paramètres → Serveur) ———
     // Jellyfin : redémarrage et scan via son API, avec le jeton de l'admin.
     // Machine : le conteneur ne peut pas redémarrer le PC lui-même ; il dépose une demande dans DATA_DIR/host-actions/,
