@@ -46,7 +46,7 @@ export type Req = {
   };
 };
 
-export type MediaInfo = { status: number; seasons: { seasonNumber: number; status: number }[]; requests: Req[] };
+export type MediaInfo = { status: number; seasons: { seasonNumber: number; status: number; have?: number; total?: number }[]; requests: Req[] };
 
 export type Me = {
   id: string;

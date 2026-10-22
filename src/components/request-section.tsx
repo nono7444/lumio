@@ -27,6 +27,8 @@ export function RequestSection({
   onChange,
   inJellyfin,
   onAvailable,
+  onMedia,
+  reloadKey,
 }: {
   target: RequestTarget;
   onChange?: () => void;
@@ -34,6 +36,10 @@ export function RequestSection({
   onAvailable?: () => void;
   /** Film déjà présent dans Jellyfin (même s'il n'est pas géré par Radarr) : pas de demande possible */
   inJellyfin?: boolean;
+  /** Statut du média (et de chaque saison), partagé avec la liste des saisons de la fiche */
+  onMedia?: (m: MediaInfo) => void;
+  /** Change quand la fiche a envoyé une demande (bouton « Demander » d'une saison) : on recharge */
+  reloadKey?: number;
 }) {
   const { settings } = useSettings();
   const [media, setMedia] = useState<MediaInfo | null>(null);
@@ -49,12 +55,14 @@ export function RequestSection({
       .media(settings, target.type, target.tmdbId, target.tvdbId, seasons)
       .then((m) => {
         setMedia(m);
+        onMedia?.(m);
         setError(null);
       })
       .catch((e) => setError(e?.message ?? String(e)));
-  }, [settings, target]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings, target.type, target.tmdbId, target.tvdbId]);
 
-  useEffect(load, [load]);
+  useEffect(load, [load, reloadKey]);
 
   const movieInJf = inJellyfin && target.type === 'movie';
   const status = movieInJf ? MediaStatus.AVAILABLE : (media?.status ?? MediaStatus.UNKNOWN);

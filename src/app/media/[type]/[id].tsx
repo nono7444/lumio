@@ -26,8 +26,9 @@ import { FamilyRating } from '@/components/family-rating';
 import { ReportProblemButton } from '@/components/report-problem';
 import { RequestSection } from '@/components/request-section';
 import { TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
-import { grab, mediaFlavor } from '@/lib/grab';
-import { useServerRequests } from '@/lib/requests';
+import { grab, mediaFlavor, suggestFolder } from '@/lib/grab';
+import { MediaStatus, requestsApi, useServerRequests, type MediaInfo } from '@/lib/requests';
+import { toast } from '@/components/toast';
 import { chat } from '@/lib/chat';
 import { arrReady, hasTmdb, isManager, useSettings } from '@/lib/settings';
 import { pickLogo, tmdb, tmdbImg, upcomingRelease, type TmdbMovie, type TmdbTv } from '@/lib/tmdb';
@@ -49,6 +50,17 @@ function seasonInfo(series: SonarrSeries | null, n: number): SeasonInfo | null {
   return { label: '', color: C.textFaint, monitored: false, have, total };
 }
 
+/** Statut d'une saison côté serveur Lumio : disponible, partielle, en cours, demandée ou absente. */
+function serverSeasonBadge(x: MediaInfo['seasons'][number] | undefined): { label: string; color: string; icon: keyof typeof Ionicons.glyphMap } {
+  const st = x?.status ?? MediaStatus.UNKNOWN;
+  if (st === MediaStatus.AVAILABLE) return { label: 'Disponible', color: C.success, icon: 'checkmark-circle' };
+  if (st === MediaStatus.PARTIALLY_AVAILABLE)
+    return { label: x?.total ? `${x.have ?? 0}/${x.total} épisodes` : 'Partielle', color: C.warning, icon: 'contrast' };
+  if (st === MediaStatus.PROCESSING) return { label: 'En téléchargement', color: C.accent, icon: 'arrow-down-circle' };
+  if (st === MediaStatus.PENDING) return { label: 'Demandée', color: '#FFC93C', icon: 'time' };
+  return { label: 'Pas disponible', color: C.textFaint, icon: 'remove-circle-outline' };
+}
+
 export default function MediaScreen() {
   const { type, id } = useLocalSearchParams<{ type: string; id: string }>();
   const { settings } = useSettings();
@@ -60,6 +72,10 @@ export default function MediaScreen() {
   const [busy, setBusy] = useState(false);
   const [jfItem, setJfItem] = useState<JfItem | null>(null);
   const [showRate, setShowRate] = useState(false);
+  // Statut de chaque saison (serveur Lumio) et demande d'une saison en cours d'envoi
+  const [media, setMedia] = useState<MediaInfo | null>(null);
+  const [mediaKey, setMediaKey] = useState(0);
+  const [seasonBusy, setSeasonBusy] = useState<number | null>(null);
 
   const tmdbId = Number(id);
   const isTv = type === 'tv';
@@ -195,6 +211,50 @@ export default function MediaScreen() {
     );
   }
 
+  /** Bouton « Demander » à côté d'une saison absente : demande de cette saison seule au serveur Lumio. */
+  function requestOneSeason(n: number) {
+    if (details?.kind !== 'tv') return;
+    const data = details.data;
+    const send = async () => {
+      setSeasonBusy(n);
+      try {
+        // Série pas encore sur le serveur : dossier choisi selon le genre (animés, jeunesse…), comme la demande complète
+        let folder: string | undefined;
+        if (!media || media.status === MediaStatus.UNKNOWN) {
+          const o = await requestsApi.options(settings, 'tv').catch(() => null);
+          if (o) folder = suggestFolder(o.folders, mediaFlavor(data), o.default) ?? undefined;
+        }
+        const r = await requestsApi.create(settings, {
+          type: 'tv',
+          tmdbId,
+          tvdbId: data.external_ids?.tvdb_id ?? undefined,
+          seasons: [n],
+          title: data.name,
+          year: data.first_air_date?.slice(0, 4),
+          poster: tmdbImg(data.poster_path, 'w342'),
+          backdrop: tmdbImg(data.backdrop_path, 'w780'),
+          rootFolderPath: folder,
+        });
+        toast(
+          r.status === 1
+            ? `Saison ${n} demandée : elle attend la validation de l’admin.`
+            : r.status === 4
+              ? `Demande enregistrée, mais l’envoi a échoué : ${r.error ?? 'erreur'}`
+              : `Saison ${n} : téléchargement lancé.`
+        );
+        setMediaKey((k) => k + 1);
+      } catch (e: any) {
+        Alert.alert('Demande impossible', e?.message ?? String(e));
+      } finally {
+        setSeasonBusy(null);
+      }
+    };
+    Alert.alert(`Demander la saison ${n} ?`, `« ${data.name} »`, [
+      { text: 'Annuler', style: 'cancel' },
+      { text: 'Demander', onPress: send },
+    ]);
+  }
+
   const movieFile = details.kind === 'movie' ? details.arr?.movieFile : undefined;
   const imdbId = details.kind === 'movie' ? details.data.imdb_id : details.data.external_ids?.imdb_id;
   const logo = pickLogo(settings, d.images);
@@ -258,7 +318,7 @@ export default function MediaScreen() {
                     onPress={() => router.push({ pathname: '/watch', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title } })}
                   />
                 ) : serverReq ? (
-                  <RequestSection inJellyfin={false} onAvailable={refreshJf} target={tvTarget} />
+                  <RequestSection inJellyfin={false} onAvailable={refreshJf} onMedia={setMedia} reloadKey={mediaKey} target={tvTarget} />
                 ) : null}
                 {serverReq ? <TvRound icon="star-outline" iconOn="star" on={showRate} color={TV_GOLD} label="Noter" onPress={() => setShowRate((v) => !v)} /> : null}
               </View>
@@ -358,6 +418,8 @@ export default function MediaScreen() {
             <RequestSection
               inJellyfin={Boolean(jfItem)}
               onAvailable={refreshJf}
+              onMedia={setMedia}
+              reloadKey={mediaKey}
               target={{
                 type: details.kind,
                 tmdbId,
@@ -461,7 +523,57 @@ export default function MediaScreen() {
           {d.overview && !Platform.isTV ? <Text style={styles.overview}>{d.overview}</Text> : null}
 
           {/* ——— Saisons ——— */}
-          {details.kind === 'tv' && (
+          {/* ——— Saisons (serveur Lumio) : statut de chaque saison + « Demander » à côté de celles qui manquent ——— */}
+          {details.kind === 'tv' && serverReq && seasonsList.length > 0 ? (
+            <View>
+              <View style={styles.seasonHead}>
+                <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Saisons</Text>
+                {media ? (
+                  <Text style={styles.dim}>
+                    {seasonsList.filter((s) => media.seasons.find((x) => x.seasonNumber === s.season_number)?.status === MediaStatus.AVAILABLE).length}/
+                    {seasonsList.length} disponible{seasonsList.length > 1 ? 's' : ''}
+                  </Text>
+                ) : null}
+              </View>
+              <View style={styles.card}>
+                {seasonsList.map((s, idx) => {
+                  const x = media?.seasons.find((y) => y.seasonNumber === s.season_number);
+                  const b = serverSeasonBadge(x);
+                  const missing = Boolean(media) && (x?.status ?? MediaStatus.UNKNOWN) === MediaStatus.UNKNOWN;
+                  const pct =
+                    x?.status === MediaStatus.AVAILABLE ? 1 : x?.status === MediaStatus.PARTIALLY_AVAILABLE && x.total ? (x.have ?? 0) / x.total : 0;
+                  return (
+                    <View key={s.id} style={[styles.seasonRow, idx === seasonsList.length - 1 && { borderBottomWidth: 0 }, missing && { opacity: 0.92 }]}>
+                      <Ionicons name={media ? b.icon : 'ellipse-outline'} size={24} color={media ? b.color : C.textFaint} />
+                      <View style={{ flex: 1, gap: 2 }}>
+                        <Text style={[styles.seasonName, missing && { color: C.textDim }]}>{s.name || `Saison ${s.season_number}`}</Text>
+                        <Text style={styles.dim}>
+                          {s.episode_count} épisodes{s.air_date ? `  •  ${s.air_date.slice(0, 4)}` : ''}
+                        </Text>
+                        {media ? <Text style={[styles.seasonStatus, { color: b.color }]}>{b.label}</Text> : null}
+                        {pct > 0 && pct < 1 ? (
+                          <View style={styles.seasonBar}>
+                            <View style={[styles.seasonFill, { width: `${Math.round(pct * 100)}%`, backgroundColor: b.color }]} />
+                          </View>
+                        ) : null}
+                      </View>
+                      {missing ? (
+                        <Button
+                          title="Demander"
+                          icon="paper-plane-outline"
+                          small
+                          loading={seasonBusy === s.season_number}
+                          onPress={() => requestOneSeason(s.season_number)}
+                        />
+                      ) : null}
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          ) : null}
+
+          {details.kind === 'tv' && !serverReq && (
             <View>
               <Text style={styles.sectionTitle}>Saisons</Text>
               <View style={styles.card}>
@@ -593,6 +705,10 @@ const styles = StyleSheet.create({
     borderBottomColor: C.border,
   },
   seasonName: { color: C.text, fontSize: 15, fontWeight: '700' },
+  seasonHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 },
+  seasonStatus: { fontSize: 12, fontWeight: '800', marginTop: 2 },
+  seasonBar: { height: 4, borderRadius: 2, backgroundColor: C.surfaceHigh, overflow: 'hidden', marginTop: 4, maxWidth: 160 },
+  seasonFill: { height: 4, borderRadius: 2 },
   castItem: { width: Platform.isTV ? 130 : 84, alignItems: 'center' },
   castPhoto: {
     width: Platform.isTV ? 112 : 76,

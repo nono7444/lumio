@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.22.0';
+const VERSION = '3.22.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -493,7 +493,9 @@ function mediaStatus(lib, type, tmdbId, tvdbId, seasonNumbers) {
       if (r && r.status === RequestStatus.PENDING && st === MediaStatus.UNKNOWN) st = MediaStatus.PENDING;
       else if (r) st = MediaStatus.PROCESSING;
     }
-    return { seasonNumber: n, status: st };
+    const se = entry && entry.seasons.find((x) => x.seasonNumber === n);
+    // Nombre d'épisodes présents / sortis : la fiche affiche « 6/10 épisodes » pour une saison partielle
+    return se ? { seasonNumber: n, status: st, have: se.files, total: se.aired } : { seasonNumber: n, status: st };
   });
   let status = MediaStatus.UNKNOWN;
   if (seasons.length && seasons.every((s) => s.status === MediaStatus.AVAILABLE)) status = MediaStatus.AVAILABLE;

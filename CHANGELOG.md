@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Fiche d'une série : chaque saison affiche son statut (Disponible, 6/10 épisodes, En téléchargement, Demandée, Pas disponible), avec le nombre de saisons disponibles et un bouton « Demander » à côté de chaque saison manquante.
+- Serveur Lumio 3.22.1 : nombre d'épisodes présents par saison.
+
 ## 1.0.86 — 22 octobre 2026
 
 - iPhone : l'onglet Lumio Secour est vraiment retiré de la barre d'onglets.
