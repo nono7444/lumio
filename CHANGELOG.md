@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.88 — 22 octobre 2026
+
 - Série en partie sur le serveur : section « Saisons manquantes » sur sa fiche, avec un bouton « Demander » par saison (on demande une saison entière, jamais un épisode). Les épisodes « manquants » affichés par Jellyfin sont masqués.
 - Épisodes plus rapides : requête allégée, saison suivante préchargée, saisons déjà ouvertes affichées tout de suite, vignettes immédiates (image de la série en attendant celle de l'épisode), longues saisons affichées par 30.
 
