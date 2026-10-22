@@ -8,9 +8,7 @@ import { FocusPressable as Pressable } from '@/components/tv';
 import { FamilyStarBadge, tap } from '@/components/ui';
 import { setTvFocus, tvInfoFromJf } from '@/lib/tv-focus';
 import { C, POSTER_W, R } from '@/constants/theme';
-import { useBetterPoster } from '@/lib/better-posters';
-import { useFamilyRatingBadge } from '@/lib/ratings';
-import { jfBackdrop, jfPoster, type JfItem } from '@/lib/jellyfin';
+import { jfBackdrop, jfPoster, tmdbArtFor, type JfItem } from '@/lib/jellyfin';
 import { useSettings } from '@/lib/settings';
 
 export function openJellyfin(item: JfItem) {
@@ -46,18 +44,8 @@ export function JfPosterCard({ item, width = POSTER_W }: { item: JfItem; width?:
   const pct = progressOf(item);
   const unplayed = item.UserData?.UnplayedItemCount;
   const [failed, setFailed] = useState(false);
-  const fam = useFamilyRatingBadge(
-    settings,
-    item.Type === 'Movie' ? 'movie' : item.Type === 'Series' ? 'tv' : undefined,
-    item.ProviderIds?.Tmdb ? Number(item.ProviderIds.Tmdb) : undefined
-  );
-  const better = useBetterPoster(
-    !Platform.isTV && item.ProviderIds?.Imdb && (item.Type === 'Movie' || item.Type === 'Series')
-      ? { imdb: item.ProviderIds.Imdb, type: item.Type === 'Movie' ? 'movie' : 'tv' }
-      : undefined,
-    { hideRating: Boolean(fam) }
-  );
-  const poster = better && !failed ? better : jfPoster(settings, item);
+  // Affiche de Jellyfin ; si elle ne se charge pas, celle de TMDB (via le serveur Lumio)
+  const poster = failed ? tmdbArtFor(settings, item, 'poster') : jfPoster(settings, item);
   return (
     <Pressable
       onPress={() => {
@@ -78,7 +66,7 @@ export function JfPosterCard({ item, width = POSTER_W }: { item: JfItem; width?:
             cachePolicy="memory-disk"
             priority="high"
             recyclingKey={item.Id}
-            onError={() => better && setFailed(true)}
+            onError={() => !failed && setFailed(true)}
           />
         ) : (
           <Text style={styles.fallback} numberOfLines={3}>

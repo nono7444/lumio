@@ -22,7 +22,6 @@ import { AnnouncementEditor } from '@/components/announcement';
 import { NotifySubscribeSection } from '@/components/notify-subscribe';
 import { ServerActionsSection } from '@/components/server-actions';
 import { Addon, DEFAULT_ADDON, isManager, useSettings } from '@/lib/settings';
-import { RATING_SOURCES } from '@/lib/better-posters';
 import { logout as logoutJellyfin, QUALITIES } from '@/lib/jellyfin';
 import { useServerRequests } from '@/lib/requests';
 import { tmdb as tmdbApi } from '@/lib/tmdb';
@@ -273,40 +272,6 @@ export default function SettingsScreen() {
         <Section title="Personnalisation">
           <Button title="Accueil et onglets" icon="options-outline" variant="secondary" onPress={() => router.push('/customize')} />
         </Section>
-
-        {Platform.isTV ? null : (
-        <Section title="Affiches">
-          <Toggle
-            label="Better Posters (note et tags sur les affiches)"
-            value={settings.betterPosters.enabled}
-            onChange={(v) => update({ betterPosters: { ...settings.betterPosters, enabled: v } })}
-          />
-          {settings.betterPosters.enabled && (
-            <>
-              <Toggle
-                label="Afficher la note"
-                value={settings.betterPosters.rating}
-                onChange={(v) => update({ betterPosters: { ...settings.betterPosters, rating: v } })}
-              />
-              <Toggle
-                label="Afficher le genre"
-                value={settings.betterPosters.genre}
-                onChange={(v) => update({ betterPosters: { ...settings.betterPosters, genre: v } })}
-              />
-              {settings.betterPosters.rating && (
-                <View style={{ marginTop: 8 }}>
-                  <Picker
-                    label="Source de la note"
-                    options={RATING_SOURCES}
-                    value={settings.betterPosters.ratingSource}
-                    onChange={(v) => update({ betterPosters: { ...settings.betterPosters, ratingSource: v } })}
-                  />
-                </View>
-              )}
-            </>
-          )}
-        </Section>
-        )}
 
         {Platform.isTV ? null : (
         <Section title="TMDB">

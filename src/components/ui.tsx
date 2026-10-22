@@ -10,7 +10,7 @@ import { setTvFocus } from '@/lib/tv-focus';
 import { FocusPressable as Pressable } from '@/components/tv';
 
 import { C, POSTER_H, POSTER_W, R } from '@/constants/theme';
-import { useBetterPoster, type PosterIds } from '@/lib/better-posters';
+import type { PosterIds } from '@/lib/better-posters';
 import { useFamilyRatingBadge } from '@/lib/ratings';
 import { useSettings } from '@/lib/settings';
 
@@ -82,11 +82,8 @@ export function PosterCard({ item, width = POSTER_W }: { item: PosterItem; width
   const { settings } = useSettings();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
-  // Titre noté par la famille : affiche Better Posters sans sa note (c'est la note de la famille qui s'affiche)
-  const fam = useFamilyRatingBadge(settings, item.ids?.type === 'tv' ? 'tv' : item.ids?.type === 'movie' ? 'movie' : undefined, item.ids?.tmdb);
-  // TV : affiches TMDB directes (le service d'affiches améliorées ajoute une requête et du délai)
-  const better = useBetterPoster(Platform.isTV ? undefined : item.ids, { hideRating: Boolean(fam) });
-  const src = better && !failed ? better : item.poster;
+  // Affiche TMDB (Better Posters retiré)
+  const src = failed ? undefined : item.poster;
   const height = Math.round(width * 1.5);
   return (
     <Pressable
@@ -112,7 +109,7 @@ export function PosterCard({ item, width = POSTER_W }: { item: PosterItem; width
             transition={Platform.isTV ? 0 : 200}
             cachePolicy="memory-disk"
             recyclingKey={item.key}
-            onError={() => better && setFailed(true)}
+            onError={() => setFailed(true)}
           />
         ) : (
           <View style={styles.posterFallback}>

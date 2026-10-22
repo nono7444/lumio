@@ -136,7 +136,7 @@ const DEFAULTS: Settings = {
   deviceId: '',
   jellyfin: null,
   skipJellyfin: false,
-  betterPosters: { enabled: true, rating: true, genre: false, ratingSource: '' },
+  betterPosters: { enabled: false, rating: true, genre: false, ratingSource: '' },
   player: 'mpv',
   quality: 'original',
   seerr: null,
@@ -167,7 +167,8 @@ function mergeSettings(saved: Partial<Settings>): Settings {
     ...saved,
     radarr: { ...DEFAULTS.radarr, ...saved.radarr },
     sonarr: { ...DEFAULTS.sonarr, ...saved.sonarr },
-    betterPosters: { ...DEFAULTS.betterPosters, ...saved.betterPosters },
+    // Better Posters retiré : toujours désactivé, même s'il était activé avant
+    betterPosters: { ...DEFAULTS.betterPosters, ...saved.betterPosters, enabled: false },
     liveVpn: { ...DEFAULTS.liveVpn, ...saved.liveVpn },
     // Calendrier et Chat passent en haut de l'accueil : retirés une fois de la barre du bas
     tabsLayout: saved.tabsV2

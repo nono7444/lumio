@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.24.0';
+const VERSION = '3.25.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -860,25 +860,41 @@ async function tmdbGet(p2, params = {}) {
   if (!r.ok) throw new Error(`TMDB HTTP ${r.status}`);
   return r.json();
 }
-// Affiches TMDB (en français si possible) : chemin gardé en mémoire 7 jours, une seule requête TMDB à la fois par titre
-const posterCache = new Map(); // "movie:603" → { p: '/xyz.jpg' | null, at }
+// Affiches / fonds TMDB (affiche en français si possible) : gardés en mémoire 7 jours, une seule requête TMDB à la fois par titre
+const posterCache = new Map(); // "movie:603" → { p: '/affiche.jpg' | null, b: '/fond.jpg' | null, at }
 const posterPending = new Map();
-async function tmdbPosterPath(type, id) {
+async function tmdbArt(type, id) {
   const k = `${type}:${id}`;
   const hit = posterCache.get(k);
-  if (hit && Date.now() - hit.at < 7 * 86400e3) return hit.p;
+  if (hit && Date.now() - hit.at < 7 * 86400e3) return hit;
   if (posterPending.has(k)) return posterPending.get(k);
   const job = (async () => {
     const d = await tmdbGet(`/${type}/${id}`, { append_to_response: 'images', include_image_language: 'fr,null,en' });
-    const imgs = (d && d.images && d.images.posters) || [];
-    const fr = imgs.find((x) => x.iso_639_1 === 'fr');
-    const p = (fr && fr.file_path) || (d && d.poster_path) || null;
+    const imgs = (d && d.images) || {};
+    const fr = (imgs.posters || []).find((x) => x.iso_639_1 === 'fr');
+    const clean = (imgs.backdrops || []).find((x) => !x.iso_639_1);
+    const v = { p: (fr && fr.file_path) || (d && d.poster_path) || null, b: (clean && clean.file_path) || (d && d.backdrop_path) || null, at: Date.now() };
     if (posterCache.size > 20000) posterCache.clear();
-    posterCache.set(k, { p, at: Date.now() });
-    return p;
+    posterCache.set(k, v);
+    return v;
   })().finally(() => posterPending.delete(k));
   posterPending.set(k, job);
   return job;
+}
+const tmdbPosterPath = async (type, id) => (await tmdbArt(type, id)).p;
+// Titre sans identifiant TMDB (métadonnées en cours de remplacement dans Jellyfin) : recherche par nom + année
+const findCache = new Map();
+async function tmdbFindId(type, q, year) {
+  const k = `${type}:${q.toLowerCase()}:${year || ''}`;
+  if (findCache.has(k)) return findCache.get(k);
+  const params = { query: q, include_adult: 'false' };
+  if (year) params[type === 'movie' ? 'year' : 'first_air_date_year'] = year;
+  let d = await tmdbGet(`/search/${type}`, params);
+  if (year && !(d && d.results && d.results.length)) d = await tmdbGet(`/search/${type}`, { query: q, include_adult: 'false' });
+  const id = (d && d.results && d.results[0] && d.results[0].id) || null;
+  if (findCache.size > 5000) findCache.clear();
+  findCache.set(k, id);
+  return id;
 }
 
 // Notes : complète l'identifiant IMDb des titres notés (pour les pastilles de Lumio TV), en arrière-plan
@@ -1817,10 +1833,20 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
 
   // Affiche TMDB d'un titre (Lumio TV) : redirection vers image.tmdb.org, sans jeton (ce n'est qu'une image publique).
   // /poster/movie/603 ou /poster/tv/1399 ; ?w=w342 par défaut. 404 si TMDB n'a pas d'affiche : l'appli garde alors celle de Jellyfin.
-  const posterM = url.pathname.match(/^\/poster\/(movie|tv)\/(\d{1,9})$/);
+  // /poster/movie/603, /poster/tv/1399 ou /poster/find/movie?q=Titre&y=2026 ; ?kind=backdrop pour l'image de fond.
+  const posterM = url.pathname.match(/^\/poster\/(movie|tv)\/(\d{1,9})$/) || url.pathname.match(/^\/poster\/find\/(movie|tv)$/);
   if (req.method === 'GET' && posterM) {
-    const w = /^w(92|154|185|342|500|780)$/.test(url.searchParams.get('w') || '') ? url.searchParams.get('w') : 'w342';
-    const posterPath = await tmdbPosterPath(posterM[1], Number(posterM[2])).catch(() => null);
+    const backdrop = url.searchParams.get('kind') === 'backdrop';
+    const sizes = backdrop ? /^w(300|780|1280)$/ : /^w(92|154|185|342|500|780)$/;
+    const w = sizes.test(url.searchParams.get('w') || '') ? url.searchParams.get('w') : backdrop ? 'w1280' : 'w342';
+    let id = posterM[2] ? Number(posterM[2]) : null;
+    if (!id) {
+      const q = String(url.searchParams.get('q') || '').trim().slice(0, 200);
+      const y = /^\d{4}$/.test(url.searchParams.get('y') || '') ? url.searchParams.get('y') : null;
+      if (q) id = await tmdbFindId(posterM[1], q, y).catch(() => null);
+    }
+    const art = id ? await tmdbArt(posterM[1], id).catch(() => null) : null;
+    const posterPath = art && (backdrop ? art.b : art.p);
     if (!posterPath) {
       res.writeHead(404, { 'Cache-Control': 'max-age=3600' });
       return res.end();

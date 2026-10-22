@@ -621,12 +621,33 @@ export const isAnime = (i: JfItem) =>
   (i.Genres ?? []).some((g) => /^anim[eé]$/i.test(g)) ||
   (i.Tags ?? []).some((t) => /^anim[eé]$/i.test(t));
 
-/** Affiche d'un élément (pour un épisode : l'affiche de la série). */
+/**
+ * Image TMDB d'un élément Jellyfin, servie par le serveur Lumio (qui a la clé) : utilisée quand Jellyfin n'a pas d'image
+ * (métadonnées en cours de remplacement, image supprimée…). Par identifiant TMDB, sinon par titre + année.
+ */
+export function tmdbArtFor(s: Settings, i: JfItem, kind: 'poster' | 'backdrop' = 'poster') {
+  if (!s.chatUrl) return undefined;
+  const base = s.chatUrl.trim().replace(/\/+$/, '').replace(/^(?!https?:\/\/)/i, 'https://');
+  const episode = i.Type === 'Episode' || i.Type === 'Season';
+  const type = i.Type === 'Movie' ? 'movie' : i.Type === 'Series' || episode ? 'tv' : null;
+  if (!type) return undefined;
+  const q = new URLSearchParams();
+  if (kind === 'backdrop') q.set('kind', 'backdrop');
+  const tmdbId = episode ? undefined : i.ProviderIds?.Tmdb;
+  if (tmdbId) return `${base}/poster/${type}/${tmdbId}${q.size ? `?${q}` : ''}`;
+  const name = episode ? i.SeriesName : i.Name;
+  if (!name) return undefined;
+  q.set('q', name);
+  if (!episode && i.ProductionYear) q.set('y', String(i.ProductionYear));
+  return `${base}/poster/find/${type}?${q}`;
+}
+
+/** Affiche d'un élément (pour un épisode : l'affiche de la série). Sans image Jellyfin : l'affiche TMDB. */
 export function jfPoster(s: Settings, i: JfItem, maxHeight = 450) {
   if (i.ImageTags?.Primary && i.Type !== 'Episode') return jfImage(s, i.Id, 'Primary', { tag: i.ImageTags.Primary, maxHeight });
   if (i.SeriesId && i.SeriesPrimaryImageTag) return jfImage(s, i.SeriesId, 'Primary', { tag: i.SeriesPrimaryImageTag, maxHeight });
   if (i.ImageTags?.Primary) return jfImage(s, i.Id, 'Primary', { tag: i.ImageTags.Primary, maxHeight });
-  return undefined;
+  return tmdbArtFor(s, i, 'poster');
 }
 
 export function jfBackdrop(s: Settings, i: JfItem, maxWidth = 1280) {
@@ -634,7 +655,7 @@ export function jfBackdrop(s: Settings, i: JfItem, maxWidth = 1280) {
   if (i.ParentBackdropItemId && i.ParentBackdropImageTags?.length)
     return jfImage(s, i.ParentBackdropItemId, 'Backdrop', { tag: i.ParentBackdropImageTags[0], maxWidth });
   if (i.ImageTags?.Thumb) return jfImage(s, i.Id, 'Thumb', { tag: i.ImageTags.Thumb, maxWidth });
-  return jfPoster(s, i, 900);
+  return tmdbArtFor(s, i, 'backdrop') ?? jfPoster(s, i, 900);
 }
 
 export function jfLogo(s: Settings, i: JfItem) {
