@@ -22,13 +22,15 @@ import {
 import { TvBackdropLayer } from '@/components/tv-backdrop';
 import { toast } from '@/components/toast';
 import { filesApi } from '@/lib/files';
-import { tmdb, tmdbImg } from '@/lib/tmdb';
+import { tmdb, tmdbImg, type TmdbTv } from '@/lib/tmdb';
+import { EpisodePicker, useSeriesEpisodes } from '@/components/jf-episodes';
+import { SeasonRequests } from '@/components/season-requests';
 import { TvActionRow, TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { MetadataEditor } from '@/components/metadata-editor';
 import { FamilyRating } from '@/components/family-rating';
 import { ReportProblemButton } from '@/components/report-problem';
 import { useServerRequests } from '@/lib/requests';
-import { useSettings } from '@/lib/settings';
+import { hasTmdb, useSettings } from '@/lib/settings';
 
 const FOLDER_TYPES = ['CollectionFolder', 'UserView', 'Folder', 'BoxSet'];
 
@@ -193,10 +195,6 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
   const { settings } = useSettings();
   const { width, height: screenH } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const [seasons, setSeasons] = useState<JfItem[]>([]);
-  const [season, setSeason] = useState<string | null>(null);
-  const [episodes, setEpisodes] = useState<JfItem[]>([]);
-  const [loadingEps, setLoadingEps] = useState(false);
   const [similar, setSimilar] = useState<JfItem[]>([]);
   const [fav, setFav] = useState(Boolean(item.UserData?.IsFavorite));
   const [showRate, setShowRate] = useState(false);
@@ -238,23 +236,16 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
   const cast = (item.People ?? []).filter((p) => p.Type === 'Actor').slice(0, 15);
   const director = (item.People ?? []).filter((p) => p.Type === 'Director' || p.Type === 'Creator').slice(0, 2).map((p) => p.Name).join(', ');
 
-  useEffect(() => {
-    if (!isSeries) return;
-    jf.seasons(settings, item.Id).then((list) => {
-      setSeasons(list);
-      // Première saison non terminée, sinon la première
-      const firstUnwatched = list.find((s) => !s.UserData?.Played) ?? list[0];
-      if (firstUnwatched) setSeason((cur) => cur ?? firstUnwatched.Id);
-    });
-  }, [isSeries, item.Id, settings]);
+  const eps = useSeriesEpisodes(isSeries ? item.Id : undefined);
+  const episodes = eps.episodes;
 
+  // Saisons qui manquent sur le serveur : proposées à la demande, saison par saison (fiche TMDB de la série)
+  const [show, setShow] = useState<TmdbTv | null>(null);
   useEffect(() => {
-    if (!season) return;
-    setLoadingEps(true);
-    jf.episodes(settings, item.Id, season)
-      .then(setEpisodes)
-      .finally(() => setLoadingEps(false));
-  }, [season, item.Id, settings]);
+    if (!isSeries || !tmdbId || !serverReq || !hasTmdb(settings)) return;
+    tmdb.tv(settings, tmdbId).then(setShow).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSeries, tmdbId, serverReq]);
 
   const nextEpisode = episodes.find((e) => !e.UserData?.Played) ?? episodes[0];
 
@@ -413,64 +404,11 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
 
           {item.Overview && !Platform.isTV ? <Text style={styles.overview}>{item.Overview}</Text> : null}
 
-          {isSeries && (
-            <View>
-              <FlatList
-                horizontal
-                data={seasons}
-                keyExtractor={(s) => s.Id}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ gap: 8 }}
-                style={{ marginBottom: 14 }}
-                renderItem={({ item: s }) => <SegChip label={s.Name} on={s.Id === season} onPress={() => setSeason(s.Id)} />}
-              />
-              {loadingEps ? (
-                <ActivityIndicator color={C.text} style={{ marginVertical: 20 }} />
-              ) : (
-                <View style={{ gap: 14 }}>
-                  {episodes.map((e) => {
-                    const pct = (e.UserData?.PlayedPercentage ?? 0) / 100;
-                    return (
-                      <Pressable
-                        key={e.Id}
-                        onPress={() => {
-                          tap();
-                          playJellyfin(e);
-                        }}
-                        style={({ pressed }) => [styles.episode, { opacity: pressed ? 0.7 : 1 }]}>
-                        <View style={styles.epThumb}>
-                          <Image
-                            source={jfImage(settings, e.Id, 'Primary', { tag: e.ImageTags?.Primary, maxWidth: 400 })}
-                            style={StyleSheet.absoluteFill}
-                            contentFit="cover"
-                          />
-                          <View style={styles.epPlay}>
-                            <Ionicons name={e.UserData?.Played ? 'checkmark' : 'play'} size={14} color="#000" />
-                          </View>
-                          {pct > 0 && pct < 1 && (
-                            <View style={styles.epBar}>
-                              <View style={[styles.epBarFill, { width: `${pct * 100}%` }]} />
-                            </View>
-                          )}
-                        </View>
-                        <View style={{ flex: 1, gap: 3 }}>
-                          <Text style={styles.epTitle} numberOfLines={2}>
-                            {e.IndexNumber}. {e.Name}
-                          </Text>
-                          <Text style={styles.dim}>{formatRuntime(e.RunTimeTicks)}</Text>
-                          {e.Overview ? (
-                            <Text style={styles.epOverview} numberOfLines={2}>
-                              {e.Overview}
-                            </Text>
-                          ) : null}
-                        </View>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              )}
-            </View>
-          )}
+          {isSeries ? <EpisodePicker {...eps} /> : null}
+
+          {isSeries && show && tmdbId ? (
+            <SeasonRequests tmdbId={tmdbId} show={show} onlyMissing title="Saisons manquantes" />
+          ) : null}
 
           {similar.length > 0 && !Platform.isTV && (
             <View style={{ marginHorizontal: -16 }}>

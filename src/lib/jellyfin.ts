@@ -190,6 +190,8 @@ export async function logout(s: Settings) {
 
 // ——— Bibliothèque ———
 
+const episodeCache = new Map<string, { at: number; p: Promise<JfItem[]>; items?: JfItem[] }>();
+
 const FIELDS = 'PrimaryImageAspectRatio,ProductionYear,Overview,Genres,Tags,Path,ProviderIds,CommunityRating,OfficialRating,ChildCount';
 
 function api(s: Settings) {
@@ -387,16 +389,43 @@ export const jf = {
     return get<JfItem>(`/Users/${j.userId}/Items/${id}`);
   },
 
+  /** Saisons présentes sur le serveur (sans les saisons « manquantes » que Jellyfin peut afficher : elles se demandent à part) */
   seasons: (s: Settings, seriesId: string) => {
     const { j, get } = api(s);
-    return get<{ Items: JfItem[] }>(`/Shows/${seriesId}/Seasons?UserId=${j.userId}&Fields=${FIELDS}`).then((r) => r.Items);
+    return get<{ Items: JfItem[] }>(`/Shows/${seriesId}/Seasons?UserId=${j.userId}&IsMissing=false&Fields=ChildCount`).then((r) => r.Items);
   },
 
+  /**
+   * Épisodes d'une saison : requête légère (seulement le résumé et une image par type), sans les épisodes manquants,
+   * gardée en mémoire : la saison s'affiche tout de suite la fois suivante, puis se met à jour (vu / en cours).
+   */
   episodes: (s: Settings, seriesId: string, seasonId: string) => {
     const { j, get } = api(s);
-    return get<{ Items: JfItem[] }>(
-      `/Shows/${seriesId}/Episodes?UserId=${j.userId}&SeasonId=${seasonId}&Fields=${FIELDS}`
-    ).then((r) => r.Items);
+    const key = `${j.userId}:${seasonId}`;
+    const hit = episodeCache.get(key);
+    // Même saison demandée deux fois en même temps (préchargement + clic) : une seule requête
+    if (hit && !hit.items && Date.now() - hit.at < 30_000) return hit.p;
+    const p = get<{ Items: JfItem[] }>(
+      `/Shows/${seriesId}/Episodes?UserId=${j.userId}&SeasonId=${seasonId}&IsMissing=false&Fields=Overview&EnableImageTypes=Primary,Thumb,Backdrop&ImageTypeLimit=1`
+    )
+      .then((r) => {
+        const e = episodeCache.get(key);
+        if (e) e.items = r.Items;
+        if (episodeCache.size > 200) episodeCache.delete(episodeCache.keys().next().value!);
+        return r.Items;
+      })
+      .catch((e) => {
+        episodeCache.delete(key);
+        throw e;
+      });
+    episodeCache.set(key, { at: Date.now(), p, items: hit?.items });
+    return p;
+  },
+
+  /** Épisodes déjà chargés (affichage immédiat sans indicateur de chargement) */
+  cachedEpisodes: (s: Settings, seasonId: string) => {
+    const hit = s.jellyfin ? episodeCache.get(`${s.jellyfin.userId}:${seasonId}`) : undefined;
+    return hit?.items;
   },
 
   /**
@@ -557,6 +586,17 @@ export type JfRemoteResult = {
 };
 
 // ——— Images ———
+
+/**
+ * Vignette d'un épisode : son image si Jellyfin l'a déjà, sinon tout de suite l'image de fond de la série
+ * (sans tag, Jellyfin extrait l'image de la vidéo à la demande : très lent, c'est ce qui faisait attendre).
+ */
+export function jfEpisodeThumb(s: Settings, e: JfItem) {
+  if (e.ImageTags?.Primary) return jfImage(s, e.Id, 'Primary', { tag: e.ImageTags.Primary, maxWidth: 400, quality: 80 });
+  const parent = e.ParentBackdropItemId ?? e.SeriesId;
+  if (parent) return jfImage(s, parent, 'Backdrop', { tag: e.ParentBackdropImageTags?.[0], maxWidth: 400, quality: 80 });
+  return undefined;
+}
 
 export function jfImage(
   s: Settings,

@@ -1,4 +1,6 @@
 // Choix de l'épisode d'une série présente dans Jellyfin : saisons en puces, puis la liste des épisodes à lancer.
+// Rapide : saison suivante préchargée, saisons déjà vues affichées tout de suite (puis mises à jour),
+// vignettes sans attendre que Jellyfin extraie une image de la vidéo, longues saisons affichées par 30.
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useEffect, useState } from 'react';
@@ -6,12 +8,13 @@ import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-nativ
 
 import { playJellyfin } from '@/components/jf-cards';
 import { FocusPressable as Pressable } from '@/components/tv';
-import { SegChip, tap } from '@/components/ui';
+import { Button, SegChip, tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
-import { formatRuntime, jf, jfImage, type JfItem } from '@/lib/jellyfin';
+import { formatRuntime, jf, jfEpisodeThumb, type JfItem } from '@/lib/jellyfin';
 import { useSettings } from '@/lib/settings';
 
-export function JfEpisodes({ seriesId }: { seriesId: string }) {
+/** Saisons et épisodes d'une série Jellyfin (partagé par la fiche Jellyfin et la fiche TMDB). */
+export function useSeriesEpisodes(seriesId: string | undefined) {
   const { settings } = useSettings();
   const [seasons, setSeasons] = useState<JfItem[]>([]);
   const [season, setSeason] = useState<string | null>(null);
@@ -19,6 +22,7 @@ export function JfEpisodes({ seriesId }: { seriesId: string }) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    if (!seriesId) return;
     jf.seasons(settings, seriesId)
       .then((list) => {
         setSeasons(list);
@@ -31,19 +35,48 @@ export function JfEpisodes({ seriesId }: { seriesId: string }) {
   }, [seriesId, settings.jellyfin?.token]);
 
   useEffect(() => {
-    if (!season) return;
-    setLoading(true);
+    if (!season || !seriesId) return;
+    let alive = true;
+    const cached = jf.cachedEpisodes(settings, season);
+    setEpisodes(cached ?? []);
+    setLoading(!cached);
     jf.episodes(settings, seriesId, season)
-      .then(setEpisodes)
-      .catch(() => setEpisodes([]))
-      .finally(() => setLoading(false));
+      .then((list) => {
+        if (!alive) return;
+        setEpisodes(list);
+        // Saison suivante préchargée en arrière-plan : le changement de saison est instantané
+        const i = seasons.findIndex((s) => s.Id === season);
+        const next = seasons[i + 1];
+        if (next && !jf.cachedEpisodes(settings, next.Id)) jf.episodes(settings, seriesId, next.Id).catch(() => {});
+      })
+      .catch(() => alive && !cached && setEpisodes([]))
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [season, seriesId, settings.jellyfin?.token]);
+  }, [season, seriesId, seasons.length, settings.jellyfin?.token]);
 
+  return { seasons, season, setSeason, episodes, loading };
+}
+
+/** Puces des saisons + liste des épisodes. */
+export function EpisodePicker({
+  seasons,
+  season,
+  setSeason,
+  episodes,
+  loading,
+  title,
+}: ReturnType<typeof useSeriesEpisodes> & { title?: string }) {
+  const { settings } = useSettings();
+  const [limit, setLimit] = useState(30);
+  useEffect(() => setLimit(30), [season]);
   if (!seasons.length) return null;
+  const shown = episodes.slice(0, limit);
   return (
     <View>
-      <Text style={styles.section}>Épisodes</Text>
+      {title ? <Text style={styles.section}>{title}</Text> : null}
       <FlatList
         horizontal
         data={seasons}
@@ -53,11 +86,11 @@ export function JfEpisodes({ seriesId }: { seriesId: string }) {
         style={{ marginBottom: 14 }}
         renderItem={({ item: s }) => <SegChip label={s.Name} on={s.Id === season} onPress={() => setSeason(s.Id)} />}
       />
-      {loading ? (
+      {loading && !episodes.length ? (
         <ActivityIndicator color={C.text} style={{ marginVertical: 20 }} />
       ) : (
         <View style={{ gap: 14 }}>
-          {episodes.map((e) => {
+          {shown.map((e) => {
             const pct = (e.UserData?.PlayedPercentage ?? 0) / 100;
             return (
               <Pressable
@@ -69,7 +102,10 @@ export function JfEpisodes({ seriesId }: { seriesId: string }) {
                 style={({ pressed }) => [styles.episode, { opacity: pressed ? 0.7 : 1 }]}>
                 <View style={styles.thumb}>
                   <Image
-                    source={jfImage(settings, e.Id, 'Primary', { tag: e.ImageTags?.Primary, maxWidth: 400 })}
+                    source={jfEpisodeThumb(settings, e)}
+                    recyclingKey={e.Id}
+                    cachePolicy="memory-disk"
+                    transition={120}
                     style={StyleSheet.absoluteFill}
                     contentFit="cover"
                   />
@@ -96,10 +132,24 @@ export function JfEpisodes({ seriesId }: { seriesId: string }) {
               </Pressable>
             );
           })}
+          {episodes.length > limit ? (
+            <Button
+              title={`Afficher plus (${episodes.length - limit} épisodes)`}
+              icon="chevron-down"
+              variant="secondary"
+              onPress={() => setLimit((n) => n + 30)}
+            />
+          ) : null}
         </View>
       )}
     </View>
   );
+}
+
+/** Fiche TMDB d'une série présente dans Jellyfin. */
+export function JfEpisodes({ seriesId }: { seriesId: string }) {
+  const state = useSeriesEpisodes(seriesId);
+  return <EpisodePicker {...state} title="Épisodes" />;
 }
 
 const styles = StyleSheet.create({
