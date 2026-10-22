@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Profil → Serveur : pourcentage d'avancement de Jellyfin pendant le remplacement des métadonnées par TMDB (et pendant un scan), bibliothèque par bibliothèque (serveur Lumio 3.26.0).
+
 - Better Posters retiré (iPhone et Android) : toutes les affiches viennent de TMDB.
 - Affiches et fonds toujours visibles : si Jellyfin n'a pas (ou plus) d'image pour un titre, l'affiche ou le fond TMDB s'affiche à la place, via le serveur Lumio (3.25.0), même sans identifiant TMDB (recherche par titre et année).
 

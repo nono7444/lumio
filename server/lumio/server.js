@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.25.0';
+const VERSION = '3.26.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2284,6 +2284,21 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       const r = await fetch(`${JELLYFIN_URL}/Library/Refresh`, { method: 'POST', headers: jfHeaders(user.token) });
       if (!r.ok) throw new HttpError(502, `Jellyfin a refusé le scan (HTTP ${r.status})`);
       return send(res, 200, { ok: true, message: 'Scan des bibliothèques lancé.' });
+    }
+    // Avancement de l'actualisation des bibliothèques Jellyfin (remplacement TMDB, scan) : pourcentage par bibliothèque
+    if (req.method === 'GET' && p === '/api/admin/jellyfin/refresh-status') {
+      requireAdmin(user);
+      const r = await fetch(`${JELLYFIN_URL}/Library/VirtualFolders`, { headers: jfHeaders(user.token) });
+      if (!r.ok) throw new HttpError(502, `Jellyfin a refusé (HTTP ${r.status})`);
+      const libs = (await r.json())
+        .filter((l) => l.ItemId)
+        .map((l) => {
+          const active = l.RefreshStatus === 'Active' || (l.RefreshProgress != null && l.RefreshProgress < 100);
+          return { name: l.Name, active, progress: active ? Math.max(0, Math.min(100, Math.round(l.RefreshProgress || 0))) : 100 };
+        });
+      const running = libs.filter((l) => l.active);
+      const progress = libs.length ? Math.round(libs.reduce((n, l) => n + l.progress, 0) / libs.length) : 100;
+      return send(res, 200, { active: running.length > 0, progress, libraries: libs });
     }
     if (req.method === 'POST' && p === '/api/admin/jellyfin/replace-metadata') {
       requireAdmin(user);

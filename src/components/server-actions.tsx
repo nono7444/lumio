@@ -1,5 +1,5 @@
 // Profil → Serveur (admin) : scan des bibliothèques, métadonnées remplacées par TMDB (iPhone), redémarrage de Jellyfin, mise à jour du serveur Lumio, redémarrage du PC.
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Platform, StyleSheet, Text, View } from 'react-native';
 
 import { toast } from '@/components/toast';
@@ -33,16 +33,56 @@ const ASK: Record<Action, { title: string; text: string; ok: string; path: strin
   },
 };
 
+type RefreshStatus = { active: boolean; progress: number; libraries: { name: string; active: boolean; progress: number }[] };
+
 export function ServerActionsSection() {
   const { settings } = useSettings();
   const [busy, setBusy] = useState<Action | null>(null);
-  if (!settings.chatUrl || settings.jellyfin?.isAdmin !== true || Platform.isTV) return null;
+  const allowed = Boolean(settings.chatUrl) && settings.jellyfin?.isAdmin === true && !Platform.isTV;
+  // Avancement de Jellyfin (remplacement TMDB ou scan) : vérifié toutes les 3 s tant qu'il travaille
+  const [refresh, setRefresh] = useState<RefreshStatus | null>(null);
+  const [watch, setWatch] = useState(0);
+  const sawActive = useRef(false);
+  const poll = useCallback(async () => {
+    try {
+      const st = await serverCall<RefreshStatus>(settings, '/api/admin/jellyfin/refresh-status');
+      setRefresh(st);
+      if (st.active) sawActive.current = true;
+      else if (sawActive.current) {
+        sawActive.current = false;
+        toast('Jellyfin a terminé : métadonnées et images à jour');
+      }
+      return st.active;
+    } catch {
+      return false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.chatUrl, settings.jellyfin?.token]);
+  useEffect(() => {
+    if (!allowed) return;
+    let alive = true;
+    let t: ReturnType<typeof setTimeout>;
+    let tries = 0;
+    const tick = async () => {
+      const active = await poll();
+      tries++;
+      // Juste après le lancement, Jellyfin met parfois quelques secondes à démarrer : on insiste un peu
+      if (alive && (active || (watch > 0 && tries < 10))) t = setTimeout(tick, 3000);
+    };
+    tick();
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [allowed, poll, watch]);
+  if (!allowed) return null;
 
   const run = async (a: Action) => {
     setBusy(a);
     try {
       const r = await serverCall<{ message?: string }>(settings, ASK[a].path, { method: 'POST', body: '{}' });
       toast(r.message ?? 'C’est parti');
+      if (a === 'tmdb' || a === 'scan') setWatch((n) => n + 1);
       if (a === 'reboot' || a === 'update') {
         // Si le service de la machine n'est pas installé, la demande reste en attente : on prévient
         setTimeout(async () => {
@@ -88,6 +128,24 @@ export function ServerActionsSection() {
             onPress={() => confirm('tmdb')}
           />
         ) : null}
+        {refresh?.active ? (
+          <View style={styles.progressBox}>
+            <View style={styles.progressHead}>
+              <Text style={styles.progressTitle}>Jellyfin actualise les bibliothèques</Text>
+              <Text style={styles.progressPct}>{refresh.progress} %</Text>
+            </View>
+            <View style={styles.track}>
+              <View style={[styles.fill, { width: `${refresh.progress}%` }]} />
+            </View>
+            {refresh.libraries
+              .filter((l) => l.active)
+              .map((l) => (
+                <Text key={l.name} style={[styles.help, { marginBottom: 0 }]}>
+                  {l.name} : {l.progress} %
+                </Text>
+              ))}
+          </View>
+        ) : null}
         <Button title="Redémarrer Jellyfin" icon="reload-circle-outline" variant="secondary" loading={busy === 'jellyfin'} onPress={() => confirm('jellyfin')} />
         <Button title="Mettre à jour le serveur Lumio" icon="cloud-download-outline" variant="secondary" loading={busy === 'update'} onPress={() => confirm('update')} />
         <Button title="Redémarrer le PC serveur" icon="power" variant="danger" loading={busy === 'reboot'} onPress={() => confirm('reboot')} />
@@ -98,4 +156,10 @@ export function ServerActionsSection() {
 
 const styles = StyleSheet.create({
   help: { color: C.textDim, fontSize: 13, lineHeight: 19, marginBottom: 12 },
+  progressBox: { backgroundColor: C.surface, borderRadius: 14, padding: 14, gap: 8 },
+  progressHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
+  progressTitle: { color: C.text, fontSize: 14, fontWeight: '700', flex: 1 },
+  progressPct: { color: C.accent, fontSize: 18, fontWeight: '900', fontVariant: ['tabular-nums'] },
+  track: { height: 8, borderRadius: 4, backgroundColor: C.surfaceHigh, overflow: 'hidden' },
+  fill: { height: 8, borderRadius: 4, backgroundColor: C.accent },
 });
