@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.84 — 22 octobre 2026
+
 - iPhone : la partie Addons Stremio et Lumio Secour (onglet et bouton « Liens ») est retirée.
 
 - Serveur 3.22.0 : recherche TMDB pour Lumio TV (`/api/tmdb/search`, avec le statut sur le serveur) et relais TMDB (`/api/tmdb/proxy/…`) ; `/health` indique si la clé TMDB est configurée.
