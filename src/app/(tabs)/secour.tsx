@@ -202,7 +202,7 @@ export default function SecourTab() {
   const online = status?.configured && status.online;
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: C.bg }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: C.bg }} behavior={undefined}>
       <ScrollView
         contentContainerStyle={{ paddingTop: insets.top, paddingHorizontal: 16, paddingBottom: TAB_SPACE + insets.bottom, gap: 14 }}
         keyboardShouldPersistTaps="handled"
