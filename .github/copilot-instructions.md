@@ -32,7 +32,7 @@ La famille utilise les applis **depuis l'extérieur** via le serveur public ; No
 3. La clé **AllDebrid** reste côté serveur (`ALLDEBRID_KEY` / `config.alldebridKey`) et n'est jamais renvoyée aux applis.
 4. La **clé TMDB** est partagée par le serveur (`GET /api/config/tmdb`, utilisateur authentifié) — les applis la récupèrent, elle n'est pas compilée dans les applis.
 5. **Licence** : `lumio-tv` est un fork de NuvioTV sous **GPL-3.0** → il reste GPL, public, avec les crédits dans `NOTICE.md` (à compléter à chaque modification notable). **Ne jamais copier de code de NuvioTV dans `nono7444/lumio`** (ce dépôt n'est pas GPL) : on peut s'inspirer du design, pas recopier.
-6. Pas d'IPTV pirate, pas de scrapers de téléchargement direct pirates (wastream refusé). Les sources IPTV sont celles que Norman ajoute lui-même.
+6. Pas d'IPTV pirate, pas de scrapers de téléchargement direct pirates. Les sources IPTV sont celles que Norman ajoute lui-même.
 7. Ne pas annuler / relancer un build CI sans demander (exception : un nouveau push annule automatiquement le build précédent, c'est accepté).
 
 ---
