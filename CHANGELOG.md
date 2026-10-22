@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.92 — 22 octobre 2026
+
 - Sous-titres français : dans le lecteur (bouton des pistes), « Chercher des sous-titres français » trouve et ajoute des sous-titres OpenSubtitles en direct. Le serveur Lumio en ajoute aussi tout seul aux nouveaux films et épisodes sans sous-titres ni audio français (plugin « Open Subtitles » de Jellyfin requis) ; ils apparaissent ensuite partout, Lumio TV comprise.
 - Fond de l'accueil au choix (Profil → Personnalisation) : titres du serveur, selon la saison, Halloween, Noël ou une photo de la galerie.
 - iPhone : appui long sur la barre d'onglets → loupe en verre façon iOS 26 qui suit le doigt ; on relâche sur l'onglet voulu. (Personnaliser la barre : Profil → Personnalisation → Accueil et onglets.)
