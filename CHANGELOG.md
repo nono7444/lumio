@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.87 — 22 octobre 2026
+
 - Fiche d'une série : chaque saison affiche son statut (Disponible, 6/10 épisodes, En téléchargement, Demandée, Pas disponible), avec le nombre de saisons disponibles et un bouton « Demander » à côté de chaque saison manquante.
 - Serveur Lumio 3.22.1 : nombre d'épisodes présents par saison.
 
