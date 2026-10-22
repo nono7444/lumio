@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.80 — 22 octobre 2026
+
 - Addons Stremio de catalogue réactivés (Profil → Addons Stremio) : leurs listes apparaissent en rangées sur l'accueil, les titres absents du serveur se demandent comme d'habitude. Les flux des addons ne sont pas utilisés.
 
 - Admin, Profil → Serveur : scanner les bibliothèques, redémarrer Jellyfin, mettre à jour le serveur Lumio et redémarrer le PC serveur (avec confirmation).
