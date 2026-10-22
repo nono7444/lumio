@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.20.0';
+const VERSION = '3.21.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2270,7 +2270,17 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
     if (p.startsWith('/api/files') || p.startsWith('/api/downloads') || p === '/api/alldebrid') {
       requireAdmin(user);
       if (req.method === 'GET' && p === '/api/alldebrid') {
-        return send(res, 200, { configured: Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey), disks: disks().length });
+        const out = { configured: Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey), fromEnv: Boolean(process.env.ALLDEBRID_KEY), disks: disks().length };
+        // ?check=1 : vérifie la clé et renvoie l'état du compte (premium, date de fin)
+        if (out.configured && q.get('check')) {
+          try {
+            const u = (await ad('/v4/user')).user || {};
+            out.account = { username: u.username || null, premium: Boolean(u.isPremium), premiumUntil: u.premiumUntil ? new Date(u.premiumUntil * 1000).toISOString() : null };
+          } catch (e) {
+            out.error = String((e && e.message) || e);
+          }
+        }
+        return send(res, 200, out);
       }
       if (req.method === 'PUT' && p === '/api/alldebrid') {
         const b = await readBody(req);
@@ -2426,6 +2436,17 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         if (b.url === '') delete config.secourKey;
         saveConfig();
         return send(res, 200, { configured: Boolean(secourUrl() && secourKey()) });
+      }
+      // Réglages du fork (sources, TMDB, cache…) : relayés tels quels, la clé Lumio Secour reste ici
+      if (req.method === 'GET' && p === '/api/secour/settings') return send(res, 200, await secour('/lumio/settings', { timeout: 15000 }));
+      if (req.method === 'PUT' && p === '/api/secour/settings') {
+        const b = await readBody(req);
+        return send(res, 200, await secour('/lumio/settings', { method: 'PUT', body: { updates: b.updates || {} }, timeout: 15000 }));
+      }
+      const secSet = p.match(/^\/api\/secour\/settings\/([A-Z0-9_]+)$/);
+      if (req.method === 'DELETE' && secSet) return send(res, 200, await secour(`/lumio/settings/${secSet[1]}`, { method: 'DELETE', timeout: 15000 }));
+      if (req.method === 'GET' && p === '/api/secour/health') {
+        return send(res, 200, await secour(`/lumio/health${q.get('refresh') ? '?refresh=true' : ''}`, { timeout: 60000 }));
       }
       if (req.method === 'GET' && p === '/api/secour/links') {
         const type = q.get('type') === 'tv' || q.get('type') === 'series' ? 'series' : 'movie';

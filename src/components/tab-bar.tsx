@@ -29,6 +29,7 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   live: 'tv',
   chat: 'chatbubbles',
   activity: 'file-tray-full',
+  secour: 'link',
 };
 
 // Libellés courts, affichés sous chaque icône (comme la barre d'onglets d'iOS)
@@ -40,6 +41,7 @@ const SHORT: Record<string, string> = {
   live: 'Live TV',
   chat: 'Chat',
   activity: 'Demandes',
+  secour: 'Secour',
   settings: 'Profil',
 };
 
