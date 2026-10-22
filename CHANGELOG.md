@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.82 — 22 octobre 2026
+
 - Nouvel onglet « Lumio Secour » (admin) : connexion au service, clé et compte AllDebrid, état des sources, et tous les réglages de Lumio Secour (sources, jeton TMDB, cache…) modifiables depuis l'appli.
 - Fiche d'un film ou d'une série (admin) : nouveau bouton « Liens » qui affiche les liens trouvés par Lumio Secour (qualité, langue, taille, dispo AllDebrid) ; un appui télécharge le fichier sur le disque choisi.
 
