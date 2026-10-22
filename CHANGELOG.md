@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.91 — 22 octobre 2026
+
 - Profil → Serveur : pourcentage d'avancement de Jellyfin pendant le remplacement des métadonnées par TMDB (et pendant un scan), bibliothèque par bibliothèque (serveur Lumio 3.26.0).
 
 - Better Posters retiré (iPhone et Android) : toutes les affiches viennent de TMDB.
