@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.102 — 23 octobre 2026
+
 - Bouton « Séries : numérotation TheTVDB » retiré.
 
 - La version Mac n'est plus compilée ni publiée.
