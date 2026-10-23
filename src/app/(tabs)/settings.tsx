@@ -7,7 +7,7 @@ import { FocusPressable as Pressable } from '@/components/tv';
 import { Picker, Toggle } from '@/components/arr-section';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Button, Field, ScreenTitle, Section } from '@/components/ui';
+import { Button, Field, ScreenTitle, Section, SectionCollapse } from '@/components/ui';
 import { ADDONS_ENABLED } from '@/constants/features';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { AppVersionSection } from '@/components/app-version';
@@ -21,6 +21,7 @@ import { DEFAULT_TV_SCALE, TV_SCALES } from '@/lib/tv-ui';
 import { AnnouncementEditor } from '@/components/announcement';
 import { NotifySubscribeSection } from '@/components/notify-subscribe';
 import { ServerActionsSection } from '@/components/server-actions';
+import { StorageSection } from '@/components/storage-section';
 import { HOME_BACKGROUNDS, pickHomePhoto } from '@/components/home-backdrop';
 import { Addon, DEFAULT_ADDON, isManager, useSettings, type HomeBackground } from '@/lib/settings';
 import { logout as logoutJellyfin, QUALITIES } from '@/lib/jellyfin';
@@ -101,6 +102,9 @@ function AddonCard({ addon, onChange, onRemove }: { addon: Addon; onChange: (a: 
 
 export default function SettingsScreen() {
   const { settings, update } = useSettings();
+  // Sections repliées : « Tout ouvrir » / « Tout fermer » en haut
+  const [allOpen, setAllOpen] = useState<boolean | null>(null);
+  const [collapseVersion, setCollapseVersion] = useState(0);
   const insets = useSafeAreaInsets();
   const manager = isManager(settings);
   const serverReq = useServerRequests();
@@ -172,9 +176,27 @@ export default function SettingsScreen() {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <SectionCollapse.Provider value={{ enabled: !Platform.isTV, all: allOpen, version: collapseVersion }}>
       <ScrollView style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ paddingTop: insets.top, paddingHorizontal: 16, paddingBottom: TAB_SPACE }} keyboardShouldPersistTaps="handled">
         <View style={{ marginHorizontal: -16 }}>
-          <ScreenTitle title="Profil" />
+          <ScreenTitle
+            title="Profil"
+            right={
+              Platform.isTV ? undefined : (
+                <Pressable
+                  onPress={() => {
+                    const next = !(allOpen ?? false);
+                    setAllOpen(next);
+                    setCollapseVersion((v) => v + 1);
+                  }}
+                  hitSlop={8}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, backgroundColor: C.surface }}>
+                  <Ionicons name={allOpen ? 'contract-outline' : 'expand-outline'} size={15} color={C.text} />
+                  <Text style={{ color: C.text, fontSize: 13, fontWeight: '700' }}>{allOpen ? 'Tout fermer' : 'Tout ouvrir'}</Text>
+                </Pressable>
+              )
+            }
+          />
         </View>
         {appUpdate ? <AppVersionSection /> : null}
         {Platform.isTV ? null : <NowPlayingEntry />}
@@ -217,6 +239,7 @@ export default function SettingsScreen() {
         {serverReq && !Platform.isTV ? <NotifySubscribeSection /> : null}
         {serverReq && settings.jellyfin?.isAdmin !== false && !Platform.isTV ? <AnnouncementEditor /> : null}
 
+        <StorageSection />
         <ServerActionsSection />
 
         {serverReq && settings.jellyfin?.isAdmin !== false && !Platform.isTV ? (
@@ -374,6 +397,7 @@ export default function SettingsScreen() {
 
         {!appUpdate ? <AppVersionSection /> : null}
       </ScrollView>
+      </SectionCollapse.Provider>
     </KeyboardAvoidingView>
   );
 }

@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { tap } from '@/components/ui';
 import { C } from '@/constants/theme';
 
+import { SkipButton } from './skip-button';
 import { formatTime, type PlayerProps, type RemoteSubtitle } from './types';
 
 const HIDE_AFTER_MS = 3500;
@@ -23,7 +24,7 @@ function trackLabel(t: TrackInfo) {
 }
 
 /** Lecteur mpv avec contrôles maison (lecture, barre de progression, pistes, vitesse, zoom). */
-export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onReady, onError, onClose, onEnded, extra, statsInfo, onPip, audioUri, subtitleFinder }: PlayerProps) {
+export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onReady, onError, onClose, onEnded, extra, statsInfo, onPip, audioUri, subtitleFinder, segments }: PlayerProps) {
   const insets = useSafeAreaInsets();
   const ref = useRef<ExpoMpvViewRef>(null);
   const [source, setSource] = useState<string | undefined>();
@@ -365,6 +366,9 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
           </View>
         </View>
       )}
+
+      {/* Passer l'intro / le générique */}
+      {!sheet ? <SkipButton segments={segments} position={position} onSkip={(to) => ref.current?.seekTo(to).catch(() => {})} /> : null}
 
       {/* Feuille des pistes audio / sous-titres */}
       {sheet && (

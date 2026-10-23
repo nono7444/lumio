@@ -16,7 +16,7 @@ import { Button } from '@/components/ui';
 import { C } from '@/constants/theme';
 import { getPlayback, jf, jfImage, playback, QUALITIES, type PlaybackTarget } from '@/lib/jellyfin';
 import { QualitySheet } from '@/components/players/quality';
-import type { SubtitleFinder } from '@/components/players/types';
+import type { SkipSegment, SubtitleFinder } from '@/components/players/types';
 import { serverCall } from '@/lib/chat';
 import { tmdbNextEpisode } from '@/lib/smart-play';
 import { useSettings } from '@/lib/settings';
@@ -277,6 +277,14 @@ export default function Player() {
     DirectStream: 'Flux direct (remuxé par le serveur)',
     Transcode: 'Conversion par le serveur',
   };
+  // Intro / générique à passer (segments Jellyfin)
+  const [segments, setSegments] = useState<SkipSegment[]>([]);
+  useEffect(() => {
+    if (p.kind !== 'jellyfin' || !p.itemId) return;
+    jf.mediaSegments(settings, p.itemId).then(setSegments).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.itemId]);
+
   // Sous-titres français à télécharger (Jellyfin + plugin Open Subtitles, via le serveur Lumio)
   const subtitleFinder: SubtitleFinder | undefined =
     p.kind === 'jellyfin' && p.itemId && settings.chatUrl && settings.jellyfin
@@ -354,6 +362,7 @@ export default function Player() {
             extra={castBtn}
             statsInfo={statsInfo}
             subtitleFinder={subtitleFinder}
+            segments={segments}
             onPip={
               Platform.OS === 'ios' && !p.audio
                 ? () => {
@@ -366,6 +375,7 @@ export default function Player() {
         ) : (
           <NativePlayer
             key={`native-${attempt}`}
+            segments={segments}
             uri={source.uri}
             headers={source.headers}
             isHls={source.isHls}

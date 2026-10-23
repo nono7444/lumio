@@ -3,7 +3,7 @@ import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import { ReactNode, useState } from 'react';
+import { createContext, ReactNode, useContext, useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle , Platform } from 'react-native';
 import { verdict } from '@/lib/ratings';
 import { setTvFocus } from '@/lib/tv-focus';
@@ -293,11 +293,52 @@ export function Field({ label, hint, ...props }: TextInputProps & { label: strin
   );
 }
 
-export function Section({ title, children }: { title: string; children: ReactNode }) {
+/**
+ * Sections repliables (écran Profil) : chaque section est fermée par défaut, « + » pour l'ouvrir, « − » pour la refermer.
+ * `version` change quand on appuie sur « Tout ouvrir » / « Tout fermer ».
+ */
+export const SectionCollapse = createContext<{ enabled: boolean; all: boolean | null; version: number }>({ enabled: false, all: null, version: 0 });
+const openSections = new Map<string, boolean>();
+
+export function Section({ title, children, defaultOpen = false, id }: { title: string; children: ReactNode; defaultOpen?: boolean; id?: string }) {
+  const ctx = useContext(SectionCollapse);
+  // Titre sans emoji ni ponctuation de statut pour mémoriser l'état (ex. « ✅ Tout est en ligne »)
+  const key = id ?? title.replace(/[^\p{L}\p{N} ]/gu, '').trim();
+  const [open, setOpen] = useState(() => openSections.get(key) ?? defaultOpen);
+  useEffect(() => {
+    if (ctx.all == null) return;
+    setOpen(ctx.all);
+    openSections.set(key, ctx.all);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx.version]);
+  if (!ctx.enabled)
+    return (
+      <View style={{ marginBottom: 22 }}>
+        <Text style={styles.sectionTitle}>{title}</Text>
+        <View style={styles.section}>{children}</View>
+      </View>
+    );
   return (
-    <View style={{ marginBottom: 22 }}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      <View style={styles.section}>{children}</View>
+    <View style={{ marginBottom: open ? 22 : 10 }}>
+      <Pressable
+        onPress={() => {
+          tap();
+          setOpen((o) => {
+            openSections.set(key, !o);
+            return !o;
+          });
+        }}
+        style={[styles.sectionHead, !open && styles.sectionHeadClosed]}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}>
+        <Text style={[styles.sectionTitle, { marginBottom: 0, flex: 1 }]} numberOfLines={1}>
+          {title}
+        </Text>
+        <View style={styles.sectionToggle}>
+          <Ionicons name={open ? 'remove' : 'add'} size={18} color={C.text} />
+        </View>
+      </Pressable>
+      {open ? <View style={[styles.section, { marginTop: 8 }]}>{children}</View> : null}
     </View>
   );
 }
@@ -468,6 +509,9 @@ const styles = StyleSheet.create({
   },
   hint: { color: C.textFaint, fontSize: 12, marginTop: 6, lineHeight: 17 },
   section: { backgroundColor: C.surface, borderRadius: R.lg, padding: 16 },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
+  sectionHeadClosed: { backgroundColor: C.surface, borderRadius: R.lg, paddingHorizontal: 16, paddingVertical: 14 },
+  sectionToggle: { width: 30, height: 30, borderRadius: 15, backgroundColor: C.surfaceHigh, alignItems: 'center', justifyContent: 'center' },
   sectionTitle: {
     color: C.textDim,
     fontSize: 13,

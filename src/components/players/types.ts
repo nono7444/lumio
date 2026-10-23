@@ -27,7 +27,11 @@ export type PlayerProps = {
   autoPip?: boolean;
   /** Sous-titres français à télécharger (OpenSubtitles via Jellyfin et le serveur Lumio) */
   subtitleFinder?: SubtitleFinder;
+  /** Intro, récap, générique détectés par Jellyfin (extension « Intro Skipper ») : bouton « Passer » */
+  segments?: SkipSegment[];
 };
+
+export type SkipSegment = { type: 'intro' | 'recap' | 'outro' | 'preview'; start: number; end: number };
 
 export type RemoteSubtitle = { id: string; label: string; detail: string };
 export type SubtitleFinder = {

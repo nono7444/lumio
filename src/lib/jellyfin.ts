@@ -422,6 +422,16 @@ export const jf = {
     return p;
   },
 
+  /** Intro, récap, générique détectés par Jellyfin (extension « Intro Skipper », Jellyfin 10.10+) */
+  mediaSegments: async (s: Settings, itemId: string) => {
+    const { get } = api(s);
+    const r = await get<{ Items: { Type: string; StartTicks: number; EndTicks: number }[] }>(`/MediaSegments/${itemId}`).catch(() => ({ Items: [] }));
+    const map: Record<string, 'intro' | 'recap' | 'outro' | 'preview'> = { Intro: 'intro', Recap: 'recap', Outro: 'outro', Preview: 'preview' };
+    return (r.Items ?? [])
+      .filter((x) => map[x.Type] && x.EndTicks > x.StartTicks)
+      .map((x) => ({ type: map[x.Type], start: x.StartTicks / 1e7, end: x.EndTicks / 1e7 }));
+  },
+
   /** Épisodes déjà chargés (affichage immédiat sans indicateur de chargement) */
   cachedEpisodes: (s: Settings, seasonId: string) => {
     const hit = s.jellyfin ? episodeCache.get(`${s.jellyfin.userId}:${seasonId}`) : undefined;

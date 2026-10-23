@@ -277,7 +277,7 @@ export function UptimeSection() {
 
   const allOk = services?.every((s) => s.ok);
   return (
-    <Section title={services ? (allOk ? '✅ Tout est en ligne' : '⚠️ Un service ne répond pas') : 'Serveurs'}>
+    <Section id="serveurs" title={services ? (allOk ? '✅ Tout est en ligne' : '⚠️ Un service ne répond pas') : 'Serveurs'}>
       <View style={{ gap: 12 }}>
         {error ? <Text style={[styles.desc, { color: '#FF453A' }]}>{error}</Text> : null}
         {sys ? <SystemCard sys={sys} /> : null}

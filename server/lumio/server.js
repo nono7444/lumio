@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.28.0';
+const VERSION = '3.29.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -754,6 +754,95 @@ async function autoFrenchSubtitles() {
 }
 setTimeout(() => autoFrenchSubtitles().catch(() => {}), 3 * 60_000);
 setInterval(() => autoFrenchSubtitles().catch(() => {}), 60 * 60_000);
+
+// ——— Disques et nettoyage (Profil → Stockage) ———
+// Espace des disques vu par Radarr / Sonarr, plus gros titres et ceux que personne n'a regardés.
+async function diskSpace() {
+  const lists = await Promise.all(
+    ['radarr', 'sonarr'].map((k) => (arrConfig(k) ? arr(k, '/diskspace').catch(() => []) : []))
+  );
+  const byPath = new Map();
+  for (const d of lists.flat()) {
+    if (!d || !d.totalSpace || d.totalSpace < 20e9) continue; // petits volumes système ignorés
+    const key = `${d.totalSpace}:${Math.round(d.freeSpace / 1e9)}`; // même disque monté à deux endroits
+    if (![...byPath.values()].some((x) => x.key === key)) byPath.set(d.path, { key, path: d.path, label: d.label || d.path, free: d.freeSpace, total: d.totalSpace });
+  }
+  return [...byPath.values()].map(({ key, ...d }) => d).sort((a, b) => a.path.localeCompare(b.path));
+}
+let diskCache = null;
+async function diskSummary() {
+  if (diskCache && Date.now() - diskCache.at < 5 * 60_000) return diskCache.value;
+  const value = await diskSpace().catch(() => []);
+  diskCache = { at: Date.now(), value };
+  return value;
+}
+/** Ce que chaque membre de la famille a regardé (films vus, séries entamées), via Jellyfin. */
+async function watchedSets(token) {
+  const out = { movies: new Map(), series: new Map() }; // tmdbId / tvdbId → date de dernière lecture
+  const ur = await fetch(`${JELLYFIN_URL}/Users`, { headers: jfHeaders(token) });
+  if (!ur.ok) return out;
+  const users = await ur.json();
+  const sr = await fetch(`${JELLYFIN_URL}/Items?Recursive=true&IncludeItemTypes=Series&Fields=ProviderIds&EnableImages=false`, { headers: jfHeaders(token) });
+  const seriesIds = new Map(); // id Jellyfin → tvdb
+  if (sr.ok) for (const x of (await sr.json()).Items || []) if (x.ProviderIds && x.ProviderIds.Tvdb) seriesIds.set(x.Id, Number(x.ProviderIds.Tvdb));
+  const keep = (map, k, d) => {
+    if (!k) return;
+    const t = d ? Date.parse(d) : 0;
+    if (!map.has(k) || map.get(k) < t) map.set(k, t);
+  };
+  for (const u of users) {
+    const q = (types) => `${JELLYFIN_URL}/Users/${u.Id}/Items?Recursive=true&IncludeItemTypes=${types}&Filters=IsPlayed&Fields=ProviderIds&EnableImages=false`;
+    const [m, e] = await Promise.all([
+      fetch(q('Movie'), { headers: jfHeaders(token) }).then((r) => (r.ok ? r.json() : { Items: [] })).catch(() => ({ Items: [] })),
+      fetch(q('Episode'), { headers: jfHeaders(token) }).then((r) => (r.ok ? r.json() : { Items: [] })).catch(() => ({ Items: [] })),
+    ]);
+    for (const x of m.Items || []) keep(out.movies, x.ProviderIds && Number(x.ProviderIds.Tmdb), x.UserData && x.UserData.LastPlayedDate);
+    for (const x of e.Items || []) keep(out.series, seriesIds.get(x.SeriesId), x.UserData && x.UserData.LastPlayedDate);
+  }
+  return out;
+}
+async function storageReport(token) {
+  const [disks, movies, series, watched] = await Promise.all([
+    diskSpace(),
+    arrConfig('radarr') ? arr('radarr', '/movie').catch(() => []) : [],
+    arrConfig('sonarr') ? arr('sonarr', '/series').catch(() => []) : [],
+    watchedSets(token).catch(() => ({ movies: new Map(), series: new Map() })),
+  ]);
+  const items = [];
+  for (const m of movies) {
+    if (!m.hasFile || !m.sizeOnDisk) continue;
+    const last = watched.movies.get(m.tmdbId) || 0;
+    items.push({ kind: 'radarr', id: m.id, type: 'movie', tmdbId: m.tmdbId, title: m.title, year: m.year, size: m.sizeOnDisk, added: m.added, watched: last > 0, lastPlayed: last ? new Date(last).toISOString() : null, poster: ((m.images || []).find((i) => i.coverType === 'poster') || {}).remoteUrl || null });
+  }
+  for (const sr of series) {
+    const size = sr.statistics && sr.statistics.sizeOnDisk;
+    if (!size) continue;
+    const last = watched.series.get(sr.tvdbId) || 0;
+    items.push({ kind: 'sonarr', id: sr.id, type: 'tv', tmdbId: sr.tmdbId, title: sr.title, year: sr.year, size, added: sr.added, watched: last > 0, lastPlayed: last ? new Date(last).toISOString() : null, poster: ((sr.images || []).find((i) => i.coverType === 'poster') || {}).remoteUrl || null });
+  }
+  const yearAgo = Date.now() - 365 * 86400e3;
+  // À nettoyer : jamais regardé et ajouté il y a plus de 6 mois, ou plus regardé depuis un an
+  const old = (x) => (!x.watched && Date.parse(x.added || 0) < Date.now() - 182 * 86400e3) || (x.watched && Date.parse(x.lastPlayed) < yearAgo);
+  const candidates = items.filter(old).sort((a, b) => b.size - a.size).slice(0, 40);
+  const biggest = [...items].sort((a, b) => b.size - a.size).slice(0, 25);
+  return { disks, candidates, biggest, totalCandidates: candidates.reduce((n, x) => n + x.size, 0) };
+}
+// Alerte : un disque à moins de 10 % d'espace libre (une notification par jour au plus)
+setInterval(async () => {
+  const disks = await diskSpace().catch(() => []);
+  const low = disks.filter((d) => d.free / d.total < 0.1);
+  if (!low.length) return;
+  const today = new Date().toISOString().slice(0, 10);
+  if (config.lastDiskAlert === today) return;
+  config.lastDiskAlert = today;
+  saveConfig();
+  notify({
+    title: 'Disque presque plein',
+    message: low.map((d) => `${d.label} : ${(d.free / 1e9).toFixed(0)} Go libres sur ${(d.total / 1e12).toFixed(1)} To`).join('\n') + '\nProfil → Stockage pour faire de la place.',
+    tags: ['floppy_disk'],
+    click: 'lumio://settings',
+  });
+}, 60 * 60_000);
 
 // Nouvelle version de l'appli iOS publiée → notification push à l'admin (ntfy)
 const APP_SOURCE = process.env.APP_SOURCE_URL || 'https://github.com/nono7444/lumio/releases/latest/download/altstore.json';
@@ -1867,7 +1956,9 @@ const server = http.createServer(async (req, res) => {
     }
     // Processeur et chaleur toujours frais (mesurés toutes les 2 s), sans détail sensible
     const last = sysHistory[sysHistory.length - 1] || {};
-    return send(res, 200, { ...publicStatusCache.body, machine: { cpu: last.cpu ?? null, temp: last.temp ?? null }, at: new Date().toISOString() });
+    // Disques : place libre / totale seulement (aucun titre)
+    const disks = (await diskSummary().catch(() => [])).map((d) => ({ label: d.label, free: d.free, total: d.total }));
+    return send(res, 200, { ...publicStatusCache.body, machine: { cpu: last.cpu ?? null, temp: last.temp ?? null }, disks, at: new Date().toISOString() });
   }
 
   // Raccourci pour installer l'appli Android (téléphone)
@@ -2384,6 +2475,32 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       const data = await tmdbGet(`/${tmdbProxy[1]}`, params);
       if (data == null) return send(res, 404, { status_message: 'introuvable' });
       return send(res, 200, data);
+    }
+
+    // ——— Stockage (admin) : disques, gros titres, titres jamais / plus regardés ———
+    if (req.method === 'GET' && p === '/api/admin/storage') {
+      requireAdmin(user);
+      return send(res, 200, await storageReport(user.token));
+    }
+    const delM = p.match(/^\/api\/admin\/storage\/(radarr|sonarr)\/(\d+)$/);
+    if (req.method === 'DELETE' && delM) {
+      requireAdmin(user);
+      const [, kind, id] = delM;
+      const item = await arr(kind, `/${kind === 'radarr' ? 'movie' : 'series'}/${id}`).catch(() => null);
+      if (!item) throw new HttpError(404, 'Introuvable');
+      await arr(kind, `/${kind === 'radarr' ? 'movie' : 'series'}/${id}?deleteFiles=true&${kind === 'radarr' ? 'addImportExclusion' : 'addImportListExclusion'}=false`, { method: 'DELETE' });
+      // Demandes du titre closes, Jellyfin rescanné pour qu'il disparaisse tout de suite
+      for (const r of requests)
+        if (r.type === (kind === 'radarr' ? 'movie' : 'tv') && r.tmdbId === item.tmdbId && (r.status === RequestStatus.APPROVED || r.status === RequestStatus.COMPLETED)) {
+          r.status = RequestStatus.COMPLETED;
+          r.deletedAt = new Date().toISOString();
+        }
+      saveRequests();
+      fetch(`${JELLYFIN_URL}/Library/Refresh`, { method: 'POST', headers: jfHeaders(user.token) }).catch(() => {});
+      library = null;
+      diskCache = null;
+      console.log(`Stockage : « ${item.title} » supprimé par ${user.name} (${((item.sizeOnDisk || (item.statistics || {}).sizeOnDisk || 0) / 1e9).toFixed(1)} Go)`);
+      return send(res, 200, { ok: true, message: `« ${item.title} » supprimé.` });
     }
 
     // ——— Sous-titres français (lecteur) ———

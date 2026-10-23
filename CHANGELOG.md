@@ -6,6 +6,10 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Profil : toutes les sections sont repliées, « + » / « − » pour ouvrir ou fermer chacune, « Tout ouvrir / Tout fermer » en haut.
+- Lecteur : bouton « Passer l'intro / le récap / le générique » quand Jellyfin a détecté ces passages (extension « Intro Skipper »), aussi sur Lumio TV.
+- Profil → Stockage (admin) : place libre sur chaque disque, titres jamais regardés depuis 6 mois ou plus regardés depuis un an, plus gros titres ; on coche et on supprime (fichiers, Radarr / Sonarr, Jellyfin). Notification quand un disque passe sous 10 % de place libre. Les disques s'affichent aussi sur Lumio TV (serveur Lumio 3.29.0).
+
 ## 1.0.92 — 22 octobre 2026
 
 - Sous-titres français : dans le lecteur (bouton des pistes), « Chercher des sous-titres français » trouve et ajoute des sous-titres OpenSubtitles en direct. Le serveur Lumio en ajoute aussi tout seul aux nouveaux films et épisodes sans sous-titres ni audio français (plugin « Open Subtitles » de Jellyfin requis) ; ils apparaissent ensuite partout, Lumio TV comprise.

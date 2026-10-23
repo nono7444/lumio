@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { SkipButton } from './skip-button';
 import { useEventListener } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useRef, useState } from 'react';
@@ -9,7 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { PlayerProps } from './types';
 
 /** Lecteur natif du téléphone (AVPlayer / ExoPlayer) avec ses contrôles système. */
-export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, onTime, onReady, onError, onClose, onEnded, extra, statsInfo, autoPip }: PlayerProps) {
+export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, onTime, onReady, onError, onClose, onEnded, extra, statsInfo, autoPip, segments }: PlayerProps) {
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const seeked = useRef(false);
@@ -60,7 +61,11 @@ export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, on
 
   useEventListener(player, 'playToEnd', () => onEnded());
 
-  useEventListener(player, 'timeUpdate', ({ currentTime }) => onTime(currentTime, !player.playing));
+  const [pos, setPos] = useState(0);
+  useEventListener(player, 'timeUpdate', ({ currentTime }) => {
+    onTime(currentTime, !player.playing);
+    if (segments?.length) setPos(currentTime);
+  });
 
   return (
     <View style={StyleSheet.absoluteFill}>
@@ -117,6 +122,13 @@ export function NativePlayer({ uri, headers, isHls, title, subtitle, startAt, on
         </View>
       ) : null}
       {extra ? <View style={{ position: 'absolute', top: insets.top + 8, right: insets.right + 12 }}>{extra}</View> : null}
+      <SkipButton
+        segments={segments}
+        position={pos}
+        onSkip={(to) => {
+          player.currentTime = to;
+        }}
+      />
     </View>
   );
 }
