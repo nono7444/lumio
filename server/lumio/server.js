@@ -2301,10 +2301,6 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Raccourci pour installer l'appli Android (téléphone)
-  if (url.pathname === '/mac' || url.pathname === '/mac.dmg') {
-    res.writeHead(302, { Location: 'https://github.com/nono7444/lumio/releases/latest/download/lumio-mac.dmg' });
-    return res.end();
-  }
   if (url.pathname === '/android' || url.pathname === '/android.apk') {
     res.writeHead(302, { Location: process.env.ANDROID_APK_URL || 'https://github.com/nono7444/lumio/releases/latest/download/lumio-android.apk' });
     return res.end();

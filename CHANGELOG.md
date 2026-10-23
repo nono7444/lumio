@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- La version Mac n'est plus compilée ni publiée.
+
 - Téléchargements (admin) : bouton « Envoyer un fichier .torrent » pour choisir un .torrent sur le téléphone ; il passe par AllDebrid puis arrive sur le disque et le dossier choisis, comme les magnets (serveur Lumio 3.34.0).
 
 - Séries sorties en « parties » (Lupin, La Casa de Papel…) : le serveur Lumio repère tout seul les épisodes que Sonarr a rangés au mauvais endroit (sorties numérotées par partie) et les remet à leur place, toutes les 6 h, avec une notification. Sur la fiche, l'admin voit « X épisodes mal rangés » et peut réparer tout de suite (serveur Lumio 3.33.0).

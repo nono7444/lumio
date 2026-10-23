@@ -83,8 +83,8 @@ Compte rendu : court, en français, sans jargon ; dire ce qui change pour lui, c
 - Tout ce qui est propre à la TV est derrière `Platform.isTV` — **ne pas changer le téléphone** quand Norman demande « pour la TV ».
 
 ### CI (`.github/workflows/build.yml`)
-Jobs : `check` → `ios`, `android`, `mac` → `android-smoke` (installe l'APK sur un émulateur API 34 et vérifie qu'elle ne plante pas au démarrage ; sinon l'APK est retirée de la release) → `release`.
-- Chaque build de `main` = version `1.0.<n° de build>`, Release GitHub `build-<n>` avec `lumio-unsigned.ipa`, `lumio-android.apk`, `lumio-mac.dmg`, `altstore.json` (source FlareStore pour iPhone).
+Jobs : `check` → `ios`, `android` (la version Mac est abandonnée) → `android-smoke` (installe l'APK sur un émulateur API 34 et vérifie qu'elle ne plante pas au démarrage ; sinon l'APK est retirée de la release) → `release`.
+- Chaque build de `main` = version `1.0.<n° de build>`, Release GitHub `build-<n>` avec `lumio-unsigned.ipa`, `lumio-android.apk`, `altstore.json` (source FlareStore pour iPhone).
 - Erreurs Xcode / Gradle remontées en **une** annotation `::error::` (GitHub n'en garde que 10). Garde-fou : IPA d'au moins 5 Mo.
 - Le job macOS échoue parfois faute de machine disponible chez GitHub : ce n'est pas un bug du code.
 - `[skip ci]` dans le message de commit évite un build (pour la doc uniquement).
