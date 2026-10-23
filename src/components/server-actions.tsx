@@ -1,4 +1,4 @@
-// Profil → Serveur (admin) : scan des bibliothèques, métadonnées remplacées par TMDB (iPhone), redémarrage de Jellyfin, mise à jour du serveur Lumio, redémarrage du PC.
+// Profil → Serveur (admin) : scan des bibliothèques, redémarrage de Jellyfin, mise à jour du serveur Lumio, redémarrage du PC.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Platform, StyleSheet, Text, View } from 'react-native';
 
@@ -8,16 +8,10 @@ import { C } from '@/constants/theme';
 import { serverCall } from '@/lib/chat';
 import { useSettings } from '@/lib/settings';
 
-type Action = 'scan' | 'tmdb' | 'tvdb' | 'intro' | 'jellyfin' | 'reboot' | 'update';
+type Action = 'scan' | 'tvdb' | 'intro' | 'jellyfin' | 'reboot' | 'update';
 
 const ASK: Record<Action, { title: string; text: string; ok: string; path: string }> = {
   scan: { title: 'Scanner les bibliothèques ?', text: 'Jellyfin va chercher les nouveaux fichiers sur les disques.', ok: 'Scanner', path: '/api/admin/jellyfin/scan' },
-  tmdb: {
-    title: 'Tout remplacer par TMDB ?',
-    text: 'Jellyfin efface les métadonnées et les images de tous les films et séries, puis les retélécharge depuis TMDB (titres, résumés, affiches, fonds). Cela peut prendre de quelques minutes à une heure ; les modifications faites à la main seront perdues.',
-    ok: 'Tout remplacer',
-    path: '/api/admin/jellyfin/replace-metadata',
-  },
   tvdb: {
     title: 'Séries : numérotation TheTVDB ?',
     text: 'Certaines séries sont découpées autrement sur TMDB que dans Sonarr (ex. Lupin), et leurs épisodes se mélangent. Jellyfin installe l’extension TheTVDB (si besoin, avec 1 minute de redémarrage) et l’utilise pour les infos des séries, saisons et épisodes, comme Sonarr. Les affiches restent celles de TMDB.',
@@ -51,7 +45,7 @@ export function ServerActionsSection() {
   const { settings } = useSettings();
   const [busy, setBusy] = useState<Action | null>(null);
   const allowed = Boolean(settings.chatUrl) && settings.jellyfin?.isAdmin === true && !Platform.isTV;
-  // Avancement de Jellyfin (remplacement TMDB ou scan) : vérifié toutes les 3 s tant qu'il travaille
+  // Avancement de Jellyfin (réglage TheTVDB ou scan) : vérifié toutes les 3 s tant qu'il travaille
   const [refresh, setRefresh] = useState<RefreshStatus | null>(null);
   // Intro Skipper déjà installé dans Jellyfin ?
   const [intro, setIntro] = useState<{ installed: boolean; version?: string } | null>(null);
@@ -101,7 +95,7 @@ export function ServerActionsSection() {
     try {
       const r = await serverCall<{ message?: string }>(settings, ASK[a].path, { method: 'POST', body: '{}' });
       toast(r.message ?? 'C’est parti');
-      if (a === 'tmdb' || a === 'scan') setWatch((n) => n + 1);
+      if (a === 'tvdb' || a === 'scan') setWatch((n) => n + 1);
       if (a === 'reboot' || a === 'update') {
         // Si le service de la machine n'est pas installé, la demande reste en attente : on prévient
         setTimeout(async () => {
@@ -138,15 +132,6 @@ export function ServerActionsSection() {
       <Text style={styles.help}>Actions réservées à l’admin.</Text>
       <View style={{ gap: 10 }}>
         <Button title="Scanner les bibliothèques" icon="refresh" variant="secondary" loading={busy === 'scan'} onPress={() => confirm('scan')} />
-        {Platform.OS === 'ios' ? (
-          <Button
-            title="Remplacer toutes les métadonnées par TMDB"
-            icon="images-outline"
-            variant="secondary"
-            loading={busy === 'tmdb'}
-            onPress={() => confirm('tmdb')}
-          />
-        ) : null}
         {refresh?.active ? (
           <View style={styles.progressBox}>
             <View style={styles.progressHead}>
