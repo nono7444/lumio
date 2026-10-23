@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.34.0';
+const VERSION = '3.35.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -952,69 +952,6 @@ async function removeFromArr(r, deleteFiles) {
 const WATCHLIST_FILE = path.join(DATA_DIR, 'watchlist.json');
 let watchlists = readJson(WATCHLIST_FILE, {}); // userId → [{ type, tmdbId, title, year, poster, backdrop, addedAt }]
 const saveWatchlists = () => persist(WATCHLIST_FILE, () => watchlists);
-
-// ——— Séries : numérotation TheTVDB (celle de Sonarr) dans Jellyfin ———
-// Certaines séries n'ont pas le même découpage sur TMDB et sur TheTVDB (ex. Lupin : 2 saisons sur TMDB, 3 « parties »
-// sur TheTVDB). Sonarr range les fichiers selon TheTVDB : si Jellyfin lit les infos sur TMDB, les épisodes sont mélangés.
-// On installe l'extension officielle TheTVDB et on la met en premier pour les séries, saisons et épisodes
-// (les affiches restent celles de TMDB), puis on actualise les infos des séries.
-async function tvdbStatus(token) {
-  const plugins = (await jfJson(token, '/Plugins')) || [];
-  const p = plugins.find((x) => /thetvdb|tvdb/i.test(x.Name || ''));
-  return p ? { installed: true, version: p.Version, status: p.Status, name: p.Name } : { installed: false };
-}
-async function configureTvdbLibraries(token, refresh = true) {
-  const libs = ((await jfJson(token, '/Library/VirtualFolders')) || []).filter((l) => l.CollectionType === 'tvshows' && l.ItemId);
-  const names = [];
-  for (const l of libs) {
-    const opts = l.LibraryOptions || {};
-    const types = Array.isArray(opts.TypeOptions) ? opts.TypeOptions : [];
-    for (const type of ['Series', 'Season', 'Episode']) {
-      let t = types.find((x) => x.Type === type);
-      if (!t) {
-        t = { Type: type, MetadataFetchers: [], MetadataFetcherOrder: [], ImageFetchers: [], ImageFetcherOrder: [] };
-        types.push(t);
-      }
-      const order = (t.MetadataFetcherOrder || []).filter((n) => n !== 'TheTVDB');
-      t.MetadataFetcherOrder = ['TheTVDB', ...order];
-      t.MetadataFetchers = Array.from(new Set(['TheTVDB', ...(t.MetadataFetchers || [])]));
-      // Images : TMDB d'abord (affiches en français), TheTVDB ensuite
-      const io = (t.ImageFetcherOrder || []).filter((n) => n !== 'TheMovieDb');
-      t.ImageFetcherOrder = ['TheMovieDb', ...io];
-    }
-    opts.TypeOptions = types;
-    await jfJson(token, '/Library/VirtualFolders/LibraryOptions', { method: 'POST', body: JSON.stringify({ Id: l.ItemId, LibraryOptions: opts }) });
-    names.push(l.Name);
-    if (refresh) {
-      const q = new URLSearchParams({ Recursive: 'true', MetadataRefreshMode: 'FullRefresh', ImageRefreshMode: 'Default', ReplaceAllMetadata: 'true', ReplaceAllImages: 'false' });
-      await fetch(`${JELLYFIN_URL}/Items/${l.ItemId}/Refresh?${q}`, { method: 'POST', headers: jfHeaders(token) }).catch(() => {});
-    }
-  }
-  return names;
-}
-async function installTvdb(token) {
-  const st = await tvdbStatus(token);
-  if (st.installed && st.status !== 'Restart') {
-    const names = await configureTvdbLibraries(token);
-    return { ok: true, message: `TheTVDB est en place pour ${names.join(', ') || 'les séries'} : Jellyfin réactualise les infos des séries (quelques minutes à une heure).` };
-  }
-  let pkg = null;
-  for (let i = 0; i < 4 && !pkg; i++) {
-    const list = (await jfJson(token, '/Packages').catch(() => [])) || [];
-    pkg = list.find((x) => /^thetvdb$/i.test(x.name || '')) || list.find((x) => /tvdb/i.test(x.name || ''));
-    if (!pkg) await new Promise((ok) => setTimeout(ok, 3000));
-  }
-  if (!pkg) throw new HttpError(502, 'L’extension TheTVDB est introuvable dans le catalogue de Jellyfin.');
-  const r = await fetch(`${JELLYFIN_URL}/Packages/Installed/${encodeURIComponent(pkg.name)}?${new URLSearchParams({ assemblyGuid: pkg.guid })}`, { method: 'POST', headers: jfHeaders(token) });
-  if (!r.ok) throw new HttpError(502, `Installation refusée par Jellyfin (HTTP ${r.status})`);
-  setTimeout(() => fetch(`${JELLYFIN_URL}/System/Restart`, { method: 'POST', headers: jfHeaders(token) }).catch(() => {}), 15_000);
-  // Après le redémarrage : réglage des bibliothèques de séries et actualisation
-  setTimeout(() => configureTvdbLibraries(token).then((n) => console.log(`TheTVDB configuré pour : ${n.join(', ')}`)).catch((e) => console.log('TheTVDB :', e.message)), 150_000);
-  return {
-    ok: true,
-    message: 'TheTVDB s’installe : Jellyfin redémarre dans 15 s (1 minute de coupure), puis les séries sont réglées sur TheTVDB et leurs infos actualisées toutes seules.',
-  };
-}
 
 // ——— Séries sorties en « parties » (Lupin, La Casa de Papel…) : réparation de la numérotation dans Sonarr ———
 // Netflix publie certaines saisons en plusieurs parties, et beaucoup de sorties sont numérotées par partie
@@ -2934,14 +2871,6 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       const running = libs.filter((l) => l.active);
       const progress = libs.length ? Math.round(libs.reduce((n, l) => n + l.progress, 0) / libs.length) : 100;
       return send(res, 200, { active: running.length > 0, progress, libraries: libs });
-    }
-    if (req.method === 'GET' && p === '/api/admin/jellyfin/tvdb') {
-      requireAdmin(user);
-      return send(res, 200, await tvdbStatus(user.token));
-    }
-    if (req.method === 'POST' && p === '/api/admin/jellyfin/tvdb') {
-      requireAdmin(user);
-      return send(res, 200, await installTvdb(user.token));
     }
     if (req.method === 'GET' && p === '/api/admin/jellyfin/intro-skipper') {
       requireAdmin(user);

@@ -8,16 +8,10 @@ import { C } from '@/constants/theme';
 import { serverCall } from '@/lib/chat';
 import { useSettings } from '@/lib/settings';
 
-type Action = 'scan' | 'tvdb' | 'intro' | 'jellyfin' | 'reboot' | 'update';
+type Action = 'scan' | 'intro' | 'jellyfin' | 'reboot' | 'update';
 
 const ASK: Record<Action, { title: string; text: string; ok: string; path: string }> = {
   scan: { title: 'Scanner les bibliothèques ?', text: 'Jellyfin va chercher les nouveaux fichiers sur les disques.', ok: 'Scanner', path: '/api/admin/jellyfin/scan' },
-  tvdb: {
-    title: 'Séries : numérotation TheTVDB ?',
-    text: 'Certaines séries sont découpées autrement sur TMDB que dans Sonarr (ex. Lupin), et leurs épisodes se mélangent. Jellyfin installe l’extension TheTVDB (si besoin, avec 1 minute de redémarrage) et l’utilise pour les infos des séries, saisons et épisodes, comme Sonarr. Les affiches restent celles de TMDB.',
-    ok: 'Appliquer',
-    path: '/api/admin/jellyfin/tvdb',
-  },
   intro: {
     title: 'Installer Intro Skipper ?',
     text: 'L’extension Jellyfin qui repère intros, récaps et génériques (bouton « Passer l’intro »). Jellyfin redémarre une fois (environ 1 minute), puis analyse la bibliothèque en arrière-plan.',
@@ -45,7 +39,7 @@ export function ServerActionsSection() {
   const { settings } = useSettings();
   const [busy, setBusy] = useState<Action | null>(null);
   const allowed = Boolean(settings.chatUrl) && settings.jellyfin?.isAdmin === true && !Platform.isTV;
-  // Avancement de Jellyfin (réglage TheTVDB ou scan) : vérifié toutes les 3 s tant qu'il travaille
+  // Avancement de Jellyfin (scan des bibliothèques) : vérifié toutes les 3 s tant qu'il travaille
   const [refresh, setRefresh] = useState<RefreshStatus | null>(null);
   // Intro Skipper déjà installé dans Jellyfin ?
   const [intro, setIntro] = useState<{ installed: boolean; version?: string } | null>(null);
@@ -95,7 +89,7 @@ export function ServerActionsSection() {
     try {
       const r = await serverCall<{ message?: string }>(settings, ASK[a].path, { method: 'POST', body: '{}' });
       toast(r.message ?? 'C’est parti');
-      if (a === 'tvdb' || a === 'scan') setWatch((n) => n + 1);
+      if (a === 'scan') setWatch((n) => n + 1);
       if (a === 'reboot' || a === 'update') {
         // Si le service de la machine n'est pas installé, la demande reste en attente : on prévient
         setTimeout(async () => {
@@ -124,7 +118,7 @@ export function ServerActionsSection() {
   const confirm = (a: Action) =>
     Alert.alert(ASK[a].title, ASK[a].text, [
       { text: 'Annuler', style: 'cancel' },
-      { text: ASK[a].ok, style: a === 'scan' || a === 'intro' || a === 'tvdb' ? 'default' : 'destructive', onPress: () => run(a) },
+      { text: ASK[a].ok, style: a === 'scan' || a === 'intro' ? 'default' : 'destructive', onPress: () => run(a) },
     ]);
 
   return (
@@ -150,13 +144,6 @@ export function ServerActionsSection() {
               ))}
           </View>
         ) : null}
-        <Button
-          title="Séries : numérotation TheTVDB (comme Sonarr)"
-          icon="list-outline"
-          variant="secondary"
-          loading={busy === 'tvdb'}
-          onPress={() => confirm('tvdb')}
-        />
         <Button
           title={intro?.installed ? `Intro Skipper installé${intro.version ? ` (${intro.version})` : ''} · relancer l’analyse` : 'Installer Intro Skipper (passer l’intro)'}
           icon="play-skip-forward-outline"

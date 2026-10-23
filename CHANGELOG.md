@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Bouton « Séries : numérotation TheTVDB » retiré.
+
 - La version Mac n'est plus compilée ni publiée.
 
 - Téléchargements (admin) : bouton « Envoyer un fichier .torrent » pour choisir un .torrent sur le téléphone ; il passe par AllDebrid puis arrive sur le disque et le dossier choisis, comme les magnets (serveur Lumio 3.34.0).
