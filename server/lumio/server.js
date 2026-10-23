@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.32.0';
+const VERSION = '3.33.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1015,6 +1015,143 @@ async function installTvdb(token) {
     message: 'TheTVDB s’installe : Jellyfin redémarre dans 15 s (1 minute de coupure), puis les séries sont réglées sur TheTVDB et leurs infos actualisées toutes seules.',
   };
 }
+
+// ——— Séries sorties en « parties » (Lupin, La Casa de Papel…) : réparation de la numérotation dans Sonarr ———
+// Netflix publie certaines saisons en plusieurs parties, et beaucoup de sorties sont numérotées par partie
+// (« S02 » = 2e partie) alors que Sonarr / TheTVDB rangent les deux premières parties dans la saison 1.
+// Sonarr range alors « S02E01 » (chapitre 6) à la place du 1er épisode de SA saison 2 (la partie 3).
+// Les parties se repèrent toutes seules : épisodes d'une même saison sortis le même jour (mise en ligne d'un bloc).
+// Un fichier n'est déplacé que si c'est sans ambiguïté : il vient d'un lot dont le nombre d'épisodes correspond
+// à une partie et pas à la saison Sonarr. Déplacement fait par l'import manuel de Sonarr ; doublon : supprimé
+// et sa sortie mise sur liste noire (Sonarr ne la reprendra plus).
+function seriesParts(episodes) {
+  const bySeason = new Map();
+  for (const e of episodes) if (e.seasonNumber > 0) bySeason.set(e.seasonNumber, [...(bySeason.get(e.seasonNumber) || []), e]);
+  const parts = [];
+  let split = false;
+  for (const n of [...bySeason.keys()].sort((a, b) => a - b)) {
+    const eps = bySeason.get(n).sort((a, b) => a.episodeNumber - b.episodeNumber);
+    const day = (e) => (e.airDateUtc || e.airDate || '').slice(0, 10);
+    const batches = [];
+    for (const e of eps) {
+      const last = batches[batches.length - 1];
+      if (last && day(last[last.length - 1]) === day(e) && day(e)) last.push(e);
+      else batches.push([e]);
+    }
+    // Saison en parties : au moins 2 blocs, chacun d'au moins 2 épisodes sortis le même jour
+    if (batches.length >= 2 && batches.every((b) => b.length >= 2)) {
+      split = true;
+      parts.push(...batches);
+    } else parts.push(eps);
+  }
+  return split ? parts : null;
+}
+const SXXEYY = /S(\d{1,2})[ ._-]?E(\d{1,3})/i;
+async function numberingPlan(series) {
+  const [episodes, files] = await Promise.all([
+    arr('sonarr', `/episode?seriesId=${series.id}`),
+    arr('sonarr', `/episodefile?seriesId=${series.id}`),
+  ]);
+  const parts = seriesParts(episodes || []);
+  if (!parts) return null;
+  const seasonCount = (n) => (episodes || []).filter((e) => e.seasonNumber === n).length;
+  const epByFile = new Map((episodes || []).filter((e) => e.episodeFileId).map((e) => [e.episodeFileId, e]));
+  // Lots : fichiers importés ensemble (même saison, même groupe, même qualité, à 2 h près)
+  const lotKey = (f) => [f.seasonNumber, f.releaseGroup || '', (f.quality && f.quality.quality && f.quality.quality.name) || '', Math.floor(Date.parse(f.dateAdded || 0) / 7.2e6)].join('|');
+  const lots = new Map();
+  for (const f of files || []) lots.set(lotKey(f), [...(lots.get(lotKey(f)) || []), f]);
+  const moves = [];
+  for (const f of files || []) {
+    const cur = epByFile.get(f.id);
+    const m = SXXEYY.exec(f.sceneName || '') || SXXEYY.exec((f.relativePath || '').split('/').pop() || '');
+    if (!cur || !m) continue;
+    const X = Number(m[1]);
+    const Y = Number(m[2]);
+    const part = parts[X - 1];
+    const target = part && part[Y - 1];
+    if (!target || (target.seasonNumber === cur.seasonNumber && target.episodeNumber === cur.episodeNumber)) continue;
+    // Preuve : le lot compte autant d'épisodes que la partie X, et pas autant que la saison X de Sonarr
+    const lot = lots.get(lotKey(f)) || [];
+    if (!(lot.length === part.length && lot.length !== seasonCount(X))) continue;
+    const occupied = (episodes || []).find((e) => e.id === target.id && e.hasFile && e.episodeFileId !== f.id);
+    moves.push({
+      fileId: f.id,
+      path: f.path,
+      from: `S${String(cur.seasonNumber).padStart(2, '0')}E${String(cur.episodeNumber).padStart(2, '0')}`,
+      to: `S${String(target.seasonNumber).padStart(2, '0')}E${String(target.episodeNumber).padStart(2, '0')}`,
+      targetEpisodeId: target.id,
+      duplicate: Boolean(occupied),
+      file: f,
+    });
+  }
+  return { seriesId: series.id, title: series.title, parts: parts.length, moves };
+}
+async function applyNumbering(plan) {
+  let moved = 0;
+  let removed = 0;
+  const toImport = plan.moves.filter((m) => !m.duplicate);
+  // Doublons (l'épisode cible a déjà un fichier) : fichier mal rangé supprimé, sortie mise sur liste noire
+  for (const m of plan.moves.filter((x) => x.duplicate)) {
+    await arr('sonarr', `/episodefile/${m.fileId}`, { method: 'DELETE' }).catch(() => null);
+    removed++;
+  }
+  if (plan.moves.some((x) => x.duplicate)) {
+    const hist = await arr('sonarr', `/history/series?seriesId=${plan.seriesId}&eventType=grabbed`).catch(() => []);
+    const bad = new Set(plan.moves.filter((x) => x.duplicate).map((x) => x.file.sceneName).filter(Boolean));
+    for (const h of hist || []) if (bad.has(h.sourceTitle)) await arr('sonarr', `/history/failed/${h.id}`, { method: 'POST' }).catch(() => null);
+  }
+  if (toImport.length) {
+    // L'import manuel de Sonarr rattache chaque fichier au bon épisode (et le renomme)
+    const folders = [...new Set(toImport.map((m) => m.path.replace(/\/[^/]+$/, '')))];
+    const items = [];
+    for (const folder of folders) {
+      const list = await arr('sonarr', `/manualimport?folder=${encodeURIComponent(folder)}&seriesId=${plan.seriesId}&filterExistingFiles=false`).catch(() => []);
+      items.push(...(list || []));
+    }
+    const files = [];
+    for (const m of toImport) {
+      const it = items.find((x) => x.path === m.path);
+      files.push({
+        path: m.path,
+        seriesId: plan.seriesId,
+        episodeIds: [m.targetEpisodeId],
+        quality: (it && it.quality) || m.file.quality,
+        languages: (it && it.languages) || m.file.languages || [],
+        releaseGroup: m.file.releaseGroup || (it && it.releaseGroup) || '',
+        indexerFlags: 0,
+        releaseType: 'singleEpisode',
+      });
+    }
+    await arr('sonarr', '/command', { method: 'POST', body: JSON.stringify({ name: 'ManualImport', importMode: 'move', files }) });
+    moved = files.length;
+  }
+  if (moved || removed) {
+    console.log(`Numérotation « ${plan.title} » : ${moved} épisode(s) remis à leur place, ${removed} doublon(s) supprimé(s)`);
+    library = null;
+  }
+  return { moved, removed };
+}
+async function seriesByTvdbOrTmdb(tvdbId, tmdbId) {
+  if (tvdbId) return (await arr('sonarr', `/series?tvdbId=${tvdbId}`).catch(() => []))[0] || null;
+  const all = await arr('sonarr', '/series').catch(() => []);
+  return (all || []).find((x) => x.tmdbId === tmdbId) || null;
+}
+// Passage automatique : toutes les 6 h (et 10 min après le démarrage), sur toutes les séries de Sonarr
+async function autoFixNumbering() {
+  if (!arrConfig('sonarr') || config.autoFixNumbering === false) return;
+  const all = (await arr('sonarr', '/series').catch(() => [])) || [];
+  const fixed = [];
+  for (const sr of all) {
+    if (!sr.statistics || !sr.statistics.episodeFileCount) continue;
+    const plan = await numberingPlan(sr).catch(() => null);
+    if (!plan || !plan.moves.length) continue;
+    const r = await applyNumbering(plan).catch((e) => (console.log(`Numérotation « ${sr.title} » :`, e.message), null));
+    if (r && (r.moved || r.removed)) fixed.push(`${sr.title} (${r.moved + r.removed} épisode${r.moved + r.removed > 1 ? 's' : ''})`);
+  }
+  if (fixed.length) notify({ title: 'Épisodes remis dans l’ordre', message: fixed.join(', '), tags: ['wrench'] });
+}
+setTimeout(() => autoFixNumbering().catch(() => {}), 10 * 60_000);
+setInterval(() => autoFixNumbering().catch(() => {}), 6 * 3600_000);
 
 /** Saisons d'une série dans la numérotation de Sonarr (TheTVDB), avec le nombre d'épisodes. */
 async function arrSeasons(tvdbId) {
@@ -2689,6 +2826,19 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       diskCache = null;
       console.log(`Stockage : « ${item.title} » supprimé par ${user.name} (${((item.sizeOnDisk || (item.statistics || {}).sizeOnDisk || 0) / 1e9).toFixed(1)} Go)`);
       return send(res, 200, { ok: true, message: `« ${item.title} » supprimé.` });
+    }
+
+    // ——— Numérotation des séries en parties (admin) : aperçu puis réparation ———
+    if (p === '/api/admin/numbering' && (req.method === 'GET' || req.method === 'POST')) {
+      requireAdmin(user);
+      const sr = await seriesByTvdbOrTmdb(Number(q.get('tvdbId')) || null, Number(q.get('tmdbId')) || null);
+      if (!sr) return send(res, 200, { plan: null });
+      const plan = await numberingPlan(sr);
+      const pub = plan && { title: plan.title, parts: plan.parts, moves: plan.moves.map(({ from, to, duplicate }) => ({ from, to, duplicate })) };
+      if (req.method === 'GET') return send(res, 200, { plan: pub });
+      if (!plan || !plan.moves.length) return send(res, 200, { plan: pub, moved: 0, removed: 0, message: 'Rien à réparer.' });
+      const r = await applyNumbering(plan);
+      return send(res, 200, { plan: pub, ...r, message: `${r.moved} épisode${r.moved > 1 ? 's' : ''} remis à leur place${r.removed ? `, ${r.removed} doublon${r.removed > 1 ? 's' : ''} supprimé${r.removed > 1 ? 's' : ''}` : ''}. Sonarr les renomme, puis Jellyfin les retrouve au prochain scan.` });
     }
 
     // ——— Saisons d'une série selon Sonarr / TheTVDB (fiches : liste des saisons et demandes) ———

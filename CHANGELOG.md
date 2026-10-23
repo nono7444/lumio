@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Séries sorties en « parties » (Lupin, La Casa de Papel…) : le serveur Lumio repère tout seul les épisodes que Sonarr a rangés au mauvais endroit (sorties numérotées par partie) et les remet à leur place, toutes les 6 h, avec une notification. Sur la fiche, l'admin voit « X épisodes mal rangés » et peut réparer tout de suite (serveur Lumio 3.33.0).
+
 ## 1.0.99 — 23 octobre 2026
 
 - Bouton « Remplacer toutes les métadonnées par TMDB » retiré (il mélangeait les épisodes des séries découpées autrement sur TMDB, comme Lupin).

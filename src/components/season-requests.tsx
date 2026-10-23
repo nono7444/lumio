@@ -79,6 +79,42 @@ export function SeasonRequests({
 
   const stat = (n: number) => media?.seasons.find((x) => x.seasonNumber === n);
 
+  // Admin : épisodes mal rangés par Sonarr (séries sorties en « parties », ex. Lupin) → réparation en un appui
+  const admin = settings.jellyfin?.isAdmin === true;
+  const [fix, setFix] = useState<{ title: string; moves: { from: string; to: string; duplicate: boolean }[] } | null>(null);
+  const [fixing, setFixing] = useState(false);
+  useEffect(() => {
+    if (!admin || !tvdb || !settings.chatUrl) return;
+    serverCall<{ plan: typeof fix }>(settings, `/api/admin/numbering?tvdbId=${tvdb}`)
+      .then((r) => setFix(r.plan?.moves.length ? r.plan : null))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [admin, tvdb, settings.chatUrl]);
+  const repair = () =>
+    Alert.alert(
+      'Remettre les épisodes dans l’ordre ?',
+      (fix?.moves ?? []).map((m) => `${m.from} → ${m.duplicate ? 'doublon, supprimé' : m.to}`).join('\n'),
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Réparer',
+          onPress: async () => {
+            setFixing(true);
+            try {
+              const r = await serverCall<{ message?: string }>(settings, `/api/admin/numbering?tvdbId=${tvdb}`, { method: 'POST', body: '{}' });
+              toast(r.message ?? 'Épisodes remis dans l’ordre');
+              setFix(null);
+              setTimeout(load, 8000);
+            } catch (e: any) {
+              Alert.alert('Réparation impossible', e?.message ?? String(e));
+            } finally {
+              setFixing(false);
+            }
+          },
+        },
+      ]
+    );
+
   function request(n: number) {
     const send = async () => {
       setBusy(n);
@@ -135,6 +171,14 @@ export function SeasonRequests({
           </Text>
         ) : null}
       </View>
+      {fix ? (
+        <View style={styles.fix}>
+          <Text style={styles.fixText}>
+            ⚠️ {fix.moves.length} épisode{fix.moves.length > 1 ? 's' : ''} mal rangé{fix.moves.length > 1 ? 's' : ''} par Sonarr (série sortie en parties)
+          </Text>
+          <Button title="Réparer" icon="construct-outline" small loading={fixing} onPress={repair} />
+        </View>
+      ) : null}
       <View style={styles.card}>
         {list.map((s, idx) => {
           const x = stat(s.season_number);
@@ -186,4 +230,6 @@ const styles = StyleSheet.create({
   status: { fontSize: 12, fontWeight: '800', marginTop: 2 },
   bar: { height: 4, borderRadius: 2, backgroundColor: C.surfaceHigh, overflow: 'hidden', marginTop: 4, maxWidth: 160 },
   fill: { height: 4, borderRadius: 2 },
+  fix: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(255,159,10,0.12)', borderRadius: R.md, padding: 12, marginBottom: 10 },
+  fixText: { color: C.text, fontSize: 13, flex: 1, lineHeight: 18 },
 });
