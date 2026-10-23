@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Les saisons vides (dossier resté vide après un déplacement de fichiers) ne s'affichent plus dans la liste des épisodes.
+
 ## 1.0.102 — 23 octobre 2026
 
 - Bouton « Séries : numérotation TheTVDB » retiré.

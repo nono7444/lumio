@@ -24,7 +24,9 @@ export function useSeriesEpisodes(seriesId: string | undefined) {
   useEffect(() => {
     if (!seriesId) return;
     jf.seasons(settings, seriesId)
-      .then((list) => {
+      .then((all) => {
+        // Saison vide (dossier resté vide, fichiers déplacés ailleurs) : pas affichée
+        const list = all.filter((x) => x.ChildCount == null || x.ChildCount > 0);
         setSeasons(list);
         // Première saison pas terminée, sinon la première
         const first = list.find((s) => !s.UserData?.Played) ?? list[0];
