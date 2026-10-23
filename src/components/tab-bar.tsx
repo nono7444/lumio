@@ -29,6 +29,7 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   live: 'tv',
   chat: 'chatbubbles',
   activity: 'file-tray-full',
+  watchlist: 'bookmark',
   secour: 'link',
 };
 
@@ -41,6 +42,7 @@ const SHORT: Record<string, string> = {
   live: 'Live TV',
   chat: 'Chat',
   activity: 'Demandes',
+  watchlist: 'À voir',
   secour: 'Secour',
   settings: 'Profil',
 };

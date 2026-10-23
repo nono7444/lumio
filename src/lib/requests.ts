@@ -130,7 +130,9 @@ export const requestsApi = {
     serverCall<{ found: boolean; available?: boolean; pending?: boolean; message: string }>(s, `/api/requests/${id}/search`, { method: 'POST', body: '{}' }),
   decline: (s: Settings, id: string, reason?: string) =>
     serverCall<Req>(s, `/api/requests/${id}/decline`, { method: 'POST', body: JSON.stringify({ reason }) }),
-  remove: (s: Settings, id: string) => serverCall(s, `/api/requests/${id}`, { method: 'DELETE' }),
+  /** arr (admin) : 'keep' = arrêter + retirer de Radarr / Sonarr en gardant les fichiers, 'files' = tout supprimer */
+  remove: (s: Settings, id: string, arr?: 'keep' | 'files') =>
+    serverCall<{ message?: string } | undefined>(s, `/api/requests/${id}${arr ? `?arr=${arr}` : ''}`, { method: 'DELETE' }),
   options: (s: Settings, type: 'movie' | 'tv') => serverCall<ArrOptions>(s, `/api/arr/options?type=${type}`),
   users: (s: Settings) => serverCall<{ settings: AdminSettings; users: AdminUser[] }>(s, '/api/admin/users'),
   updateUser: (s: Settings, id: string, patch: Record<string, number | boolean | null>) =>

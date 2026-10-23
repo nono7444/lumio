@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.30.1';
+const VERSION = '3.31.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -896,6 +896,62 @@ async function installIntroSkipper(token) {
     message: 'Intro Skipper s’installe : Jellyfin redémarre dans 15 s (1 minute de coupure), puis l’analyse de la bibliothèque démarre toute seule. Les boutons « Passer l’intro » apparaîtront au fur et à mesure.',
   };
 }
+
+// ——— Retrait d'une demande de Radarr / Sonarr (suppression d'une demande par l'admin) ———
+// Film : téléchargements en cours annulés, film retiré de Radarr (fichiers gardés ou effacés).
+// Série : saisons de la demande plus surveillées, téléchargements annulés, épisodes effacés si demandé ;
+// série retirée de Sonarr s'il ne lui reste rien (aucune saison surveillée ni fichier).
+async function removeFromArr(r, deleteFiles) {
+  const kind = r.type === 'movie' ? 'radarr' : 'sonarr';
+  if (!arrConfig(kind)) return null;
+  const cancelQueue = async (match) => {
+    const q = await arr(kind, '/queue?pageSize=500&includeUnknownMovieItems=false&includeUnknownSeriesItems=false').catch(() => null);
+    let n = 0;
+    for (const rec of (q && q.records) || []) {
+      if (!match(rec)) continue;
+      await arr(kind, `/queue/${rec.id}?removeFromClient=true&blocklist=false`, { method: 'DELETE' }).catch(() => null);
+      n++;
+    }
+    return n;
+  };
+  if (kind === 'radarr') {
+    const m = (await arr('radarr', `/movie?tmdbId=${r.tmdbId}`).catch(() => []))[0];
+    if (!m) return 'Le film n’était plus dans Radarr.';
+    const n = await cancelQueue((rec) => rec.movieId === m.id);
+    await arr('radarr', `/movie/${m.id}?deleteFiles=${deleteFiles}&addImportExclusion=false`, { method: 'DELETE' });
+    console.log(`Demande supprimée : « ${m.title} » retiré de Radarr${deleteFiles ? ' avec ses fichiers' : ''} (${n} téléchargement(s) annulé(s))`);
+    return `${deleteFiles ? 'Film et fichiers supprimés' : 'Film retiré de Radarr (fichiers gardés)'}${n ? `, ${n} téléchargement${n > 1 ? 's' : ''} annulé${n > 1 ? 's' : ''}` : ''}.`;
+  }
+  const sr = r.tvdbId ? (await arr('sonarr', `/series?tvdbId=${r.tvdbId}`).catch(() => []))[0] : null;
+  if (!sr) return 'La série n’était plus dans Sonarr.';
+  const seasons = (r.seasons || []).map(Number);
+  const n = await cancelQueue((rec) => rec.seriesId === sr.id && (!seasons.length || seasons.includes(rec.seasonNumber)));
+  if (deleteFiles) {
+    const files = (await arr('sonarr', `/episodefile?seriesId=${sr.id}`).catch(() => [])) || [];
+    const ids = files.filter((f) => !seasons.length || seasons.includes(f.seasonNumber)).map((f) => f.id);
+    if (ids.length) await arr('sonarr', '/episodefile/bulk', { method: 'DELETE', body: JSON.stringify({ episodeFileIds: ids }) }).catch(() => null);
+  }
+  const full = await arr('sonarr', `/series/${sr.id}`);
+  for (const se of full.seasons || []) if (!seasons.length || seasons.includes(se.seasonNumber)) se.monitored = false;
+  // Autres saisons encore utiles (surveillées ou avec des fichiers) : la série reste dans Sonarr ; sinon elle est retirée
+  const stillUsed = (full.seasons || []).filter(
+    (se) => se.seasonNumber > 0 && (seasons.length ? !seasons.includes(se.seasonNumber) : false) && (se.monitored || (se.statistics && se.statistics.episodeFileCount > 0))
+  );
+  if (!stillUsed.length) {
+    await arr('sonarr', `/series/${sr.id}?deleteFiles=${deleteFiles}&addImportListExclusion=false`, { method: 'DELETE' });
+    console.log(`Demande supprimée : « ${sr.title} » retirée de Sonarr${deleteFiles ? ' avec ses fichiers' : ''}`);
+    return `${deleteFiles ? 'Série et fichiers supprimés' : 'Série retirée de Sonarr (fichiers gardés)'}${n ? `, ${n} téléchargement${n > 1 ? 's' : ''} annulé${n > 1 ? 's' : ''}` : ''}.`;
+  }
+  await arr('sonarr', `/series/${sr.id}`, { method: 'PUT', body: JSON.stringify(full) });
+  const what = seasons.length ? `saison${seasons.length > 1 ? 's' : ''} ${seasons.join(', ')}` : 'série';
+  console.log(`Demande supprimée : « ${sr.title} » ${what} plus surveillée(s)${deleteFiles ? ', épisodes effacés' : ''}`);
+  return `${what[0].toUpperCase() + what.slice(1)} plus téléchargée${seasons.length > 1 ? 's' : ''}${deleteFiles ? ', épisodes effacés' : ''}${n ? `, ${n} téléchargement${n > 1 ? 's' : ''} annulé${n > 1 ? 's' : ''}` : ''}.`;
+}
+
+// ——— Liste « À voir » de chaque membre de la famille (films et séries à ne pas oublier) ———
+const WATCHLIST_FILE = path.join(DATA_DIR, 'watchlist.json');
+let watchlists = readJson(WATCHLIST_FILE, {}); // userId → [{ type, tmdbId, title, year, poster, backdrop, addedAt }]
+const saveWatchlists = () => persist(WATCHLIST_FILE, () => watchlists);
 
 // Nouvelle version de l'appli iOS publiée → notification push à l'admin (ntfy)
 const APP_SOURCE = process.env.APP_SOURCE_URL || 'https://github.com/nono7444/lumio/releases/latest/download/altstore.json';
@@ -1989,7 +2045,7 @@ const server = http.createServer(async (req, res) => {
       ok: true,
       version: VERSION,
       messages: messages.length,
-      features: ['chat', 'requests', 'status', 'ideas', 'ratings', 'files', ...(tmdbKey() ? ['tmdb'] : [])],
+      features: ['chat', 'requests', 'status', 'ideas', 'ratings', 'files', 'watchlist', ...(tmdbKey() ? ['tmdb'] : [])],
       radarr: Boolean(arrConfig('radarr')),
       sonarr: Boolean(arrConfig('sonarr')),
     });
@@ -2443,9 +2499,15 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         // Comme Seerr : le demandeur peut annuler tant que c'est en attente ; l'admin peut tout supprimer
         if (!user.admin && !(r.requestedBy.id === user.id && r.status === RequestStatus.PENDING))
           return send(res, 403, { error: 'Seule une demande en attente peut être annulée.' });
+        // Admin : ?arr=keep (arrêter + retirer de Radarr / Sonarr, garder les fichiers) ou ?arr=files (tout supprimer)
+        const mode = q.get('arr');
+        let arrMsg = null;
+        if (user.admin && (mode === 'keep' || mode === 'files')) arrMsg = await removeFromArr(r, mode === 'files');
         requests = requests.filter((x) => x.id !== r.id);
         saveRequests();
-        return send(res, 204);
+        library = null;
+        diskCache = null;
+        return send(res, 200, { ok: true, message: arrMsg ? `Demande supprimée. ${arrMsg}` : 'Demande supprimée.' });
       }
     }
 
@@ -2552,6 +2614,43 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       diskCache = null;
       console.log(`Stockage : « ${item.title} » supprimé par ${user.name} (${((item.sizeOnDisk || (item.statistics || {}).sizeOnDisk || 0) / 1e9).toFixed(1)} Go)`);
       return send(res, 200, { ok: true, message: `« ${item.title} » supprimé.` });
+    }
+
+    // ——— À voir (liste personnelle) ———
+    if (p === '/api/watchlist') {
+      const list = watchlists[user.id] || [];
+      if (req.method === 'GET') {
+        const lib = await loadLibrary().catch(() => null);
+        return send(res, 200, {
+          items: list.map((x) => ({ ...x, status: lib ? mediaStatus(lib, x.type, x.tmdbId, null, null).status : MediaStatus.UNKNOWN })),
+        });
+      }
+      if (req.method === 'POST') {
+        const b = await readBody(req);
+        const type = b.type === 'tv' ? 'tv' : 'movie';
+        const tmdbId = Number(b.tmdbId);
+        if (!tmdbId) throw new HttpError(400, 'Identifiant TMDB manquant');
+        const clean = (v, n) => (typeof v === 'string' ? v.slice(0, n) : undefined);
+        const item = {
+          type,
+          tmdbId,
+          title: clean(b.title, 200) || '',
+          year: clean(b.year, 4),
+          poster: typeof b.poster === 'string' && /^https:\/\//.test(b.poster) ? b.poster : undefined,
+          backdrop: typeof b.backdrop === 'string' && /^https:\/\//.test(b.backdrop) ? b.backdrop : undefined,
+          addedAt: new Date().toISOString(),
+        };
+        watchlists[user.id] = [item, ...list.filter((x) => !(x.type === type && x.tmdbId === tmdbId))].slice(0, 500);
+        saveWatchlists();
+        return send(res, 200, { ok: true });
+      }
+      if (req.method === 'DELETE') {
+        const type = q.get('type') === 'tv' ? 'tv' : 'movie';
+        const tmdbId = Number(q.get('tmdbId'));
+        watchlists[user.id] = list.filter((x) => !(x.type === type && x.tmdbId === tmdbId));
+        saveWatchlists();
+        return send(res, 200, { ok: true });
+      }
     }
 
     // ——— Sous-titres français (lecteur) ———

@@ -115,12 +115,13 @@ export const TAB_LABELS: Record<string, string> = {
   calendar: 'Calendrier',
   chat: 'Chat',
   activity: 'Demandes',
+  watchlist: 'À voir',
   secour: 'Lumio Secour',
   settings: 'Profil',
 };
 
 /** Onglets déplaçables / masquables (Accueil et Profil restent toujours visibles). */
-export const MOVABLE_TABS = ['search', 'library', 'live', 'activity', 'calendar', 'chat'];
+export const MOVABLE_TABS = ['search', 'library', 'live', 'activity', 'watchlist', 'calendar', 'chat'];
 /** Raccourcis absents de la barre par défaut (ils sont en haut de l'accueil). */
 export const HIDDEN_TABS_BY_DEFAULT = ['calendar', 'chat'];
 

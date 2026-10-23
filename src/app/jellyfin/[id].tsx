@@ -16,6 +16,7 @@ import {
   jfImage,
   jfLogo,
   jfPoster,
+  tmdbArtFor,
   ticksToSeconds,
   type JfItem,
 } from '@/lib/jellyfin';
@@ -25,6 +26,7 @@ import { filesApi } from '@/lib/files';
 import { tmdb, tmdbImg, type TmdbTv } from '@/lib/tmdb';
 import { EpisodePicker, useSeriesEpisodes } from '@/components/jf-episodes';
 import { SeasonRequests } from '@/components/season-requests';
+import { WatchlistButton } from '@/components/watchlist-button';
 import { TvActionRow, TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { MetadataEditor } from '@/components/metadata-editor';
 import { FamilyRating } from '@/components/family-rating';
@@ -393,6 +395,19 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
           {settings.jellyfin?.isAdmin === true && !Platform.isTV ? <AdminItemActions item={item} reload={reload} /> : null}
 
           {/* Notes de la famille et signalement d'un problème (serveur Lumio) */}
+          {/* ——— Liste « À voir » ——— */}
+          {tmdbId && (item.Type === 'Movie' || isSeries) ? (
+            <WatchlistButton
+              item={{
+                type: isSeries ? 'tv' : 'movie',
+                tmdbId,
+                title: item.Name,
+                year: item.ProductionYear ? String(item.ProductionYear) : undefined,
+                poster: tmdbArtFor(settings, item, 'poster') ?? jfPoster(settings, item, 342),
+              }}
+            />
+          ) : null}
+
           {serverReq && tmdbId && Platform.isTV ? (
             showRate ? <FamilyRating type={isSeries ? 'tv' : 'movie'} tmdbId={tmdbId} title={item.Name} poster={jfPoster(settings, item, 342)} /> : null
           ) : serverReq && tmdbId ? (

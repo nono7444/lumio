@@ -85,19 +85,20 @@ function RequestCard({ r, admin, meId, onChanged }: { r: Req; admin: boolean; me
   const media = r.status === RequestStatus.APPROVED ? mediaStatusLabel(r.mediaStatus) : null;
   const mine = r.requestedBy.id === meId;
 
-  async function act(kind: 'approve' | 'retry' | 'decline' | 'delete', reason?: string) {
+  async function act(kind: 'approve' | 'retry' | 'decline' | 'delete', reason?: string, arr?: 'keep' | 'files') {
     setBusy(kind);
     try {
+      let msg: string | undefined;
       if (kind === 'approve') await requestsApi.approve(settings, r.id);
       else if (kind === 'retry') await requestsApi.retry(settings, r.id);
       else if (kind === 'decline') await requestsApi.decline(settings, r.id, reason);
-      else await requestsApi.remove(settings, r.id);
+      else msg = (await requestsApi.remove(settings, r.id, arr))?.message;
       toast(
         kind === 'approve' || kind === 'retry'
           ? `« ${r.title} » approuvé : téléchargement lancé.`
           : kind === 'decline'
             ? `Demande de ${r.requestedBy.name} refusée.`
-            : 'Demande supprimée.'
+            : (msg ?? 'Demande supprimée.')
       );
       onChanged();
     } catch (e: any) {
@@ -112,11 +113,21 @@ function RequestCard({ r, admin, meId, onChanged }: { r: Req; admin: boolean; me
       ? Alert.prompt('Refuser la demande', 'Raison (facultatif)', (reason) => act('decline', reason || undefined))
       : act('decline');
 
+  // Demande déjà partie vers Radarr / Sonarr : l'admin choisit ce qu'il advient du film ou de la série
+  const sent = r.status === RequestStatus.APPROVED || r.status === RequestStatus.COMPLETED || r.status === RequestStatus.FAILED;
+  const app = r.type === 'movie' ? 'Radarr' : 'Sonarr';
   const remove = () =>
-    Alert.alert(mine && !admin ? 'Annuler ta demande ?' : 'Supprimer cette demande ?', r.title, [
-      { text: 'Non', style: 'cancel' },
-      { text: 'Oui', style: 'destructive', onPress: () => act('delete') },
-    ]);
+    admin && sent
+      ? Alert.alert('Supprimer cette demande ?', `${r.title}${r.seasons?.length ? ` (saison${r.seasons.length > 1 ? 's' : ''} ${r.seasons.join(', ')})` : ''}`, [
+          { text: `Arrêter et retirer de ${app} (garder les fichiers)`, onPress: () => act('delete', undefined, 'keep') },
+          { text: 'Tout supprimer, fichiers compris', style: 'destructive', onPress: () => act('delete', undefined, 'files') },
+          { text: 'Retirer de la liste seulement', onPress: () => act('delete') },
+          { text: 'Annuler', style: 'cancel' },
+        ])
+      : Alert.alert(mine && !admin ? 'Annuler ta demande ?' : 'Supprimer cette demande ?', r.title, [
+          { text: 'Non', style: 'cancel' },
+          { text: 'Oui', style: 'destructive', onPress: () => act('delete') },
+        ]);
 
   return (
     <Pressable onPress={() => openMedia(r.type, r.tmdbId)} style={({ pressed }) => [styles.card, { opacity: pressed ? 0.85 : 1 }]}>

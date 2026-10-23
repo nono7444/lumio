@@ -29,6 +29,7 @@ import { TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { grab, mediaFlavor } from '@/lib/grab';
 import { useServerRequests } from '@/lib/requests';
 import { SeasonRequests } from '@/components/season-requests';
+import { WatchlistButton } from '@/components/watchlist-button';
 import { chat } from '@/lib/chat';
 import { arrReady, hasTmdb, isManager, useSettings } from '@/lib/settings';
 import { pickLogo, tmdb, tmdbImg, upcomingRelease, type TmdbMovie, type TmdbTv } from '@/lib/tmdb';
@@ -397,6 +398,18 @@ export default function MediaScreen() {
               ) : null}
             </View>
           ) : null}
+
+          {/* ——— Liste « À voir » ——— */}
+          <WatchlistButton
+            item={{
+              type: details.kind,
+              tmdbId,
+              title,
+              year: date?.slice(0, 4),
+              poster: tmdbImg(d.poster_path, 'w342'),
+              backdrop: tmdbImg(d.backdrop_path, 'w780'),
+            }}
+          />
 
           {/* ——— Proposer le titre dans le chat famille ——— */}
           {/* Proposer : seulement pour un titre pas encore sur le serveur */}

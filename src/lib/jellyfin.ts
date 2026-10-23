@@ -644,7 +644,7 @@ export function tmdbArtFor(s: Settings, i: JfItem, kind: 'poster' | 'backdrop' =
   const q = new URLSearchParams();
   if (kind === 'backdrop') q.set('kind', 'backdrop');
   const tmdbId = episode ? undefined : i.ProviderIds?.Tmdb;
-  if (tmdbId) return `${base}/poster/${type}/${tmdbId}${q.size ? `?${q}` : ''}`;
+  if (tmdbId) return `${base}/poster/${type}/${tmdbId}${q.toString() ? `?${q.toString()}` : ''}`;
   const name = episode ? i.SeriesName : i.Name;
   if (!name) return undefined;
   q.set('q', name);
