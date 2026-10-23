@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- « À voir » marche même si le serveur Lumio n'est pas encore à jour (plus d'erreur « introuvable ») : la liste est gardée sur le téléphone, puis envoyée au serveur dès qu'il est en 3.31.0 ou plus.
+
 ## 1.0.96 — 23 octobre 2026
 
 - « À voir » devient une simple liste de rappel : plus de statut de disponibilité, filtres Tout / Films / Séries ; on ouvre la fiche pour regarder ou demander.
