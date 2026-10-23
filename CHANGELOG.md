@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.95 — 23 octobre 2026
+
 - Nouvel onglet « À voir » : ta liste de films et séries à ne pas oublier (disponibles ou pas encore sur le serveur), avec filtres Disponibles / Pas encore là / Films / Séries. Bouton « Ajouter à « À voir » » sur chaque fiche. La liste est gardée sur le serveur Lumio : la même sur tous tes appareils.
 - Admin : supprimer une demande déjà partie propose « Arrêter et retirer de Radarr / Sonarr (garder les fichiers) », « Tout supprimer, fichiers compris » ou « Retirer de la liste seulement » ; les téléchargements en cours sont annulés (serveur Lumio 3.31.0).
 - Correction : le fond TMDB de secours s'affichait parfois à la place de l'image de fond.
