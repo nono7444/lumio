@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Profil → Serveur : « Installer Intro Skipper » installe l'extension dans Jellyfin, redémarre Jellyfin puis lance l'analyse tout seul (serveur Lumio 3.30.0).
+
 - Profil : toutes les sections sont repliées, « + » / « − » pour ouvrir ou fermer chacune, « Tout ouvrir / Tout fermer » en haut.
 - Lecteur : bouton « Passer l'intro / le récap / le générique » quand Jellyfin a détecté ces passages (extension « Intro Skipper »), aussi sur Lumio TV.
 - Profil → Stockage (admin) : place libre sur chaque disque, titres jamais regardés depuis 6 mois ou plus regardés depuis un an, plus gros titres ; on coche et on supprime (fichiers, Radarr / Sonarr, Jellyfin). Notification quand un disque passe sous 10 % de place libre. Les disques s'affichent aussi sur Lumio TV (serveur Lumio 3.29.0).

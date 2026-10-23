@@ -8,7 +8,7 @@ import { C } from '@/constants/theme';
 import { serverCall } from '@/lib/chat';
 import { useSettings } from '@/lib/settings';
 
-type Action = 'scan' | 'tmdb' | 'jellyfin' | 'reboot' | 'update';
+type Action = 'scan' | 'tmdb' | 'intro' | 'jellyfin' | 'reboot' | 'update';
 
 const ASK: Record<Action, { title: string; text: string; ok: string; path: string }> = {
   scan: { title: 'Scanner les bibliothèques ?', text: 'Jellyfin va chercher les nouveaux fichiers sur les disques.', ok: 'Scanner', path: '/api/admin/jellyfin/scan' },
@@ -17,6 +17,12 @@ const ASK: Record<Action, { title: string; text: string; ok: string; path: strin
     text: 'Jellyfin efface les métadonnées et les images de tous les films et séries, puis les retélécharge depuis TMDB (titres, résumés, affiches, fonds). Cela peut prendre de quelques minutes à une heure ; les modifications faites à la main seront perdues.',
     ok: 'Tout remplacer',
     path: '/api/admin/jellyfin/replace-metadata',
+  },
+  intro: {
+    title: 'Installer Intro Skipper ?',
+    text: 'L’extension Jellyfin qui repère intros, récaps et génériques (bouton « Passer l’intro »). Jellyfin redémarre une fois (environ 1 minute), puis analyse la bibliothèque en arrière-plan.',
+    ok: 'Installer',
+    path: '/api/admin/jellyfin/intro-skipper',
   },
   jellyfin: { title: 'Redémarrer Jellyfin ?', text: 'Les lectures en cours seront coupées environ 1 minute.', ok: 'Redémarrer', path: '/api/admin/jellyfin/restart' },
   update: {
@@ -41,6 +47,13 @@ export function ServerActionsSection() {
   const allowed = Boolean(settings.chatUrl) && settings.jellyfin?.isAdmin === true && !Platform.isTV;
   // Avancement de Jellyfin (remplacement TMDB ou scan) : vérifié toutes les 3 s tant qu'il travaille
   const [refresh, setRefresh] = useState<RefreshStatus | null>(null);
+  // Intro Skipper déjà installé dans Jellyfin ?
+  const [intro, setIntro] = useState<{ installed: boolean; version?: string } | null>(null);
+  useEffect(() => {
+    if (!allowed) return;
+    serverCall<{ installed: boolean; version?: string }>(settings, '/api/admin/jellyfin/intro-skipper').then(setIntro).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allowed, busy]);
   const [watch, setWatch] = useState(0);
   const sawActive = useRef(false);
   const poll = useCallback(async () => {
@@ -111,7 +124,7 @@ export function ServerActionsSection() {
   const confirm = (a: Action) =>
     Alert.alert(ASK[a].title, ASK[a].text, [
       { text: 'Annuler', style: 'cancel' },
-      { text: ASK[a].ok, style: a === 'scan' ? 'default' : 'destructive', onPress: () => run(a) },
+      { text: ASK[a].ok, style: a === 'scan' || a === 'intro' ? 'default' : 'destructive', onPress: () => run(a) },
     ]);
 
   return (
@@ -146,6 +159,13 @@ export function ServerActionsSection() {
               ))}
           </View>
         ) : null}
+        <Button
+          title={intro?.installed ? `Intro Skipper installé${intro.version ? ` (${intro.version})` : ''} · relancer l’analyse` : 'Installer Intro Skipper (passer l’intro)'}
+          icon="play-skip-forward-outline"
+          variant="secondary"
+          loading={busy === 'intro'}
+          onPress={() => confirm('intro')}
+        />
         <Button title="Redémarrer Jellyfin" icon="reload-circle-outline" variant="secondary" loading={busy === 'jellyfin'} onPress={() => confirm('jellyfin')} />
         <Button title="Mettre à jour le serveur Lumio" icon="cloud-download-outline" variant="secondary" loading={busy === 'update'} onPress={() => confirm('update')} />
         <Button title="Redémarrer le PC serveur" icon="power" variant="danger" loading={busy === 'reboot'} onPress={() => confirm('reboot')} />

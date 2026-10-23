@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.29.0';
+const VERSION = '3.30.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -843,6 +843,59 @@ setInterval(async () => {
     click: 'lumio://settings',
   });
 }, 60 * 60_000);
+
+// ——— Intro Skipper (extension Jellyfin qui repère intros, récaps et génériques) : installée depuis Lumio ———
+const INTRO_SKIPPER_REPO = 'https://intro-skipper.org/manifest.json';
+async function jfJson(token, p2, init = {}) {
+  const r = await fetch(`${JELLYFIN_URL}${p2}`, { ...init, headers: { ...jfHeaders(token), ...(init.body ? { 'Content-Type': 'application/json' } : {}) } });
+  if (!r.ok) throw new HttpError(502, `Jellyfin a refusé ${p2} (HTTP ${r.status})`);
+  const t = await r.text();
+  return t ? JSON.parse(t) : null;
+}
+async function introSkipperStatus(token) {
+  const plugins = (await jfJson(token, '/Plugins')) || [];
+  const p = plugins.find((x) => /intro\s*skipper/i.test(x.Name || ''));
+  return p ? { installed: true, version: p.Version, status: p.Status } : { installed: false };
+}
+/** Lance l'analyse des épisodes / films (tâches planifiées de l'extension). */
+async function startIntroSkipperTasks(token) {
+  const tasks = (await jfJson(token, '/ScheduledTasks').catch(() => [])) || [];
+  const mine = tasks.filter((t) => /intro\s*skipper/i.test(t.Category || '') || /intro|credit|générique|recap/i.test(t.Name || ''));
+  for (const t of mine.filter((t) => t.State !== 'Running')) await fetch(`${JELLYFIN_URL}/ScheduledTasks/Running/${t.Id}`, { method: 'POST', headers: jfHeaders(token) }).catch(() => {});
+  return mine.length;
+}
+async function installIntroSkipper(token) {
+  const st = await introSkipperStatus(token);
+  if (st.installed && st.status !== 'Restart') {
+    const n = await startIntroSkipperTasks(token);
+    return { ok: true, message: `Intro Skipper est déjà installé (version ${st.version}). Analyse relancée (${n} tâche${n > 1 ? 's' : ''}).` };
+  }
+  // 1) Dépôt de l'extension ajouté à Jellyfin (s'il n'y est pas)
+  const repos = (await jfJson(token, '/Repositories')) || [];
+  if (!repos.some((r) => (r.Url || '').includes('intro-skipper'))) {
+    repos.push({ Name: 'Intro Skipper', Url: INTRO_SKIPPER_REPO, Enabled: true });
+    await jfJson(token, '/Repositories', { method: 'POST', body: JSON.stringify(repos) });
+  }
+  // 2) Paquet trouvé dans le catalogue puis installé
+  let pkg = null;
+  for (let i = 0; i < 6 && !pkg; i++) {
+    const list = (await jfJson(token, '/Packages').catch(() => [])) || [];
+    pkg = list.find((x) => /intro\s*skipper/i.test(x.name || ''));
+    if (!pkg) await new Promise((ok) => setTimeout(ok, 3000));
+  }
+  if (!pkg) throw new HttpError(502, 'Intro Skipper introuvable dans le catalogue de Jellyfin (Jellyfin 10.10 ou plus récent requis).');
+  const q = new URLSearchParams({ assemblyGuid: pkg.guid, repositoryUrl: INTRO_SKIPPER_REPO });
+  const r = await fetch(`${JELLYFIN_URL}/Packages/Installed/${encodeURIComponent(pkg.name)}?${q}`, { method: 'POST', headers: jfHeaders(token) });
+  if (!r.ok) throw new HttpError(502, `Installation refusée par Jellyfin (HTTP ${r.status})`);
+  // 3) Jellyfin redémarre pour charger l'extension, puis on lance l'analyse
+  setTimeout(() => fetch(`${JELLYFIN_URL}/System/Restart`, { method: 'POST', headers: jfHeaders(token) }).catch(() => {}), 15_000);
+  setTimeout(() => startIntroSkipperTasks(token).then((n) => console.log(`Intro Skipper : analyse lancée (${n} tâches)`)).catch(() => {}), 150_000);
+  console.log('Intro Skipper : installation lancée');
+  return {
+    ok: true,
+    message: 'Intro Skipper s’installe : Jellyfin redémarre dans 15 s (1 minute de coupure), puis l’analyse de la bibliothèque démarre toute seule. Les boutons « Passer l’intro » apparaîtront au fur et à mesure.',
+  };
+}
 
 // Nouvelle version de l'appli iOS publiée → notification push à l'admin (ntfy)
 const APP_SOURCE = process.env.APP_SOURCE_URL || 'https://github.com/nono7444/lumio/releases/latest/download/altstore.json';
@@ -2540,6 +2593,14 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       const running = libs.filter((l) => l.active);
       const progress = libs.length ? Math.round(libs.reduce((n, l) => n + l.progress, 0) / libs.length) : 100;
       return send(res, 200, { active: running.length > 0, progress, libraries: libs });
+    }
+    if (req.method === 'GET' && p === '/api/admin/jellyfin/intro-skipper') {
+      requireAdmin(user);
+      return send(res, 200, await introSkipperStatus(user.token));
+    }
+    if (req.method === 'POST' && p === '/api/admin/jellyfin/intro-skipper') {
+      requireAdmin(user);
+      return send(res, 200, await installIntroSkipper(user.token));
     }
     if (req.method === 'POST' && p === '/api/admin/jellyfin/replace-metadata') {
       requireAdmin(user);
