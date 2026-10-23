@@ -76,15 +76,15 @@ Compte rendu : court, en français, sans jargon ; dire ce qui change pour lui, c
 - `targets/widget/` : widget iOS (Swift, style UptimeRobot).
 - `plugins/with-cast-framework-version.js` : **force** `play-services-cast-framework` 22.1.0 et `androidx.mediarouter` **1.8.0** (1.7.0 → plantage au démarrage `NoSuchMethodError`, versions plus récentes → Kotlin 2.4 / SDK 37). Ne pas toucher sans raison.
 
-### Particularités TV (ancienne appli TV en React Native)
+### Particularités TV (ancienne appli TV en React Native — abandonnée, ne plus la modifier ; l'appli TV est Lumio TV)
 - `TvScaleRoot` réduit toute l'interface (échelle 0,65–1). **Sur la route `/player`, pas de réduction** pour que la vidéo s'affiche en SurfaceView (sinon saccades / écran noir).
 - `FocusPressable` ignore les appuis pendant 700 ms après l'apparition d'un écran (sinon l'appui « OK » qui ouvre le lecteur le refermait).
 - Pas de `RefreshControl` sur TV (écrans noirs) ; listes TV en `ScrollView` simples.
 - Tout ce qui est propre à la TV est derrière `Platform.isTV` — **ne pas changer le téléphone** quand Norman demande « pour la TV ».
 
 ### CI (`.github/workflows/build.yml`)
-Jobs : `check` → `ios`, `android`, `android-tv`, `mac` → `android-smoke` (installe l'APK sur un émulateur API 34 et vérifie qu'elle ne plante pas au démarrage ; sinon l'APK est retirée de la release) → `release`.
-- Chaque build de `main` = version `1.0.<n° de build>`, Release GitHub `build-<n>` avec `lumio-unsigned.ipa`, `lumio-android.apk`, `lumio-tv.apk`, `lumio-mac.dmg`, `altstore.json` (source FlareStore pour iPhone).
+Jobs : `check` → `ios`, `android`, `mac` → `android-smoke` (installe l'APK sur un émulateur API 34 et vérifie qu'elle ne plante pas au démarrage ; sinon l'APK est retirée de la release) → `release`.
+- Chaque build de `main` = version `1.0.<n° de build>`, Release GitHub `build-<n>` avec `lumio-unsigned.ipa`, `lumio-android.apk`, `lumio-mac.dmg`, `altstore.json` (source FlareStore pour iPhone).
 - Erreurs Xcode / Gradle remontées en **une** annotation `::error::` (GitHub n'en garde que 10). Garde-fou : IPA d'au moins 5 Mo.
 - Le job macOS échoue parfois faute de machine disponible chez GitHub : ce n'est pas un bug du code.
 - `[skip ci]` dans le message de commit évite un build (pour la doc uniquement).
