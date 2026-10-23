@@ -45,6 +45,8 @@ export const filesApi = {
   moveJobs: (s: Settings) => serverCall<{ jobs: MoveJob[] }>(s, '/api/files/jobs').then((r) => r.jobs),
   downloads: (s: Settings) => serverCall<{ downloads: DownloadJob[] }>(s, '/api/downloads').then((r) => r.downloads),
   startDownload: (s: Settings, link: string, root: string, folder: string) => post(s, '/api/downloads', { link, root, folder }),
+  /** Fichier .torrent (contenu en base64) → AllDebrid → disque choisi */
+  startTorrent: (s: Settings, name: string, data: string, root: string, folder: string) => post(s, '/api/downloads/torrent', { name, data, root, folder }),
   cancelDownload: (s: Settings, id: string) => serverCall(s, `/api/downloads/${id}`, { method: 'DELETE' }),
 };
 

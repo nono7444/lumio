@@ -1,6 +1,8 @@
-// Admin : téléchargements AllDebrid (liens d'hébergeurs ou magnets) directement sur les disques du serveur.
+// Admin : téléchargements AllDebrid (liens d'hébergeurs, magnets ou fichiers .torrent) directement sur les disques du serveur.
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -98,6 +100,26 @@ export default function Downloads() {
     try {
       await filesApi.startDownload(settings, link.trim(), root, folder);
       setLink('');
+      toast('Téléchargement lancé');
+      loadJobs();
+    } catch (e: any) {
+      Alert.alert('Téléchargement impossible', e?.message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Fichier .torrent choisi sur le téléphone (Fichiers, iCloud, Téléchargements…)
+  const pickTorrent = async () => {
+    if (!root) return Alert.alert('Disque', 'Choisis d’abord le disque où télécharger.');
+    try {
+      const r = await DocumentPicker.getDocumentAsync({ type: ['application/x-bittorrent', '*/*'], copyToCacheDirectory: true, multiple: false });
+      if (r.canceled || !r.assets?.[0]) return;
+      const f = r.assets[0];
+      if (!/\.torrent$/i.test(f.name)) return Alert.alert('Fichier .torrent', 'Choisis un fichier qui se termine par .torrent.');
+      setBusy(true);
+      const data = await FileSystem.readAsStringAsync(f.uri, { encoding: FileSystem.EncodingType.Base64 });
+      await filesApi.startTorrent(settings, f.name, data, root, folder);
       toast('Téléchargement lancé');
       loadJobs();
     } catch (e: any) {
@@ -206,6 +228,7 @@ export default function Downloads() {
           ) : null}
 
           <Button title="Télécharger ici" icon="cloud-download-outline" onPress={start} loading={busy} disabled={!root || !link.trim() || configured === false} />
+          <Button title="Envoyer un fichier .torrent" icon="document-attach-outline" variant="secondary" onPress={pickTorrent} loading={busy} disabled={!root || configured === false} />
         </View>
 
         <Text style={styles.cardTitle}>En cours et récents</Text>

@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.33.0';
+const VERSION = '3.34.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1783,12 +1783,12 @@ function send(res, statusCode, body) {
   res.end(body === undefined ? '' : JSON.stringify(body));
 }
 
-function readBody(req) {
+function readBody(req, limit = 64 * 1024) {
   return new Promise((resolve, reject) => {
     let data = '';
     req.on('data', (c) => {
       data += c;
-      if (data.length > 64 * 1024) reject(new HttpError(413, 'trop volumineux'));
+      if (data.length > limit) reject(new HttpError(413, 'trop volumineux'));
     });
     req.on('end', () => {
       try {
@@ -1899,11 +1899,29 @@ function flattenFiles(nodes, prefix = '') {
   return out;
 }
 
-/** Magnet → attend que AllDebrid l'ait récupéré → liste des fichiers avec leurs liens. */
+/** Fichier .torrent envoyé à AllDebrid (multipart) → identifiant du magnet chez AllDebrid. */
+async function uploadTorrentFile(name, buf) {
+  const key = process.env.ALLDEBRID_KEY || config.alldebridKey;
+  if (!key) throw new HttpError(400, 'Clé AllDebrid non configurée');
+  const form = new FormData();
+  form.append('files[]', new Blob([buf], { type: 'application/x-bittorrent' }), name.endsWith('.torrent') ? name : `${name}.torrent`);
+  const r = await fetch(`${AD_API}/v4/magnet/upload/file`, { method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form });
+  const j = await r.json().catch(() => null);
+  if (!j || j.status !== 'success') throw new HttpError(502, `AllDebrid : ${(j && j.error && (j.error.message || j.error.code)) || `HTTP ${r.status}`}`);
+  const f = j.data && j.data.files && j.data.files[0];
+  if (!f || f.error) throw new HttpError(502, `AllDebrid : ${(f && f.error && f.error.message) || 'fichier .torrent refusé'}`);
+  return { id: f.id, name: f.name || name.replace(/\.torrent$/i, '') };
+}
+
+/** Magnet (ou .torrent déjà envoyé : « adid:<id> ») → attend qu'AllDebrid l'ait récupéré → fichiers avec leurs liens. */
 async function magnetFiles(magnet, job) {
-  const up = await ad('/v4/magnet/upload', { magnets: [magnet] });
-  const m = up.magnets && up.magnets[0];
-  if (!m || m.error) throw new Error(`AllDebrid : ${(m && m.error && m.error.message) || 'magnet refusé'}`);
+  let m;
+  if (/^adid:\d+$/.test(magnet)) m = { id: Number(magnet.slice(5)), name: job.name };
+  else {
+    const up = await ad('/v4/magnet/upload', { magnets: [magnet] });
+    m = up.magnets && up.magnets[0];
+    if (!m || m.error) throw new Error(`AllDebrid : ${(m && m.error && m.error.message) || 'magnet refusé'}`);
+  }
   job.name = m.name || job.name;
   for (let i = 0; i < 2880 && !job.cancelled; i++) {
     const st = await ad('/v4.1/magnet/status', { id: m.id });
@@ -2006,7 +2024,7 @@ async function runDownload(job) {
       const r = await secour('/lumio/resolve', { method: 'POST', body: job.secour, timeout: 180000 });
       const name = job.fileName || fileNameFromUrl(r.url) || `${job.name || 'fichier'}.mkv`;
       files = [{ rel: name, direct: r.url }];
-    } else if (/^magnet:\?/i.test(job.link) || /^[a-f0-9]{40}$/i.test(job.link)) {
+    } else if (/^magnet:\?/i.test(job.link) || /^[a-f0-9]{40}$/i.test(job.link) || /^adid:\d+$/.test(job.link)) {
       job.status = 'debrid';
       files = await magnetFiles(job.link, job);
     } else {
@@ -3258,6 +3276,19 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
           return publicJob(job);
         });
         return send(res, 201, { downloads: created });
+      }
+      // Fichier .torrent (envoyé en base64 par l'appli) → AllDebrid → disque choisi
+      if (req.method === 'POST' && p === '/api/downloads/torrent') {
+        const b = await readBody(req, 15 * 1024 * 1024);
+        safePath(b.root, b.folder || '');
+        const buf = Buffer.from(String(b.data || ''), 'base64');
+        if (!buf.length || buf.length > 10 * 1024 * 1024) throw new HttpError(400, 'Fichier .torrent invalide');
+        const up = await uploadTorrentFile(String(b.name || 'fichier.torrent').slice(0, 200), buf);
+        const job = { id: crypto.randomBytes(5).toString('hex'), link: `adid:${up.id}`, root: b.root, folder: b.folder || '', status: 'queued',
+          name: up.name, size: 0, done: 0, speed: 0, token: user.token, createdAt: new Date().toISOString() };
+        downloads.push(job);
+        runDownload(job);
+        return send(res, 201, { downloads: [publicJob(job)] });
       }
       const dl = p.match(/^\/api\/downloads\/([\w-]+)$/);
       if (req.method === 'DELETE' && dl) {
