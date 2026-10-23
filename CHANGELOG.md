@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.94 — 23 octobre 2026
+
 - Profil → Serveur : « Installer Intro Skipper » installe l'extension dans Jellyfin, redémarre Jellyfin puis lance l'analyse tout seul (serveur Lumio 3.30.0).
 
 - Profil : toutes les sections sont repliées, « + » / « − » pour ouvrir ou fermer chacune, « Tout ouvrir / Tout fermer » en haut.
