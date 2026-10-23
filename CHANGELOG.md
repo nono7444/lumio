@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Séries découpées différemment sur TMDB et dans Sonarr (ex. Lupin) : les fiches listent maintenant les saisons comme Sonarr (TheTVDB), les statuts et les demandes ne se mélangent plus. Profil → Serveur : « Séries : numérotation TheTVDB » règle Jellyfin pour que les épisodes soient aussi dans le bon ordre (serveur Lumio 3.32.0).
+
 ## 1.0.97 — 23 octobre 2026
 
 - « À voir » marche même si le serveur Lumio n'est pas encore à jour (plus d'erreur « introuvable ») : la liste est gardée sur le téléphone, puis envoyée au serveur dès qu'il est en 3.31.0 ou plus.

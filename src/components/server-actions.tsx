@@ -8,7 +8,7 @@ import { C } from '@/constants/theme';
 import { serverCall } from '@/lib/chat';
 import { useSettings } from '@/lib/settings';
 
-type Action = 'scan' | 'tmdb' | 'intro' | 'jellyfin' | 'reboot' | 'update';
+type Action = 'scan' | 'tmdb' | 'tvdb' | 'intro' | 'jellyfin' | 'reboot' | 'update';
 
 const ASK: Record<Action, { title: string; text: string; ok: string; path: string }> = {
   scan: { title: 'Scanner les bibliothèques ?', text: 'Jellyfin va chercher les nouveaux fichiers sur les disques.', ok: 'Scanner', path: '/api/admin/jellyfin/scan' },
@@ -17,6 +17,12 @@ const ASK: Record<Action, { title: string; text: string; ok: string; path: strin
     text: 'Jellyfin efface les métadonnées et les images de tous les films et séries, puis les retélécharge depuis TMDB (titres, résumés, affiches, fonds). Cela peut prendre de quelques minutes à une heure ; les modifications faites à la main seront perdues.',
     ok: 'Tout remplacer',
     path: '/api/admin/jellyfin/replace-metadata',
+  },
+  tvdb: {
+    title: 'Séries : numérotation TheTVDB ?',
+    text: 'Certaines séries sont découpées autrement sur TMDB que dans Sonarr (ex. Lupin), et leurs épisodes se mélangent. Jellyfin installe l’extension TheTVDB (si besoin, avec 1 minute de redémarrage) et l’utilise pour les infos des séries, saisons et épisodes, comme Sonarr. Les affiches restent celles de TMDB.',
+    ok: 'Appliquer',
+    path: '/api/admin/jellyfin/tvdb',
   },
   intro: {
     title: 'Installer Intro Skipper ?',
@@ -124,7 +130,7 @@ export function ServerActionsSection() {
   const confirm = (a: Action) =>
     Alert.alert(ASK[a].title, ASK[a].text, [
       { text: 'Annuler', style: 'cancel' },
-      { text: ASK[a].ok, style: a === 'scan' || a === 'intro' ? 'default' : 'destructive', onPress: () => run(a) },
+      { text: ASK[a].ok, style: a === 'scan' || a === 'intro' || a === 'tvdb' ? 'default' : 'destructive', onPress: () => run(a) },
     ]);
 
   return (
@@ -159,6 +165,13 @@ export function ServerActionsSection() {
               ))}
           </View>
         ) : null}
+        <Button
+          title="Séries : numérotation TheTVDB (comme Sonarr)"
+          icon="list-outline"
+          variant="secondary"
+          loading={busy === 'tvdb'}
+          onPress={() => confirm('tvdb')}
+        />
         <Button
           title={intro?.installed ? `Intro Skipper installé${intro.version ? ` (${intro.version})` : ''} · relancer l’analyse` : 'Installer Intro Skipper (passer l’intro)'}
           icon="play-skip-forward-outline"

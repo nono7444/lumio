@@ -10,6 +10,7 @@ import { C, R } from '@/constants/theme';
 import { mediaFlavor, suggestFolder } from '@/lib/grab';
 import { MediaStatus, requestsApi, type MediaInfo } from '@/lib/requests';
 import { useSettings } from '@/lib/settings';
+import { serverCall } from '@/lib/chat';
 import { tmdbImg, type TmdbTv } from '@/lib/tmdb';
 
 type SeasonStat = MediaInfo['seasons'][number];
@@ -43,8 +44,28 @@ export function SeasonRequests({
   const { settings } = useSettings();
   const [media, setMedia] = useState<MediaInfo | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
-  const seasons = (show.seasons ?? []).filter((s) => s.season_number > 0);
   const tvdb = show.external_ids?.tvdb_id ?? undefined;
+  // Saisons selon Sonarr (TheTVDB) : c'est elles qu'on demande. Certaines séries sont découpées autrement sur TMDB
+  // (ex. Lupin : 2 saisons TMDB, 3 « parties » TheTVDB) : sans ça, les statuts et les demandes se mélangeaient.
+  const [arrList, setArrList] = useState<{ seasonNumber: number; episodes: number | null }[] | null>(null);
+  useEffect(() => {
+    if (!tvdb || !settings.chatUrl) return;
+    serverCall<{ seasons: { seasonNumber: number; episodes: number | null }[] | null }>(settings, `/api/tv/seasons?tvdbId=${tvdb}`)
+      .then((r) => setArrList(r.seasons?.length ? r.seasons : null))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tvdb, settings.chatUrl]);
+  const tmdbSeasons = (show.seasons ?? []).filter((s) => s.season_number > 0);
+  const sameSplit = !arrList || (arrList.length === tmdbSeasons.length && arrList.every((x, i) => x.seasonNumber === tmdbSeasons[i]?.season_number));
+  const seasons = sameSplit
+    ? tmdbSeasons
+    : arrList!.map((x) => ({
+        id: -x.seasonNumber,
+        season_number: x.seasonNumber,
+        name: `Saison ${x.seasonNumber}`,
+        episode_count: x.episodes ?? 0,
+        air_date: undefined as string | undefined,
+      }));
 
   const load = useCallback(() => {
     requestsApi
@@ -125,9 +146,11 @@ export function SeasonRequests({
               <Ionicons name={media ? b.icon : 'ellipse-outline'} size={24} color={media ? b.color : C.textFaint} />
               <View style={{ flex: 1, gap: 2 }}>
                 <Text style={[styles.name, missing && { color: C.textDim }]}>{s.name || `Saison ${s.season_number}`}</Text>
-                <Text style={styles.dim}>
-                  {s.episode_count} épisodes{s.air_date ? `  •  ${s.air_date.slice(0, 4)}` : ''}
-                </Text>
+                {s.episode_count || s.air_date ? (
+                  <Text style={styles.dim}>
+                    {[s.episode_count ? `${s.episode_count} épisodes` : null, s.air_date ? s.air_date.slice(0, 4) : null].filter(Boolean).join('  •  ')}
+                  </Text>
+                ) : null}
                 {media ? <Text style={[styles.status, { color: b.color }]}>{b.label}</Text> : null}
                 {pct > 0 && pct < 1 ? (
                   <View style={styles.bar}>
