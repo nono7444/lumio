@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.96 — 23 octobre 2026
+
 - « À voir » devient une simple liste de rappel : plus de statut de disponibilité, filtres Tout / Films / Séries ; on ouvre la fiche pour regarder ou demander.
 
 ## 1.0.95 — 23 octobre 2026
