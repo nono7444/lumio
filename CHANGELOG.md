@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.99 — 23 octobre 2026
+
 - Bouton « Remplacer toutes les métadonnées par TMDB » retiré (il mélangeait les épisodes des séries découpées autrement sur TMDB, comme Lupin).
 
 - Séries découpées différemment sur TMDB et dans Sonarr (ex. Lupin) : les fiches listent maintenant les saisons comme Sonarr (TheTVDB), les statuts et les demandes ne se mélangent plus. Profil → Serveur : « Séries : numérotation TheTVDB » règle Jellyfin pour que les épisodes soient aussi dans le bon ordre (serveur Lumio 3.32.0).
