@@ -114,50 +114,6 @@ jobs:
           name: lumio-android
           path: lumio-android.apk
 
-  # Appli Android TV : même code et même design que l'iPhone, compilé avec react-native-tvos
-  # (télécommande, focus, lanceur Android TV). 32 bits seulement : léger et compatible avec toutes les box.
-  android-tv:
-    needs: check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-      - run: npm ci
-      - name: Bascule sur react-native-tvos
-        run: npm install --no-save --legacy-peer-deps react-native@npm:react-native-tvos@0.86.3-0 @react-native-tvos/config-tv@0.1.7
-      - name: Config TV (version, bannière, lanceur Android TV)
-        run: |
-          node -e "const f='app.json';const a=require('./'+f);a.expo.version='1.0.${{ github.run_number }}';a.expo.android.versionCode=${{ github.run_number }};a.expo.plugins.push(['@react-native-tvos/config-tv',{isTV:true,androidTVBanner:'./assets/images/tv-banner.png'}]);require('fs').writeFileSync(f,JSON.stringify(a,null,2))"
-      - name: Génère le projet Android TV
-        run: EXPO_TV=1 npx expo prebuild --platform android --no-install --clean
-      - name: Clé de signature fixe
-        run: cp keystore/lumio-android.keystore android/app/debug.keystore
-      - name: Compile l'APK
-        working-directory: android
-        run: |
-          ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=armeabi-v7a > gradle.log 2>&1 || {
-            # Échec : les erreurs remontent en annotations (journaux GitHub parfois illisibles)
-            # GitHub ne garde que 10 annotations par étape : tout est réuni en une seule
-            msg=$( { grep -A14 "issues were found when checking AAR metadata" gradle.log; grep -E "^e: |error:|What went wrong|Execution failed" -A2 gradle.log; } | grep -v "^--$" | awk '!seen[$0]++' | head -40 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
-            echo "::error::$msg"
-            tail -n 60 gradle.log
-            exit 1
-          }
-          tail -n 15 gradle.log
-      - name: Renomme l'APK
-        run: cp android/app/build/outputs/apk/release/app-release.apk lumio-tv.apk
-      - uses: actions/upload-artifact@v4
-        with:
-          name: lumio-tv
-          path: lumio-tv.apk
-
   # Appli Mac (Intel + Apple Silicon) : la version web de Lumio dans une fenêtre Electron, en .dmg
   mac:
     needs: check
@@ -221,7 +177,7 @@ jobs:
             if adb shell pidof lol.wawanono.lumio > /dev/null; then echo "::notice::L'appli tourne toujours après 40 s"; else msg=$(grep -A30 "FATAL EXCEPTION" logcat.txt | head -32 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}'); echo "::error::Plantage au démarrage%0A$msg"; exit 1; fi
 
   release:
-    needs: [ios, android, android-smoke, android-tv, mac]
+    needs: [ios, android, android-smoke, mac]
     # Publie dès que l'iPhone est prêt, même si l'APK Android a échoué
     if: ${{ always() && needs.ios.result == 'success' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-latest
@@ -259,7 +215,7 @@ jobs:
             echo "iPhone : mets à jour depuis FlareStore (source : https://github.com/${{ github.repository }}/releases/latest/download/altstore.json), ou installe lumio-unsigned.ipa avec Sideloadly / SideStore."
             echo "Android (téléphone) : https://github.com/${{ github.repository }}/releases/latest/download/lumio-android.apk"
             echo "Mac (Intel et Apple Silicon) : https://github.com/${{ github.repository }}/releases/latest/download/lumio-mac.dmg"
-            echo "Android TV : https://github.com/${{ github.repository }}/releases/latest/download/lumio-tv.apk (ou lumio.wawanono.lol/tv dans Downloader)"
+            echo "Android TV : Lumio TV (https://github.com/nono7444/lumio-tv/releases/latest), ou lumio.wawanono.lol/tv dans Downloader"
             echo "Toutes les notes : https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md"
           } > body.md
       - uses: softprops/action-gh-release@v2
@@ -274,7 +230,6 @@ jobs:
             lumio-unsigned.ipa
             lumio-android.apk
             lumio-mac.dmg
-            lumio-tv.apk
             altstore.json
       - name: Range les notes sous le numéro de version dans CHANGELOG.md
         if: github.ref == 'refs/heads/main'

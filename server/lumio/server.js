@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.30.0';
+const VERSION = '3.30.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2070,12 +2070,10 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
 </main></body></html>`);
   }
 
-  // Raccourci pour installer l'appli TV : taper « lumio.tondomaine/tv » dans Downloader
-  // Lumio TV : par défaut la version 32 bits (≈ 50 Mo), qui s'installe sur toutes les box et clés TV Android,
-  // même les 64 bits ; l'APK universel (≈ 130 Mo) fait planter Downloader sur les petites box.
-  // Lumio TV : même appli que l'iPhone, compilée pour Android TV (publiée avec chaque version de Lumio)
+  // Raccourci pour installer l'appli TV : taper « lumio.tondomaine/tv » dans Downloader → Lumio TV (32 bits, toutes les box).
+  // L'ancienne appli TV (React Native) n'existe plus.
   if (url.pathname === '/tv' || url.pathname === '/tv.apk') {
-    res.writeHead(302, { Location: process.env.TV_APK_URL || 'https://github.com/nono7444/lumio/releases/latest/download/lumio-tv.apk' });
+    res.writeHead(302, { Location: process.env.TV_APK_URL || 'https://github.com/nono7444/lumio-tv/releases/latest/download/lumio-tv-armeabi-v7a.apk' });
     return res.end();
   }
 

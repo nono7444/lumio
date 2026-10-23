@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- L'ancienne appli TV (React Native) est abandonnée : seule Lumio TV reste. `lumio.wawanono.lol/tv` installe maintenant Lumio TV (serveur Lumio 3.30.1).
+
 ## 1.0.94 — 23 octobre 2026
 
 - Profil → Serveur : « Installer Intro Skipper » installe l'extension dans Jellyfin, redémarre Jellyfin puis lance l'analyse tout seul (serveur Lumio 3.30.0).
