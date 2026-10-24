@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.42.0';
+const VERSION = '3.43.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2172,11 +2172,97 @@ async function magnetFiles(magnet, job) {
 // Lancé et surveillé par ce serveur, il n'écoute que sur 127.0.0.1 : rien n'est exposé, ce n'est plus un addon Stremio.
 // Désactivable avec LUMIO_SECOUR_EMBEDDED=0 (ou remplacé par un service à part avec LUMIO_SECOUR_URL).
 // Réglages du moteur par variables d'environnement : préfixe SECOUR_ (ex. SECOUR_WAWACITY_URL=https://…), ou depuis l'appli.
-const SECOUR_PY = process.env.LUMIO_SECOUR_PYTHON || '/opt/secour/bin/python';
+// Python du moteur : image récente (/opt/secour), sinon installé tout seul dans /data/secour (voir installSecourEngine)
+const SECOUR_VENV = path.join(DATA_DIR, 'secour', 'venv');
+const secourPy = () =>
+  process.env.LUMIO_SECOUR_PYTHON || (fs.existsSync('/opt/secour/bin/python') ? '/opt/secour/bin/python' : path.join(SECOUR_VENV, 'bin', 'python'));
 const SECOUR_PORT = Number(process.env.LUMIO_SECOUR_PORT || 7010);
 let secourProc = null;
 let secourRestarts = 0;
-const secourEmbedded = () => !process.env.LUMIO_SECOUR_URL && process.env.LUMIO_SECOUR_EMBEDDED !== '0' && fs.existsSync(SECOUR_PY);
+let secourInstall = null; // { state: 'installing' | 'error', message }
+const secourWanted = () => !process.env.LUMIO_SECOUR_URL && process.env.LUMIO_SECOUR_EMBEDDED !== '0';
+const secourEmbedded = () => secourWanted() && fs.existsSync(secourPy());
+
+/** Lance une commande, renvoie sa sortie (erreur si le code de sortie n'est pas 0). */
+function run(cmd, args, { input, timeout = 15 * 60_000 } = {}) {
+  const { spawn } = require('child_process');
+  return new Promise((resolve, reject) => {
+    const c = spawn(cmd, args, { stdio: [input ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
+    let out = '';
+    c.stdout.on('data', (d) => (out += d));
+    c.stderr.on('data', (d) => (out += d));
+    const t = setTimeout(() => c.kill('SIGKILL'), timeout);
+    c.on('error', (e) => {
+      clearTimeout(t);
+      reject(e);
+    });
+    c.on('close', (code) => {
+      clearTimeout(t);
+      code === 0 ? resolve(out) : reject(new Error(`${cmd} : code ${code} — ${out.trim().split('\n').slice(-4).join(' | ')}`));
+    });
+    if (input) {
+      c.stdin.end(input);
+    }
+  });
+}
+
+/**
+ * Installation sans SSH : avec l'ancienne image (node:alpine, sans Python), le serveur installe lui-même
+ * Python (apk) et le moteur Lumio Secour (code de cette version, pris sur GitHub) dans /data/secour.
+ * Refait à chaque nouvelle version du serveur, et Python est remis après une reconstruction du conteneur.
+ */
+async function installSecourEngine() {
+  if (!secourWanted() || process.env.LUMIO_SECOUR_PYTHON || fs.existsSync('/opt/secour/bin/python') || secourInstall?.state === 'installing') return;
+  const dir = path.join(DATA_DIR, 'secour');
+  const stamp = path.join(dir, 'engine.json');
+  const done = readJson(stamp, {});
+  const pyOk = fs.existsSync('/usr/bin/python3');
+  if (done.version === VERSION && pyOk && fs.existsSync(path.join(SECOUR_VENV, 'bin', 'python'))) return;
+  if (!fs.existsSync('/sbin/apk')) return; // autre système : il faut l'image Docker récente
+  secourInstall = { state: 'installing', message: 'Installation de Lumio Secour…' };
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    if (!pyOk) {
+      console.log('Lumio Secour : installation de Python dans le conteneur…');
+      await run('apk', ['add', '--no-cache', 'python3']);
+    }
+    if (done.version !== VERSION || !fs.existsSync(path.join(SECOUR_VENV, 'bin', 'python'))) {
+      console.log(`Lumio Secour : téléchargement du moteur (serveur ${VERSION})…`);
+      const ref = process.env.LUMIO_SECOUR_REF || 'main';
+      const r = await fetch(`https://codeload.github.com/nono7444/lumio/tar.gz/refs/heads/${ref}`);
+      if (!r.ok) throw new Error(`GitHub : HTTP ${r.status}`);
+      const tgz = Buffer.from(await r.arrayBuffer());
+      const src = path.join(dir, 'src');
+      fs.rmSync(src, { recursive: true, force: true });
+      fs.mkdirSync(src, { recursive: true });
+      await run('tar', ['-xz', '-C', src, '--strip-components=4', `lumio-${ref}/server/lumio/secour`], { input: tgz });
+      if (!fs.existsSync(path.join(src, 'pyproject.toml'))) throw new Error('code du moteur introuvable dans l’archive GitHub');
+      fs.rmSync(SECOUR_VENV, { recursive: true, force: true });
+      await run('python3', ['-m', 'venv', SECOUR_VENV]);
+      const pip = path.join(SECOUR_VENV, 'bin', 'pip');
+      try {
+        await run(pip, ['install', '--no-cache-dir', '--quiet', src]);
+      } catch (e) {
+        // Paquet sans version précompilée pour alpine : outils de compilation, puis nouvel essai
+        console.log(`Lumio Secour : compilation nécessaire (${e.message.slice(0, 160)})`);
+        await run('apk', ['add', '--no-cache', 'build-base', 'python3-dev', 'libffi-dev']);
+        await run(pip, ['install', '--no-cache-dir', '--quiet', src]);
+      }
+      writeJson(stamp, { version: VERSION, at: new Date().toISOString() });
+    }
+    secourInstall = null;
+    console.log('Lumio Secour : moteur installé');
+    startEmbeddedSecour();
+  } catch (e) {
+    secourInstall = { state: 'error', message: `Installation de Lumio Secour impossible : ${String((e && e.message) || e).slice(0, 300)}` };
+    console.log(secourInstall.message);
+    setTimeout(() => {
+      secourInstall = null;
+      installSecourEngine();
+    }, 30 * 60_000);
+  }
+}
+
 function startEmbeddedSecour() {
   if (!secourEmbedded() || secourProc) return;
   // Secrets propres au moteur : créés une fois, gardés dans config.json (jamais dans Git ni dans l'appli)
@@ -2199,7 +2285,7 @@ function startEmbeddedSecour() {
   };
   for (const [k, v] of Object.entries(process.env)) if (k.startsWith('SECOUR_') && k !== 'SECOUR_LOG_LEVEL') env[k.slice(7)] = v;
   const { spawn } = require('child_process');
-  const child = spawn(SECOUR_PY, ['-m', 'lumio_secour.main'], { cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(secourPy(), ['-m', 'lumio_secour.main'], { cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe'] });
   secourProc = child;
   const log = (buf) => {
     for (const line of String(buf).split('\n')) {
@@ -3823,9 +3909,10 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       requireAdmin(user);
       if (req.method === 'GET' && p === '/api/secour') {
         const out = { configured: Boolean(secourUrl() && secourKey()), url: secourUrl() || null, fromEnv: Boolean(process.env.LUMIO_SECOUR_URL) || secourEmbedded(),
-          embedded: secourEmbedded(), alldebrid: Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey), disks: disks().length,
+          embedded: secourEmbedded() || Boolean(secourInstall), install: secourInstall || undefined, alldebrid: Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey), disks: disks().length,
           auto: secourAutoView() };
-        if (out.configured) {
+        if (secourInstall) Object.assign(out, { online: false, error: secourInstall.message });
+        else if (out.configured) {
           try {
             const ping = await secour('/lumio/ping', { timeout: 8000 });
             Object.assign(out, { online: true, version: ping.version, sources: ping.sources || [], tmdb: ping.tmdb });
@@ -3987,8 +4074,9 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
 
 server.listen(PORT, () => console.log(`Serveur Lumio ${VERSION} sur le port ${PORT} (Jellyfin : ${JELLYFIN_URL})`));
 
-// Lumio Secour intégré, puis reprise des demandes du groupe de secours interrompues par un redémarrage
-startEmbeddedSecour();
+// Lumio Secour intégré (installé tout seul si l'image n'a pas Python), puis reprise des demandes interrompues
+if (secourEmbedded()) startEmbeddedSecour();
+installSecourEngine();
 for (const r of requests)
   if (r.via === 'secour' && r.status === RequestStatus.APPROVED && r.secour && ['queued', 'running'].includes(r.secour.state)) secourQueue.push(r.id);
 if (secourQueue.length) setTimeout(runSecourQueue, 20_000);

@@ -121,18 +121,21 @@ Configuration :
 
 Les données du moteur (réglages, cache, liens morts) sont dans `/data/secour/`.
 
-### Première installation (une seule fois)
+### Installation : rien à faire en SSH
 
-L'image passe de `node:alpine` à `node:bookworm-slim` avec Python. Sur le serveur :
+Dans l'appli : Profil → Serveur → **Mettre à jour**. Le nouveau `server.js` voit que l'image (node:alpine) n'a pas Python :
+il l'installe dans le conteneur (`apk`), télécharge le moteur Lumio Secour de la même version depuis GitHub, et l'installe dans
+`/data/secour/venv` (compte quelques minutes la première fois, l'état s'affiche dans Profil → Lumio Secour).
+Après une reconstruction du conteneur, Python est réinstallé tout seul au démarrage.
+
+Plus tard, si tu es devant le serveur, tu peux passer à l'image avec Python déjà dedans (démarrage plus rapide) :
 
 ```sh
 cd /data/lumio-server
 curl -fsSL https://codeload.github.com/nono7444/lumio/tar.gz/refs/heads/main | tar -xz --strip-components=3 lumio-main/server/lumio
 cd /data && docker compose up -d --build --force-recreate lumio
-sudo sh /data/lumio-server/host/install-host-actions.sh   # le bouton « Mettre à jour » récupère aussi Lumio Secour
+sudo sh /data/lumio-server/host/install-host-actions.sh   # le bouton « Mettre à jour » récupère alors tout le dossier
 ```
-
-Tu peux ensuite arrêter et supprimer l'ancien conteneur `lumio-secour` s'il existe.
 
 | Méthode | Route | Rôle |
 |---|---|---|
