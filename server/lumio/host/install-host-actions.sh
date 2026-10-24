@@ -24,9 +24,26 @@ Description=Lumio : redémarrage de la machine demandé depuis l'appli
 Type=oneshot
 ExecStart=/bin/sh -c 'rm -f "$DIR/reboot"; sleep 3; /usr/bin/systemctl reboot'
 UNIT
-# Mise à jour du serveur Lumio : nouveau server.js depuis GitHub, puis reconstruction du conteneur
+# Mise à jour du serveur Lumio : server.js, Dockerfile et Lumio Secour depuis GitHub, puis reconstruction du conteneur
 CODE=$(dirname "$SRC")
 COMPOSE_DIR=$(docker inspect lumio --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}')
+cat > "$CODE/update.sh" <<'SCRIPT'
+#!/bin/sh
+# Lumio : mise à jour demandée depuis l'appli (Profil → Serveur → Mettre à jour)
+set -e
+DIR="$1"; CODE="$2"; COMPOSE_DIR="$3"
+rm -f "$DIR/update"
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+curl -fsSL https://codeload.github.com/nono7444/lumio/tar.gz/refs/heads/main | tar -xz -C "$TMP" --strip-components=3 lumio-main/server/lumio
+test -s "$TMP/server.js"
+cp "$TMP/server.js" "$CODE/server.js"
+cp "$TMP/Dockerfile" "$CODE/Dockerfile"
+rm -rf "$CODE/secour"
+cp -R "$TMP/secour" "$CODE/secour"
+cd "$COMPOSE_DIR" && docker compose up -d --build --force-recreate lumio
+SCRIPT
+chmod +x "$CODE/update.sh"
 cat > /etc/systemd/system/lumio-update.path <<UNIT
 [Unit]
 Description=Lumio : demande de mise à jour depuis l'appli
@@ -40,7 +57,7 @@ cat > /etc/systemd/system/lumio-update.service <<UNIT
 Description=Lumio : mise à jour du serveur demandée depuis l'appli
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c 'rm -f "$DIR/update"; curl -fsSL -o "$CODE/server.js.new" https://raw.githubusercontent.com/nono7444/lumio/main/server/lumio/server.js && mv "$CODE/server.js.new" "$CODE/server.js" && cd "$COMPOSE_DIR" && docker compose up -d --build --force-recreate lumio'
+ExecStart=/bin/sh $CODE/update.sh "$DIR" "$CODE" "$COMPOSE_DIR"
 UNIT
 # Redémarrage de Jellyfin (quand il ne sait pas se relancer seul dans Docker)
 cat > /etc/systemd/system/lumio-jellyfin.path <<UNIT

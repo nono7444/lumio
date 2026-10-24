@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lumio-secour"
+version = "1.0.0"
+description = "Lumio Secour : moteur de liens de secours du serveur Lumio (fork de WAStream)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "selectolax<1",
+    "httpx[socks]",
+    "databases",
+    "aiosqlite",
+    "asyncpg",
+    "pydantic-settings",
+    "loguru",
+    "pycryptodome",
+    "bcrypt",
+    "psutil",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lumio_secour*"]

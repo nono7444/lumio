@@ -93,17 +93,48 @@ La clé API AllDebrid se saisit dans l'appli (Accueil → icône Téléchargemen
 Tu peux aussi la mettre dans `.env` (`ALLDEBRID_KEY=…`).
 
 
-## Lumio Secour (liens d'hébergeurs, admin)
+## Lumio Secour (groupe de secours, intégré)
 
-Lumio Secour (service à part, dans `/data/lumio-secour` sur le serveur) cherche des liens pour un film ou un épisode.
-Dans l'appli, l'onglet **Lumio Secour** (admin) règle la connexion, la clé AllDebrid et les réglages du fork ;
-sur une fiche, le bouton **Liens** les affiche ; un appui lance le téléchargement :
-Lumio Secour convertit le lien avec la clé AllDebrid du serveur Lumio, puis le fichier arrive sur le disque choisi
-et Jellyfin rescanne. Rien n'est lu en streaming dans l'appli.
+Lumio Secour est intégré au serveur Lumio : c'est un fork de WAStream (licence MIT, `secour/LICENSE`) transformé en
+moteur interne. Ce n'est plus un addon Stremio : pas de manifest, pas de page de configuration, rien d'exposé.
+`server.js` le lance dans le même conteneur (127.0.0.1:7010) et le relance s'il s'arrête.
 
-```yaml
-  lumio:
-    environment:
-      - LUMIO_SECOUR_URL=http://lumio-secour:7000   # ou depuis l'appli (Liens → Réglages)
-      - LUMIO_SECOUR_KEY=${LUMIO_SECOUR_KEY}
+**Groupe de secours** : quand Radarr ou Sonarr ne marchent plus (injoignable, délai dépassé, erreur 5xx, clé refusée),
+une demande validée n'échoue plus : Lumio Secour prend le relais. Il cherche les liens, choisit le meilleur
+(dispo AllDebrid, Multi / VF, 1080p), le convertit avec la clé AllDebrid du serveur, et range le fichier façon Jellyfin :
+
+- films : `Films/Titre (année)/Titre (année).mkv`
+- séries : `Séries/Titre (année)/Season 01/Titre (année) - S01E01.mkv` (épisodes déjà sortis des saisons demandées)
+
+Un fichier à la fois. Si un lien échoue, le suivant est essayé. La demande affiche la progression, puis passe à « Terminée ».
+Une notification part au début, à la fin, ou en cas d'échec.
+
+Configuration :
+
+- **Clé AllDebrid** : celle du serveur (Accueil → Téléchargements, ou `ALLDEBRID_KEY`). Elle n'est jamais enregistrée par le moteur.
+- **TMDB** : la clé TMDB du serveur Lumio est transmise automatiquement.
+- **Sites** : aucun n'est fourni. Renseigne-les dans l'appli (Profil → Administration → Lumio Secour → réglages), ou dans le compose
+  avec le préfixe `SECOUR_` : `SECOUR_WAWACITY_URL=https://…`, `SECOUR_ZONE_TELECHARGEMENT_URL=…`, `SECOUR_DARKI_API_URL=…`…
+- **Dossiers** : réglés dans l'appli, ou `SECOUR_MOVIES=jellyfin1:Films` et `SECOUR_SERIES=jellyfin2:Séries`
+  (sinon Lumio reprend le nom du dossier Radarr / Sonarr s'il existe sur un disque de `LUMIO_DISKS`).
+- `LUMIO_SECOUR_EMBEDDED=0` désactive le moteur intégré. `LUMIO_SECOUR_URL` / `LUMIO_SECOUR_KEY` utilisent un service à part.
+
+Les données du moteur (réglages, cache, liens morts) sont dans `/data/secour/`.
+
+### Première installation (une seule fois)
+
+L'image passe de `node:alpine` à `node:bookworm-slim` avec Python. Sur le serveur :
+
+```sh
+cd /data/lumio-server
+curl -fsSL https://codeload.github.com/nono7444/lumio/tar.gz/refs/heads/main | tar -xz --strip-components=3 lumio-main/server/lumio
+cd /data && docker compose up -d --build --force-recreate lumio
+sudo sh /data/lumio-server/host/install-host-actions.sh   # le bouton « Mettre à jour » récupère aussi Lumio Secour
 ```
+
+Tu peux ensuite arrêter et supprimer l'ancien conteneur `lumio-secour` s'il existe.
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| GET / PUT | `/api/secour/auto` | Admin : groupe de secours `{ enabled, movie: { root, folder }, tv: { root, folder } }` |
+| POST | `/api/secour/requests/:id` | Admin : passer une demande par Lumio Secour à la main |

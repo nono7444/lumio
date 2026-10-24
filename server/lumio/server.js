@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.41.0';
+const VERSION = '3.42.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -218,9 +218,11 @@ function quotaOf(user) {
 }
 
 // ——— Appels Radarr / Sonarr ———
+/** Erreur Radarr / Sonarr « hors service » (injoignable, délai, erreur 5xx, clé refusée) : le groupe de secours prend le relais. */
+const arrDown = (e, msg) => Object.assign(e instanceof HttpError ? e : new HttpError(502, msg || String(e)), { arrDown: true });
 async function arr(kind, p, init = {}) {
   const c = arrConfig(kind);
-  if (!c) throw new HttpError(503, `${label(kind)} n'est pas configuré sur le serveur Lumio`);
+  if (!c) throw arrDown(new HttpError(503, `${label(kind)} n'est pas configuré sur le serveur Lumio`));
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 20000);
   try {
@@ -241,13 +243,14 @@ async function arr(kind, p, init = {}) {
       if (res.status === 401) msg = 'clé API refusée';
       else if (Array.isArray(body)) msg = body.map((e) => e.errorMessage).filter(Boolean).join(' · ') || msg;
       else if (body && body.message) msg = body.message;
-      throw new HttpError(502, `${label(kind)} : ${msg}`);
+      const err = new HttpError(502, `${label(kind)} : ${msg}`);
+      throw res.status === 401 || res.status >= 500 ? arrDown(err) : err;
     }
     return body;
   } catch (e) {
-    if (e && e.name === 'AbortError') throw new HttpError(504, `${label(kind)} ne répond pas`);
+    if (e && e.name === 'AbortError') throw arrDown(new HttpError(504, `${label(kind)} ne répond pas`));
     if (e instanceof HttpError) throw e;
-    throw new HttpError(502, `${label(kind)} injoignable`);
+    throw arrDown(new HttpError(502, `${label(kind)} injoignable`));
   } finally {
     clearTimeout(t);
   }
@@ -522,7 +525,7 @@ function mediaStatus(lib, type, tmdbId, tvdbId, seasonNumbers) {
 function refreshCompleted(lib) {
   let changed = false;
   for (const r of requests) {
-    if (r.status !== RequestStatus.APPROVED) continue;
+    if (r.status !== RequestStatus.APPROVED || r.via === 'secour') continue;
     let done = false;
     if (r.type === 'movie') done = Boolean((lib.movies.get(r.tmdbId) || {}).hasFile);
     else {
@@ -547,7 +550,7 @@ setInterval(async () => {
     if (r.status !== RequestStatus.FAILED || Date.parse(r.createdAt) < day || (r.autoRetries || 0) >= 3) continue;
     r.autoRetries = (r.autoRetries || 0) + 1;
     try {
-      await sendToArr(r);
+      await sendOrSecour(r);
       r.status = RequestStatus.APPROVED;
       delete r.error;
       console.log(`Demande « ${r.title} » renvoyée avec succès (essai ${r.autoRetries})`);
@@ -1426,6 +1429,19 @@ async function queueIndex() {
 }
 
 function downloadOf(r, lib) {
+  // Groupe de secours : progression des téléchargements Lumio Secour (même forme que la file Radarr / Sonarr)
+  if (r.via === 'secour' && r.status === RequestStatus.APPROVED && r.secour) {
+    const cur = r.secour.items.find((i) => i.status === 'downloading' || i.status === 'searching');
+    const job = cur && cur.download ? downloads.find((d) => d.id === cur.download) : null;
+    const pct = job && job.size ? Math.round((job.done / job.size) * 100) : null;
+    return {
+      state: 'downloading',
+      via: 'secour',
+      progress: r.secour.total > 1 ? Math.round(((r.secour.done + (pct || 0) / 100) / r.secour.total) * 100) : pct,
+      count: r.secour.total > 1 ? r.secour.total - r.secour.done : undefined,
+      title: cur ? `Lumio Secour${cur.label ? ` · ${cur.label}` : ''}${cur.status === 'searching' ? ' · recherche' : ''}` : 'Lumio Secour · en attente',
+    };
+  }
   if (!lib || !lib.queue || r.status !== RequestStatus.APPROVED) return undefined;
   if (r.type === 'movie') {
     const t = lib.queue.movies.get(r.tmdbId);
@@ -2152,21 +2168,296 @@ async function magnetFiles(magnet, job) {
   return flattenFiles(mm && mm.files);
 }
 
+// ——— Lumio Secour intégré : le moteur de liens (fork de WAStream, en Python) tourne dans ce conteneur ———
+// Lancé et surveillé par ce serveur, il n'écoute que sur 127.0.0.1 : rien n'est exposé, ce n'est plus un addon Stremio.
+// Désactivable avec LUMIO_SECOUR_EMBEDDED=0 (ou remplacé par un service à part avec LUMIO_SECOUR_URL).
+// Réglages du moteur par variables d'environnement : préfixe SECOUR_ (ex. SECOUR_WAWACITY_URL=https://…), ou depuis l'appli.
+const SECOUR_PY = process.env.LUMIO_SECOUR_PYTHON || '/opt/secour/bin/python';
+const SECOUR_PORT = Number(process.env.LUMIO_SECOUR_PORT || 7010);
+let secourProc = null;
+let secourRestarts = 0;
+const secourEmbedded = () => !process.env.LUMIO_SECOUR_URL && process.env.LUMIO_SECOUR_EMBEDDED !== '0' && fs.existsSync(SECOUR_PY);
+function startEmbeddedSecour() {
+  if (!secourEmbedded() || secourProc) return;
+  // Secrets propres au moteur : créés une fois, gardés dans config.json (jamais dans Git ni dans l'appli)
+  if (!config.secourEmbeddedKey) config.secourEmbeddedKey = crypto.randomBytes(24).toString('hex');
+  if (!config.secourSecret) config.secourSecret = crypto.randomBytes(32).toString('hex');
+  saveConfig();
+  const dir = path.join(DATA_DIR, 'secour');
+  fs.mkdirSync(dir, { recursive: true });
+  const env = {
+    PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
+    HOME: dir,
+    TZ: process.env.TZ || 'Europe/Paris',
+    PORT: String(SECOUR_PORT),
+    LUMIO_SECOUR_HOST: '127.0.0.1',
+    LUMIO_API_KEY: config.secourEmbeddedKey,
+    SECRET_KEY: config.secourSecret,
+    DATABASE_TYPE: 'sqlite',
+    DATABASE_PATH: path.join(dir, 'secour.db'),
+    LOG_LEVEL: process.env.SECOUR_LOG_LEVEL || 'INFO',
+  };
+  for (const [k, v] of Object.entries(process.env)) if (k.startsWith('SECOUR_') && k !== 'SECOUR_LOG_LEVEL') env[k.slice(7)] = v;
+  const { spawn } = require('child_process');
+  const child = spawn(SECOUR_PY, ['-m', 'lumio_secour.main'], { cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  secourProc = child;
+  const log = (buf) => {
+    for (const line of String(buf).split('\n')) {
+      // eslint-disable-next-line no-control-regex
+      const clean = line.replace(/\x1b\[[0-9;]*m/g, '').trim();
+      if (clean && !/\| DEBUG/.test(clean)) console.log(`[Secour] ${clean.slice(0, 400)}`);
+    }
+  };
+  child.stdout.on('data', log);
+  child.stderr.on('data', log);
+  child.on('error', (e) => console.log(`Lumio Secour : démarrage impossible — ${e.message}`));
+  child.on('exit', (code) => {
+    secourProc = null;
+    const wait = Math.min(60, 5 * ++secourRestarts);
+    console.log(`Lumio Secour arrêté (code ${code}), relance dans ${wait} s`);
+    setTimeout(startEmbeddedSecour, wait * 1000);
+  });
+  setTimeout(() => (secourRestarts = 0), 120_000);
+  console.log(`Lumio Secour intégré lancé (127.0.0.1:${SECOUR_PORT})`);
+}
+for (const sig of ['SIGTERM', 'SIGINT'])
+  process.on(sig, () => {
+    if (secourProc) secourProc.kill('SIGTERM');
+    process.exit(0);
+  });
+
+// ——— Groupe de secours : quand Radarr / Sonarr ne marchent plus, Lumio Secour prend le relais ———
+// La demande reste « approuvée » : Lumio cherche les liens, les convertit avec la clé AllDebrid du serveur
+// et range les fichiers façon Jellyfin (Films/Titre (année)/…, Séries/Titre (année)/Season 01/…), un à la fois.
+const secourAutoOn = () => config.secourAuto !== false && Boolean(secourUrl() && secourKey()) && Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey) && disks().length > 0;
+
+/** Dossier de destination : réglé dans l'appli, sinon SECOUR_MOVIES / SECOUR_SERIES (« disque:dossier »), sinon deviné. */
+function secourTarget(kind, r) {
+  const set = (config.secourTargets || {})[kind];
+  if (set && disks().some((d) => d.name === set.root)) return set;
+  const envv = process.env[kind === 'movie' ? 'SECOUR_MOVIES' : 'SECOUR_SERIES'];
+  if (envv && envv.includes(':')) {
+    const [root, ...rest] = envv.split(':');
+    if (disks().some((d) => d.name === root)) return { root, folder: rest.join(':').replace(/^\/+|\/+$/g, '') };
+  }
+  // Même nom de dossier que dans Radarr / Sonarr (ex. /movies/Films → « Films » sur un des disques)
+  const wanted = r && r.rootFolderPath ? String(r.rootFolderPath).replace(/\/+$/, '').split('/').pop() : '';
+  const guesses = [wanted, ...(kind === 'movie' ? ['Films', 'films', 'Movies', 'movies'] : ['Séries', 'Series', 'séries', 'series', 'TV', 'tv'])].filter(Boolean);
+  for (const g of guesses) for (const d of disks()) if (fs.existsSync(path.join(d.dir, g))) return { root: d.name, folder: g };
+  const d = disks()[0];
+  return d ? { root: d.name, folder: kind === 'movie' ? 'Films' : 'Séries' } : null;
+}
+function secourAutoView() {
+  return {
+    enabled: config.secourAuto !== false,
+    ready: secourAutoOn(),
+    alldebrid: Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey),
+    engine: Boolean(secourUrl() && secourKey()),
+    disks: disks().map((d) => d.name),
+    movie: secourTarget('movie'),
+    tv: secourTarget('tv'),
+    queue: secourQueue.length + (secourBusy ? 1 : 0),
+  };
+}
+
+/** Envoie à Radarr / Sonarr ; s'ils sont hors service, bascule sur le groupe de secours. */
+async function sendOrSecour(r) {
+  try {
+    await sendToArr(r);
+    if (r.via === 'secour' && r.secour && r.secour.state !== 'running') delete r.via;
+  } catch (e) {
+    if (!(e && e.arrDown) || !secourAutoOn()) throw e;
+    if (r.via === 'secour' && r.secour && ['queued', 'running'].includes(r.secour.state)) return;
+    startSecour(r, e.message);
+  }
+}
+
+const secourQueue = [];
+// Demande refusée ou supprimée pendant le travail : on s'arrête
+const secourStopped = (r) => !requests.includes(r) || r.status === RequestStatus.DECLINED || !r.secour || r.secour.state === 'cancelled';
+let secourBusy = false;
+function startSecour(r, reason) {
+  if (!secourUrl() || !secourKey()) throw new HttpError(400, 'Lumio Secour n’est pas prêt');
+  if (!(process.env.ALLDEBRID_KEY || config.alldebridKey)) throw new HttpError(400, 'Clé AllDebrid non configurée (Téléchargements)');
+  if (!secourTarget(r.type === 'movie' ? 'movie' : 'tv', r)) throw new HttpError(400, 'Aucun disque configuré (LUMIO_DISKS)');
+  r.status = RequestStatus.APPROVED;
+  r.via = 'secour';
+  r.secour = { state: 'queued', reason: String(reason || '').slice(0, 200), startedAt: new Date().toISOString(), done: 0, total: 0, items: [] };
+  delete r.error;
+  saveRequests();
+  if (!secourQueue.includes(r.id)) secourQueue.push(r.id);
+  console.log(`Groupe de secours : « ${r.title} » confié à Lumio Secour (${r.secour.reason})`);
+  notify({ title: '🛟 Lumio Secour prend le relais', message: `${r.title} — ${r.secour.reason}`, tags: ['sos'], image: r.poster, click: 'lumio://activity' }).catch(() => {});
+  runSecourQueue();
+}
+
+const cleanName = (t) => String(t || 'Sans titre').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+const pad2 = (n) => String(n).padStart(2, '0');
+
+/** Classe les liens : dispo AllDebrid, français / multi, 1080p, puis taille raisonnable. */
+function rankSecourLinks(links) {
+  const lang = (l) => {
+    const t = String(l || '');
+    if (/multi/i.test(t)) return 0;
+    if (/vostfr|sub/i.test(t)) return 30;
+    if (/fr|vf/i.test(t)) return 2;
+    if (/unknown/i.test(t)) return 20;
+    return 40;
+  };
+  const res = (q) => {
+    const t = String(q || '');
+    if (/1080/.test(t)) return 0;
+    if (/2160|4k|uhd/i.test(t)) return 8;
+    if (/720/.test(t)) return 10;
+    return 25;
+  };
+  const size = (b) => (!b ? 6 : b > 25e9 ? 12 : b < 300e6 ? 15 : 0);
+  return [...links].sort((a, b) => (a.cached ? 0 : 100) + lang(a.language) + res(a.quality) + size(a.sizeBytes) - ((b.cached ? 0 : 100) + lang(b.language) + res(b.quality) + size(b.sizeBytes)));
+}
+
+/** Cherche et télécharge un film ou un épisode ; essaie les meilleurs liens l'un après l'autre. */
+async function secourGrab(r, item, target, folder, baseName, query) {
+  const dir = safePath(target.root, folder).full;
+  const existing = fs.existsSync(dir) ? fs.readdirSync(dir).find((f) => f.startsWith(`${baseName}.`) && !f.endsWith('.part')) : null;
+  if (existing) {
+    item.status = 'present';
+    return true;
+  }
+  item.status = 'searching';
+  const qs = new URLSearchParams(query);
+  const found = await secour(`/lumio/links?${qs}`, { timeout: 120000 });
+  const candidates = rankSecourLinks((found && found.links) || []).slice(0, 6);
+  if (!candidates.length) {
+    item.status = 'notfound';
+    item.error = 'Aucun lien trouvé';
+    return false;
+  }
+  for (const l of candidates) {
+    if (secourStopped(r)) return false;
+    const job = {
+      id: crypto.randomBytes(5).toString('hex'), link: l.link, root: target.root, folder, status: 'queued', quiet: true,
+      name: `${r.title}${item.label ? ` · ${item.label}` : ''}`, baseName, size: Number(l.sizeBytes) || 0, done: 0, speed: 0,
+      token: process.env.JELLYFIN_API_KEY || jfAdminToken || jfIndexToken, createdAt: new Date().toISOString(),
+      secour: { link: l.link, hoster: l.hoster, source: l.source, season: l.season, episode: l.episode, type: query.type },
+    };
+    downloads.push(job);
+    item.status = 'downloading';
+    item.download = job.id;
+    item.quality = l.quality;
+    await runDownload(job);
+    if (job.status === 'done') {
+      item.status = 'done';
+      delete item.error;
+      return true;
+    }
+    item.error = job.error || 'échec';
+    console.log(`Groupe de secours : ${job.name} — lien ${l.hoster} en échec (${item.error}), lien suivant`);
+  }
+  item.status = 'error';
+  return false;
+}
+
+async function processSecour(r) {
+  const s = r.secour;
+  s.state = 'running';
+  s.items = [];
+  const kind = r.type === 'movie' ? 'movie' : 'tv';
+  const target = secourTarget(kind, r);
+  const ext = await tmdbGet(`/${kind}/${r.tmdbId}/external_ids`).catch(() => null);
+  const imdb = ext && ext.imdb_id;
+  if (!imdb) throw new Error('Identifiant IMDb introuvable sur TMDB');
+  const show = `${cleanName(r.title)}${r.year ? ` (${r.year})` : ''}`;
+  if (kind === 'movie') {
+    const item = { label: '', status: 'queued' };
+    s.items.push(item);
+    s.total = 1;
+    saveRequests();
+    const ok = await secourGrab(r, item, target, path.posix.join(target.folder, show), show, { imdb, type: 'movie' });
+    s.done = ok ? 1 : 0;
+    if (!ok) throw new Error(item.error || 'aucun lien utilisable');
+    return;
+  }
+  // Séries : épisodes déjà sortis des saisons demandées
+  const today = new Date().toISOString().slice(0, 10);
+  for (const n of (r.seasons || []).map(Number).filter((x) => x > 0)) {
+    const season = await tmdbGet(`/tv/${r.tmdbId}/season/${n}`).catch(() => null);
+    for (const ep of (season && season.episodes) || []) if (ep.air_date && ep.air_date <= today) s.items.push({ label: `S${pad2(n)}E${pad2(ep.episode_number)}`, season: n, episode: ep.episode_number, status: 'queued' });
+  }
+  s.total = s.items.length;
+  saveRequests();
+  if (!s.total) throw new Error('Aucun épisode sorti pour ces saisons');
+  for (const item of s.items) {
+    if (secourStopped(r)) return;
+    try {
+      const ok = await secourGrab(r, item, target, path.posix.join(target.folder, show, `Season ${pad2(item.season)}`), `${show} - ${item.label}`, {
+        imdb, type: 'series', season: String(item.season), episode: String(item.episode),
+      });
+      if (ok) s.done += 1;
+    } catch (e) {
+      item.status = 'error';
+      item.error = String((e && e.message) || e);
+    }
+    saveRequests();
+  }
+  if (!s.done) throw new Error('Aucun épisode trouvé');
+}
+
+async function runSecourQueue() {
+  if (secourBusy) return;
+  secourBusy = true;
+  try {
+    while (secourQueue.length) {
+      const r = requests.find((x) => x.id === secourQueue[0]);
+      if (r && r.via === 'secour' && r.status === RequestStatus.APPROVED) {
+        try {
+          await processSecour(r);
+          r.secour.state = 'done';
+          r.status = RequestStatus.COMPLETED;
+          r.completedAt = new Date().toISOString();
+          const missing = r.secour.items.filter((i) => !['done', 'present'].includes(i.status)).length;
+          const what = r.type === 'tv' ? ` (${r.secour.done}/${r.secour.total} épisodes${missing ? `, ${missing} introuvable${missing > 1 ? 's' : ''}` : ''})` : '';
+          notify({ title: '🛟 Disponible via Lumio Secour', message: `${r.title}${what} · demandé par ${r.requestedBy.name}`, tags: ['tada'], image: r.poster }).catch(() => {});
+          notifyFamily({ title: '🎉 Disponible', message: `${r.title} est prêt à regarder`, tags: ['tada'], image: r.poster, click: 'lumio://' });
+        } catch (e) {
+          if (r.secour.state !== 'cancelled') {
+            r.secour.state = 'error';
+            r.status = RequestStatus.FAILED;
+            r.error = `Lumio Secour : ${String((e && e.message) || e)}`;
+            notify({ title: '🛟 Lumio Secour : échec', message: `${r.title} — ${r.error}`, tags: ['warning'], image: r.poster }).catch(() => {});
+          }
+        }
+        saveRequests();
+        library = null;
+      }
+      secourQueue.shift();
+    }
+  } finally {
+    secourBusy = false;
+  }
+}
+
 // ——— Lumio Secour : liens d'hébergeurs pour un film ou un épisode ———
 // Adresse et clé : LUMIO_SECOUR_URL / LUMIO_SECOUR_KEY, ou envoyées par l'appli de l'admin.
 // La clé AllDebrid reste ici : elle est transmise à Lumio Secour à chaque appel, jamais à l'appli.
-const secourUrl = () => (process.env.LUMIO_SECOUR_URL || config.secourUrl || '').replace(/\/+$/, '');
-const secourKey = () => process.env.LUMIO_SECOUR_KEY || config.secourKey || '';
+// Intégré : le moteur tourne dans le même conteneur (127.0.0.1) et a priorité sur une ancienne adresse enregistrée.
+const secourUrl = () => (process.env.LUMIO_SECOUR_URL || (secourEmbedded() ? `http://127.0.0.1:${SECOUR_PORT}` : config.secourUrl) || '').replace(/\/+$/, '');
+const secourKey = () => process.env.LUMIO_SECOUR_KEY || (secourEmbedded() ? config.secourEmbeddedKey : config.secourKey) || '';
 async function secour(pathname, { method = 'GET', body, timeout = 60000 } = {}) {
   if (!secourUrl() || !secourKey()) throw new HttpError(400, 'Lumio Secour n’est pas configuré');
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeout);
   try {
     const adKey = process.env.ALLDEBRID_KEY || config.alldebridKey;
+    const tk = tmdbKey();
     const r = await fetch(`${secourUrl()}${pathname}`, {
       method,
       signal: ctrl.signal,
-      headers: { 'X-Lumio-Key': secourKey(), ...(adKey ? { 'X-Debrid-Key': adKey } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      headers: {
+        'X-Lumio-Key': secourKey(),
+        ...(adKey ? { 'X-Debrid-Key': adKey } : {}),
+        ...(tk ? { 'X-Tmdb-Key': tk } : {}),
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+      },
       body: body ? JSON.stringify(body) : undefined,
     });
     const j = await r.json().catch(() => null);
@@ -2224,14 +2515,16 @@ async function downloadTo(url, dest, job) {
 }
 
 async function runDownload(job) {
-  notify({ title: '⬇️ Téléchargement AllDebrid lancé', message: job.name || job.link.slice(0, 120), tags: ['arrow_down'], click: 'lumio://downloads' });
+  if (!job.quiet) notify({ title: '⬇️ Téléchargement AllDebrid lancé', message: job.name || job.link.slice(0, 120), tags: ['arrow_down'], click: 'lumio://downloads' });
   try {
     const { full } = safePath(job.root, job.folder);
     let files;
     if (job.secour) {
       job.status = 'debrid';
       const r = await secour('/lumio/resolve', { method: 'POST', body: job.secour, timeout: 180000 });
-      const name = job.fileName || fileNameFromUrl(r.url) || `${job.name || 'fichier'}.mkv`;
+      const fromUrl = fileNameFromUrl(r.url);
+      const ext = (fromUrl.match(/\.\w{2,4}$/) || ['.mkv'])[0];
+      const name = job.baseName ? `${job.baseName}${ext}` : job.fileName || fromUrl || `${job.name || 'fichier'}.mkv`;
       files = [{ rel: name, direct: r.url }];
     } else if (/^magnet:\?/i.test(job.link) || /^[a-f0-9]{40}$/i.test(job.link) || /^adid:\d+$/.test(job.link)) {
       job.status = 'debrid';
@@ -2263,7 +2556,7 @@ async function runDownload(job) {
     job.finishedAt = new Date().toISOString();
     // Jellyfin voit les nouveaux fichiers tout de suite
     if (job.token) fetch(`${JELLYFIN_URL}/Library/Refresh`, { method: 'POST', headers: jfHeaders(job.token) }).catch(() => {});
-    notify({ title: 'Téléchargement terminé', message: job.name || 'Fichier', tags: ['white_check_mark'] }).catch(() => {});
+    if (!job.quiet) notify({ title: 'Téléchargement terminé', message: job.name || 'Fichier', tags: ['white_check_mark'] }).catch(() => {});
   } catch (e) {
     job.status = job.cancelled ? 'cancelled' : 'error';
     job.error = String((e && e.message) || e);
@@ -2433,7 +2726,7 @@ async function createRequest(user, b) {
     r.modifiedBy = { id: user.id, name: user.name };
     r.modifiedAt = r.createdAt;
     try {
-      await sendToArr(r);
+      await sendOrSecour(r);
     } catch (e) {
       r.status = RequestStatus.FAILED;
       r.error = String(e.message || e);
@@ -2458,7 +2751,7 @@ async function approveRequest(admin, r, b) {
   r.modifiedBy = { id: admin.id, name: admin.name };
   r.modifiedAt = new Date().toISOString();
   try {
-    await sendToArr(r);
+    await sendOrSecour(r);
     r.status = RequestStatus.APPROVED;
     delete r.error;
   } catch (e) {
@@ -3529,8 +3822,9 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
     if (p === '/api/secour' || p.startsWith('/api/secour/')) {
       requireAdmin(user);
       if (req.method === 'GET' && p === '/api/secour') {
-        const out = { configured: Boolean(secourUrl() && secourKey()), url: secourUrl() || null, fromEnv: Boolean(process.env.LUMIO_SECOUR_URL),
-          alldebrid: Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey), disks: disks().length };
+        const out = { configured: Boolean(secourUrl() && secourKey()), url: secourUrl() || null, fromEnv: Boolean(process.env.LUMIO_SECOUR_URL) || secourEmbedded(),
+          embedded: secourEmbedded(), alldebrid: Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey), disks: disks().length,
+          auto: secourAutoView() };
         if (out.configured) {
           try {
             const ping = await secour('/lumio/ping', { timeout: 8000 });
@@ -3548,6 +3842,30 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         if (b.url === '') delete config.secourKey;
         saveConfig();
         return send(res, 200, { configured: Boolean(secourUrl() && secourKey()) });
+      }
+      // Groupe de secours : activé ou non, dossiers de destination
+      if (req.method === 'GET' && p === '/api/secour/auto') return send(res, 200, secourAutoView());
+      if (req.method === 'PUT' && p === '/api/secour/auto') {
+        const b = await readBody(req);
+        if (typeof b.enabled === 'boolean') config.secourAuto = b.enabled;
+        for (const k of ['movie', 'tv']) {
+          const t = b[k];
+          if (t && typeof t === 'object') {
+            safePath(t.root, t.folder || '');
+            config.secourTargets = { ...(config.secourTargets || {}), [k]: { root: String(t.root), folder: String(t.folder || '').replace(/^\/+|\/+$/g, '') } };
+          }
+        }
+        saveConfig();
+        return send(res, 200, secourAutoView());
+      }
+      // Admin : passer une demande par le groupe de secours à la main
+      const viaSec = p.match(/^\/api\/secour\/requests\/([\w-]+)$/);
+      if (req.method === 'POST' && viaSec) {
+        const r = requests.find((x) => x.id === viaSec[1]);
+        if (!r) throw new HttpError(404, 'Demande introuvable');
+        if (r.status === RequestStatus.DECLINED || r.status === RequestStatus.COMPLETED) throw new HttpError(409, 'Cette demande est close.');
+        startSecour(r, `lancé à la main par ${user.name}`);
+        return send(res, 200, { request: r });
       }
       // Réglages du fork (sources, TMDB, cache…) : relayés tels quels, la clé Lumio Secour reste ici
       if (req.method === 'GET' && p === '/api/secour/settings') return send(res, 200, await secour('/lumio/settings', { timeout: 15000 }));
@@ -3668,3 +3986,10 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
 });
 
 server.listen(PORT, () => console.log(`Serveur Lumio ${VERSION} sur le port ${PORT} (Jellyfin : ${JELLYFIN_URL})`));
+
+// Lumio Secour intégré, puis reprise des demandes du groupe de secours interrompues par un redémarrage
+startEmbeddedSecour();
+for (const r of requests)
+  if (r.via === 'secour' && r.status === RequestStatus.APPROVED && r.secour && ['queued', 'running'].includes(r.secour.state)) secourQueue.push(r.id);
+if (secourQueue.length) setTimeout(runSecourQueue, 20_000);
+
