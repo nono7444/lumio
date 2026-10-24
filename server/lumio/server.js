@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.45.0';
+const VERSION = '3.46.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2368,13 +2368,15 @@ const secourQueue = [];
 // Demande refusée ou supprimée pendant le travail : on s'arrête
 const secourStopped = (r) => !requests.includes(r) || r.status === RequestStatus.DECLINED || !r.secour || r.secour.state === 'cancelled';
 let secourBusy = false;
-function startSecour(r, reason) {
+function startSecour(r, reason, opts = {}) {
   if (!secourUrl() || !secourKey()) throw new HttpError(400, 'Lumio Secour n’est pas prêt');
   if (!(process.env.ALLDEBRID_KEY || config.alldebridKey)) throw new HttpError(400, 'Clé AllDebrid non configurée (Téléchargements)');
   if (!secourTarget(r.type === 'movie' ? 'movie' : 'tv', r)) throw new HttpError(400, 'Aucun disque configuré (LUMIO_DISKS)');
   r.status = RequestStatus.APPROVED;
   r.via = 'secour';
   r.secour = { state: 'queued', reason: String(reason || '').slice(0, 200), startedAt: new Date().toISOString(), done: 0, total: 0, items: [] };
+  // Source imposée (bouton « LS » → choix du site), sinon toutes les sources
+  if (opts.source) r.secour.source = String(opts.source).slice(0, 60);
   delete r.error;
   saveRequests();
   if (!secourQueue.includes(r.id)) secourQueue.push(r.id);
@@ -2418,10 +2420,12 @@ async function secourGrab(r, item, target, folder, baseName, query) {
   item.status = 'searching';
   const qs = new URLSearchParams(query);
   const found = await secour(`/lumio/links?${qs}`, { timeout: 120000 });
-  const candidates = rankSecourLinks((found && found.links) || []).slice(0, 6);
+  const wanted = r.secour && r.secour.source ? r.secour.source.toLowerCase() : '';
+  const all = (found && found.links) || [];
+  const candidates = rankSecourLinks(wanted ? all.filter((l) => String(l.source || '').toLowerCase() === wanted) : all).slice(0, 6);
   if (!candidates.length) {
     item.status = 'notfound';
-    item.error = 'Aucun lien trouvé';
+    item.error = wanted ? `Aucun lien sur ${r.secour.source}${all.length ? ` (${all.length} ailleurs)` : ''}` : 'Aucun lien trouvé';
     return false;
   }
   for (const l of candidates) {
@@ -3991,7 +3995,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         r.modifiedBy = { id: user.id, name: user.name };
         r.modifiedAt = new Date().toISOString();
         try {
-          startSecour(r, `téléchargement direct par ${user.name}`);
+          startSecour(r, `téléchargement direct par ${user.name}${b.source ? ` · ${String(b.source).slice(0, 60)}` : ''}`, { source: b.source });
         } catch (e) {
           if (isNew) requests.splice(requests.indexOf(r), 1); // pas de demande fantôme si Lumio Secour n'est pas prêt
           throw e;
