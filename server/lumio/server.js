@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.37.0';
+const VERSION = '3.37.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1150,8 +1150,18 @@ async function renumberSeason(token, { jfSeriesId, from, to }) {
   }
 
   // 2) Sur le disque, directement
-  const eps = ((await jfJson(token, `/Items?ParentId=${encodeURIComponent(jfSeriesId)}&Recursive=true&IncludeItemTypes=Episode&Fields=Path`)) || {}).Items || [];
-  const files = eps.filter((e) => e.ParentIndexNumber === from && e.Path);
+  // Épisodes de la saison, demandés comme l'appli les affiche (par la saison de la série), avec leur chemin
+  const me = (await jfJson(token, '/Users/Me').catch(() => null)) || {};
+  const seasonsList = ((await jfJson(token, `/Shows/${encodeURIComponent(jfSeriesId)}/Seasons?UserId=${me.Id || ''}`).catch(() => null)) || {}).Items || [];
+  const seasonItem = seasonsList.find((x) => x.IndexNumber === from);
+  let eps = [];
+  if (seasonItem)
+    eps = ((await jfJson(token, `/Shows/${encodeURIComponent(jfSeriesId)}/Episodes?SeasonId=${seasonItem.Id}&UserId=${me.Id || ''}&Fields=Path`).catch(() => null)) || {}).Items || [];
+  if (!eps.length)
+    eps = (((await jfJson(token, `/Items?ParentId=${encodeURIComponent(jfSeriesId)}&Recursive=true&IncludeItemTypes=Episode&Fields=Path&UserId=${me.Id || ''}`).catch(() => null)) || {}).Items || []).filter(
+      (e) => e.ParentIndexNumber === from
+    );
+  const files = eps.filter((e) => e.Path && e.LocationType !== 'Virtual');
   if (!files.length) throw new HttpError(404, `Aucun fichier trouvé pour la saison ${from}`);
   const seasonDirRe = new RegExp(`^(season|saison|s)[ ._-]*0*${from}$`, 'i');
   // Dossier d'une sortie (« Lupin.S03.MULTi.1080p… ») : les fichiers vont dans « Season 02 » à côté
