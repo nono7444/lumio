@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.47.0';
+const VERSION = '3.48.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2310,62 +2310,6 @@ for (const sig of ['SIGTERM', 'SIGINT'])
     process.exit(0);
   });
 
-// ——— Streaming Lumio Secour : lien direct en attendant que Radarr / Sonarr téléchargent ———
-const streamCache = new Map(); // "movie:603" / "tv:1399:1:2" → { at, value }
-const streamPending = new Map();
-async function secourStream(b, user) {
-  const type = b.type === 'tv' ? 'tv' : 'movie';
-  const tmdbId = Number(b.tmdbId);
-  if (!tmdbId) throw new HttpError(400, 'Identifiant TMDB manquant');
-  const season = type === 'tv' ? Number(b.season) || 1 : null;
-  const episode = type === 'tv' ? Number(b.episode) || 1 : null;
-  const key = `${type}:${tmdbId}${type === 'tv' ? `:${season}:${episode}` : ''}`;
-  const hit = streamCache.get(key);
-  // Liens AllDebrid valables quelques heures : gardés 2 h (b.retry : le lecteur n'a pas pu lire, on en cherche un autre)
-  if (hit && Date.now() - hit.at < 2 * 3600e3 && !b.retry) return hit.value;
-  if (streamPending.has(key)) return streamPending.get(key);
-  const job = (async () => {
-    let imdb = typeof b.imdb === 'string' && /^tt\d+$/.test(b.imdb) ? b.imdb : '';
-    if (!imdb) {
-      const ext = await tmdbGet(`/${type}/${tmdbId}/external_ids`).catch(() => null);
-      imdb = (ext && ext.imdb_id) || '';
-    }
-    if (!imdb) throw new HttpError(404, 'Identifiant IMDb introuvable pour ce titre');
-    const qs = new URLSearchParams({ imdb, type: type === 'tv' ? 'series' : 'movie' });
-    if (type === 'tv') {
-      qs.set('season', String(season));
-      qs.set('episode', String(episode));
-    }
-    const found = await secour(`/lumio/links?${qs}`, { timeout: 120000 });
-    const skip = new Set(b.retry && hit ? hit.tried || [] : []);
-    // Lecture : un fichier prêt chez AllDebrid d'abord, en évitant les très gros fichiers (4K remux) pour le réseau
-    const list = rankSecourLinks(((found && found.links) || []).filter((l) => !skip.has(l.link)));
-    const candidates = [...list.filter((l) => l.cached), ...list.filter((l) => !l.cached)].slice(0, 5);
-    if (!candidates.length) throw new HttpError(404, 'Aucun lien trouvé par Lumio Secour pour le moment');
-    const tried = [...skip];
-    for (const l of candidates) {
-      tried.push(l.link);
-      try {
-        const r = await secour('/lumio/resolve', {
-          method: 'POST',
-          body: { link: l.link, hoster: l.hoster, source: l.source, season: l.season ?? season, episode: l.episode ?? episode, type: type === 'tv' ? 'series' : 'movie' },
-          timeout: 90000,
-        });
-        if (!r || !r.url) continue;
-        const value = { url: r.url, name: l.name || fileNameFromUrl(r.url), quality: l.quality, language: l.language, size: l.size, source: l.source, hoster: l.hoster };
-        streamCache.set(key, { at: Date.now(), value, tried });
-        console.log(`Streaming Lumio Secour : ${user.name} → ${key} (${l.source} · ${l.hoster} · ${l.quality})`);
-        return value;
-      } catch (e) {
-        console.log(`Streaming Lumio Secour : ${key} — ${l.hoster} en échec (${e.message})`);
-      }
-    }
-    throw new HttpError(502, 'Les liens trouvés ne sont pas lisibles pour le moment');
-  })().finally(() => streamPending.delete(key));
-  streamPending.set(key, job);
-  return job;
-}
-
 // ——— Groupe de secours : quand Radarr / Sonarr ne marchent plus, Lumio Secour prend le relais ———
 // La demande reste « approuvée » : Lumio cherche les liens, les convertit avec la clé AllDebrid du serveur
 // et range les fichiers façon Jellyfin (Films/Titre (année)/…, Séries/Titre (année)/Season 01/…), un à la fois.
@@ -2391,7 +2335,6 @@ function secourAutoView() {
   return {
     enabled: config.secourAuto !== false,
     force: Boolean(config.secourForce),
-    stream: config.secourStream !== false,
     ready: secourAutoOn(),
     alldebrid: Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey),
     engine: Boolean(secourUrl() && secourKey()),
@@ -2928,7 +2871,7 @@ const server = http.createServer(async (req, res) => {
       ok: true,
       version: VERSION,
       messages: messages.length,
-      features: ['chat', 'requests', 'status', 'ideas', 'ratings', 'files', 'watchlist', ...(tmdbKey() ? ['tmdb'] : []), ...(config.secourStream !== false && secourUrl() && secourKey() && (process.env.ALLDEBRID_KEY || config.alldebridKey) ? ['secour-stream'] : [])],
+      features: ['chat', 'requests', 'status', 'ideas', 'ratings', 'files', 'watchlist', ...(tmdbKey() ? ['tmdb'] : [])],
       radarr: Boolean(arrConfig('radarr')),
       sonarr: Boolean(arrConfig('sonarr')),
     });
@@ -3969,16 +3912,6 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       }
     }
 
-    // ——— Lumio Secour en streaming (toute la famille) : pas encore sur Jellyfin → lien direct pour le lecteur ———
-    // Le serveur cherche, choisit le meilleur fichier (dispo AllDebrid d'abord) et le convertit avec sa clé AllDebrid :
-    // l'appli ne reçoit qu'un lien de lecture temporaire, jamais la clé. Coupable avec config.secourStream = false.
-    if (req.method === 'POST' && p === '/api/secour/stream') {
-      if (config.secourStream === false) throw new HttpError(403, 'Le streaming Lumio Secour est désactivé par l’admin');
-      if (!secourUrl() || !secourKey() || !(process.env.ALLDEBRID_KEY || config.alldebridKey)) throw new HttpError(503, 'Lumio Secour n’est pas prêt');
-      const b = await readBody(req);
-      return send(res, 200, await secourStream(b, user));
-    }
-
     // ——— Admin : Lumio Secour (liens d'hébergeurs → AllDebrid → disques) ———
     if (p === '/api/secour' || p.startsWith('/api/secour/')) {
       requireAdmin(user);
@@ -4011,7 +3944,6 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         const b = await readBody(req);
         if (typeof b.enabled === 'boolean') config.secourAuto = b.enabled;
         if (typeof b.force === 'boolean') config.secourForce = b.force;
-        if (typeof b.stream === 'boolean') config.secourStream = b.stream;
         for (const k of ['movie', 'tv']) {
           const t = b[k];
           if (t && typeof t === 'object') {
