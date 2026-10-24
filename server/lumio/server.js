@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.43.0';
+const VERSION = '3.44.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2336,6 +2336,7 @@ function secourTarget(kind, r) {
 function secourAutoView() {
   return {
     enabled: config.secourAuto !== false,
+    force: Boolean(config.secourForce),
     ready: secourAutoOn(),
     alldebrid: Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey),
     engine: Boolean(secourUrl() && secourKey()),
@@ -2348,6 +2349,11 @@ function secourAutoView() {
 
 /** Envoie à Radarr / Sonarr ; s'ils sont hors service, bascule sur le groupe de secours. */
 async function sendOrSecour(r) {
+  // Simulation (admin) : Radarr / Sonarr considérés en panne, tout passe par Lumio Secour
+  if (config.secourForce && secourAutoOn()) {
+    startSecour(r, 'simulation : Radarr / Sonarr considérés en panne');
+    return;
+  }
   try {
     await sendToArr(r);
     if (r.via === 'secour' && r.secour && r.secour.state !== 'running') delete r.via;
@@ -3935,6 +3941,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       if (req.method === 'PUT' && p === '/api/secour/auto') {
         const b = await readBody(req);
         if (typeof b.enabled === 'boolean') config.secourAuto = b.enabled;
+        if (typeof b.force === 'boolean') config.secourForce = b.force;
         for (const k of ['movie', 'tv']) {
           const t = b[k];
           if (t && typeof t === 'object') {
