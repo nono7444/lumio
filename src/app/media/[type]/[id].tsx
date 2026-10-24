@@ -28,7 +28,7 @@ import { RequestSection } from '@/components/request-section';
 import { TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { grab, mediaFlavor } from '@/lib/grab';
 import { useServerRequests } from '@/lib/requests';
-import { IS_BETA, secourAdminApi } from '@/lib/secour';
+import { IS_BETA, secourAdminApi, secourApi } from '@/lib/secour';
 import { SeasonRequests } from '@/components/season-requests';
 import { WatchlistButton } from '@/components/watchlist-button';
 import { chat } from '@/lib/chat';
@@ -368,7 +368,11 @@ export default function MediaScreen() {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
               {IS_BETA ? (
                 <LsButton
-                  onGrab={(seasons) =>
+                  loadSources={() => secourApi.status(settings).then((st) => st.sources ?? [])}
+                  onPickSource={(source) =>
+                    router.push({ pathname: '/secour', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title, source } })
+                  }
+                  onGrab={(seasons, source) =>
                     secourAdminApi.grab(settings, {
                       type: details.kind,
                       tmdbId,
@@ -378,6 +382,7 @@ export default function MediaScreen() {
                       poster: tmdbImg(d.poster_path, 'w342') ?? undefined,
                       backdrop: tmdbImg(d.backdrop_path, 'w780') ?? undefined,
                       seasons,
+                      source,
                     })
                   }
                   title={title}
@@ -617,12 +622,25 @@ function Notice({ icon, text, color = C.textDim }: { icon: keyof typeof Ionicons
 }
 
 /** Bouton rond « LS » : télécharge directement avec Lumio Secour (film, ou saisons au choix pour une série). */
-function LsButton({ title, seasons, onGrab }: { title: string; seasons: number[]; onGrab: (seasons?: number[]) => Promise<{ already?: boolean }> }) {
+function LsButton({
+  title,
+  seasons,
+  onGrab,
+  loadSources,
+  onPickSource,
+}: {
+  title: string;
+  seasons: number[];
+  onGrab: (seasons?: number[], source?: string) => Promise<{ already?: boolean }>;
+  loadSources: () => Promise<string[]>;
+  /** Source choisie : liste des fichiers trouvés sur ce site, on choisit soi-même */
+  onPickSource: (source: string) => void;
+}) {
   const [busy, setBusy] = useState(false);
-  const go = async (s?: number[]) => {
+  const go = async (s?: number[], source?: string) => {
     setBusy(true);
     try {
-      const r = await onGrab(s);
+      const r = await onGrab(s, source);
       Alert.alert(
         '🛟 Lumio Secour',
         r.already ? `« ${title} » est déjà en cours de téléchargement.` : `« ${title} » part en téléchargement : meilleur lien trouvé, puis rangé sur le disque. Suivi dans Demandes.`
@@ -633,15 +651,24 @@ function LsButton({ title, seasons, onGrab }: { title: string; seasons: number[]
       setBusy(false);
     }
   };
-  const press = () => {
-    if (!seasons.length)
-      return Alert.alert('Télécharger avec Lumio Secour ?', `« ${title} »`, [
-        { text: 'Annuler', style: 'cancel' },
-        { text: 'Télécharger', onPress: () => go() },
-      ]);
-    Alert.alert('Télécharger avec Lumio Secour', `« ${title} » : quelles saisons ?`, [
-      ...seasons.slice(0, 12).map((n) => ({ text: `Saison ${n}`, onPress: () => go([n]) })),
-      { text: `Toutes (${seasons.length})`, onPress: () => go(seasons) },
+  // 2e étape : film → téléchargement ; série → choix des saisons
+  const afterSource = (source?: string) => {
+    const from = source ? ` depuis ${source}` : '';
+    if (!seasons.length) return go(undefined, source);
+    Alert.alert('Télécharger avec Lumio Secour', `« ${title} »${from} : quelles saisons ?`, [
+      ...seasons.slice(0, 12).map((n) => ({ text: `Saison ${n}`, onPress: () => go([n], source) })),
+      { text: `Toutes (${seasons.length})`, onPress: () => go(seasons, source) },
+      { text: 'Annuler', style: 'cancel' as const },
+    ]);
+  };
+  // 1re étape : choix de la source (sites renseignés dans Lumio Secour)
+  const press = async () => {
+    setBusy(true);
+    const sources = await loadSources().catch(() => [] as string[]);
+    setBusy(false);
+    Alert.alert('Lumio Secour', `« ${title} » : quelle source ?`, [
+      { text: 'Automatique (meilleur fichier)', onPress: () => afterSource() },
+      ...sources.map((s) => ({ text: `${s} → choisir le fichier`, onPress: () => onPickSource(s) })),
       { text: 'Annuler', style: 'cancel' as const },
     ]);
   };

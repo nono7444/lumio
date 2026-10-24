@@ -6,7 +6,7 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
-- Bêta (admin) : bouton rond « LS » sur les fiches, à côté de « Liens » : téléchargement direct avec Lumio Secour (meilleur lien trouvé tout seul ; pour une série, choix de la saison ou toutes), suivi dans Demandes.
+- Bêta (admin) : bouton rond « LS » sur les fiches, à côté de « Liens » : choix de la source — « Automatique » télécharge tout seul le meilleur fichier (pour une série : une saison ou toutes), ou un site précis pour choisir soi-même le fichier dans la liste. Suivi dans Demandes.
 - Bêta : bouton « Liens » sur les fiches aussi sur iPhone, et « Simuler une panne de Radarr / Sonarr » dans Lumio Secour pour tester le groupe de secours.
 - Lumio Secour passe dans l'administration (Profil → Lumio Secour) : l'onglet disparaît, l'écran est aussi sur iPhone.
 - Groupe de secours : si Radarr ou Sonarr ne marchent plus, les demandes validées sont téléchargées par Lumio Secour (AllDebrid → disques) ; interrupteur et dossiers Films / Séries dans l'administration.

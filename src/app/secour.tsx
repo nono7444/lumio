@@ -14,7 +14,7 @@ import { qualityBucket, secourApi, type SecourLink, type SecourStatus } from '@/
 import { useSettings } from '@/lib/settings';
 import { tmdb } from '@/lib/tmdb';
 
-type Params = { type: 'movie' | 'tv'; tmdbId: string; imdb?: string; title: string; season?: string };
+type Params = { type: 'movie' | 'tv'; tmdbId: string; imdb?: string; title: string; season?: string; source?: string };
 
 // Dernière destination choisie (le temps que l'appli reste ouverte)
 const lastDest: Record<'movie' | 'tv', { root: string; folder: string } | null> = { movie: null, tv: null };
@@ -49,6 +49,8 @@ export default function Secour() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('Toutes');
   const [cachedOnly, setCachedOnly] = useState(false);
+  // Source choisie depuis le bouton « LS » (sinon toutes)
+  const [source, setSource] = useState<string>(typeof p.source === 'string' ? p.source : '');
   const [sending, setSending] = useState<string | null>(null);
 
   const loadStatus = useCallback(() => {
@@ -124,9 +126,17 @@ export default function Secour() {
   };
 
   const shown = useMemo(
-    () => (links ?? []).filter((l) => (filter === 'Toutes' || qualityBucket(l.quality) === filter) && (!cachedOnly || l.cached)),
-    [links, filter, cachedOnly]
+    () =>
+      (links ?? []).filter(
+        (l) => (filter === 'Toutes' || qualityBucket(l.quality) === filter) && (!cachedOnly || l.cached) && (!source || l.source.toLowerCase() === source.toLowerCase())
+      ),
+    [links, filter, cachedOnly, source]
   );
+  const sourcesFound = useMemo(() => {
+    const c = new Map<string, number>();
+    for (const l of links ?? []) if (l.source) c.set(l.source, (c.get(l.source) ?? 0) + 1);
+    return [...c.entries()];
+  }, [links]);
   const counts = useMemo(() => {
     const c: Record<string, number> = { Toutes: links?.length ?? 0 };
     for (const l of links ?? []) c[qualityBucket(l.quality)] = (c[qualityBucket(l.quality)] ?? 0) + 1;
@@ -299,6 +309,15 @@ export default function Secour() {
               <SegChip key={f} label={`${f} (${counts[f] ?? 0})`} on={filter === f} onPress={() => setFilter(f)} />
             ))}
             <SegChip label="⚡ En cache" on={cachedOnly} onPress={() => setCachedOnly((x) => !x)} />
+          </ScrollView>
+        ) : null}
+        {links && (sourcesFound.length > 1 || source) ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+            <SegChip label={`Toutes les sources (${links.length})`} on={!source} onPress={() => setSource('')} />
+            {sourcesFound.map(([s, n]) => (
+              <SegChip key={s} label={`${s} (${n})`} on={source.toLowerCase() === s.toLowerCase()} onPress={() => setSource(s)} />
+            ))}
+            {source && !sourcesFound.some(([s]) => s.toLowerCase() === source.toLowerCase()) ? <SegChip label={`${source} (0)`} on onPress={() => {}} /> : null}
           </ScrollView>
         ) : null}
 

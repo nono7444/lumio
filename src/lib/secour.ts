@@ -125,7 +125,7 @@ export type AlldebridStatus = {
   error?: string;
 };
 
-export type SecourGrab = { type: 'movie' | 'tv'; tmdbId: number; tvdbId?: number; title: string; year?: string; poster?: string; backdrop?: string; seasons?: number[] };
+export type SecourGrab = { type: 'movie' | 'tv'; tmdbId: number; tvdbId?: number; title: string; year?: string; poster?: string; backdrop?: string; seasons?: number[]; source?: string };
 
 export const secourAdminApi = {
   /** Bouton « LS » : téléchargement direct par Lumio Secour (meilleur lien, AllDebrid, disques) */
