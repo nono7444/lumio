@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.106 — 24 octobre 2026
+
 - Demandes : deux blocs repliables (+ / −) en haut — « Téléchargements sur les disques » (progression des téléchargements AllDebrid, admin) et « En attente dans Radarr / Sonarr » (films et séries surveillés pas encore téléchargés, avec leur état).
 - « À voir » : signet à côté de Lire / J'aime sur les fiches (un appui ajoute, un autre retire) ; sur les affiches de la liste, date de sortie en numérique (films) ou du prochain épisode (séries).
 - Recherche par thème : tous les titres du thème, du plus récent au plus ancien, sans limite (chargement au fil du défilement). Nouveau thème 🏰 Disney (Walt Disney, Disney Animation, Pixar : classiques et nouveautés).
