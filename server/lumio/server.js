@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.35.0';
+const VERSION = '3.36.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1089,6 +1089,86 @@ async function autoFixNumbering() {
 }
 setTimeout(() => autoFixNumbering().catch(() => {}), 10 * 60_000);
 setInterval(() => autoFixNumbering().catch(() => {}), 6 * 3600_000);
+
+// ——— Changer le numéro d'une saison (fiche Jellyfin, admin) : ex. « Saison 3 » qui est en fait la saison 2 ———
+// Sonarr gère les fichiers : chaque épisode SxxEyy est rattaché à S(to)Eyy par l'import manuel de Sonarr (qui renomme).
+// Sinon : renommage direct sur le disque (dossier « Season 03 » → « Season 02 », S03E05 → S02E05, sous-titres compris).
+// Ensuite Jellyfin réactualise la série.
+async function jfSeriesRefresh(token, seriesId) {
+  const q = new URLSearchParams({ Recursive: 'true', MetadataRefreshMode: 'FullRefresh', ImageRefreshMode: 'Default', ReplaceAllMetadata: 'true', ReplaceAllImages: 'false' });
+  await fetch(`${JELLYFIN_URL}/Library/Refresh`, { method: 'POST', headers: jfHeaders(token) }).catch(() => {});
+  setTimeout(() => fetch(`${JELLYFIN_URL}/Items/${seriesId}/Refresh?${q}`, { method: 'POST', headers: jfHeaders(token) }).catch(() => {}), 25_000);
+}
+async function renumberSeason(token, { jfSeriesId, from, to }) {
+  from = Number(from);
+  to = Number(to);
+  if (!(from >= 0) || !(to >= 0) || from === to) throw new HttpError(400, 'Numéros de saison invalides');
+  const it = ((await jfJson(token, `/Items?Ids=${encodeURIComponent(jfSeriesId)}&Fields=ProviderIds,Path`)) || {}).Items?.[0];
+  if (!it) throw new HttpError(404, 'Série introuvable dans Jellyfin');
+  const tvdbId = Number((it.ProviderIds || {}).Tvdb) || null;
+  const tmdbId = Number((it.ProviderIds || {}).Tmdb) || null;
+  const pad = (n) => String(n).padStart(2, '0');
+
+  // 1) Sonarr, s'il a les fichiers de cette saison
+  const sr = arrConfig('sonarr') ? await seriesByTvdbOrTmdb(tvdbId, tmdbId).catch(() => null) : null;
+  if (sr) {
+    const [episodes, files] = await Promise.all([arr('sonarr', `/episode?seriesId=${sr.id}`), arr('sonarr', `/episodefile?seriesId=${sr.id}`)]);
+    const inFrom = (files || []).filter((f) => f.seasonNumber === from);
+    if (inFrom.length) {
+      const epOfFile = (f) => (episodes || []).filter((e) => e.episodeFileId === f.id);
+      const moves = [];
+      const missing = [];
+      for (const f of inFrom) {
+        for (const e of epOfFile(f)) {
+          const target = (episodes || []).find((x) => x.seasonNumber === to && x.episodeNumber === e.episodeNumber);
+          if (!target) missing.push(`S${pad(to)}E${pad(e.episodeNumber)}`);
+          else moves.push({ fileId: f.id, path: f.path, from: `S${pad(from)}E${pad(e.episodeNumber)}`, to: `S${pad(to)}E${pad(e.episodeNumber)}`, targetEpisodeId: target.id, duplicate: Boolean(target.hasFile && target.episodeFileId !== f.id), file: f });
+        }
+      }
+      if (missing.length) throw new HttpError(409, `La saison ${to} n’a pas ces épisodes dans Sonarr : ${missing.join(', ')}`);
+      const dup = moves.filter((m) => m.duplicate);
+      if (dup.length) throw new HttpError(409, `Ces épisodes de la saison ${to} ont déjà un fichier : ${dup.map((m) => m.to).join(', ')}. Supprime-les d’abord.`);
+      const r = await applyNumbering({ seriesId: sr.id, title: sr.title, moves });
+      jfSeriesRefresh(token, jfSeriesId);
+      return { ok: true, message: `${r.moved} épisode${r.moved > 1 ? 's' : ''} passé${r.moved > 1 ? 's' : ''} de la saison ${from} à la saison ${to} (par Sonarr). Jellyfin se met à jour dans une minute.` };
+    }
+  }
+
+  // 2) Sur le disque, directement
+  const eps = ((await jfJson(token, `/Items?ParentId=${encodeURIComponent(jfSeriesId)}&Recursive=true&IncludeItemTypes=Episode&Fields=Path`)) || {}).Items || [];
+  const files = eps.filter((e) => e.ParentIndexNumber === from && e.Path);
+  if (!files.length) throw new HttpError(404, `Aucun fichier trouvé pour la saison ${from}`);
+  const seasonDirRe = new RegExp(`^(season|saison|s)[ ._-]*0*${from}$`, 'i');
+  let moved = 0;
+  const problems = [];
+  for (const e of files) {
+    if (!fs.existsSync(e.Path)) {
+      problems.push(path.basename(e.Path));
+      continue;
+    }
+    const dir = path.dirname(e.Path);
+    const base = path.basename(dir);
+    const newDir = seasonDirRe.test(base) ? path.join(path.dirname(dir), base.replace(new RegExp(`0*${from}$`), pad(to))) : dir;
+    await fs.promises.mkdir(newDir, { recursive: true });
+    const stem = path.basename(e.Path).replace(/\.[^.]+$/, '');
+    // Fichier vidéo + fichiers liés (sous-titres, .nfo, vignettes) qui commencent pareil
+    for (const name of await fs.promises.readdir(dir)) {
+      if (!name.startsWith(stem)) continue;
+      const renamed = name.replace(new RegExp(`S0*${from}(E\\d+)`, 'i'), `S${pad(to)}$1`);
+      await fs.promises.rename(path.join(dir, name), path.join(newDir, renamed));
+    }
+    moved++;
+  }
+  // Ancien dossier de saison vide : supprimé
+  for (const d of new Set(files.map((e) => path.dirname(e.Path)))) {
+    const left = await fs.promises.readdir(d).catch(() => null);
+    if (left && left.every((n) => /\.(nfo|jpg|png)$/i.test(n)) && seasonDirRe.test(path.basename(d))) await fs.promises.rm(d, { recursive: true, force: true }).catch(() => {});
+  }
+  if (!moved) throw new HttpError(502, `Le serveur Lumio n’a pas accès à ces fichiers (${problems.slice(0, 2).join(', ')}). Monte le dossier des séries dans son conteneur, au même chemin que Jellyfin.`);
+  jfSeriesRefresh(token, jfSeriesId);
+  console.log(`Saison renumérotée : « ${it.Name} » saison ${from} → ${to} (${moved} fichier(s))`);
+  return { ok: true, message: `${moved} épisode${moved > 1 ? 's' : ''} passé${moved > 1 ? 's' : ''} de la saison ${from} à la saison ${to}. Jellyfin se met à jour dans une minute.${problems.length ? ` (${problems.length} fichier(s) introuvable(s))` : ''}` };
+}
 
 /** Saisons d'une série dans la numérotation de Sonarr (TheTVDB), avec le nombre d'épisodes. */
 async function arrSeasons(tvdbId) {
@@ -2790,6 +2870,12 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       if (!plan || !plan.moves.length) return send(res, 200, { plan: pub, moved: 0, removed: 0, message: 'Rien à réparer.' });
       const r = await applyNumbering(plan);
       return send(res, 200, { plan: pub, ...r, message: `${r.moved} épisode${r.moved > 1 ? 's' : ''} remis à leur place${r.removed ? `, ${r.removed} doublon${r.removed > 1 ? 's' : ''} supprimé${r.removed > 1 ? 's' : ''}` : ''}. Sonarr les renomme, puis Jellyfin les retrouve au prochain scan.` });
+    }
+
+    // ——— Changer le numéro d'une saison (admin) ———
+    if (req.method === 'POST' && p === '/api/admin/series/renumber') {
+      requireAdmin(user);
+      return send(res, 200, await renumberSeason(user.token, await readBody(req)));
     }
 
     // ——— Saisons d'une série selon Sonarr / TheTVDB (fiches : liste des saisons et demandes) ———

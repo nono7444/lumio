@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Fiche d'une série (admin) : « Changer le numéro de cette saison » sous les saisons (ex. Saison 3 → 2). Les fichiers sont renommés par Sonarr s'il gère la série, sinon directement sur le disque, puis Jellyfin se met à jour (serveur Lumio 3.36.0).
+
 ## 1.0.103 — 23 octobre 2026
 
 - Les saisons vides (dossier resté vide après un déplacement de fichiers) ne s'affichent plus dans la liste des épisodes.

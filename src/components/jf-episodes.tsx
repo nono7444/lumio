@@ -4,7 +4,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Platform, StyleSheet, Text, View } from 'react-native';
 
 import { playJellyfin } from '@/components/jf-cards';
 import { FocusPressable as Pressable } from '@/components/tv';
@@ -12,6 +12,8 @@ import { Button, SegChip, tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
 import { formatRuntime, jf, jfEpisodeThumb, type JfItem } from '@/lib/jellyfin';
 import { useSettings } from '@/lib/settings';
+import { serverCall } from '@/lib/chat';
+import { usePrompt } from '@/components/prompt-modal';
 
 /** Saisons et épisodes d'une série Jellyfin (partagé par la fiche Jellyfin et la fiche TMDB). */
 export function useSeriesEpisodes(seriesId: string | undefined) {
@@ -20,6 +22,7 @@ export function useSeriesEpisodes(seriesId: string | undefined) {
   const [season, setSeason] = useState<string | null>(null);
   const [episodes, setEpisodes] = useState<JfItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     if (!seriesId) return;
@@ -34,7 +37,7 @@ export function useSeriesEpisodes(seriesId: string | undefined) {
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seriesId, settings.jellyfin?.token]);
+  }, [seriesId, settings.jellyfin?.token, nonce]);
 
   useEffect(() => {
     if (!season || !seriesId) return;
@@ -59,22 +62,58 @@ export function useSeriesEpisodes(seriesId: string | undefined) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [season, seriesId, seasons.length, settings.jellyfin?.token]);
 
-  return { seasons, season, setSeason, episodes, loading };
+  const reload = () => {
+    setSeason(null);
+    setNonce((n) => n + 1);
+  };
+  return { seriesId, seasons, season, setSeason, episodes, loading, reload };
 }
 
 /** Puces des saisons + liste des épisodes. */
 export function EpisodePicker({
+  seriesId,
   seasons,
   season,
   setSeason,
   episodes,
   loading,
+  reload,
   title,
 }: ReturnType<typeof useSeriesEpisodes> & { title?: string }) {
   const { settings } = useSettings();
   const [limit, setLimit] = useState(30);
+  const { prompt, element: promptEl } = usePrompt();
+  const [renumbering, setRenumbering] = useState(false);
   useEffect(() => setLimit(30), [season]);
   if (!seasons.length) return null;
+  const current = seasons.find((x) => x.Id === season);
+  const admin = settings.jellyfin?.isAdmin === true && Boolean(settings.chatUrl) && !Platform.isTV;
+
+  // Admin : « Saison 3 » qui est en fait la saison 2 (séries en parties…) → changement de numéro
+  const renumber = async () => {
+    if (!current || current.IndexNumber == null || !seriesId) return;
+    const v = await prompt({
+      title: `Changer le numéro de « ${current.Name} »`,
+      message: 'Nouveau numéro de saison. Les fichiers sont renommés (par Sonarr s’il gère la série), puis Jellyfin se met à jour.',
+      value: String(Math.max(1, current.IndexNumber - 1)),
+      ok: 'Changer',
+    });
+    const to = Number(v);
+    if (v == null || !Number.isInteger(to) || to < 0 || to === current.IndexNumber) return;
+    setRenumbering(true);
+    try {
+      const r = await serverCall<{ message?: string }>(settings, '/api/admin/series/renumber', {
+        method: 'POST',
+        body: JSON.stringify({ jfSeriesId: seriesId, from: current.IndexNumber, to }),
+      });
+      Alert.alert('C’est fait', r.message ?? 'Saison renumérotée.');
+      setTimeout(reload, 45000);
+    } catch (e: any) {
+      Alert.alert('Changement impossible', e?.message ?? String(e));
+    } finally {
+      setRenumbering(false);
+    }
+  };
   const shown = episodes.slice(0, limit);
   return (
     <View>
@@ -88,6 +127,13 @@ export function EpisodePicker({
         style={{ marginBottom: 14 }}
         renderItem={({ item: s }) => <SegChip label={s.Name} on={s.Id === season} onPress={() => setSeason(s.Id)} />}
       />
+      {admin && current?.IndexNumber != null ? (
+        <Pressable onPress={renumber} style={styles.renumber} disabled={renumbering}>
+          {renumbering ? <ActivityIndicator size="small" color={C.textDim} /> : <Ionicons name="swap-vertical" size={15} color={C.textDim} />}
+          <Text style={styles.renumberText}>Changer le numéro de cette saison</Text>
+        </Pressable>
+      ) : null}
+      {promptEl}
       {loading && !episodes.length ? (
         <ActivityIndicator color={C.text} style={{ marginVertical: 20 }} />
       ) : (
@@ -156,6 +202,8 @@ export function JfEpisodes({ seriesId }: { seriesId: string }) {
 
 const styles = StyleSheet.create({
   section: { color: C.text, fontSize: 18, fontWeight: '800', marginBottom: 10 },
+  renumber: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', marginTop: -6, marginBottom: 12, paddingVertical: 4 },
+  renumberText: { color: C.textDim, fontSize: 13, fontWeight: '600' },
   episode: { flexDirection: 'row', gap: 12 },
   thumb: { width: 140, height: 79, borderRadius: R.sm, overflow: 'hidden', backgroundColor: C.surfaceHigh },
   play: {
