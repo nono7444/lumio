@@ -28,7 +28,7 @@ import { RequestSection } from '@/components/request-section';
 import { TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { grab, mediaFlavor } from '@/lib/grab';
 import { useServerRequests } from '@/lib/requests';
-import { IS_BETA } from '@/lib/secour';
+import { IS_BETA, secourAdminApi } from '@/lib/secour';
 import { SeasonRequests } from '@/components/season-requests';
 import { WatchlistButton } from '@/components/watchlist-button';
 import { chat } from '@/lib/chat';
@@ -363,20 +363,41 @@ export default function MediaScreen() {
             <WatchlistButton item={wlItem} variant="pill" />
           ) : null}
 
-          {/* ——— Admin : liens Lumio Secour → AllDebrid → disques du serveur ——— */}
+          {/* ——— Admin : Lumio Secour (« LS » = téléchargement direct, « Liens » = choisir soi-même) ——— */}
           {settings.chatUrl && settings.jellyfin?.isAdmin === true && !Platform.isTV && (Platform.OS !== 'ios' || IS_BETA) ? (
-            <Button
-              title="Liens"
-              icon="link-outline"
-              variant="secondary"
-              small
-              onPress={() =>
-                router.push({
-                  pathname: '/secour',
-                  params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title },
-                })
-              }
-            />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              {IS_BETA ? (
+                <LsButton
+                  onGrab={(seasons) =>
+                    secourAdminApi.grab(settings, {
+                      type: details.kind,
+                      tmdbId,
+                      tvdbId: details.kind === 'tv' ? details.data.external_ids?.tvdb_id ?? undefined : undefined,
+                      title,
+                      year: date?.slice(0, 4),
+                      poster: tmdbImg(d.poster_path, 'w342') ?? undefined,
+                      backdrop: tmdbImg(d.backdrop_path, 'w780') ?? undefined,
+                      seasons,
+                    })
+                  }
+                  title={title}
+                  seasons={seasonsList.map((s) => s.season_number)}
+                />
+              ) : null}
+              <Button
+                title="Liens"
+                icon="link-outline"
+                variant="secondary"
+                small
+                style={{ flex: 1 }}
+                onPress={() =>
+                  router.push({
+                    pathname: '/secour',
+                    params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title },
+                  })
+                }
+              />
+            </View>
           ) : null}
 
           {/* ——— Série dans Jellyfin : choix de la saison et de l'épisode ——— */}
@@ -595,7 +616,45 @@ function Notice({ icon, text, color = C.textDim }: { icon: keyof typeof Ionicons
   );
 }
 
+/** Bouton rond « LS » : télécharge directement avec Lumio Secour (film, ou saisons au choix pour une série). */
+function LsButton({ title, seasons, onGrab }: { title: string; seasons: number[]; onGrab: (seasons?: number[]) => Promise<{ already?: boolean }> }) {
+  const [busy, setBusy] = useState(false);
+  const go = async (s?: number[]) => {
+    setBusy(true);
+    try {
+      const r = await onGrab(s);
+      Alert.alert(
+        '🛟 Lumio Secour',
+        r.already ? `« ${title} » est déjà en cours de téléchargement.` : `« ${title} » part en téléchargement : meilleur lien trouvé, puis rangé sur le disque. Suivi dans Demandes.`
+      );
+    } catch (e: any) {
+      Alert.alert('Lumio Secour', e?.message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const press = () => {
+    if (!seasons.length)
+      return Alert.alert('Télécharger avec Lumio Secour ?', `« ${title} »`, [
+        { text: 'Annuler', style: 'cancel' },
+        { text: 'Télécharger', onPress: () => go() },
+      ]);
+    Alert.alert('Télécharger avec Lumio Secour', `« ${title} » : quelles saisons ?`, [
+      ...seasons.slice(0, 12).map((n) => ({ text: `Saison ${n}`, onPress: () => go([n]) })),
+      { text: `Toutes (${seasons.length})`, onPress: () => go(seasons) },
+      { text: 'Annuler', style: 'cancel' as const },
+    ]);
+  };
+  return (
+    <Pressable onPress={press} disabled={busy} style={styles.ls} accessibilityLabel="Télécharger avec Lumio Secour">
+      {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.lsText}>LS</Text>}
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  ls: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#30D158', alignItems: 'center', justifyContent: 'center' },
+  lsText: { color: '#fff', fontSize: 15, fontWeight: '900', letterSpacing: 0.5 },
   heroContentTv: { position: 'absolute', left: 48, bottom: 36, width: '48%', alignItems: 'flex-start', gap: 10 },
   tvLine: { color: 'rgba(255,255,255,0.85)', fontSize: 15, fontWeight: '600' },
   overviewTv: { color: 'rgba(255,255,255,0.78)', fontSize: 15, lineHeight: 22 },

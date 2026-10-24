@@ -125,7 +125,11 @@ export type AlldebridStatus = {
   error?: string;
 };
 
+export type SecourGrab = { type: 'movie' | 'tv'; tmdbId: number; tvdbId?: number; title: string; year?: string; poster?: string; backdrop?: string; seasons?: number[] };
+
 export const secourAdminApi = {
+  /** Bouton « LS » : téléchargement direct par Lumio Secour (meilleur lien, AllDebrid, disques) */
+  grab: (s: Settings, g: SecourGrab) => serverCall<{ request: { id: string }; already?: boolean }>(s, '/api/secour/grab', { method: 'POST', body: JSON.stringify(g) }),
   auto: (s: Settings) => serverCall<SecourAuto>(s, '/api/secour/auto'),
   saveAuto: (s: Settings, body: Partial<{ enabled: boolean; force: boolean; movie: SecourTarget; tv: SecourTarget }>) =>
     serverCall<SecourAuto>(s, '/api/secour/auto', { method: 'PUT', body: JSON.stringify(body) }),
