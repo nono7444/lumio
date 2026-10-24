@@ -3970,6 +3970,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         const open = (x) => x.type === type && x.tmdbId === tmdbId && [RequestStatus.PENDING, RequestStatus.APPROVED, RequestStatus.FAILED].includes(x.status);
         let r = requests.find((x) => open(x) && (type === 'movie' || JSON.stringify([...(x.seasons || [])].sort()) === JSON.stringify([...seasons].sort())));
         if (r && r.via === 'secour' && r.secour && ['queued', 'running'].includes(r.secour.state)) return send(res, 200, { request: r, already: true });
+        const isNew = !r;
         if (!r) {
           r = {
             id: `${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`,
@@ -3989,7 +3990,12 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         }
         r.modifiedBy = { id: user.id, name: user.name };
         r.modifiedAt = new Date().toISOString();
-        startSecour(r, `téléchargement direct par ${user.name}`);
+        try {
+          startSecour(r, `téléchargement direct par ${user.name}`);
+        } catch (e) {
+          if (isNew) requests.splice(requests.indexOf(r), 1); // pas de demande fantôme si Lumio Secour n'est pas prêt
+          throw e;
+        }
         library = null;
         return send(res, 201, { request: r });
       }
