@@ -121,11 +121,6 @@ Configuration :
 
 Les données du moteur (réglages, cache, liens morts) sont dans `/data/secour/`.
 
-**Streaming** : un titre pas encore sur Jellyfin peut être regardé tout de suite. L'appli demande `/api/secour/stream`,
-le serveur choisit un fichier prêt chez AllDebrid et renvoie seulement un lien de lecture temporaire (la clé reste ici).
-En parallèle, la demande part normalement vers Radarr / Sonarr. Désactivable : `PUT /api/secour/auto { stream: false }`.
-
-Les données du moteur restent dans `/data/secour/`.
 
 ### Installation : rien à faire en SSH
 
@@ -147,5 +142,4 @@ sudo sh /data/lumio-server/host/install-host-actions.sh   # le bouton « Mettre 
 |---|---|---|
 | GET / PUT | `/api/secour/auto` | Admin : groupe de secours `{ enabled, movie: { root, folder }, tv: { root, folder } }` |
 | POST | `/api/secour/requests/:id` | Admin : passer une demande par Lumio Secour à la main |
-| POST | `/api/secour/stream` | Toute la famille : `{ type, tmdbId, season?, episode?, retry? }` → `{ url, name, quality… }`, lien de lecture direct (titre pas encore sur Jellyfin) |
 | POST | `/api/secour/grab` | Admin (bouton « LS ») : `{ type, tmdbId, tvdbId?, title, year, poster, seasons? }` → téléchargement direct par Lumio Secour |
