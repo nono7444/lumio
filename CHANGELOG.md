@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Serveur Lumio 3.37.0 : « Changer le numéro de cette saison » retrouve les fichiers même quand le serveur voit les disques à un autre chemin que Jellyfin, et range les épisodes d'un dossier de sortie (« Lupin.S03… ») dans « Season 02 ».
+
 ## 1.0.104 — 24 octobre 2026
 
 - Fiche d'une série (admin) : « Changer le numéro de cette saison » sous les saisons (ex. Saison 3 → 2). Les fichiers sont renommés par Sonarr s'il gère la série, sinon directement sur le disque, puis Jellyfin se met à jour (serveur Lumio 3.36.0).

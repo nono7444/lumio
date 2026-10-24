@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.36.0';
+const VERSION = '3.37.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1099,6 +1099,21 @@ async function jfSeriesRefresh(token, seriesId) {
   await fetch(`${JELLYFIN_URL}/Library/Refresh`, { method: 'POST', headers: jfHeaders(token) }).catch(() => {});
   setTimeout(() => fetch(`${JELLYFIN_URL}/Items/${seriesId}/Refresh?${q}`, { method: 'POST', headers: jfHeaders(token) }).catch(() => {}), 25_000);
 }
+/** Chemin vu par Jellyfin (/media/jellyfin1/SERIES/…) → chemin vu par le serveur Lumio (disques LUMIO_DISKS). */
+function localPath(jfPath) {
+  if (!jfPath) return null;
+  if (fs.existsSync(jfPath)) return jfPath;
+  const parts = jfPath.split('/');
+  for (const d of disks()) {
+    for (const key of [d.name, path.basename(d.dir)]) {
+      const i = parts.indexOf(key);
+      if (i < 0) continue;
+      const candidate = path.join(d.dir, ...parts.slice(i + 1));
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  }
+  return null;
+}
 async function renumberSeason(token, { jfSeriesId, from, to }) {
   from = Number(from);
   to = Number(to);
@@ -1139,30 +1154,37 @@ async function renumberSeason(token, { jfSeriesId, from, to }) {
   const files = eps.filter((e) => e.ParentIndexNumber === from && e.Path);
   if (!files.length) throw new HttpError(404, `Aucun fichier trouvé pour la saison ${from}`);
   const seasonDirRe = new RegExp(`^(season|saison|s)[ ._-]*0*${from}$`, 'i');
+  // Dossier d'une sortie (« Lupin.S03.MULTi.1080p… ») : les fichiers vont dans « Season 02 » à côté
+  const releaseDirRe = new RegExp(`[._ -]S0*${from}(?![0-9E])`, 'i');
   let moved = 0;
   const problems = [];
+  const oldDirs = new Set();
   for (const e of files) {
-    if (!fs.existsSync(e.Path)) {
+    const local = localPath(e.Path);
+    if (!local) {
       problems.push(path.basename(e.Path));
       continue;
     }
-    const dir = path.dirname(e.Path);
+    const dir = path.dirname(local);
     const base = path.basename(dir);
-    const newDir = seasonDirRe.test(base) ? path.join(path.dirname(dir), base.replace(new RegExp(`0*${from}$`), pad(to))) : dir;
+    let newDir = dir;
+    if (seasonDirRe.test(base)) newDir = path.join(path.dirname(dir), base.replace(new RegExp(`0*${from}$`), pad(to)));
+    else if (releaseDirRe.test(base)) newDir = path.join(path.dirname(dir), `Season ${pad(to)}`);
     await fs.promises.mkdir(newDir, { recursive: true });
-    const stem = path.basename(e.Path).replace(/\.[^.]+$/, '');
+    const stem = path.basename(local).replace(/\.[^.]+$/, '');
     // Fichier vidéo + fichiers liés (sous-titres, .nfo, vignettes) qui commencent pareil
     for (const name of await fs.promises.readdir(dir)) {
       if (!name.startsWith(stem)) continue;
       const renamed = name.replace(new RegExp(`S0*${from}(E\\d+)`, 'i'), `S${pad(to)}$1`);
       await fs.promises.rename(path.join(dir, name), path.join(newDir, renamed));
     }
+    if (newDir !== dir) oldDirs.add(dir);
     moved++;
   }
-  // Ancien dossier de saison vide : supprimé
-  for (const d of new Set(files.map((e) => path.dirname(e.Path)))) {
+  // Ancien dossier vide (ou avec seulement des images / .nfo / .txt) : supprimé
+  for (const d of oldDirs) {
     const left = await fs.promises.readdir(d).catch(() => null);
-    if (left && left.every((n) => /\.(nfo|jpg|png)$/i.test(n)) && seasonDirRe.test(path.basename(d))) await fs.promises.rm(d, { recursive: true, force: true }).catch(() => {});
+    if (left && left.every((n) => /\.(nfo|jpg|png|txt|url|exe|srr|sfv)$/i.test(n) || /sample/i.test(n))) await fs.promises.rm(d, { recursive: true, force: true }).catch(() => {});
   }
   if (!moved) throw new HttpError(502, `Le serveur Lumio n’a pas accès à ces fichiers (${problems.slice(0, 2).join(', ')}). Monte le dossier des séries dans son conteneur, au même chemin que Jellyfin.`);
   jfSeriesRefresh(token, jfSeriesId);
