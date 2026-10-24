@@ -6,7 +6,7 @@ import { ActivityIndicator, Alert, Platform, StyleSheet, Text, View } from 'reac
 
 import { toast } from '@/components/toast';
 import { FocusPressable as Pressable } from '@/components/tv';
-import { Button, SegChip, Section, tap } from '@/components/ui';
+import { Button, Section, tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
 import { formatBytes } from '@/lib/arr';
 import { serverCall } from '@/lib/chat';
@@ -38,7 +38,6 @@ export function StorageSection() {
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'old' | 'big'>('old');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
@@ -56,7 +55,8 @@ export function StorageSection() {
 
   if (!settings.chatUrl || settings.jellyfin?.isAdmin !== true || Platform.isTV) return null;
 
-  const list = report ? (tab === 'old' ? report.candidates : report.biggest) : [];
+  // Plus de liste « À nettoyer » (titres jamais / plus regardés) : seulement les plus gros, supprimés à la main
+  const list = report ? report.biggest : [];
   const keyOf = (x: Item) => `${x.kind}:${x.id}`;
   const chosen = list.filter((x) => selected.has(keyOf(x)));
   const chosenSize = chosen.reduce((n, x) => n + x.size, 0);
@@ -99,7 +99,7 @@ export function StorageSection() {
           <ActivityIndicator color={C.text} style={{ marginVertical: 12 }} />
         ) : (
           <View style={{ gap: 10 }}>
-            <Text style={styles.help}>Place sur les disques, titres que personne n’a regardés depuis longtemps et plus gros fichiers.</Text>
+            <Text style={styles.help}>Place sur les disques et plus gros fichiers.</Text>
             {error ? <Text style={[styles.help, { color: C.danger }]}>{error}</Text> : null}
             <Button title="Analyser le stockage" icon="pie-chart-outline" variant="secondary" onPress={load} />
           </View>
@@ -127,15 +127,7 @@ export function StorageSection() {
             );
           })}
 
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <SegChip label={`À nettoyer (${report.candidates.length})`} on={tab === 'old'} onPress={() => setTab('old')} />
-            <SegChip label="Les plus gros" on={tab === 'big'} onPress={() => setTab('big')} />
-          </View>
-          {tab === 'old' ? (
-            <Text style={styles.help}>
-              Jamais regardés depuis plus de 6 mois, ou plus regardés depuis un an : {formatBytes(report.totalCandidates)} au total.
-            </Text>
-          ) : null}
+          <Text style={[styles.diskName, { flex: 0 }]}>Les plus gros</Text>
 
           {list.length === 0 ? <Text style={styles.help}>Rien à signaler 👌</Text> : null}
           {list.map((x) => {
