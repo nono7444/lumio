@@ -1,5 +1,6 @@
 // Génère la source AltStore (compatible FlareStore, SideStore, ESign…) pour la dernière build.
 // Usage : node scripts/make-source.mjs <version> <tag> <ipa>
+// Bêta : SOURCE_KIND=beta → « Lumio Bêta », identifiant lol.wawanono.lumio.beta, fichier altstore-beta.json
 import { statSync, writeFileSync } from 'node:fs';
 
 const [version, tag, ipa = 'lumio-unsigned.ipa'] = process.argv.slice(2);
@@ -14,19 +15,22 @@ const notes = (process.env.RELEASE_NOTES || '')
   .slice(0, 15)
   .join('\n');
 const downloadURL = `https://github.com/${repo}/releases/download/${tag}/${ipa}`;
+const beta = process.env.SOURCE_KIND === 'beta';
+const out = beta ? 'altstore-beta.json' : 'altstore.json';
 const iconURL = `https://raw.githubusercontent.com/${repo}/main/assets/images/icon.png`;
 
 const source = {
-  name: 'Lumio',
-  identifier: 'lol.wawanono.lumio.source',
-  sourceURL: `https://github.com/${repo}/releases/latest/download/altstore.json`,
+  name: beta ? 'Lumio Bêta' : 'Lumio',
+  identifier: beta ? 'lol.wawanono.lumio.beta.source' : 'lol.wawanono.lumio.source',
+  // Bêta : adresse fixe (pré-version « beta-source », mise à jour à chaque build bêta)
+  sourceURL: beta ? `https://github.com/${repo}/releases/download/beta-source/altstore-beta.json` : `https://github.com/${repo}/releases/latest/download/altstore.json`,
   subtitle: 'Jellyfin, Radarr et Sonarr dans ta poche',
   iconURL,
   tintColor: '#3D8BFF',
   apps: [
     {
-      name: 'Lumio',
-      bundleIdentifier: 'lol.wawanono.lumio',
+      name: beta ? 'Lumio Bêta' : 'Lumio',
+      bundleIdentifier: beta ? 'lol.wawanono.lumio.beta' : 'lol.wawanono.lumio',
       developerName: 'Norman',
       subtitle: 'Ton cinéma maison',
       localizedDescription:
@@ -46,5 +50,5 @@ const source = {
   news: [],
 };
 
-writeFileSync('altstore.json', JSON.stringify(source, null, 2));
-console.log(`altstore.json : Lumio ${version} → ${downloadURL} (${size} octets)`);
+writeFileSync(out, JSON.stringify(source, null, 2));
+console.log(`${out} : Lumio ${version} → ${downloadURL} (${size} octets)`);
