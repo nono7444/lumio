@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.38.0';
+const VERSION = '3.38.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1155,12 +1155,18 @@ async function renumberSeason(token, { jfSeriesId, from, to }) {
   if (!seriesDir) throw new HttpError(502, `Le serveur Lumio n’a pas accès au dossier de la série (${it.Path}). Ajoute ce disque à LUMIO_DISKS.`);
   const VIDEO = /\.(mkv|mp4|avi|m4v|ts|mov|wmv)$/i;
   const epRe = new RegExp(`S0*${from}E(\\d+)`, 'i');
+  // Vidéos déjà renommées (S02Exx) mais restées dans un dossier « …S03… » : rangées aussi
+  const epReTo = new RegExp(`S0*${to}E(\\d+)`, 'i');
+  const fromDirRe = new RegExp(`(^|[._ -])(S|Season[ ._-]?|Saison[ ._-]?)0*${from}(?!\\d)`, 'i');
   const found = [];
   const walk = async (dir, depth) => {
     for (const ent of await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => [])) {
       const full = path.join(dir, ent.name);
       if (ent.isDirectory() && depth < 3) await walk(full, depth + 1);
-      else if (ent.isFile() && VIDEO.test(ent.name) && epRe.test(ent.name) && !/sample/i.test(ent.name)) found.push(full);
+      else if (ent.isFile() && VIDEO.test(ent.name) && !/sample/i.test(ent.name)) {
+        if (epRe.test(ent.name)) found.push(full);
+        else if (epReTo.test(ent.name) && path.relative(seriesDir, dir).split(path.sep).some((seg) => fromDirRe.test(seg))) found.push(full);
+      }
     }
   };
   await walk(seriesDir, 0);
