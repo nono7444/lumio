@@ -94,12 +94,13 @@ export function EpisodePicker({
     if (!current || current.IndexNumber == null || !seriesId) return;
     const v = await prompt({
       title: `Changer le numéro de « ${current.Name} »`,
-      message: 'Nouveau numéro de saison. Les fichiers sont renommés (par Sonarr s’il gère la série), puis Jellyfin se met à jour.',
+      message: 'Nouveau numéro de saison. Les fichiers sont renommés (par Sonarr s’il gère la série), puis Jellyfin se met à jour. Le même numéro range seulement les fichiers dans leur dossier « Season ».',
       value: String(Math.max(1, current.IndexNumber - 1)),
       ok: 'Changer',
     });
     const to = Number(v);
-    if (v == null || !Number.isInteger(to) || to < 0 || to === current.IndexNumber) return;
+    if (v == null || !Number.isInteger(to) || to < 0) return;
+    // Même numéro : range seulement les fichiers dans « Season NN » (dossiers de sorties mal nommés…)
     setRenumbering(true);
     try {
       const r = await serverCall<{ message?: string }>(settings, '/api/admin/series/renumber', {

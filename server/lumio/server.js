@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.38.1';
+const VERSION = '3.39.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1117,7 +1117,9 @@ function localPath(jfPath) {
 async function renumberSeason(token, { jfSeriesId, from, to }) {
   from = Number(from);
   to = Number(to);
-  if (!(from >= 0) || !(to >= 0) || from === to) throw new HttpError(400, 'Numéros de saison invalides');
+  if (!(from >= 0) || !(to >= 0)) throw new HttpError(400, 'Numéros de saison invalides');
+  // Même numéro : on range seulement (vidéos « S02Exx » encore dans des dossiers d'une autre saison → « Season 02 »)
+  const tidyOnly = from === to;
   const it = ((await jfJson(token, `/Items?Ids=${encodeURIComponent(jfSeriesId)}&Fields=ProviderIds,Path`)) || {}).Items?.[0];
   if (!it) throw new HttpError(404, 'Série introuvable dans Jellyfin');
   const tvdbId = Number((it.ProviderIds || {}).Tvdb) || null;
@@ -1125,7 +1127,7 @@ async function renumberSeason(token, { jfSeriesId, from, to }) {
   const pad = (n) => String(n).padStart(2, '0');
 
   // 1) Sonarr, s'il a les fichiers de cette saison
-  const sr = arrConfig('sonarr') ? await seriesByTvdbOrTmdb(tvdbId, tmdbId).catch(() => null) : null;
+  const sr = !tidyOnly && arrConfig('sonarr') ? await seriesByTvdbOrTmdb(tvdbId, tmdbId).catch(() => null) : null;
   if (sr) {
     const [episodes, files] = await Promise.all([arr('sonarr', `/episode?seriesId=${sr.id}`), arr('sonarr', `/episodefile?seriesId=${sr.id}`)]);
     const inFrom = (files || []).filter((f) => f.seasonNumber === from);
@@ -1164,13 +1166,18 @@ async function renumberSeason(token, { jfSeriesId, from, to }) {
       const full = path.join(dir, ent.name);
       if (ent.isDirectory() && depth < 3) await walk(full, depth + 1);
       else if (ent.isFile() && VIDEO.test(ent.name) && !/sample/i.test(ent.name)) {
-        if (epRe.test(ent.name)) found.push(full);
-        else if (epReTo.test(ent.name) && path.relative(seriesDir, dir).split(path.sep).some((seg) => fromDirRe.test(seg))) found.push(full);
+        const rel = path.relative(seriesDir, dir);
+        if (tidyOnly) {
+          // Rangement : vidéo de la saison, ailleurs que dans « Season NN »
+          if (epReTo.test(ent.name) && rel && path.resolve(dir) !== path.resolve(seriesDir, `Season ${pad(to)}`)) found.push(full);
+        } else if (epRe.test(ent.name)) found.push(full);
+        else if (epReTo.test(ent.name) && rel.split(path.sep).some((seg) => fromDirRe.test(seg))) found.push(full);
       }
     }
   };
   await walk(seriesDir, 0);
-  if (!found.length) throw new HttpError(404, `Aucune vidéo « S${pad(from)}Exx » trouvée dans ${path.basename(seriesDir)}`);
+  if (!found.length)
+    throw new HttpError(404, tidyOnly ? `Rien à ranger : les épisodes de la saison ${to} sont déjà dans « Season ${pad(to)} ».` : `Aucune vidéo « S${pad(from)}Exx » trouvée dans ${path.basename(seriesDir)}`);
   const targetDir = path.join(seriesDir, `Season ${pad(to)}`);
   await fs.promises.mkdir(targetDir, { recursive: true });
   let moved = 0;
@@ -1206,7 +1213,7 @@ async function renumberSeason(token, { jfSeriesId, from, to }) {
   if (!moved) throw new HttpError(502, `Le serveur Lumio n’a pas accès à ces fichiers (${problems.slice(0, 2).join(', ')}). Monte le dossier des séries dans son conteneur, au même chemin que Jellyfin.`);
   jfSeriesRefresh(token, jfSeriesId);
   console.log(`Saison renumérotée : « ${it.Name} » saison ${from} → ${to} (${moved} fichier(s))`);
-  return { ok: true, message: `${moved} épisode${moved > 1 ? 's' : ''} passé${moved > 1 ? 's' : ''} de la saison ${from} à la saison ${to}. Jellyfin se met à jour dans une minute.${problems.length ? ` (${problems.length} fichier(s) laissé(s) en place : un fichier du même nom existe déjà dans « Season ${pad(to)} »)` : ''}` };
+  return { ok: true, message: `${moved} épisode${moved > 1 ? 's' : ''} ${tidyOnly ? `rangé${moved > 1 ? 's' : ''} dans « Season ${pad(to)} »` : `passé${moved > 1 ? 's' : ''} de la saison ${from} à la saison ${to}`}. Jellyfin se met à jour dans une minute.${problems.length ? ` (${problems.length} fichier(s) laissé(s) en place : un fichier du même nom existe déjà dans « Season ${pad(to)} »)` : ''}` };
 }
 
 /** Saisons d'une série dans la numérotation de Sonarr (TheTVDB), avec le nombre d'épisodes. */

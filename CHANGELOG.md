@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- « Changer le numéro de cette saison » : garder le même numéro range les fichiers de la saison dans leur dossier « Season NN » (ex. vidéos S02 restées dans un dossier « Lupin.S03… ») (serveur Lumio 3.39.0).
+
 - Serveur Lumio 3.37.0 : « Changer le numéro de cette saison » retrouve les fichiers même quand le serveur voit les disques à un autre chemin que Jellyfin, et range les épisodes d'un dossier de sortie (« Lupin.S03… ») dans « Season 02 ».
 
 ## 1.0.104 — 24 octobre 2026
