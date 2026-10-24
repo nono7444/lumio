@@ -1,4 +1,5 @@
 // Page « Demandes » façon Seerr : filtres, cartes avec affiche, demandeur, statuts, actions admin.
+import { ArrWantedBlock, DiskDownloadsBlock } from '@/components/requests-extra';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useFocusEffect } from 'expo-router';
@@ -336,6 +337,9 @@ export function ServerRequests({ header }: { header: React.ReactNode }) {
               />
             ))}
           </ScrollView>
+          {/* Téléchargements sur les disques + en attente dans Radarr / Sonarr (repliables) */}
+          <DiskDownloadsBlock />
+          <ArrWantedBlock />
           {!admin ? <Text style={[styles.meta, { marginHorizontal: 16, marginBottom: 8 }]}>Tes demandes</Text> : null}
           {error ? <Text style={[styles.meta, { color: C.danger, marginHorizontal: 16 }]}>{error}</Text> : null}
         </View>

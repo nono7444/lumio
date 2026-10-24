@@ -17,6 +17,8 @@ export type WatchItem = {
   addedAt: string;
   /** Statut sur le serveur (MediaStatus) */
   status?: number;
+  /** Sortie en numérique (film) ou prochain épisode (série), AAAA-MM-JJ */
+  digital?: string | null;
 };
 
 let cache: WatchItem[] | null = null;

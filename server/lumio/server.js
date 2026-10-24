@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.39.0';
+const VERSION = '3.41.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -952,6 +952,35 @@ async function removeFromArr(r, deleteFiles) {
 const WATCHLIST_FILE = path.join(DATA_DIR, 'watchlist.json');
 let watchlists = readJson(WATCHLIST_FILE, {}); // userId → [{ type, tmdbId, title, year, poster, backdrop, addedAt }]
 const saveWatchlists = () => persist(WATCHLIST_FILE, () => watchlists);
+// Date de sortie en numérique (VOD) d'un film, en France de préférence ; série : prochain épisode ou 1re diffusion
+const digitalCache = new Map();
+async function digitalDate(type, id) {
+  const k = `${type}:${id}`;
+  const hit = digitalCache.get(k);
+  if (hit && Date.now() - hit.at < 24 * 3600e3) return hit.v;
+  let v = null;
+  try {
+    if (type === 'movie') {
+      const r = await tmdbGet(`/movie/${id}/release_dates`);
+      const all = (r && r.results) || [];
+      const pick = (cc) => {
+        const c = all.find((x) => x.iso_3166_1 === cc);
+        const d = c && (c.release_dates || []).filter((x) => x.type === 4).map((x) => x.release_date).sort()[0];
+        return d || null;
+      };
+      v = pick('FR') || pick('US') || all.flatMap((x) => (x.release_dates || []).filter((y) => y.type === 4).map((y) => y.release_date)).sort()[0] || null;
+      if (!v) {
+        const m = await tmdbGet(`/movie/${id}`);
+        v = (m && m.release_date) || null;
+      }
+    } else {
+      const t = await tmdbGet(`/tv/${id}`);
+      v = (t && ((t.next_episode_to_air && t.next_episode_to_air.air_date) || t.first_air_date)) || null;
+    }
+  } catch {}
+  digitalCache.set(k, { at: Date.now(), v: v ? String(v).slice(0, 10) : null });
+  return v ? String(v).slice(0, 10) : null;
+}
 
 // ——— Séries sorties en « parties » (Lupin, La Casa de Papel…) : réparation de la numérotation dans Sonarr ———
 // Netflix publie certaines saisons en plusieurs parties, et beaucoup de sorties sont numérotées par partie
@@ -1214,6 +1243,123 @@ async function renumberSeason(token, { jfSeriesId, from, to }) {
   jfSeriesRefresh(token, jfSeriesId);
   console.log(`Saison renumérotée : « ${it.Name} » saison ${from} → ${to} (${moved} fichier(s))`);
   return { ok: true, message: `${moved} épisode${moved > 1 ? 's' : ''} ${tidyOnly ? `rangé${moved > 1 ? 's' : ''} dans « Season ${pad(to)} »` : `passé${moved > 1 ? 's' : ''} de la saison ${from} à la saison ${to}`}. Jellyfin se met à jour dans une minute.${problems.length ? ` (${problems.length} fichier(s) laissé(s) en place : un fichier du même nom existe déjà dans « Season ${pad(to)} »)` : ''}` };
+}
+
+// ——— En attente dans Radarr / Sonarr : surveillés mais pas encore téléchargés (onglet Demandes) ———
+let wantedCache = null;
+async function arrWanted() {
+  if (wantedCache && Date.now() - wantedCache.at < 60_000) return wantedCache.value;
+  const img = (x) => ((x.images || []).find((i) => i.coverType === 'poster') || {}).remoteUrl || null;
+  const [movies, missing, queue] = await Promise.all([
+    arrConfig('radarr') ? arr('radarr', '/movie').catch(() => []) : [],
+    arrConfig('sonarr') ? arr('sonarr', '/wanted/missing?page=1&pageSize=1000&monitored=true&includeSeries=true&sortKey=airDateUtc&sortDirection=descending').catch(() => null) : null,
+    queueIndex().catch(() => ({ movies: new Map(), series: new Map() })),
+  ]);
+  const items = [];
+  const now = Date.now();
+  for (const m of movies || []) {
+    if (!m.monitored || m.hasFile) continue;
+    const release = m.digitalRelease || m.physicalRelease || m.inCinemas || null;
+    const q = queue.movies.get(m.tmdbId);
+    items.push({
+      type: 'movie',
+      tmdbId: m.tmdbId,
+      title: m.title,
+      year: m.year,
+      poster: img(m),
+      added: m.added,
+      released: Boolean(m.isAvailable),
+      release,
+      state: q ? q.state : m.isAvailable ? 'searching' : 'upcoming',
+      progress: q && q.progress != null ? q.progress : null,
+    });
+  }
+  const bySeries = new Map();
+  for (const r of (missing && missing.records) || []) {
+    const srs = r.series;
+    if (!srs || (r.airDateUtc && Date.parse(r.airDateUtc) > now)) continue;
+    const e = bySeries.get(srs.id) || { type: 'tv', tmdbId: srs.tmdbId, tvdbId: srs.tvdbId, title: srs.title, year: srs.year, poster: img(srs), added: srs.added, missing: 0, seasons: new Set(), released: true };
+    e.missing++;
+    e.seasons.add(r.seasonNumber);
+    bySeries.set(srs.id, e);
+  }
+  for (const e of bySeries.values()) {
+    const q = queue.series.get(e.tvdbId) || [];
+    const prog = q.filter((x) => x.progress != null);
+    items.push({
+      ...e,
+      seasons: [...e.seasons].sort((a, b) => a - b),
+      state: q.length ? (q.some((x) => x.state === 'warning') ? 'warning' : 'downloading') : 'searching',
+      progress: prog.length ? Math.round(prog.reduce((n, x) => n + x.progress, 0) / prog.length) : null,
+    });
+  }
+  // En téléchargement d'abord, puis recherche, puis à venir ; les plus récents en premier
+  const rank = { downloading: 0, importing: 0, warning: 1, searching: 2, upcoming: 3 };
+  items.sort((a, b) => (rank[a.state] ?? 2) - (rank[b.state] ?? 2) || Date.parse(b.added || 0) - Date.parse(a.added || 0));
+  wantedCache = { at: Date.now(), value: items };
+  return items;
+}
+
+// ——— Récompenses de la famille : points, grades et badges ———
+// Heures regardées et coups de cœur (Jellyfin), notes données, demandes, messages du chat, titres « À voir ».
+const GRADES = [
+  { min: 0, name: 'Spectateur', emoji: '🍿' },
+  { min: 150, name: 'Habitué', emoji: '🎟️' },
+  { min: 400, name: 'Cinéphile', emoji: '🎬' },
+  { min: 900, name: 'Critique', emoji: '📝' },
+  { min: 1800, name: 'Réalisateur', emoji: '🎥' },
+  { min: 3500, name: 'Producteur', emoji: '💼' },
+  { min: 6000, name: 'Légende', emoji: '🏆' },
+];
+const BADGES = [
+  { id: 'marathon', emoji: '🏃', name: 'Marathonien', desc: '100 heures regardées', test: (x) => x.hours >= 100 },
+  { id: 'binge', emoji: '📺', name: 'Accro aux séries', desc: '200 épisodes vus', test: (x) => x.episodes >= 200 },
+  { id: 'cine', emoji: '🎞️', name: 'Ciné-club', desc: '50 films vus', test: (x) => x.movies >= 50 },
+  { id: 'critic', emoji: '⭐', name: 'Critique', desc: '20 titres notés', test: (x) => x.ratings >= 20 },
+  { id: 'heart', emoji: '❤️', name: 'Coup de cœur', desc: '25 « J’aime »', test: (x) => x.likes >= 25 },
+  { id: 'explorer', emoji: '🧭', name: 'Explorateur', desc: '10 demandes', test: (x) => x.requests >= 10 },
+  { id: 'chatty', emoji: '💬', name: 'Bavard', desc: '50 messages dans le chat', test: (x) => x.messages >= 50 },
+  { id: 'planner', emoji: '🔖', name: 'Prévoyant', desc: '15 titres dans « À voir »', test: (x) => x.watchlist >= 15 },
+  { id: 'first', emoji: '🥇', name: 'Premier de la famille', desc: 'Le plus de points', test: (x, rank) => rank === 1 },
+];
+let rewardsCache = null;
+async function rewardsBoard(token) {
+  if (rewardsCache && Date.now() - rewardsCache.at < 10 * 60_000) return rewardsCache.value;
+  const users = ((await jfJson(token, '/Users').catch(() => [])) || []).filter((u) => !(u.Policy && u.Policy.IsDisabled));
+  const rows = [];
+  for (const u of users) {
+    const q = (types, filter) =>
+      jfJson(token, `/Users/${u.Id}/Items?Recursive=true&IncludeItemTypes=${types}&Filters=${filter}&Fields=RunTimeTicks&EnableImages=false`).catch(() => ({ Items: [] }));
+    const [played, favs] = await Promise.all([q('Movie,Episode', 'IsPlayed'), q('Movie,Series,Episode', 'IsFavorite')]);
+    const items = (played && played.Items) || [];
+    const ticks = items.reduce((n, x) => n + (x.RunTimeTicks || 0), 0);
+    const x = {
+      id: u.Id,
+      name: u.Name,
+      hours: Math.round(ticks / 36e9),
+      movies: items.filter((i) => i.Type === 'Movie').length,
+      episodes: items.filter((i) => i.Type === 'Episode').length,
+      likes: ((favs && favs.Items) || []).length,
+      ratings: Object.values(ratings).filter((e) => e.votes && e.votes[u.Id]).length,
+      requests: requests.filter((r) => r.requestedBy && r.requestedBy.id === u.Id).length,
+      messages: messages.filter((m) => m.userId === u.Id).length,
+      watchlist: (watchlists[u.Id] || []).length,
+    };
+    x.points = x.hours * 10 + x.ratings * 15 + x.likes * 3 + x.requests * 5 + x.messages * 1 + x.watchlist * 2;
+    rows.push(x);
+  }
+  rows.sort((a, b) => b.points - a.points);
+  rows.forEach((x, i) => {
+    x.rank = i + 1;
+    const g = [...GRADES].reverse().find((g) => x.points >= g.min) || GRADES[0];
+    const next = GRADES.find((n) => n.min > x.points) || null;
+    x.grade = { name: g.name, emoji: g.emoji, min: g.min };
+    x.next = next ? { name: next.name, emoji: next.emoji, min: next.min } : null;
+    x.badges = BADGES.filter((b) => b.test(x, x.rank)).map(({ id, emoji, name, desc }) => ({ id, emoji, name, desc }));
+  });
+  const value = { users: rows, grades: GRADES, badges: BADGES.map(({ id, emoji, name, desc }) => ({ id, emoji, name, desc })) };
+  rewardsCache = { at: Date.now(), value };
+  return value;
 }
 
 /** Saisons d'une série dans la numérotation de Sonarr (TheTVDB), avec le nombre d'épisodes. */
@@ -2918,6 +3064,11 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       return send(res, 200, { plan: pub, ...r, message: `${r.moved} épisode${r.moved > 1 ? 's' : ''} remis à leur place${r.removed ? `, ${r.removed} doublon${r.removed > 1 ? 's' : ''} supprimé${r.removed > 1 ? 's' : ''}` : ''}. Sonarr les renomme, puis Jellyfin les retrouve au prochain scan.` });
     }
 
+    // ——— En attente dans Radarr / Sonarr (onglet Demandes) ———
+    if (req.method === 'GET' && p === '/api/arr/wanted') {
+      return send(res, 200, { items: await arrWanted() });
+    }
+
     // ——— Changer le numéro d'une saison (admin) ———
     if (req.method === 'POST' && p === '/api/admin/series/renumber') {
       requireAdmin(user);
@@ -2929,13 +3080,27 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       return send(res, 200, { seasons: await arrSeasons(Number(q.get('tvdbId'))) });
     }
 
+    // ——— Récompenses de la famille ———
+    if (req.method === 'GET' && p === '/api/rewards') {
+      const token = user.admin ? user.token : jfAdminToken || process.env.JELLYFIN_API_KEY;
+      if (!token) throw new HttpError(503, 'Un admin doit d’abord ouvrir Lumio une fois');
+      const b = await rewardsBoard(token);
+      return send(res, 200, { ...b, me: user.id });
+    }
+
     // ——— À voir (liste personnelle) ———
     if (p === '/api/watchlist') {
       const list = watchlists[user.id] || [];
       if (req.method === 'GET') {
         const lib = await loadLibrary().catch(() => null);
         return send(res, 200, {
-          items: list.map((x) => ({ ...x, status: lib ? mediaStatus(lib, x.type, x.tmdbId, null, null).status : MediaStatus.UNKNOWN })),
+          items: await Promise.all(
+            list.map(async (x) => ({
+              ...x,
+              status: lib ? mediaStatus(lib, x.type, x.tmdbId, null, null).status : MediaStatus.UNKNOWN,
+              digital: tmdbKey() ? await digitalDate(x.type, x.tmdbId).catch(() => null) : null,
+            }))
+          ),
         });
       }
       if (req.method === 'POST') {

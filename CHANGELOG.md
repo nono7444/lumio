@@ -6,6 +6,12 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Demandes : deux blocs repliables (+ / −) en haut — « Téléchargements sur les disques » (progression des téléchargements AllDebrid, admin) et « En attente dans Radarr / Sonarr » (films et séries surveillés pas encore téléchargés, avec leur état).
+- « À voir » : signet à côté de Lire / J'aime sur les fiches (un appui ajoute, un autre retire) ; sur les affiches de la liste, date de sortie en numérique (films) ou du prochain épisode (séries).
+- Recherche par thème : tous les titres du thème, du plus récent au plus ancien, sans limite (chargement au fil du défilement). Nouveau thème 🏰 Disney (Walt Disney, Disney Animation, Pixar : classiques et nouveautés).
+- Récompenses (Profil → Récompenses) : points, grades (Spectateur → Légende), badges et classement de la famille, selon les heures regardées, les notes, les J'aime, les demandes, le chat et « À voir ».
+- Rangée de saison (🎃 Halloween…) : les titres du serveur, puis des idées qu'on n'a pas encore, à demander depuis leur fiche (serveur Lumio 3.41.0).
+
 ## 1.0.105 — 24 octobre 2026
 
 - « Changer le numéro de cette saison » : garder le même numéro range les fichiers de la saison dans leur dossier « Season NN » (ex. vidéos S02 restées dans un dossier « Lupin.S03… ») (serveur Lumio 3.39.0).

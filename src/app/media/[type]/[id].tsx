@@ -209,6 +209,15 @@ export default function MediaScreen() {
   }
 
   const movieFile = details.kind === 'movie' ? details.arr?.movieFile : undefined;
+  // Liste « À voir » (signet)
+  const wlItem = {
+    type: details.kind,
+    tmdbId,
+    title,
+    year: date?.slice(0, 4),
+    poster: tmdbImg(d.poster_path, 'w342'),
+    backdrop: tmdbImg(d.backdrop_path, 'w780'),
+  };
   const imdbId = details.kind === 'movie' ? details.data.imdb_id : details.data.external_ids?.imdb_id;
   const logo = pickLogo(settings, d.images);
   // Sur TV (paysage), le hero ne dépasse pas l'écran
@@ -334,17 +343,23 @@ export default function MediaScreen() {
         <View style={[{ paddingHorizontal: 16, gap: 20, marginTop: 4 }, Platform.isTV && { width: '100%', maxWidth: 1100, alignSelf: 'flex-start', paddingLeft: 48 }]}>
           {/* ——— Lecture (depuis Jellyfin) ——— */}
           {jfItem && !Platform.isTV ? (
-            <Button
-              title="Lire"
-              icon="play"
-              small
-              onPress={() =>
-                router.push({
-                  pathname: '/watch',
-                  params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title },
-                })
-              }
-            />
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <Button
+                title="Lire"
+                icon="play"
+                small
+                onPress={() =>
+                  router.push({
+                    pathname: '/watch',
+                    params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title },
+                  })
+                }
+                style={{ flex: 1 }}
+              />
+              <WatchlistButton item={wlItem} variant="icon" />
+            </View>
+          ) : !Platform.isTV ? (
+            <WatchlistButton item={wlItem} variant="pill" />
           ) : null}
 
           {/* ——— Admin : liens Lumio Secour → AllDebrid → disques du serveur ——— */}
@@ -398,18 +413,6 @@ export default function MediaScreen() {
               ) : null}
             </View>
           ) : null}
-
-          {/* ——— Liste « À voir » ——— */}
-          <WatchlistButton
-            item={{
-              type: details.kind,
-              tmdbId,
-              title,
-              year: date?.slice(0, 4),
-              poster: tmdbImg(d.poster_path, 'w342'),
-              backdrop: tmdbImg(d.backdrop_path, 'w780'),
-            }}
-          />
 
           {/* ——— Proposer le titre dans le chat famille ——— */}
           {/* Proposer : seulement pour un titre pas encore sur le serveur */}

@@ -293,6 +293,15 @@ export default function SettingsScreen() {
           <Toggle label="Enchaîner l'épisode suivant" value={settings.autoNext} onChange={(v) => update({ autoNext: v })} />
         </Section>
 
+        {settings.chatUrl && settings.jellyfin && !Platform.isTV ? (
+          <Section title="Récompenses">
+            <Text style={{ color: C.textDim, fontSize: 13, lineHeight: 19, marginBottom: 10 }}>
+              Ton grade, tes badges et le classement de la famille (heures regardées, notes, J’aime, demandes…).
+            </Text>
+            <Button title="Voir mes récompenses" icon="trophy-outline" variant="secondary" onPress={() => router.push('/rewards')} />
+          </Section>
+        ) : null}
+
         <Section title="Personnalisation">
           <Button title="Accueil et onglets" icon="options-outline" variant="secondary" onPress={() => router.push('/customize')} />
           {Platform.isTV ? null : (

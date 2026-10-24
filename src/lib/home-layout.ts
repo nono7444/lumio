@@ -39,8 +39,8 @@ export function useAvailableRows(nonce = 0) {
 
       // Sélections de la période en cours (Halloween, Noël…)
       if (season) {
-        if (settings.jellyfin) out.push({ id: 'season-jf', label: `${season.emoji} ${season.name} · Sur ton serveur`, kind: 'season-jf' });
-        if (hasTmdb(settings)) out.push({ id: 'season-tmdb', label: `${season.emoji} ${season.name} · À découvrir`, kind: 'season-tmdb' });
+        if (settings.jellyfin || hasTmdb(settings)) out.push({ id: 'season-jf', label: `${season.emoji} ${season.name}`, kind: 'season-jf' });
+        // (les propositions TMDB sont maintenant dans la même rangée que les titres du serveur)
       }
 
       if (settings.jellyfin) {

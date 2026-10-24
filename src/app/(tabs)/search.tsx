@@ -19,9 +19,11 @@ const FILTERS: { value: Filter; label: string }[] = [
   { value: 'tv', label: 'Séries' },
 ];
 
-/** Recherche rapide par thème : les mieux notés d'abord */
-type Theme = { id: string; label: string; emoji: string; genre?: number; tvGenre?: number; keyword?: string };
+/** Recherche rapide par thème : tous les titres du thème, du plus récent au plus ancien */
+type Theme = { id: string; label: string; emoji: string; genre?: number; tvGenre?: number; keyword?: string; companies?: number[]; tvCompanies?: number[] };
 const THEMES: Theme[] = [
+  // Disney : Walt Disney Pictures, Walt Disney Animation Studios, Pixar (les classiques comme les nouveaux)
+  { id: 'disney', label: 'Disney', emoji: '🏰', companies: [2, 6125, 3], tvCompanies: [2, 3475] },
   { id: 'noel', label: 'Noël', emoji: '🎄', keyword: 'christmas' },
   { id: 'halloween', label: 'Halloween', emoji: '🎃', keyword: 'halloween' },
   { id: 'valentin', label: 'Saint-Valentin', emoji: '💘', keyword: "valentine's day" },
@@ -54,6 +56,31 @@ export default function Search() {
   const reqId = useRef(0);
   const [theme, setTheme] = useState<Theme | null>(null);
   const [themeOpen, setThemeOpen] = useState(false);
+  const [themePage, setThemePage] = useState({ page: 1, total: 1 });
+  const [moreBusy, setMoreBusy] = useState(false);
+
+  // Thème : page suivante en arrivant en bas de la liste
+  const loadMoreTheme = async () => {
+    if (!theme || query.trim().length >= 2 || moreBusy || themePage.page >= themePage.total) return;
+    const type: MediaType = filter === 'tv' ? 'tv' : 'movie';
+    setMoreBusy(true);
+    try {
+      const r = await tmdb.themed(settings, type, {
+        genre: type === 'tv' ? theme.tvGenre : theme.genre,
+        keyword: theme.keyword,
+        companies: type === 'tv' ? theme.tvCompanies : theme.companies,
+        page: themePage.page + 1,
+      });
+      setResults((cur) => {
+        const seen = new Set(cur.map((x) => x.id));
+        return [...cur, ...r.results.filter((x) => !seen.has(x.id))];
+      });
+      setThemePage({ page: themePage.page + 1, total: r.totalPages });
+    } catch {
+    } finally {
+      setMoreBusy(false);
+    }
+  };
 
   const cols = width > 700 ? 5 : 3;
   const gap = 12;
@@ -63,19 +90,25 @@ export default function Search() {
     const q = query.trim();
     if (q.length < 2) {
       setError(null);
-      // Pas de texte mais un thème choisi : les mieux notés de ce thème
+      // Pas de texte mais un thème choisi : tous les titres du thème, du plus récent au plus ancien
       if (theme) {
         const id = ++reqId.current;
         const type: MediaType = filter === 'tv' ? 'tv' : 'movie';
         const genre = type === 'tv' ? theme.tvGenre : theme.genre;
-        if (!genre && !theme.keyword) {
+        const companies = type === 'tv' ? theme.tvCompanies : theme.companies;
+        if (!genre && !theme.keyword && !companies?.length) {
           setResults([]);
           return;
         }
         setLoading(true);
+        setThemePage({ page: 1, total: 1 });
         tmdb
-          .best(settings, type, { genre, keyword: theme.keyword })
-          .then((r) => id === reqId.current && setResults(r))
+          .themed(settings, type, { genre, keyword: theme.keyword, companies })
+          .then((r) => {
+            if (id !== reqId.current) return;
+            setResults(r.results);
+            setThemePage({ page: 1, total: r.totalPages });
+          })
           .catch((e) => id === reqId.current && setError(e?.message ?? 'Erreur'))
           .finally(() => id === reqId.current && setLoading(false));
       } else setResults([]);
@@ -137,7 +170,7 @@ export default function Search() {
       </View>
       {theme && query.trim().length < 2 ? (
         <Text style={styles.themeHint}>
-          Les {filter === 'tv' ? 'séries' : 'films'} « {theme.label} » les mieux notés
+          {filter === 'tv' ? 'Toutes les séries' : 'Tous les films'} « {theme.label} », du plus récent au plus ancien
         </Text>
       ) : null}
       <Modal visible={themeOpen} transparent animationType="fade" onRequestClose={() => setThemeOpen(false)}>
@@ -180,6 +213,9 @@ export default function Search() {
         numColumns={cols}
         keyExtractor={(r) => `${r.media_type}:${r.id}`}
         keyboardDismissMode="on-drag"
+        onEndReached={loadMoreTheme}
+        onEndReachedThreshold={0.6}
+        ListFooterComponent={moreBusy ? <ActivityIndicator color={C.textDim} style={{ marginVertical: 20 }} /> : null}
         contentContainerStyle={{ padding: 16, paddingBottom: TAB_SPACE, gap: 18 }}
         columnWrapperStyle={{ gap }}
         renderItem={({ item: r }) => {

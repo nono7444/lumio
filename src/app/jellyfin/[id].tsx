@@ -222,6 +222,18 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
   }, [tmdbId, item.Type]);
 
 
+  // Liste « À voir » : signet à côté de J'aime
+  const wlItem =
+    tmdbId && (item.Type === 'Movie' || item.Type === 'Series')
+      ? {
+          type: (item.Type === 'Series' ? 'tv' : 'movie') as 'tv' | 'movie',
+          tmdbId,
+          title: item.Name,
+          year: item.ProductionYear ? String(item.ProductionYear) : undefined,
+          poster: tmdbArtFor(settings, item, 'poster') ?? jfPoster(settings, item, 342),
+        }
+      : null;
+
   async function toggleFav() {
     const next = !fav;
     setFav(next);
@@ -360,6 +372,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                   <Button title="Depuis le début" icon="refresh" variant="glass" small onPress={() => playJellyfin(item, true)} style={{ flex: 1 }} />
                 )}
                 <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" small onPress={toggleFav} style={{ width: 46, paddingHorizontal: 0 }} />
+                {wlItem ? <WatchlistButton item={wlItem} variant="icon" /> : null}
                 <Button
                   small
                   title={item.UserData?.Played ? 'Vu' : 'Marquer vu'}
@@ -386,6 +399,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                   />
                 ) : null}
                 <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" small onPress={toggleFav} style={{ width: 46, paddingHorizontal: 0 }} />
+                {wlItem ? <WatchlistButton item={wlItem} variant="icon" /> : null}
               </View>
             </View>
           )}
@@ -395,19 +409,6 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
           {settings.jellyfin?.isAdmin === true && !Platform.isTV ? <AdminItemActions item={item} reload={reload} /> : null}
 
           {/* Notes de la famille et signalement d'un problème (serveur Lumio) */}
-          {/* ——— Liste « À voir » ——— */}
-          {tmdbId && (item.Type === 'Movie' || isSeries) ? (
-            <WatchlistButton
-              item={{
-                type: isSeries ? 'tv' : 'movie',
-                tmdbId,
-                title: item.Name,
-                year: item.ProductionYear ? String(item.ProductionYear) : undefined,
-                poster: tmdbArtFor(settings, item, 'poster') ?? jfPoster(settings, item, 342),
-              }}
-            />
-          ) : null}
-
           {serverReq && tmdbId && Platform.isTV ? (
             showRate ? <FamilyRating type={isSeries ? 'tv' : 'movie'} tmdbId={tmdbId} title={item.Name} poster={jfPoster(settings, item, 342)} /> : null
           ) : serverReq && tmdbId ? (

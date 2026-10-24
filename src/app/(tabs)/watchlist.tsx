@@ -100,6 +100,12 @@ export default function WatchlistScreen() {
                   onPress: () => openMedia(x.type, x.tmdbId),
                 }}
               />
+              {x.digital ? (
+                <Text style={styles.date} numberOfLines={1}>
+                  {x.type === 'tv' ? '📺 ' : '💿 '}
+                  {x.digital.split('-').reverse().join('/')}
+                </Text>
+              ) : null}
               <Text style={styles.state} numberOfLines={1} onPress={() => remove(x)}>
                 Retirer
               </Text>
@@ -115,4 +121,5 @@ const styles = StyleSheet.create({
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 16, marginBottom: 14 },
   empty: { color: C.textDim, fontSize: 14, lineHeight: 20, textAlign: 'center' },
   state: { fontSize: 12, fontWeight: '700', marginTop: 4, color: C.textFaint },
+  date: { fontSize: 12, fontWeight: '800', marginTop: 4, color: C.text, fontVariant: ['tabular-nums'] },
 });

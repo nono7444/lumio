@@ -11,7 +11,7 @@ import { tvInfoFromJf, type TvFocusInfo } from '@/lib/tv-focus';
 import { Hero, heroFromTmdb, HeroTopBar, type HeroItem } from '@/components/hero';
 import { HomeBackdrop, homeBackdropSource } from '@/components/home-backdrop';
 import { JfRow, openJellyfin, playJellyfin } from '@/components/jf-cards';
-import { isAnime, jf, jfImage, jfLogo, type JfItem } from '@/lib/jellyfin';
+import { isAnime, jf, jfImage, jfLogo, jfPoster, type JfItem } from '@/lib/jellyfin';
 import { useSeason } from '@/lib/seasons';
 
 import { PosterItem, Row } from '@/components/ui';
@@ -141,31 +141,34 @@ function JfHero({ nonce }: { nonce: number }) {
   return <Hero items={items} season={season} />;
 }
 
-/** Sélection de saison tirée du serveur Jellyfin (ex. films d'horreur pour Halloween), du plus récent au plus ancien. */
+/**
+ * Rangée de saison (ex. Halloween) : d'abord les titres du serveur (du plus récent au plus ancien),
+ * puis des propositions TMDB qu'on n'a pas encore — un appui ouvre la fiche pour les demander.
+ */
 function SeasonJfRow({ nonce }: { nonce: number }) {
   const { settings } = useSettings();
   const season = useSeason();
-  const [items, setItems] = useState<JfItem[]>([]);
+  const badge = useLibrary();
+  const [owned, setOwned] = useState<JfItem[]>([]);
+  const [ideas, setIdeas] = useState<PosterItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!season || !settings.jellyfin) return;
+    if (!season) return;
     let alive = true;
+    setLoading(true);
     (async () => {
       let found: JfItem[] = [];
-      if (season.jfGenre) {
+      if (settings.jellyfin && season.jfGenre) {
         const genres = (await jf.genres(settings).catch(() => [])).map((g) => g.Name).filter((n) => season.jfGenre!.test(n));
         if (genres.length) {
-          const r = await jf.items(settings, {
-            types: 'Movie,Series',
-            genres: genres.join('|'),
-            sort: 'PremiereDate,ProductionYear,SortName',
-            order: 'Descending',
-            limit: 40,
-          });
+          const r = await jf
+            .items(settings, { types: 'Movie,Series', genres: genres.join('|'), sort: 'PremiereDate,ProductionYear,SortName', order: 'Descending', limit: 40 })
+            .catch(() => ({ Items: [] as JfItem[] }));
           found = r.Items;
         }
       }
-      if (season.jfSearch) {
+      if (settings.jellyfin && season.jfSearch) {
         const res = await Promise.all(
           season.jfSearch.map((q) => jf.items(settings, { types: 'Movie,Series', search: q, limit: 20 }).catch(() => ({ Items: [] as JfItem[] })))
         );
@@ -173,16 +176,61 @@ function SeasonJfRow({ nonce }: { nonce: number }) {
         for (const r of res) for (const i of r.Items) if (!seen.has(i.Id)) (seen.add(i.Id), found.push(i));
         found.sort((a, b) => (b.ProductionYear ?? 0) - (a.ProductionYear ?? 0));
       }
-      if (alive) setItems(found);
+      // Propositions : films du thème sur TMDB qui ne sont pas sur le serveur
+      let props: PosterItem[] = [];
+      if (hasTmdb(settings) && (season.tmdbGenres?.length || season.tmdbKeyword)) {
+        const have = new Set(found.map((i) => Number(i.ProviderIds?.Tmdb)).filter(Boolean));
+        const pages = await Promise.all(
+          [1, 2].map((page) => tmdb.discover(settings, 'movie', { genres: season.tmdbGenres, keyword: season.tmdbKeyword, page }).catch(() => ({ results: [] })))
+        );
+        props = pages
+          .flatMap((p) => p.results)
+          .filter((r) => r.poster_path && !have.has(r.id))
+          .slice(0, 30)
+          .map((r) => ({
+            key: `movie:${r.id}`,
+            title: itemTitle(r),
+            poster: tmdbImg(r.poster_path),
+            backdrop: r.backdrop_path ? tmdbImg(r.backdrop_path, 'w1280') : undefined,
+            ids: { tmdb: r.id, type: 'movie' as const },
+            subtitle: `${itemYear(r) ?? ''}${itemYear(r) ? ' · ' : ''}À demander`,
+            badge: badge('movie', r.id),
+            onPress: () => openMedia('movie', r.id),
+          }));
+      }
+      if (alive) {
+        setOwned(found);
+        setIdeas(props);
+        setLoading(false);
+      }
     })();
     return () => {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [season?.id, settings.jellyfin?.token, nonce]);
+  }, [season?.id, settings.jellyfin?.token, settings.tmdbKey, nonce]);
 
   if (!season) return null;
-  return <JfRow title={`${season.emoji} ${season.name} · Sur ton serveur`} items={items} accent={season.accent} />;
+  const items: PosterItem[] = [
+    ...owned.map((i) => ({
+      key: `jf:${i.Id}`,
+      title: i.Name,
+      poster: jfPoster(settings, i),
+      subtitle: `${i.ProductionYear ?? ''}${i.ProductionYear ? ' · ' : ''}Sur ton serveur`,
+      badge: { label: 'Disponible', color: '#2FBF71', state: 'available' as const },
+      onPress: () => openJellyfin(i),
+    })),
+    ...ideas,
+  ];
+  return (
+    <Row
+      title={`${season.emoji} ${season.name}`}
+      subtitle={owned.length && ideas.length ? 'Sur ton serveur, puis des idées à demander' : season.tagline}
+      items={items}
+      loading={loading && !items.length}
+      accent={season.accent}
+    />
+  );
 }
 
 /** Sélection de saison à découvrir (TMDB), du plus récent au plus ancien. */

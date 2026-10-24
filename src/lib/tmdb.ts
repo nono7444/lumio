@@ -134,6 +134,31 @@ export const tmdb = {
     return r.results.map((i) => ({ ...i, media_type: type }));
   },
 
+  /**
+   * Recherche par thème : tous les titres du thème (genre, mot-clé ou studios), du plus récent au plus ancien,
+   * page par page (pas seulement les mieux notés). Titres sortis seulement, un minimum de votes pour écarter le bruit.
+   */
+  themed: async (s: Settings, type: MediaType, opts: { genre?: number; keyword?: string; companies?: number[]; page?: number }) => {
+    let kw: number | undefined;
+    if (opts.keyword) {
+      const k = await tmdbCall<{ results: { id: number; name: string }[] }>(s, '/search/keyword', { query: opts.keyword });
+      kw = (k.results.find((x) => x.name.toLowerCase() === opts.keyword!.toLowerCase()) ?? k.results[0])?.id;
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    const dateKey = type === 'movie' ? 'primary_release_date' : 'first_air_date';
+    const r = await tmdbCall<{ results: TmdbItem[]; total_pages: number }>(s, `/discover/${type}`, {
+      sort_by: `${dateKey}.desc`,
+      [`${dateKey}.lte`]: today,
+      'vote_count.gte': opts.companies?.length ? 30 : 40,
+      include_adult: 'false',
+      page: opts.page ?? 1,
+      ...(opts.genre ? { with_genres: String(opts.genre) } : {}),
+      ...(kw ? { with_keywords: String(kw) } : {}),
+      ...(opts.companies?.length ? { with_companies: opts.companies.join('|') } : {}),
+    });
+    return { results: r.results.map((i) => ({ ...i, media_type: type })), totalPages: r.total_pages ?? 1 };
+  },
+
   /** Découverte filtrée (genres / mot-clé), du plus récent au plus ancien. */
   discover: (s: Settings, type: MediaType, opts: { genres?: number[]; keyword?: number; page?: number }) => {
     const today = new Date().toISOString().slice(0, 10);
