@@ -759,7 +759,7 @@ setTimeout(() => autoFrenchSubtitles().catch(() => {}), 3 * 60_000);
 setInterval(() => autoFrenchSubtitles().catch(() => {}), 60 * 60_000);
 
 // ——— Disques et nettoyage (Profil → Stockage) ———
-// Espace des disques vu par Radarr / Sonarr, plus gros titres et ceux que personne n'a regardés.
+// Espace des disques vu par Radarr / Sonarr et plus gros titres.
 async function diskSpace() {
   const lists = await Promise.all(
     ['radarr', 'sonarr'].map((k) => (arrConfig(k) ? arr(k, '/diskspace').catch(() => []) : []))
@@ -823,10 +823,8 @@ async function storageReport(token) {
     const last = watched.series.get(sr.tvdbId) || 0;
     items.push({ kind: 'sonarr', id: sr.id, type: 'tv', tmdbId: sr.tmdbId, title: sr.title, year: sr.year, size, added: sr.added, watched: last > 0, lastPlayed: last ? new Date(last).toISOString() : null, poster: ((sr.images || []).find((i) => i.coverType === 'poster') || {}).remoteUrl || null });
   }
-  const yearAgo = Date.now() - 365 * 86400e3;
-  // À nettoyer : jamais regardé et ajouté il y a plus de 6 mois, ou plus regardé depuis un an
-  const old = (x) => (!x.watched && Date.parse(x.added || 0) < Date.now() - 182 * 86400e3) || (x.watched && Date.parse(x.lastPlayed) < yearAgo);
-  const candidates = items.filter(old).sort((a, b) => b.size - a.size).slice(0, 40);
+  // Plus de suggestions « à nettoyer » (titres jamais / plus regardés) : l'admin supprime lui-même ce qu'il veut
+  const candidates = [];
   const biggest = [...items].sort((a, b) => b.size - a.size).slice(0, 25);
   return { disks, candidates, biggest, totalCandidates: candidates.reduce((n, x) => n + x.size, 0) };
 }
