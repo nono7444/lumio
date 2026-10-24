@@ -141,3 +141,4 @@ sudo sh /data/lumio-server/host/install-host-actions.sh   # le bouton « Mettre 
 |---|---|---|
 | GET / PUT | `/api/secour/auto` | Admin : groupe de secours `{ enabled, movie: { root, folder }, tv: { root, folder } }` |
 | POST | `/api/secour/requests/:id` | Admin : passer une demande par Lumio Secour à la main |
+| POST | `/api/secour/grab` | Admin (bouton « LS ») : `{ type, tmdbId, tvdbId?, title, year, poster, seasons? }` → téléchargement direct par Lumio Secour |

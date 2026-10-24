@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.44.0';
+const VERSION = '3.45.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3951,6 +3951,47 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         }
         saveConfig();
         return send(res, 200, secourAutoView());
+      }
+      // Admin : bouton « LS » d'une fiche → téléchargement direct par Lumio Secour (crée ou reprend la demande)
+      if (req.method === 'POST' && p === '/api/secour/grab') {
+        const b = await readBody(req);
+        const type = b.type === 'tv' ? 'tv' : 'movie';
+        const tmdbId = Number(b.tmdbId);
+        if (!tmdbId) throw new HttpError(400, 'Identifiant TMDB manquant');
+        let seasons;
+        if (type === 'tv') {
+          seasons = (Array.isArray(b.seasons) ? b.seasons : []).map(Number).filter((n) => n > 0);
+          if (!seasons.length) {
+            const t = await tmdbGet(`/tv/${tmdbId}`).catch(() => null);
+            seasons = ((t && t.seasons) || []).map((x) => x.season_number).filter((n) => n > 0);
+          }
+          if (!seasons.length) throw new HttpError(400, 'Aucune saison à télécharger');
+        }
+        const open = (x) => x.type === type && x.tmdbId === tmdbId && [RequestStatus.PENDING, RequestStatus.APPROVED, RequestStatus.FAILED].includes(x.status);
+        let r = requests.find((x) => open(x) && (type === 'movie' || JSON.stringify([...(x.seasons || [])].sort()) === JSON.stringify([...seasons].sort())));
+        if (r && r.via === 'secour' && r.secour && ['queued', 'running'].includes(r.secour.state)) return send(res, 200, { request: r, already: true });
+        if (!r) {
+          r = {
+            id: `${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`,
+            type,
+            tmdbId,
+            tvdbId: type === 'tv' && Number(b.tvdbId) ? Number(b.tvdbId) : undefined,
+            title: String(b.title || '').slice(0, 200),
+            year: b.year ? String(b.year).slice(0, 4) : undefined,
+            poster: typeof b.poster === 'string' && /^https:\/\//.test(b.poster) ? b.poster : undefined,
+            backdrop: typeof b.backdrop === 'string' && /^https:\/\//.test(b.backdrop) ? b.backdrop : undefined,
+            seasons,
+            status: RequestStatus.APPROVED,
+            requestedBy: { id: user.id, name: user.name },
+            createdAt: new Date().toISOString(),
+          };
+          requests.unshift(r);
+        }
+        r.modifiedBy = { id: user.id, name: user.name };
+        r.modifiedAt = new Date().toISOString();
+        startSecour(r, `téléchargement direct par ${user.name}`);
+        library = null;
+        return send(res, 201, { request: r });
       }
       // Admin : passer une demande par le groupe de secours à la main
       const viaSec = p.match(/^\/api\/secour\/requests\/([\w-]+)$/);
