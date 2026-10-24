@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.37.1';
+const VERSION = '3.38.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1149,57 +1149,58 @@ async function renumberSeason(token, { jfSeriesId, from, to }) {
     }
   }
 
-  // 2) Sur le disque, directement
-  // Épisodes de la saison, demandés comme l'appli les affiche (par la saison de la série), avec leur chemin
-  const me = (await jfJson(token, '/Users/Me').catch(() => null)) || {};
-  const seasonsList = ((await jfJson(token, `/Shows/${encodeURIComponent(jfSeriesId)}/Seasons?UserId=${me.Id || ''}`).catch(() => null)) || {}).Items || [];
-  const seasonItem = seasonsList.find((x) => x.IndexNumber === from);
-  let eps = [];
-  if (seasonItem)
-    eps = ((await jfJson(token, `/Shows/${encodeURIComponent(jfSeriesId)}/Episodes?SeasonId=${seasonItem.Id}&UserId=${me.Id || ''}&Fields=Path`).catch(() => null)) || {}).Items || [];
-  if (!eps.length)
-    eps = (((await jfJson(token, `/Items?ParentId=${encodeURIComponent(jfSeriesId)}&Recursive=true&IncludeItemTypes=Episode&Fields=Path&UserId=${me.Id || ''}`).catch(() => null)) || {}).Items || []).filter(
-      (e) => e.ParentIndexNumber === from
-    );
-  const files = eps.filter((e) => e.Path && e.LocationType !== 'Virtual');
-  if (!files.length) throw new HttpError(404, `Aucun fichier trouvé pour la saison ${from}`);
-  const seasonDirRe = new RegExp(`^(season|saison|s)[ ._-]*0*${from}$`, 'i');
-  // Dossier d'une sortie (« Lupin.S03.MULTi.1080p… ») : les fichiers vont dans « Season 02 » à côté
-  const releaseDirRe = new RegExp(`[._ -]S0*${from}(?![0-9E])`, 'i');
+  // 2) Sur le disque, directement : dossier de la série parcouru (dossiers de sorties et sous-dossiers par épisode compris),
+  // chaque vidéo « S03Exx » rangée dans « Season 02 » sous le nom « S02Exx », avec ses sous-titres / .nfo.
+  const seriesDir = localPath(it.Path);
+  if (!seriesDir) throw new HttpError(502, `Le serveur Lumio n’a pas accès au dossier de la série (${it.Path}). Ajoute ce disque à LUMIO_DISKS.`);
+  const VIDEO = /\.(mkv|mp4|avi|m4v|ts|mov|wmv)$/i;
+  const epRe = new RegExp(`S0*${from}E(\\d+)`, 'i');
+  const found = [];
+  const walk = async (dir, depth) => {
+    for (const ent of await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory() && depth < 3) await walk(full, depth + 1);
+      else if (ent.isFile() && VIDEO.test(ent.name) && epRe.test(ent.name) && !/sample/i.test(ent.name)) found.push(full);
+    }
+  };
+  await walk(seriesDir, 0);
+  if (!found.length) throw new HttpError(404, `Aucune vidéo « S${pad(from)}Exx » trouvée dans ${path.basename(seriesDir)}`);
+  const targetDir = path.join(seriesDir, `Season ${pad(to)}`);
+  await fs.promises.mkdir(targetDir, { recursive: true });
   let moved = 0;
   const problems = [];
   const oldDirs = new Set();
-  for (const e of files) {
-    const local = localPath(e.Path);
-    if (!local) {
-      problems.push(path.basename(e.Path));
-      continue;
-    }
-    const dir = path.dirname(local);
-    const base = path.basename(dir);
-    let newDir = dir;
-    if (seasonDirRe.test(base)) newDir = path.join(path.dirname(dir), base.replace(new RegExp(`0*${from}$`), pad(to)));
-    else if (releaseDirRe.test(base)) newDir = path.join(path.dirname(dir), `Season ${pad(to)}`);
-    await fs.promises.mkdir(newDir, { recursive: true });
-    const stem = path.basename(local).replace(/\.[^.]+$/, '');
-    // Fichier vidéo + fichiers liés (sous-titres, .nfo, vignettes) qui commencent pareil
+  for (const file of found) {
+    const dir = path.dirname(file);
+    const stem = path.basename(file).replace(/\.[^.]+$/, '');
     for (const name of await fs.promises.readdir(dir)) {
       if (!name.startsWith(stem)) continue;
-      const renamed = name.replace(new RegExp(`S0*${from}(E\\d+)`, 'i'), `S${pad(to)}$1`);
-      await fs.promises.rename(path.join(dir, name), path.join(newDir, renamed));
+      const renamed = name.replace(epRe, (m, e) => `S${pad(to)}E${e}`);
+      const dest = path.join(targetDir, renamed);
+      if (fs.existsSync(dest)) {
+        problems.push(renamed);
+        continue;
+      }
+      await fs.promises.rename(path.join(dir, name), dest);
     }
-    if (newDir !== dir) oldDirs.add(dir);
+    if (dir !== targetDir) oldDirs.add(dir);
     moved++;
   }
-  // Ancien dossier vide (ou avec seulement des images / .nfo / .txt) : supprimé
-  for (const d of oldDirs) {
+  // Anciens dossiers (épisode puis sortie) devenus vides ou avec seulement des .nfo / images : supprimés
+  const junk = (n) => /\.(nfo|jpg|png|txt|url|exe|srr|sfv)$/i.test(n) || /sample/i.test(n);
+  const cleanup = async (d) => {
+    if (!d.startsWith(seriesDir + path.sep) || d === targetDir) return;
     const left = await fs.promises.readdir(d).catch(() => null);
-    if (left && left.every((n) => /\.(nfo|jpg|png|txt|url|exe|srr|sfv)$/i.test(n) || /sample/i.test(n))) await fs.promises.rm(d, { recursive: true, force: true }).catch(() => {});
-  }
+    if (left && left.every(junk)) {
+      await fs.promises.rm(d, { recursive: true, force: true }).catch(() => {});
+      await cleanup(path.dirname(d));
+    }
+  };
+  for (const d of oldDirs) await cleanup(d);
   if (!moved) throw new HttpError(502, `Le serveur Lumio n’a pas accès à ces fichiers (${problems.slice(0, 2).join(', ')}). Monte le dossier des séries dans son conteneur, au même chemin que Jellyfin.`);
   jfSeriesRefresh(token, jfSeriesId);
   console.log(`Saison renumérotée : « ${it.Name} » saison ${from} → ${to} (${moved} fichier(s))`);
-  return { ok: true, message: `${moved} épisode${moved > 1 ? 's' : ''} passé${moved > 1 ? 's' : ''} de la saison ${from} à la saison ${to}. Jellyfin se met à jour dans une minute.${problems.length ? ` (${problems.length} fichier(s) introuvable(s))` : ''}` };
+  return { ok: true, message: `${moved} épisode${moved > 1 ? 's' : ''} passé${moved > 1 ? 's' : ''} de la saison ${from} à la saison ${to}. Jellyfin se met à jour dans une minute.${problems.length ? ` (${problems.length} fichier(s) laissé(s) en place : un fichier du même nom existe déjà dans « Season ${pad(to)} »)` : ''}` };
 }
 
 /** Saisons d'une série dans la numérotation de Sonarr (TheTVDB), avec le nombre d'épisodes. */
