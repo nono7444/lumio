@@ -53,10 +53,6 @@ export default function TabsLayout() {
       <Tabs.Screen name="chat" options={{ title: 'Chat', href: settings.jellyfin ? undefined : null }} />
       <Tabs.Screen name="activity" options={{ title: 'Demandes' }} />
       <Tabs.Screen name="watchlist" options={{ title: 'À voir', href: Platform.isTV ? null : undefined }} />
-      <Tabs.Screen
-        name="secour"
-        options={{ title: 'Lumio Secour', href: settings.jellyfin?.isAdmin === true && settings.chatUrl && !Platform.isTV && Platform.OS !== 'ios' ? undefined : null }}
-      />
       <Tabs.Screen name="settings" options={{ title: 'Profil' }} />
     </Tabs>
   );

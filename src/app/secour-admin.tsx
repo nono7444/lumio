@@ -1,14 +1,14 @@
-// Onglet Lumio Secour (admin) : connexion au fork, clé AllDebrid, état des sources et réglages du fork.
+// Administration → Lumio Secour : groupe de secours (relais de Radarr / Sonarr), AllDebrid, sources et réglages du moteur.
 import { Ionicons } from '@expo/vector-icons';
-import { router, Redirect } from 'expo-router';
+import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { toast } from '@/components/toast';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { Button, ScreenTitle, SegChip, tap } from '@/components/ui';
-import { C, R, TAB_SPACE } from '@/constants/theme';
+import { C, R } from '@/constants/theme';
 import {
   CATEGORY_FR,
   FIELD_FR,
@@ -17,8 +17,10 @@ import {
   type AlldebridStatus,
   type SecourCategory,
   type SecourField,
+  type SecourAuto,
   type SecourHealth,
   type SecourStatus,
+  type SecourTarget,
 } from '@/lib/secour';
 import { useSettings } from '@/lib/settings';
 
@@ -48,14 +50,13 @@ function fromText(f: SecourField, text: string): unknown {
 
 const fmtDate = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) : '');
 
-export default function SecourTab() {
-  // iPhone : Lumio Secour retiré
-  if (Platform.OS === 'ios') return <Redirect href="/" />;
+export default function SecourAdmin() {
   const { settings } = useSettings();
   const insets = useSafeAreaInsets();
   const admin = settings.jellyfin?.isAdmin === true;
 
   const [status, setStatus] = useState<SecourStatus | null>(null);
+  const [auto, setAuto] = useState<SecourAuto | null>(null);
   const [ad, setAd] = useState<AlldebridStatus | null>(null);
   const [health, setHealth] = useState<SecourHealth | null>(null);
   const [cats, setCats] = useState<SecourCategory[] | null>(null);
@@ -81,6 +82,7 @@ export default function SecourTab() {
       return null;
     });
     setStatus(st);
+    setAuto(st?.auto ?? null);
     if (st?.url) setUrl(st.url);
     secourAdminApi.alldebrid(settings).then(setAd).catch(() => setAd(null));
     if (st?.configured && st.online) {
@@ -125,6 +127,15 @@ export default function SecourTab() {
       setAdKey('');
       toast(value ? 'Clé AllDebrid enregistrée sur le serveur' : 'Clé AllDebrid retirée');
       secourAdminApi.alldebrid(settings).then(setAd).catch(() => {});
+    } catch (e: any) {
+      toast(e?.message ?? String(e), 'error');
+    }
+  };
+
+  const saveAuto = async (body: Partial<{ enabled: boolean; movie: SecourTarget; tv: SecourTarget }>) => {
+    try {
+      setAuto(await secourAdminApi.saveAuto(settings, body));
+      toast('Groupe de secours enregistré');
     } catch (e: any) {
       toast(e?.message ?? String(e), 'error');
     }
@@ -204,9 +215,13 @@ export default function SecourTab() {
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: C.bg }} behavior={undefined}>
       <ScrollView
-        contentContainerStyle={{ paddingTop: insets.top, paddingHorizontal: 16, paddingBottom: TAB_SPACE + insets.bottom, gap: 14 }}
+        contentContainerStyle={{ paddingTop: insets.top, paddingHorizontal: 16, paddingBottom: 40 + insets.bottom, gap: 14 }}
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.text} />}>
+        <Pressable onPress={() => router.back()} hitSlop={10} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 }} accessibilityLabel="Retour">
+          <Ionicons name="chevron-back" size={20} color={C.accent} />
+          <Text style={{ color: C.accent, fontSize: 15, fontWeight: '600' }}>Profil</Text>
+        </Pressable>
         <ScreenTitle
           title="Lumio Secour"
           right={
@@ -218,8 +233,24 @@ export default function SecourTab() {
         />
         {error ? <Text style={{ color: C.danger }}>{error}</Text> : null}
 
-        {/* ——— Connexion au fork ——— */}
-        <View style={styles.card}>
+        {/* ——— Groupe de secours ——— */}
+        {auto ? <AutoCard auto={auto} onSave={saveAuto} /> : null}
+
+        {/* ——— Moteur ——— */}
+        {status?.embedded ? (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Moteur</Text>
+            <Text style={styles.dim}>
+              {online ? 'Intégré au serveur Lumio' : 'Intégré au serveur Lumio, pas encore prêt'}
+              {status.sources?.length ? ` · sources : ${status.sources.join(', ')}` : ' · aucune source : renseigne-les dans Réglages → Sources'}
+              {status.tmdb ? ' · TMDB ✓' : ' · TMDB manquant'}
+            </Text>
+            {status.error ? <Text style={[styles.dim, { color: C.danger }]}>{status.error}</Text> : null}
+          </View>
+        ) : null}
+
+        {/* ——— Connexion au fork (service à part) ——— */}
+        {status?.embedded ? null : <View style={styles.card}>
           <Text style={styles.cardTitle}>Connexion</Text>
           {status?.error ? <Text style={[styles.dim, { color: C.danger }]}>{status.error}</Text> : null}
           <Text style={styles.label}>Adresse (vue par le serveur Lumio)</Text>
@@ -242,7 +273,7 @@ export default function SecourTab() {
             style={styles.input}
           />
           <Button title="Enregistrer et tester" icon="link-outline" onPress={saveConnection} disabled={!status?.fromEnv && !url.trim()} />
-        </View>
+        </View>}
 
         {/* ——— AllDebrid ——— */}
         <View style={styles.card}>
@@ -388,6 +419,61 @@ export default function SecourTab() {
         ) : null}
       </ScrollView>
     </KeyboardAvoidingView>
+  );
+}
+
+/** Groupe de secours : activé ou non, disque et dossier des films et des séries. */
+function AutoCard({ auto, onSave }: { auto: SecourAuto; onSave: (b: Partial<{ enabled: boolean; movie: SecourTarget; tv: SecourTarget }>) => void }) {
+  const [movie, setMovie] = useState<SecourTarget>(auto.movie ?? { root: auto.disks[0] ?? '', folder: 'Films' });
+  const [tv, setTv] = useState<SecourTarget>(auto.tv ?? { root: auto.disks[0] ?? '', folder: 'Séries' });
+  const missing = [!auto.engine && 'moteur hors ligne', !auto.alldebrid && 'clé AllDebrid', !auto.disks.length && 'disques (LUMIO_DISKS)'].filter(Boolean);
+  const same = (a: SecourTarget | null, b: SecourTarget) => Boolean(a) && a!.root === b.root && a!.folder === b.folder;
+  const dirty = !same(auto.movie, movie) || !same(auto.tv, tv);
+
+  // Fonction (pas un composant) : le champ garde le focus pendant la saisie
+  const target = (label: string, value: SecourTarget, onChange: (t: SecourTarget) => void) => (
+    <View style={{ gap: 6 }}>
+      <Text style={styles.label}>{label}</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {auto.disks.map((d) => (
+          <SegChip key={d} label={d} on={value.root === d} onPress={() => onChange({ ...value, root: d })} />
+        ))}
+      </View>
+      <TextInput
+        value={value.folder}
+        onChangeText={(t) => onChange({ ...value, folder: t })}
+        placeholder="Dossier sur ce disque"
+        placeholderTextColor={C.textFaint}
+        autoCapitalize="none"
+        autoCorrect={false}
+        style={styles.input}
+      />
+    </View>
+  );
+
+  return (
+    <View style={styles.card}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <Ionicons name="medkit" size={18} color={C.success} />
+        <Text style={[styles.cardTitle, { flex: 1 }]}>Groupe de secours</Text>
+        <Switch value={auto.enabled} onValueChange={(v) => onSave({ enabled: v })} trackColor={{ true: C.success, false: C.border }} />
+      </View>
+      <Text style={styles.dim}>
+        Si Radarr ou Sonarr ne marchent plus, les demandes validées passent par Lumio Secour : meilleur lien (AllDebrid, VF / Multi, 1080p),
+        téléchargé sur le disque choisi, puis Jellyfin rescanne. Un fichier à la fois.
+      </Text>
+      <Text style={[styles.dim, { color: auto.ready ? C.success : auto.enabled ? C.warning : C.textFaint, fontWeight: '700' }]}>
+        {!auto.enabled ? 'Désactivé' : auto.ready ? `Prêt${auto.queue ? ` · ${auto.queue} demande${auto.queue > 1 ? 's' : ''} en cours` : ''}` : `Pas prêt : ${missing.join(', ')}`}
+      </Text>
+      {auto.disks.length ? (
+        <>
+          {target('Films', movie, setMovie)}
+          {target('Séries', tv, setTv)}
+          <Text style={styles.faint}>Ce dossier doit faire partie d’une bibliothèque Jellyfin (Films ou Séries).</Text>
+          <Button title="Enregistrer les dossiers" icon="folder-outline" variant="secondary" onPress={() => onSave({ movie, tv })} disabled={!dirty || !movie.root || !tv.root} />
+        </>
+      ) : null}
+    </View>
   );
 }
 

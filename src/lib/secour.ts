@@ -13,6 +13,22 @@ export type SecourStatus = {
   sources?: string[];
   tmdb?: boolean;
   error?: string;
+  /** Moteur intégré au serveur Lumio (même conteneur) */
+  embedded?: boolean;
+  auto?: SecourAuto;
+};
+
+/** Groupe de secours : Lumio Secour prend le relais quand Radarr / Sonarr ne marchent plus. */
+export type SecourTarget = { root: string; folder: string };
+export type SecourAuto = {
+  enabled: boolean;
+  ready: boolean;
+  alldebrid: boolean;
+  engine: boolean;
+  disks: string[];
+  movie: SecourTarget | null;
+  tv: SecourTarget | null;
+  queue: number;
 };
 
 export type SecourLink = {
@@ -103,6 +119,9 @@ export type AlldebridStatus = {
 };
 
 export const secourAdminApi = {
+  auto: (s: Settings) => serverCall<SecourAuto>(s, '/api/secour/auto'),
+  saveAuto: (s: Settings, body: Partial<{ enabled: boolean; movie: SecourTarget; tv: SecourTarget }>) =>
+    serverCall<SecourAuto>(s, '/api/secour/auto', { method: 'PUT', body: JSON.stringify(body) }),
   settings: (s: Settings) => serverCall<{ categories: SecourCategory[] }>(s, '/api/secour/settings').then((r) => r.categories),
   saveSettings: (s: Settings, updates: Record<string, unknown>) =>
     serverCall<{ success: boolean; results: Record<string, string> }>(s, '/api/secour/settings', { method: 'PUT', body: JSON.stringify({ updates }) }),

@@ -116,7 +116,6 @@ export const TAB_LABELS: Record<string, string> = {
   chat: 'Chat',
   activity: 'Demandes',
   watchlist: 'À voir',
-  secour: 'Lumio Secour',
   settings: 'Profil',
 };
 

@@ -249,6 +249,13 @@ export default function SettingsScreen() {
           </Section>
         ) : null}
 
+        {serverReq && settings.jellyfin?.isAdmin === true && !Platform.isTV ? (
+          <Section title="Lumio Secour">
+            <Text style={styles.help}>Groupe de secours : si Radarr ou Sonarr ne marchent plus, les demandes passent par Lumio Secour (AllDebrid → disques). Sources, dossiers et réglages.</Text>
+            <Button title="Lumio Secour" icon="medkit-outline" variant="secondary" onPress={() => router.push('/secour-admin')} />
+          </Section>
+        ) : null}
+
         {serverReq && !Platform.isTV ? (
           <Section title="Idées & signalements">
             <Text style={styles.help}>

@@ -236,7 +236,15 @@ function ProgressButton({ r, label, progress, color, spinner }: { r?: Req; label
   let icon: keyof typeof Ionicons.glyphMap | null = null;
   let note: string | null = null;
   if (r && d) {
-    if (d.state === 'downloading') {
+    if (d.via === 'secour') {
+      // Groupe de secours : Lumio Secour télécharge à la place de Radarr / Sonarr
+      pct = d.progress ?? 0;
+      text = d.progress != null ? `Lumio Secour · ${d.progress} %` : 'Lumio Secour…';
+      note = `${app} ne répond pas : ${d.title ?? 'Lumio Secour'}${d.count && d.count > 1 ? ` · ${d.count} épisodes restants` : ''}`;
+      tint = C.success;
+      spin = d.progress == null;
+      icon = 'medkit';
+    } else if (d.state === 'downloading') {
       pct = d.progress ?? 0;
       text = `Téléchargement ${d.progress != null ? `${d.progress} %` : '…'}`;
       if (d.count && d.count > 1) note = `${d.count} épisodes en cours`;

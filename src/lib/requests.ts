@@ -36,6 +36,9 @@ export type Req = {
   download?: {
     state: 'searching' | 'downloading' | 'importing' | 'warning' | 'partial';
     progress?: number | null;
+    /** Groupe de secours : Radarr / Sonarr hors service, Lumio Secour télécharge à leur place */
+    via?: 'secour';
+    title?: string;
     message?: string;
     release?: string;
     count?: number;
@@ -258,6 +261,8 @@ export function downloadLabel(r: Req): { text: string; color: string } | null {
   const d = r.download;
   if (!d) return null;
   const app = r.type === 'movie' ? 'Radarr' : 'Sonarr';
+  if (d.via === 'secour')
+    return { text: `🛟 ${d.title ?? 'Lumio Secour'}${d.progress != null ? ` · ${d.progress} %` : ''}${d.count && d.count > 1 ? ` · ${d.count} épisodes restants` : ''}`, color: '#30D158' };
   switch (d.state) {
     case 'warning':
       return { text: `⚠️ À vérifier dans ${app} : ${d.message ?? 'intervention manuelle nécessaire'}`, color: '#FF9F0A' };
