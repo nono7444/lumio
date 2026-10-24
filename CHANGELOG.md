@@ -6,6 +6,7 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Bêta : bouton « Liens » sur les fiches aussi sur iPhone, et « Simuler une panne de Radarr / Sonarr » dans Lumio Secour pour tester le groupe de secours.
 - Lumio Secour passe dans l'administration (Profil → Lumio Secour) : l'onglet disparaît, l'écran est aussi sur iPhone.
 - Groupe de secours : si Radarr ou Sonarr ne marchent plus, les demandes validées sont téléchargées par Lumio Secour (AllDebrid → disques) ; interrupteur et dossiers Films / Séries dans l'administration.
 - Demandes : la progression affiche « Lumio Secour » quand le groupe de secours télécharge à la place de Radarr / Sonarr.

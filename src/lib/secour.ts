@@ -1,4 +1,6 @@
 // Admin : liens d'hébergeurs trouvés par Lumio Secour, téléchargés via AllDebrid sur les disques du serveur.
+import Constants from 'expo-constants';
+
 import { serverCall } from './chat';
 import type { Settings } from './settings';
 
@@ -22,6 +24,8 @@ export type SecourStatus = {
 export type SecourTarget = { root: string; folder: string };
 export type SecourAuto = {
   enabled: boolean;
+  /** Simulation : Radarr / Sonarr considérés en panne */
+  force?: boolean;
   ready: boolean;
   alldebrid: boolean;
   engine: boolean;
@@ -44,6 +48,9 @@ export type SecourLink = {
   season: number | null;
   episode: number | null;
 };
+
+/** Build « Lumio Bêta » (identifiant .beta) : fonctions encore en test, aussi sur iPhone. */
+export const IS_BETA = Boolean(Constants.expoConfig?.ios?.bundleIdentifier?.endsWith('.beta'));
 
 export type SecourQuery = { type: 'movie' | 'tv'; tmdbId?: number; imdb?: string; season?: number; episode?: number };
 
@@ -120,7 +127,7 @@ export type AlldebridStatus = {
 
 export const secourAdminApi = {
   auto: (s: Settings) => serverCall<SecourAuto>(s, '/api/secour/auto'),
-  saveAuto: (s: Settings, body: Partial<{ enabled: boolean; movie: SecourTarget; tv: SecourTarget }>) =>
+  saveAuto: (s: Settings, body: Partial<{ enabled: boolean; force: boolean; movie: SecourTarget; tv: SecourTarget }>) =>
     serverCall<SecourAuto>(s, '/api/secour/auto', { method: 'PUT', body: JSON.stringify(body) }),
   settings: (s: Settings) => serverCall<{ categories: SecourCategory[] }>(s, '/api/secour/settings').then((r) => r.categories),
   saveSettings: (s: Settings, updates: Record<string, unknown>) =>

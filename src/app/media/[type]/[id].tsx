@@ -28,6 +28,7 @@ import { RequestSection } from '@/components/request-section';
 import { TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { grab, mediaFlavor } from '@/lib/grab';
 import { useServerRequests } from '@/lib/requests';
+import { IS_BETA } from '@/lib/secour';
 import { SeasonRequests } from '@/components/season-requests';
 import { WatchlistButton } from '@/components/watchlist-button';
 import { chat } from '@/lib/chat';
@@ -363,7 +364,7 @@ export default function MediaScreen() {
           ) : null}
 
           {/* ——— Admin : liens Lumio Secour → AllDebrid → disques du serveur ——— */}
-          {settings.chatUrl && settings.jellyfin?.isAdmin === true && !Platform.isTV && Platform.OS !== 'ios' ? (
+          {settings.chatUrl && settings.jellyfin?.isAdmin === true && !Platform.isTV && (Platform.OS !== 'ios' || IS_BETA) ? (
             <Button
               title="Liens"
               icon="link-outline"

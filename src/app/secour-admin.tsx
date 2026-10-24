@@ -132,7 +132,7 @@ export default function SecourAdmin() {
     }
   };
 
-  const saveAuto = async (body: Partial<{ enabled: boolean; movie: SecourTarget; tv: SecourTarget }>) => {
+  const saveAuto = async (body: Partial<{ enabled: boolean; force: boolean; movie: SecourTarget; tv: SecourTarget }>) => {
     try {
       setAuto(await secourAdminApi.saveAuto(settings, body));
       toast('Groupe de secours enregistré');
@@ -423,7 +423,7 @@ export default function SecourAdmin() {
 }
 
 /** Groupe de secours : activé ou non, disque et dossier des films et des séries. */
-function AutoCard({ auto, onSave }: { auto: SecourAuto; onSave: (b: Partial<{ enabled: boolean; movie: SecourTarget; tv: SecourTarget }>) => void }) {
+function AutoCard({ auto, onSave }: { auto: SecourAuto; onSave: (b: Partial<{ enabled: boolean; force: boolean; movie: SecourTarget; tv: SecourTarget }>) => void }) {
   const [movie, setMovie] = useState<SecourTarget>(auto.movie ?? { root: auto.disks[0] ?? '', folder: 'Films' });
   const [tv, setTv] = useState<SecourTarget>(auto.tv ?? { root: auto.disks[0] ?? '', folder: 'Séries' });
   const missing = [!auto.engine && 'moteur hors ligne', !auto.alldebrid && 'clé AllDebrid', !auto.disks.length && 'disques (LUMIO_DISKS)'].filter(Boolean);
@@ -465,6 +465,25 @@ function AutoCard({ auto, onSave }: { auto: SecourAuto; onSave: (b: Partial<{ en
       <Text style={[styles.dim, { color: auto.ready ? C.success : auto.enabled ? C.warning : C.textFaint, fontWeight: '700' }]}>
         {!auto.enabled ? 'Désactivé' : auto.ready ? `Prêt${auto.queue ? ` · ${auto.queue} demande${auto.queue > 1 ? 's' : ''} en cours` : ''}` : `Pas prêt : ${missing.join(', ')}`}
       </Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.fieldLabel, { flex: 0 }]}>Simuler une panne de Radarr / Sonarr</Text>
+          <Text style={styles.faint}>Pour tester : chaque demande validée passe directement par Lumio Secour. Pense à le couper après.</Text>
+        </View>
+        <Switch
+          value={Boolean(auto.force)}
+          onValueChange={(v) =>
+            v
+              ? Alert.alert('Simuler une panne ?', 'Les prochaines demandes validées (par toi ou en automatique) seront téléchargées par Lumio Secour au lieu de Radarr / Sonarr.', [
+                  { text: 'Annuler', style: 'cancel' },
+                  { text: 'Simuler', onPress: () => onSave({ force: true }) },
+                ])
+              : onSave({ force: false })
+          }
+          trackColor={{ true: C.warning, false: C.border }}
+        />
+      </View>
+      {auto.force ? <Text style={[styles.dim, { color: C.warning, fontWeight: '700' }]}>⚠️ Simulation active : Radarr et Sonarr sont ignorés.</Text> : null}
       {auto.disks.length ? (
         <>
           {target('Films', movie, setMovie)}
