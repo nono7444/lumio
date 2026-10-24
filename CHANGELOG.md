@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.107 — 25 octobre 2026
+
 - Stockage : la liste « À nettoyer » (titres jamais ou plus regardés proposés à la suppression) est retirée ; il reste la place des disques et les plus gros fichiers, à supprimer soi-même si besoin.
 
 ## 1.0.106 — 24 octobre 2026
