@@ -132,7 +132,7 @@ export default function SecourAdmin() {
     }
   };
 
-  const saveAuto = async (body: Partial<{ enabled: boolean; force: boolean; stream: boolean; movie: SecourTarget; tv: SecourTarget }>) => {
+  const saveAuto = async (body: Partial<{ enabled: boolean; force: boolean; movie: SecourTarget; tv: SecourTarget }>) => {
     try {
       setAuto(await secourAdminApi.saveAuto(settings, body));
       toast('Groupe de secours enregistré');
@@ -423,7 +423,7 @@ export default function SecourAdmin() {
 }
 
 /** Groupe de secours : activé ou non, disque et dossier des films et des séries. */
-function AutoCard({ auto, onSave }: { auto: SecourAuto; onSave: (b: Partial<{ enabled: boolean; force: boolean; stream: boolean; movie: SecourTarget; tv: SecourTarget }>) => void }) {
+function AutoCard({ auto, onSave }: { auto: SecourAuto; onSave: (b: Partial<{ enabled: boolean; force: boolean; movie: SecourTarget; tv: SecourTarget }>) => void }) {
   const [movie, setMovie] = useState<SecourTarget>(auto.movie ?? { root: auto.disks[0] ?? '', folder: 'Films' });
   const [tv, setTv] = useState<SecourTarget>(auto.tv ?? { root: auto.disks[0] ?? '', folder: 'Séries' });
   const missing = [!auto.engine && 'moteur hors ligne', !auto.alldebrid && 'clé AllDebrid', !auto.disks.length && 'disques (LUMIO_DISKS)'].filter(Boolean);
@@ -484,15 +484,6 @@ function AutoCard({ auto, onSave }: { auto: SecourAuto; onSave: (b: Partial<{ en
         />
       </View>
       {auto.force ? <Text style={[styles.dim, { color: C.warning, fontWeight: '700' }]}>⚠️ Simulation active : Radarr et Sonarr sont ignorés.</Text> : null}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.fieldLabel, { flex: 0 }]}>Regarder en attendant le téléchargement</Text>
-          <Text style={styles.faint}>
-            Un titre pas encore sur Jellyfin se lit tout de suite (bouton « Regarder ») via Lumio Secour, pendant que Radarr / Sonarr le téléchargent. Pour toute la famille.
-          </Text>
-        </View>
-        <Switch value={auto.stream !== false} onValueChange={(v) => onSave({ stream: v })} trackColor={{ true: C.success, false: C.border }} />
-      </View>
       {auto.disks.length ? (
         <>
           {target('Films', movie, setMovie)}

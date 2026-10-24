@@ -162,6 +162,17 @@ export default function MediaScreen() {
   const seasonsList = details.kind === 'tv' ? details.data.seasons.filter((s) => s.season_number > 0) : [];
 
 
+  // Proposer le titre dans le chat famille (petit mot facultatif)
+  const propose = () => {
+    const share = (msg: string) =>
+      chat
+        .send(settings, msg, { type: details.kind, tmdbId, title, year: date?.slice(0, 4), poster: tmdbImg(d.poster_path, 'w342') })
+        .then(() => Alert.alert('Proposé ✅', 'Ta proposition est dans le chat.'))
+        .catch((e) => Alert.alert('Envoi impossible', e?.message ?? String(e)));
+    if (Alert.prompt) Alert.prompt('Proposer', 'Un petit mot pour la famille (facultatif) ?', (msg) => share(msg ?? ''));
+    else share('');
+  };
+
   async function run(action: () => Promise<unknown>, success: string) {
     setBusy(true);
     try {
@@ -342,48 +353,26 @@ export default function MediaScreen() {
         </View>
 
         <View style={[{ paddingHorizontal: 16, gap: 20, marginTop: 4 }, Platform.isTV && { width: '100%', maxWidth: 1100, alignSelf: 'flex-start', paddingLeft: 48 }]}>
-          {/* ——— Lecture (depuis Jellyfin) ——— */}
-          {jfItem && !Platform.isTV ? (
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              <Button
-                title="Lire"
-                icon="play"
-                small
-                onPress={() =>
-                  router.push({
-                    pathname: '/watch',
-                    params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title },
-                  })
-                }
-                style={{ flex: 1 }}
-              />
-              <WatchlistButton item={wlItem} variant="icon" />
-            </View>
-          ) : !Platform.isTV && IS_BETA && settings.chatUrl && settings.jellyfin && !upcoming ? (
-            // Pas encore sur Jellyfin : lecture tout de suite via Lumio Secour, la demande part en même temps
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              <Button
-                title="Regarder"
-                icon="play"
-                small
-                onPress={() =>
-                  router.push({
-                    pathname: '/watch',
-                    params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title },
-                  })
-                }
-                style={{ flex: 1 }}
-              />
-              <WatchlistButton item={wlItem} variant="icon" />
-            </View>
-          ) : !Platform.isTV ? (
-            <WatchlistButton item={wlItem} variant="pill" />
-          ) : null}
-
-          {/* ——— Admin : Lumio Secour (« LS » = téléchargement direct, « Liens » = choisir soi-même) ——— */}
-          {settings.chatUrl && settings.jellyfin?.isAdmin === true && !Platform.isTV && (Platform.OS !== 'ios' || IS_BETA) ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              {IS_BETA ? (
+          {/* ——— Barre d'actions : Lire (ou « À voir »), puis Proposer et Lumio Secour en petits boutons ——— */}
+          {!Platform.isTV ? (
+            <View style={styles.actionBar}>
+              {jfItem ? (
+                <Button
+                  title="Lire"
+                  icon="play"
+                  small
+                  onPress={() => router.push({ pathname: '/watch', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title } })}
+                  style={{ flex: 1 }}
+                />
+              ) : (
+                <WatchlistButton item={wlItem} variant="pill" />
+              )}
+              {jfItem ? <WatchlistButton item={wlItem} variant="icon" /> : <View style={{ flex: 1 }} />}
+              {/* Proposer dans le chat famille : seulement pour un titre pas encore sur le serveur */}
+              {settings.chatUrl && settings.jellyfin && !jfItem ? (
+                <Button title="" icon="chatbubbles-outline" variant="glass" small onPress={propose} style={{ width: 46, paddingHorizontal: 0 }} />
+              ) : null}
+              {settings.chatUrl && settings.jellyfin?.isAdmin === true && IS_BETA ? (
                 <LsButton
                   loadSources={() => secourApi.status(settings).then((st) => st.sources ?? [])}
                   onPickSource={(source) =>
@@ -405,27 +394,18 @@ export default function MediaScreen() {
                   title={title}
                   seasons={seasonsList.map((s) => s.season_number)}
                 />
-              ) : null}
-              {IS_BETA ? null : (
+              ) : settings.chatUrl && settings.jellyfin?.isAdmin === true && Platform.OS !== 'ios' ? (
                 <Button
-                  title="Liens"
+                  title=""
                   icon="link-outline"
-                  variant="secondary"
+                  variant="glass"
                   small
-                  style={{ flex: 1 }}
-                  onPress={() =>
-                    router.push({
-                      pathname: '/secour',
-                      params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title },
-                    })
-                  }
+                  onPress={() => router.push({ pathname: '/secour', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title } })}
+                  style={{ width: 46, paddingHorizontal: 0 }}
                 />
-              )}
+              ) : null}
             </View>
           ) : null}
-
-          {/* ——— Série dans Jellyfin : choix de la saison et de l'épisode ——— */}
-          {jfItem && details.kind === 'tv' ? <JfEpisodes seriesId={jfItem.Id} /> : null}
 
           {/* ——— Demande façon Seerr (serveur Lumio) ——— */}
           {serverReq && !Platform.isTV ? (
@@ -448,48 +428,10 @@ export default function MediaScreen() {
             />
           ) : null}
 
-          {/* ——— Notes de la famille + signalement d'un problème ——— */}
-          {serverReq && Platform.isTV ? (
-            showRate ? <FamilyRating type={details.kind} tmdbId={tmdbId} title={title} poster={tmdbImg(d.poster_path, 'w342')} /> : null
-          ) : serverReq ? (
-            <View style={{ gap: 6 }}>
-              <FamilyRating type={details.kind} tmdbId={tmdbId} title={title} poster={tmdbImg(d.poster_path, 'w342')} />
-              {jfItem ? (
-                <ReportProblemButton type={details.kind} tmdbId={tmdbId} title={title} poster={tmdbImg(d.poster_path, 'w342')} />
-              ) : null}
-            </View>
-          ) : null}
+          {d.overview && !Platform.isTV ? <Text style={styles.overview}>{d.overview}</Text> : null}
 
-          {/* ——— Proposer le titre dans le chat famille ——— */}
-          {/* Proposer : seulement pour un titre pas encore sur le serveur */}
-          {settings.chatUrl && settings.jellyfin && !jfItem && !Platform.isTV ? (
-            <Button
-              title="Proposer"
-              icon="chatbubbles-outline"
-              variant="secondary"
-              onPress={() =>
-                Alert.prompt
-                  ? Alert.prompt('Proposer', 'Un petit mot pour la famille (facultatif) ?', async (msg) => {
-                      try {
-                        await chat.send(settings, msg ?? '', {
-                          type: details.kind,
-                          tmdbId,
-                          title,
-                          year: date?.slice(0, 4),
-                          poster: tmdbImg(d.poster_path, 'w342'),
-                        });
-                        Alert.alert('Proposé ✅', 'Ta proposition est dans le chat.');
-                      } catch (e: any) {
-                        Alert.alert('Envoi impossible', e?.message ?? String(e));
-                      }
-                    })
-                  : chat
-                      .send(settings, '', { type: details.kind, tmdbId, title, year: date?.slice(0, 4), poster: tmdbImg(d.poster_path, 'w342') })
-                      .then(() => Alert.alert('Proposé ✅', 'Ta proposition est dans le chat.'))
-                      .catch((e) => Alert.alert('Envoi impossible', e?.message ?? String(e)))
-              }
-            />
-          ) : null}
+          {/* ——— Série dans Jellyfin : choix de la saison et de l'épisode ——— */}
+          {jfItem && details.kind === 'tv' ? <JfEpisodes seriesId={jfItem.Id} /> : null}
 
           {/* ——— Sans serveur Lumio : demande Seerr pour les non-admins ——— */}
 
@@ -534,7 +476,6 @@ export default function MediaScreen() {
             />
           )}
 
-          {d.overview && !Platform.isTV ? <Text style={styles.overview}>{d.overview}</Text> : null}
 
           {/* ——— Saisons ——— */}
           {/* ——— Saisons (serveur Lumio) : statut de chaque saison + « Demander » à côté de celles qui manquent ——— */}
@@ -584,6 +525,18 @@ export default function MediaScreen() {
               ) : null}
             </View>
           )}
+
+          {/* ——— Notes de la famille + signalement d'un problème ——— */}
+          {serverReq && Platform.isTV ? (
+            showRate ? <FamilyRating type={details.kind} tmdbId={tmdbId} title={title} poster={tmdbImg(d.poster_path, 'w342')} /> : null
+          ) : serverReq ? (
+            <View style={{ gap: 6 }}>
+              <FamilyRating type={details.kind} tmdbId={tmdbId} title={title} poster={tmdbImg(d.poster_path, 'w342')} />
+              {jfItem ? (
+                <ReportProblemButton type={details.kind} tmdbId={tmdbId} title={title} poster={tmdbImg(d.poster_path, 'w342')} />
+              ) : null}
+            </View>
+          ) : null}
 
           {/* ——— Casting ——— */}
           {cast.length > 0 && (
@@ -699,7 +652,8 @@ function LsButton({
 }
 
 const styles = StyleSheet.create({
-  ls: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#30D158', alignItems: 'center', justifyContent: 'center' },
+  ls: { width: 46, height: 40, borderRadius: 12, backgroundColor: '#30D158', alignItems: 'center', justifyContent: 'center' },
+  actionBar: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   lsText: { color: '#fff', fontSize: 15, fontWeight: '900', letterSpacing: 0.5 },
   heroContentTv: { position: 'absolute', left: 48, bottom: 36, width: '48%', alignItems: 'flex-start', gap: 10 },
   tvLine: { color: 'rgba(255,255,255,0.85)', fontSize: 15, fontWeight: '600' },
