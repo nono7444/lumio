@@ -23,6 +23,7 @@ import { NotifySubscribeSection } from '@/components/notify-subscribe';
 import { ServerActionsSection } from '@/components/server-actions';
 import { StorageSection } from '@/components/storage-section';
 import { HOME_BACKGROUNDS, pickHomePhoto } from '@/components/home-backdrop';
+import { IS_BETA } from '@/lib/secour';
 import { Addon, DEFAULT_ADDON, isManager, useSettings, type HomeBackground } from '@/lib/settings';
 import { logout as logoutJellyfin, QUALITIES } from '@/lib/jellyfin';
 import { useServerRequests } from '@/lib/requests';
@@ -249,7 +250,7 @@ export default function SettingsScreen() {
           </Section>
         ) : null}
 
-        {serverReq && settings.jellyfin?.isAdmin === true && !Platform.isTV ? (
+        {serverReq && settings.jellyfin?.isAdmin === true && !Platform.isTV && !IS_BETA ? (
           <Section title="Lumio Secour">
             <Text style={styles.help}>Groupe de secours : si Radarr ou Sonarr ne marchent plus, les demandes passent par Lumio Secour (AllDebrid → disques). Sources, dossiers et réglages.</Text>
             <Button title="Lumio Secour" icon="medkit-outline" variant="secondary" onPress={() => router.push('/secour-admin')} />

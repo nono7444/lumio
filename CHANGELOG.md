@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Bêta : bouton « Regarder » sur les fiches pas encore sur le serveur — la lecture démarre tout de suite via Lumio Secour pendant que Radarr / Sonarr téléchargent (la demande part en même temps). Épisode suivant enchaîné. Pour toute la famille, désactivable par l'admin.
+- Bêta : Disques → « Recherche Lumio Secour » (admin) : un film ou une série, puis le fichier à télécharger sur un disque ; l'engrenage ouvre les réglages de Lumio Secour.
+- Bêta : Lumio Secour plus discret — le bouton « Liens » des fiches et l'entrée du Profil sont masqués, le bouton « LS » reste.
 - Bêta (admin) : bouton rond « LS » sur les fiches, à côté de « Liens » : choix de la source — « Automatique » télécharge tout seul le meilleur fichier (pour une série : une saison ou toutes), ou un site précis pour choisir soi-même le fichier dans la liste. Suivi dans Demandes.
 - Bêta : bouton « Liens » sur les fiches aussi sur iPhone, et « Simuler une panne de Radarr / Sonarr » dans Lumio Secour pour tester le groupe de secours.
 - Lumio Secour passe dans l'administration (Profil → Lumio Secour) : l'onglet disparaît, l'écran est aussi sur iPhone.

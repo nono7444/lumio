@@ -359,6 +359,23 @@ export default function MediaScreen() {
               />
               <WatchlistButton item={wlItem} variant="icon" />
             </View>
+          ) : !Platform.isTV && IS_BETA && settings.chatUrl && settings.jellyfin && !upcoming ? (
+            // Pas encore sur Jellyfin : lecture tout de suite via Lumio Secour, la demande part en même temps
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <Button
+                title="Regarder"
+                icon="play"
+                small
+                onPress={() =>
+                  router.push({
+                    pathname: '/watch',
+                    params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title },
+                  })
+                }
+                style={{ flex: 1 }}
+              />
+              <WatchlistButton item={wlItem} variant="icon" />
+            </View>
           ) : !Platform.isTV ? (
             <WatchlistButton item={wlItem} variant="pill" />
           ) : null}
@@ -389,19 +406,21 @@ export default function MediaScreen() {
                   seasons={seasonsList.map((s) => s.season_number)}
                 />
               ) : null}
-              <Button
-                title="Liens"
-                icon="link-outline"
-                variant="secondary"
-                small
-                style={{ flex: 1 }}
-                onPress={() =>
-                  router.push({
-                    pathname: '/secour',
-                    params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title },
-                  })
-                }
-              />
+              {IS_BETA ? null : (
+                <Button
+                  title="Liens"
+                  icon="link-outline"
+                  variant="secondary"
+                  small
+                  style={{ flex: 1 }}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/secour',
+                      params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title },
+                    })
+                  }
+                />
+              )}
             </View>
           ) : null}
 

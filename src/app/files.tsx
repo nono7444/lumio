@@ -12,6 +12,8 @@ import { FocusPressable as Pressable } from '@/components/tv';
 import { Button, tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
 import { filesApi, formatSize, joinPath, parentPath, type Disk, type FileEntry, type MoveJob } from '@/lib/files';
+import { SecourSearch } from '@/components/secour-search';
+import { IS_BETA } from '@/lib/secour';
 import { useSettings } from '@/lib/settings';
 
 type Item = { root: string; path: string; name: string };
@@ -260,6 +262,8 @@ export default function Files() {
           </Pressable>
         ) : null}
       </View>
+
+      {!root && !query && IS_BETA && settings.jellyfin?.isAdmin === true ? <SecourSearch /> : null}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
