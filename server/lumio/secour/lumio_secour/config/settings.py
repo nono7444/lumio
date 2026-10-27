@@ -204,6 +204,8 @@ class Settings(BaseSettings):
     # Lumio Secour (API privée pour le serveur Lumio)
     # ===========================
     LUMIO_API_KEY: Optional[str] = None  # clé partagée avec le serveur Lumio (en-tête X-Lumio-Key)
+    # Sources utilisées par Lumio (recherches et contrôle de nuit) ; vide = toutes celles qui ont une adresse
+    LUMIO_SOURCES: List[str] = ["movix"]
 
     # ===========================
     # Kitsu Configuration
@@ -275,6 +277,8 @@ class Settings(BaseSettings):
     # Domain Synchronization
     # ===========================
     DOMAIN_SYNC_ENABLED: bool = False
+    # Lumio Secour : un site qui redirige vers sa nouvelle adresse → l'adresse est mise à jour toute seule
+    DOMAIN_FOLLOW_REDIRECTS: bool = True
     DOMAIN_SYNC_INTERVAL: int = 7200
     DOMAIN_SYNC_RECHECK_ON_HEALTH_ERROR: bool = True
     DOMAIN_SYNC_HEALTH_ERROR_RECHECK_DELAY: int = Field(

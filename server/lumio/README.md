@@ -112,6 +112,8 @@ Une notification part au début, à la fin, ou en cas d'échec.
 Configuration :
 
 - **Clé AllDebrid** : celle du serveur (Accueil → Téléchargements, ou `ALLDEBRID_KEY`). Elle n'est jamais enregistrée par le moteur.
+- **Contrôle des sites** : une fois par nuit vers minuit (heure de Paris) ; un site qui redirige vers sa nouvelle adresse est mis à jour tout seul
+  (notification à l'admin).
 - **TMDB** : la clé TMDB du serveur Lumio est transmise automatiquement.
 - **Sites** : aucun n'est fourni. Renseigne-les dans l'appli (Profil → Administration → Lumio Secour → réglages), ou dans le compose
   avec le préfixe `SECOUR_` : `SECOUR_WAWACITY_URL=https://…`, `SECOUR_ZONE_TELECHARGEMENT_URL=…`, `SECOUR_DARKI_API_URL=…`…

@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.48.0';
+const VERSION = '3.51.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1303,14 +1303,18 @@ async function arrWanted() {
 
 // ——— Récompenses de la famille : points, grades et badges ———
 // Heures regardées et coups de cœur (Jellyfin), notes données, demandes, messages du chat, titres « À voir ».
+// 10 rangs, un écusson chacun dans l'appli (tier 0 à 9 : bois, bronze, cuivre, argent, acier, puis écussons dorés)
 const GRADES = [
-  { min: 0, name: 'Spectateur', emoji: '🍿' },
-  { min: 150, name: 'Habitué', emoji: '🎟️' },
-  { min: 400, name: 'Cinéphile', emoji: '🎬' },
-  { min: 900, name: 'Critique', emoji: '📝' },
-  { min: 1800, name: 'Réalisateur', emoji: '🎥' },
-  { min: 3500, name: 'Producteur', emoji: '💼' },
-  { min: 6000, name: 'Légende', emoji: '🏆' },
+  { min: 0, name: 'Spectateur', emoji: '🍿', tier: 0 },
+  { min: 100, name: 'Habitué', emoji: '🎟️', tier: 1 },
+  { min: 250, name: 'Cinéphile', emoji: '🎬', tier: 2 },
+  { min: 500, name: 'Critique', emoji: '📝', tier: 3 },
+  { min: 900, name: 'Expert', emoji: '🔎', tier: 4 },
+  { min: 1500, name: 'Réalisateur', emoji: '🎥', tier: 5 },
+  { min: 2500, name: 'Producteur', emoji: '💼', tier: 6 },
+  { min: 4000, name: 'Star', emoji: '🌟', tier: 7 },
+  { min: 6000, name: 'Icône', emoji: '👑', tier: 8 },
+  { min: 9000, name: 'Légende', emoji: '🏆', tier: 9 },
 ];
 const BADGES = [
   { id: 'marathon', emoji: '🏃', name: 'Marathonien', desc: '100 heures regardées', test: (x) => x.hours >= 100 },
@@ -1354,8 +1358,8 @@ async function rewardsBoard(token) {
     x.rank = i + 1;
     const g = [...GRADES].reverse().find((g) => x.points >= g.min) || GRADES[0];
     const next = GRADES.find((n) => n.min > x.points) || null;
-    x.grade = { name: g.name, emoji: g.emoji, min: g.min };
-    x.next = next ? { name: next.name, emoji: next.emoji, min: next.min } : null;
+    x.grade = { name: g.name, emoji: g.emoji, min: g.min, tier: g.tier };
+    x.next = next ? { name: next.name, emoji: next.emoji, min: next.min, tier: next.tier } : null;
     x.badges = BADGES.filter((b) => b.test(x, x.rank)).map(({ id, emoji, name, desc }) => ({ id, emoji, name, desc }));
   });
   const value = { users: rows, grades: GRADES, badges: BADGES.map(({ id, emoji, name, desc }) => ({ id, emoji, name, desc })) };
@@ -2280,6 +2284,9 @@ function startEmbeddedSecour() {
     DATABASE_TYPE: 'sqlite',
     DATABASE_PATH: path.join(dir, 'secour.db'),
     LOG_LEVEL: process.env.SECOUR_LOG_LEVEL || 'INFO',
+    // Contrôle des sites : une fois par nuit vers minuit (déclenché par ce serveur), plus toutes les minutes
+    HEALTH_CHECK_INTERVAL: process.env.SECOUR_HEALTH_CHECK_INTERVAL || String(7 * 86400),
+    DOMAIN_SYNC_INTERVAL: process.env.SECOUR_DOMAIN_SYNC_INTERVAL || String(7 * 86400),
   };
   for (const [k, v] of Object.entries(process.env)) if (k.startsWith('SECOUR_') && k !== 'SECOUR_LOG_LEVEL') env[k.slice(7)] = v;
   const { spawn } = require('child_process');
@@ -2290,6 +2297,9 @@ function startEmbeddedSecour() {
       // eslint-disable-next-line no-control-regex
       const clean = line.replace(/\x1b\[[0-9;]*m/g, '').trim();
       if (clean && !/\| DEBUG/.test(clean)) console.log(`[Secour] ${clean.slice(0, 400)}`);
+      // Un site a changé d'adresse (redirection suivie par le moteur) : l'admin est prévenu
+      const moved = clean.match(/\[Lumio\] (.+?) a déménagé : (\S+) → (\S+)/);
+      if (moved) notify({ title: '🛟 Lumio Secour : nouvelle adresse', message: `${moved[1]} : ${moved[2]} → ${moved[3]} (mise à jour toute seule)`, tags: ['globe_with_meridians'] }).catch(() => {});
     }
   };
   child.stdout.on('data', log);
@@ -2310,10 +2320,28 @@ for (const sig of ['SIGTERM', 'SIGINT'])
     process.exit(0);
   });
 
+// ——— Chaque nuit vers minuit (heure de Paris) : contrôle des sites, nouvelles adresses suivies toutes seules ———
+setInterval(async () => {
+  if (!secourUrl() || !secourKey()) return;
+  const now = new Date();
+  const paris = new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
+  const part = (t) => (paris.find((x) => x.type === t) || {}).value;
+  const day = `${part('year')}-${part('month')}-${part('day')}`;
+  if (part('hour') !== '00' || config.secourNightly === day) return;
+  config.secourNightly = day;
+  saveConfig();
+  try {
+    const r = await secour('/lumio/check', { method: 'POST', timeout: 300000 });
+    console.log(`Lumio Secour : contrôle de nuit — ${r.summary ? `${r.summary.online}/${r.summary.total} sources en ligne` : 'fait'}`);
+  } catch (e) {
+    console.log(`Lumio Secour : contrôle de nuit impossible — ${e.message}`);
+  }
+}, 5 * 60_000);
+
 // ——— Groupe de secours : quand Radarr / Sonarr ne marchent plus, Lumio Secour prend le relais ———
 // La demande reste « approuvée » : Lumio cherche les liens, les convertit avec la clé AllDebrid du serveur
 // et range les fichiers façon Jellyfin (Films/Titre (année)/…, Séries/Titre (année)/Season 01/…), un à la fois.
-const secourAutoOn = () => config.secourAuto !== false && Boolean(secourUrl() && secourKey()) && Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey) && disks().length > 0;
+const secourAutoOn = () => config.secourAuto !== false && Boolean(secourUrl() && secourKey()) && Boolean(secourDebridKey()) && disks().length > 0;
 
 /** Dossier de destination : réglé dans l'appli, sinon SECOUR_MOVIES / SECOUR_SERIES (« disque:dossier »), sinon deviné. */
 function secourTarget(kind, r) {
@@ -2336,7 +2364,8 @@ function secourAutoView() {
     enabled: config.secourAuto !== false,
     force: Boolean(config.secourForce),
     ready: secourAutoOn(),
-    alldebrid: Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey),
+    alldebrid: Boolean(secourDebridKey()),
+    service: secourService(),
     engine: Boolean(secourUrl() && secourKey()),
     disks: disks().map((d) => d.name),
     movie: secourTarget('movie'),
@@ -2368,7 +2397,7 @@ const secourStopped = (r) => !requests.includes(r) || r.status === RequestStatus
 let secourBusy = false;
 function startSecour(r, reason, opts = {}) {
   if (!secourUrl() || !secourKey()) throw new HttpError(400, 'Lumio Secour n’est pas prêt');
-  if (!(process.env.ALLDEBRID_KEY || config.alldebridKey)) throw new HttpError(400, 'Clé AllDebrid non configurée (Téléchargements)');
+  if (!secourDebridKey()) throw new HttpError(400, `Clé ${secourServiceName()} non configurée (Lumio Secour)`);
   if (!secourTarget(r.type === 'movie' ? 'movie' : 'tv', r)) throw new HttpError(400, 'Aucun disque configuré (LUMIO_DISKS)');
   r.status = RequestStatus.APPROVED;
   r.via = 'secour';
@@ -2530,6 +2559,11 @@ async function runSecourQueue() {
   }
 }
 
+// ——— Service de téléchargement de Lumio Secour : AllDebrid (clé gardée sur ce serveur) ———
+const secourService = () => 'alldebrid';
+const secourDebridKey = () => process.env.ALLDEBRID_KEY || config.alldebridKey || '';
+const secourServiceName = () => 'AllDebrid';
+
 // ——— Lumio Secour : liens d'hébergeurs pour un film ou un épisode ———
 // Adresse et clé : LUMIO_SECOUR_URL / LUMIO_SECOUR_KEY, ou envoyées par l'appli de l'admin.
 // La clé AllDebrid reste ici : elle est transmise à Lumio Secour à chaque appel, jamais à l'appli.
@@ -2541,14 +2575,14 @@ async function secour(pathname, { method = 'GET', body, timeout = 60000 } = {}) 
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeout);
   try {
-    const adKey = process.env.ALLDEBRID_KEY || config.alldebridKey;
+    const adKey = secourDebridKey();
     const tk = tmdbKey();
     const r = await fetch(`${secourUrl()}${pathname}`, {
       method,
       signal: ctrl.signal,
       headers: {
         'X-Lumio-Key': secourKey(),
-        ...(adKey ? { 'X-Debrid-Key': adKey } : {}),
+        ...(adKey ? { 'X-Debrid-Key': adKey, 'X-Debrid-Service': secourService() } : {}),
         ...(tk ? { 'X-Tmdb-Key': tk } : {}),
         ...(body ? { 'Content-Type': 'application/json' } : {}),
       },
@@ -3917,7 +3951,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       requireAdmin(user);
       if (req.method === 'GET' && p === '/api/secour') {
         const out = { configured: Boolean(secourUrl() && secourKey()), url: secourUrl() || null, fromEnv: Boolean(process.env.LUMIO_SECOUR_URL) || secourEmbedded(),
-          embedded: secourEmbedded() || Boolean(secourInstall), install: secourInstall || undefined, alldebrid: Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey), disks: disks().length,
+          embedded: secourEmbedded() || Boolean(secourInstall), install: secourInstall || undefined, alldebrid: Boolean(secourDebridKey()), service: secourService(), disks: disks().length,
           auto: secourAutoView() };
         if (secourInstall) Object.assign(out, { online: false, error: secourInstall.message });
         else if (out.configured) {
@@ -4037,7 +4071,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         return send(res, 200, await secour(`/lumio/links?${qs}`, { timeout: 90000 }));
       }
       if (req.method === 'POST' && p === '/api/secour/download') {
-        if (!(process.env.ALLDEBRID_KEY || config.alldebridKey)) throw new HttpError(400, 'Clé AllDebrid non configurée (Téléchargements)');
+        if (!secourDebridKey()) throw new HttpError(400, `Clé ${secourServiceName()} non configurée (Lumio Secour)`);
         const b = await readBody(req);
         const link = String(b.link || '').trim();
         if (!/^https?:\/\//.test(link)) throw new HttpError(400, 'Lien invalide');

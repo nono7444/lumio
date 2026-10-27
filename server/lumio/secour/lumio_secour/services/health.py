@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from lumio_secour.config.settings import settings
 from lumio_secour.utils.http_client import http_client, is_rejected_source_page
 from lumio_secour.utils.logger import api_logger
+from lumio_secour.utils.urls import get_url_origin
 from lumio_secour.services.remote import get_remote_instances, check_remote_instance
 from lumio_secour.services.hoster_status import _hoster_status_cache, get_hoster_status
 from lumio_secour.services.health_history import record_health_status_snapshot
@@ -47,7 +48,7 @@ _health_state = HealthState()
 # Configuration
 # ===========================
 def _get_sources_config() -> Dict[str, Optional[str]]:
-    return {
+    all_sources = {
         "Wawacity": settings.WAWACITY_URL,
         "Free-Telecharger": settings.FREE_TELECHARGER_URL,
         "Darki-API": settings.DARKI_API_URL,
@@ -55,6 +56,11 @@ def _get_sources_config() -> Dict[str, Optional[str]]:
         "Webshare": settings.WEBSHARE_URL,
         "Zone-Telechargement": settings.ZONE_TELECHARGEMENT_URL,
     }
+    # Lumio : seulement les sources retenues (LUMIO_SOURCES, par défaut Movix)
+    wanted = {s.strip().lower() for s in (settings.LUMIO_SOURCES or []) if s and s.strip()}
+    if not wanted:
+        return all_sources
+    return {name: url for name, url in all_sources.items() if name.lower() in wanted}
 
 
 def _queue_domain_recheck(status: SourceStatus):
@@ -182,6 +188,45 @@ def get_system_info() -> Dict[str, Any]:
 # ===========================
 # Source Health Check Functions
 # ===========================
+# ===========================
+# Lumio Secour : nouvelle adresse suivie toute seule
+# ===========================
+# Un site qui déménage redirige souvent l'ancienne adresse vers la nouvelle : si la page finale est en ligne,
+# porte le même nom de site et n'est pas une page de blocage, l'adresse enregistrée est remplacée.
+MOVED_DOMAIN_SOURCES = {
+    "Wawacity": ("WAWACITY_URL", "wawacity"),
+    "Free-Telecharger": ("FREE_TELECHARGER_URL", "free-telecharger"),
+    "Zone-Telechargement": ("ZONE_TELECHARGEMENT_URL", "zone-telechargement"),
+    "Movix": ("MOVIX_URL", "movix"),
+}
+
+
+async def _follow_moved_domain(name: str, configured_url: str, final_url: str) -> None:
+    if not settings.DOMAIN_FOLLOW_REDIRECTS:
+        return
+    entry = MOVED_DOMAIN_SOURCES.get(name)
+    if not entry:
+        return
+    key, fragment = entry
+    old, new = get_url_origin(configured_url), get_url_origin(final_url)
+    if name == "Movix" and new:
+        # Contrôle sur api.<domaine> : on garde l'adresse du site (sans « api. »)
+        old = (old or "").replace("://api.", "://")
+        new = new.replace("://api.", "://")
+    if not old or not new or old == new:
+        return
+    same = lambda o: o.replace("://www.", "://")  # noqa: E731 — www. ajouté ou retiré : même adresse
+    if same(old) == same(new) or fragment not in new.lower():
+        return
+    from lumio_secour.services.settings_manager import set_override  # import tardif (évite une boucle)
+
+    result = await set_override(key, new)
+    if result == "ok":
+        api_logger.info(f"[Lumio] {name} a déménagé : {old} → {new} (adresse mise à jour)")
+    else:
+        api_logger.warning(f"[Lumio] {name} redirige vers {new}, mise à jour impossible ({result} : adresse fixée dans le compose ?)")
+
+
 async def _check_single_source(name: str, url: Optional[str]) -> SourceStatus:
     if not url:
         return SourceStatus(
@@ -250,6 +295,7 @@ async def _check_single_source(name: str, url: Optional[str]) -> SourceStatus:
 
             rejected = is_rejected_source_page(str(response.url), response.text)
             if response.status_code < 400 and not rejected:
+                await _follow_moved_domain(name, url, str(response.url))
                 return SourceStatus(
                     name=name,
                     url=url,
@@ -292,6 +338,7 @@ async def _check_single_source(name: str, url: Optional[str]) -> SourceStatus:
                 source_url and is_rejected_source_page(str(response.url), response.text)
             )
             if response.status_code < 400 and not rejected:
+                await _follow_moved_domain(name, url, str(response.url))
                 return SourceStatus(
                     name=name,
                     url=url,
