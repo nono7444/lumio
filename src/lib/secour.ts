@@ -166,6 +166,7 @@ export const CATEGORY_FR: Record<string, string> = {
 
 export const FIELD_FR: Record<string, { label: string; hint?: string }> = {
   ADDON_NAME: { label: 'Nom' },
+  LUMIO_SOURCES: { label: 'Sources utilisées', hint: 'Une par ligne : movix, wawacity, zone-telechargement, free-telecharger, darki-api, webshare. Vide = toutes. Par défaut : movix seulement.' },
   WAWACITY_URL: { label: 'Wawacity', hint: 'Adresse du site (https://…)' },
   FREE_TELECHARGER_URL: { label: 'Free-Telecharger', hint: 'Adresse du site (https://…)' },
   DARKI_API_URL: { label: 'Darki-API', hint: 'Adresse de l’API (https://…)' },

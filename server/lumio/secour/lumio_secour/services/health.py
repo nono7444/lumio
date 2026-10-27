@@ -48,7 +48,7 @@ _health_state = HealthState()
 # Configuration
 # ===========================
 def _get_sources_config() -> Dict[str, Optional[str]]:
-    return {
+    all_sources = {
         "Wawacity": settings.WAWACITY_URL,
         "Free-Telecharger": settings.FREE_TELECHARGER_URL,
         "Darki-API": settings.DARKI_API_URL,
@@ -56,6 +56,11 @@ def _get_sources_config() -> Dict[str, Optional[str]]:
         "Webshare": settings.WEBSHARE_URL,
         "Zone-Telechargement": settings.ZONE_TELECHARGEMENT_URL,
     }
+    # Lumio : seulement les sources retenues (LUMIO_SOURCES, par défaut Movix)
+    wanted = {s.strip().lower() for s in (settings.LUMIO_SOURCES or []) if s and s.strip()}
+    if not wanted:
+        return all_sources
+    return {name: url for name, url in all_sources.items() if name.lower() in wanted}
 
 
 def _queue_domain_recheck(status: SourceStatus):
@@ -192,6 +197,7 @@ MOVED_DOMAIN_SOURCES = {
     "Wawacity": ("WAWACITY_URL", "wawacity"),
     "Free-Telecharger": ("FREE_TELECHARGER_URL", "free-telecharger"),
     "Zone-Telechargement": ("ZONE_TELECHARGEMENT_URL", "zone-telechargement"),
+    "Movix": ("MOVIX_URL", "movix"),
 }
 
 
@@ -203,6 +209,10 @@ async def _follow_moved_domain(name: str, configured_url: str, final_url: str) -
         return
     key, fragment = entry
     old, new = get_url_origin(configured_url), get_url_origin(final_url)
+    if name == "Movix" and new:
+        # Contrôle sur api.<domaine> : on garde l'adresse du site (sans « api. »)
+        old = (old or "").replace("://api.", "://")
+        new = new.replace("://api.", "://")
     if not old or not new or old == new:
         return
     same = lambda o: o.replace("://www.", "://")  # noqa: E731 — www. ajouté ou retiré : même adresse
@@ -285,6 +295,7 @@ async def _check_single_source(name: str, url: Optional[str]) -> SourceStatus:
 
             rejected = is_rejected_source_page(str(response.url), response.text)
             if response.status_code < 400 and not rejected:
+                await _follow_moved_domain(name, url, str(response.url))
                 return SourceStatus(
                     name=name,
                     url=url,

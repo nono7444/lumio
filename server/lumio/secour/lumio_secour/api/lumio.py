@@ -59,16 +59,23 @@ def _tmdb_token(request: Request) -> str:
     return (settings.TMDB_API_KEY or request.headers.get("X-Tmdb-Key") or "").strip()
 
 
+def _lumio_sources() -> List[str]:
+    return [s.strip().lower() for s in (settings.LUMIO_SOURCES or []) if s and s.strip()]
+
+
 def _config(debrid_key: str, tmdb: str, service: str = "alldebrid") -> Dict[str, Any]:
+    entry: Dict[str, Any] = {"service": service, "api_key": debrid_key}
+    if _lumio_sources():
+        entry["sources"] = _lumio_sources()  # Lumio : par défaut Movix seulement
     return {
-        "debrid_services": [{"service": service, "api_key": debrid_key}] if debrid_key else [],
+        "debrid_services": [entry] if debrid_key or _lumio_sources() else [],
         "tmdb_api_token": tmdb,
     }
 
 
 def _sources() -> List[str]:
-    out = [name for name, key in SOURCE_KEYS.items() if getattr(settings, key, None)]
-    return out
+    wanted = set(_lumio_sources())
+    return [name for name, key in SOURCE_KEYS.items() if getattr(settings, key, None) and (not wanted or name.lower() in wanted)]
 
 
 def _int(v: Any) -> Optional[int]:

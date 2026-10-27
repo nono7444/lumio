@@ -160,6 +160,7 @@ DESCRIPTIONS = {
         "Maximum delay in seconds for one Idrix retry; a longer Retry-After blocks "
         "that host for the current run (default: 30)."
     ),
+    "LUMIO_SOURCES": "Sources utilisées par Lumio, une par ligne (movix, wawacity, zone-telechargement, free-telecharger, darki-api, webshare). Vide = toutes. Par défaut : movix.",
     "DOMAIN_FOLLOW_REDIRECTS": "Lumio Secour : quand un site redirige vers une nouvelle adresse (même nom de site), l'adresse est mise à jour toute seule, vérifiée à chaque contrôle des sources (par défaut : oui).",
     "DOMAIN_SYNC_ENABLED": "Enable automatic source-domain updates from the configured Telegram channels (default: false).",
     "DOMAIN_SYNC_INTERVAL": "Full Telegram domain synchronization interval in seconds (default: 7200 = 2h).",
@@ -175,7 +176,7 @@ DESCRIPTIONS = {
 # UI layout AND editable-keys allowlist. Order = display order.
 SETTINGS_LAYOUT = [
     ("Addon", ["ADDON_NAME"]),
-    ("Sources", ["WAWACITY_URL", "FREE_TELECHARGER_URL", "DARKI_API_URL", "DARKI_API_KEY", "MOVIX_URL", "WEBSHARE_URL", "ZONE_TELECHARGEMENT_URL"]),
+    ("Sources", ["LUMIO_SOURCES", "WAWACITY_URL", "FREE_TELECHARGER_URL", "DARKI_API_URL", "DARKI_API_KEY", "MOVIX_URL", "WEBSHARE_URL", "ZONE_TELECHARGEMENT_URL"]),
     ("TMDB", ["TMDB_API_KEY"]),
     ("Database resilience", ["DATABASE_RETRY_MAX_ATTEMPTS", "DATABASE_RETRY_DELAY"]),
     ("Kitsu / Anime", ["DARKIMOVIX_KITSU_TMDB_MAPPING", "KITSU_IMDB_OVERRIDE"]),

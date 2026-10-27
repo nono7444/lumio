@@ -204,6 +204,8 @@ class Settings(BaseSettings):
     # Lumio Secour (API privée pour le serveur Lumio)
     # ===========================
     LUMIO_API_KEY: Optional[str] = None  # clé partagée avec le serveur Lumio (en-tête X-Lumio-Key)
+    # Sources utilisées par Lumio (recherches et contrôle de nuit) ; vide = toutes celles qui ont une adresse
+    LUMIO_SOURCES: List[str] = ["movix"]
 
     # ===========================
     # Kitsu Configuration
