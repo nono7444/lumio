@@ -160,6 +160,7 @@ DESCRIPTIONS = {
         "Maximum delay in seconds for one Idrix retry; a longer Retry-After blocks "
         "that host for the current run (default: 30)."
     ),
+    "DOMAIN_FOLLOW_REDIRECTS": "Lumio Secour : quand un site redirige vers une nouvelle adresse (même nom de site), l'adresse est mise à jour toute seule, vérifiée à chaque contrôle des sources (par défaut : oui).",
     "DOMAIN_SYNC_ENABLED": "Enable automatic source-domain updates from the configured Telegram channels (default: false).",
     "DOMAIN_SYNC_INTERVAL": "Full Telegram domain synchronization interval in seconds (default: 7200 = 2h).",
     "DOMAIN_SYNC_RECHECK_ON_HEALTH_ERROR": "Request a source-specific Telegram recheck when a configured source is offline (default: true).",
@@ -190,6 +191,7 @@ SETTINGS_LAYOUT = [
                "IDRIX_SCRAPER_REQUEST_DELAY",
                "IDRIX_SCRAPER_MAX_RETRY_DELAY"]),
     ("Domain synchronization", [
+        "DOMAIN_FOLLOW_REDIRECTS",
         "DOMAIN_SYNC_ENABLED", "DOMAIN_SYNC_INTERVAL",
         "DOMAIN_SYNC_RECHECK_ON_HEALTH_ERROR",
         "DOMAIN_SYNC_HEALTH_ERROR_RECHECK_DELAY",

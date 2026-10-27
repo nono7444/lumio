@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Bêta : ton rang en haut de l'accueil, avec son écusson (10 rangs, du bois à l'or) ; un appui ouvre ta page de stats. Les écussons remplacent aussi les émojis dans Récompenses.
+- Bêta : Lumio Secour suit tout seul les changements d'adresse d'un site (redirection vers le nouveau domaine), avec une notification à l'admin.
 - Bêta : fiche plus claire — une seule ligne d'actions (Lire ou « À voir », puis petits boutons Proposer et « LS »), ensuite la demande, le résumé, les épisodes / saisons, les notes de la famille et le casting.
 - Bêta : Disques → « Recherche Lumio Secour » (admin) : un film ou une série, puis le fichier à télécharger sur un disque ; l'engrenage ouvre les réglages de Lumio Secour.
 - Bêta : Lumio Secour plus discret — le bouton « Liens » des fiches et l'entrée du Profil sont masqués, le bouton « LS » reste.

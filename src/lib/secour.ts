@@ -178,6 +178,7 @@ export const FIELD_FR: Record<string, { label: string; hint?: string }> = {
   CONTENT_CACHE_MODE: { label: 'Mode du cache', hint: 'background : attend si expiré · live : instantané puis rafraîchit' },
   DEAD_LINK_TTL: { label: 'Mémoire des liens morts (s)', hint: '-1 = permanent' },
   STREAM_REQUEST_TIMEOUT: { label: 'Délai max d’une recherche (s)' },
+  DOMAIN_FOLLOW_REDIRECTS: { label: 'Suivre les changements d’adresse', hint: 'Si un site redirige vers sa nouvelle adresse, elle est mise à jour toute seule (et tu reçois une notification)' },
   DOMAIN_SYNC_ENABLED: { label: 'Mettre à jour les domaines tout seul', hint: 'Via les chaînes Telegram renseignées ci-dessous' },
   PASTEBIN_SCRAPER_URLS: { label: 'Liens Pastebin à importer', hint: 'Un par ligne' },
   IDRIX_SCRAPER_URLS: { label: 'Liens Idrix à importer', hint: 'Un par ligne' },

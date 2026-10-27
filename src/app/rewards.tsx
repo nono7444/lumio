@@ -5,12 +5,13 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { RankShield } from '@/components/rank-shield';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { C, R } from '@/constants/theme';
 import { serverCall } from '@/lib/chat';
 import { useSettings } from '@/lib/settings';
 
-type Grade = { name: string; emoji: string; min: number };
+type Grade = { name: string; emoji: string; min: number; tier?: number };
 type Badge = { id: string; emoji: string; name: string; desc: string };
 type Member = {
   id: string;
@@ -67,7 +68,7 @@ export default function RewardsScreen() {
         <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: insets.bottom + 40 }}>
           {me ? (
             <View style={styles.hero}>
-              <Text style={styles.gradeEmoji}>{me.grade.emoji}</Text>
+              <RankShield tier={me.grade.tier} size={78} />
               <Text style={styles.gradeName}>{me.grade.name}</Text>
               <Text style={styles.points}>
                 {me.points} points · {me.rank === 1 ? '1er' : `${me.rank}e`} de la famille
@@ -78,7 +79,7 @@ export default function RewardsScreen() {
                     <View style={[styles.fill, { width: `${Math.max(3, pct)}%` }]} />
                   </View>
                   <Text style={styles.dim}>
-                    Encore {me.next.min - me.points} points pour devenir {me.next.emoji} {me.next.name}
+                    Encore {me.next.min - me.points} points pour devenir {me.next.name}
                   </Text>
                 </>
               ) : (
@@ -133,7 +134,7 @@ export default function RewardsScreen() {
                 <Text style={styles.rankNum}>{MEDAL[i] ?? `${u.rank}.`}</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.rankName}>
-                    {u.name} {u.grade.emoji}
+                    {u.name}
                   </Text>
                   <Text style={styles.dim}>
                     {u.grade.name} · {u.hours} h · {u.badges.map((b) => b.emoji).join(' ')}

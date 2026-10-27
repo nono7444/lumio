@@ -157,13 +157,29 @@ export function Hero({ items, season }: { items: HeroItem[]; season?: Season | n
   );
 }
 
-export function HeroTopBar({ title, onCustomize, season, right }: { title: string; onCustomize?: () => void; season?: Season | null; right?: ReactNode }) {
+export function HeroTopBar({
+  title,
+  onCustomize,
+  season,
+  right,
+  badge,
+}: {
+  title: string;
+  onCustomize?: () => void;
+  season?: Season | null;
+  right?: ReactNode;
+  /** À côté du nom (ex. pastille du rang) */
+  badge?: ReactNode;
+}) {
   return (
     <View style={styles.topBar} pointerEvents="box-none">
-      <Text style={styles.brand}>
-        {title}
-        {season ? <Text style={{ fontSize: 22 }}> {season.emoji}</Text> : null}
-      </Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 }}>
+        <Text style={styles.brand}>
+          {title}
+          {season ? <Text style={{ fontSize: 22 }}> {season.emoji}</Text> : null}
+        </Text>
+        {badge}
+      </View>
       {right ??
         (onCustomize ? (
           <Pressable

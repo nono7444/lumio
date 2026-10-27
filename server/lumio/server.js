@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.48.0';
+const VERSION = '3.49.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1303,14 +1303,18 @@ async function arrWanted() {
 
 // ——— Récompenses de la famille : points, grades et badges ———
 // Heures regardées et coups de cœur (Jellyfin), notes données, demandes, messages du chat, titres « À voir ».
+// 10 rangs, un écusson chacun dans l'appli (tier 0 à 9 : bois, bronze, cuivre, argent, acier, puis écussons dorés)
 const GRADES = [
-  { min: 0, name: 'Spectateur', emoji: '🍿' },
-  { min: 150, name: 'Habitué', emoji: '🎟️' },
-  { min: 400, name: 'Cinéphile', emoji: '🎬' },
-  { min: 900, name: 'Critique', emoji: '📝' },
-  { min: 1800, name: 'Réalisateur', emoji: '🎥' },
-  { min: 3500, name: 'Producteur', emoji: '💼' },
-  { min: 6000, name: 'Légende', emoji: '🏆' },
+  { min: 0, name: 'Spectateur', emoji: '🍿', tier: 0 },
+  { min: 100, name: 'Habitué', emoji: '🎟️', tier: 1 },
+  { min: 250, name: 'Cinéphile', emoji: '🎬', tier: 2 },
+  { min: 500, name: 'Critique', emoji: '📝', tier: 3 },
+  { min: 900, name: 'Expert', emoji: '🔎', tier: 4 },
+  { min: 1500, name: 'Réalisateur', emoji: '🎥', tier: 5 },
+  { min: 2500, name: 'Producteur', emoji: '💼', tier: 6 },
+  { min: 4000, name: 'Star', emoji: '🌟', tier: 7 },
+  { min: 6000, name: 'Icône', emoji: '👑', tier: 8 },
+  { min: 9000, name: 'Légende', emoji: '🏆', tier: 9 },
 ];
 const BADGES = [
   { id: 'marathon', emoji: '🏃', name: 'Marathonien', desc: '100 heures regardées', test: (x) => x.hours >= 100 },
@@ -1354,8 +1358,8 @@ async function rewardsBoard(token) {
     x.rank = i + 1;
     const g = [...GRADES].reverse().find((g) => x.points >= g.min) || GRADES[0];
     const next = GRADES.find((n) => n.min > x.points) || null;
-    x.grade = { name: g.name, emoji: g.emoji, min: g.min };
-    x.next = next ? { name: next.name, emoji: next.emoji, min: next.min } : null;
+    x.grade = { name: g.name, emoji: g.emoji, min: g.min, tier: g.tier };
+    x.next = next ? { name: next.name, emoji: next.emoji, min: next.min, tier: next.tier } : null;
     x.badges = BADGES.filter((b) => b.test(x, x.rank)).map(({ id, emoji, name, desc }) => ({ id, emoji, name, desc }));
   });
   const value = { users: rows, grades: GRADES, badges: BADGES.map(({ id, emoji, name, desc }) => ({ id, emoji, name, desc })) };
@@ -2290,6 +2294,9 @@ function startEmbeddedSecour() {
       // eslint-disable-next-line no-control-regex
       const clean = line.replace(/\x1b\[[0-9;]*m/g, '').trim();
       if (clean && !/\| DEBUG/.test(clean)) console.log(`[Secour] ${clean.slice(0, 400)}`);
+      // Un site a changé d'adresse (redirection suivie par le moteur) : l'admin est prévenu
+      const moved = clean.match(/\[Lumio\] (.+?) a déménagé : (\S+) → (\S+)/);
+      if (moved) notify({ title: '🛟 Lumio Secour : nouvelle adresse', message: `${moved[1]} : ${moved[2]} → ${moved[3]} (mise à jour toute seule)`, tags: ['globe_with_meridians'] }).catch(() => {});
     }
   };
   child.stdout.on('data', log);

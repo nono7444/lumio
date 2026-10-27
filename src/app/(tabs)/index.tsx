@@ -1,4 +1,5 @@
 import { HomeShortcuts } from '@/components/home-shortcuts';
+import { RankPill } from '@/components/rank-shield';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
@@ -472,7 +473,12 @@ export default function Home() {
 
       {/* Barre du haut : toujours transparente (plus de bandeau noir en défilant) */}
       <View style={[styles.top, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
-        <HeroTopBar title="Lumio" season={season} right={<HomeShortcuts onCustomize={() => router.push('/customize')} />} />
+        <HeroTopBar
+          title="Lumio"
+          season={season}
+          badge={settings.chatUrl && settings.jellyfin ? <RankPill nonce={nonce} /> : null}
+          right={<HomeShortcuts onCustomize={() => router.push('/customize')} />}
+        />
       </View>
       {/* Message épinglé par l'admin, tant qu'il n'a pas été lu */}
       <AnnouncementPopup />

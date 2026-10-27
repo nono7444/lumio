@@ -275,6 +275,8 @@ class Settings(BaseSettings):
     # Domain Synchronization
     # ===========================
     DOMAIN_SYNC_ENABLED: bool = False
+    # Lumio Secour : un site qui redirige vers sa nouvelle adresse → l'adresse est mise à jour toute seule
+    DOMAIN_FOLLOW_REDIRECTS: bool = True
     DOMAIN_SYNC_INTERVAL: int = 7200
     DOMAIN_SYNC_RECHECK_ON_HEALTH_ERROR: bool = True
     DOMAIN_SYNC_HEALTH_ERROR_RECHECK_DELAY: int = Field(
