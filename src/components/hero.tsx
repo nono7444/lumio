@@ -172,27 +172,35 @@ export function HeroTopBar({
   badge?: ReactNode;
 }) {
   return (
-    <View style={styles.topBar} pointerEvents="box-none">
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 }}>
-        <Text style={styles.brand}>
+    <View pointerEvents="box-none">
+      <View style={styles.topBar} pointerEvents="box-none">
+        <Text style={styles.brand} numberOfLines={1}>
           {title}
           {season ? <Text style={{ fontSize: 22 }}> {season.emoji}</Text> : null}
         </Text>
-        {badge}
+        {/* Les boutons de droite ne rétrécissent jamais : rien ne passe dessous */}
+        <View style={styles.right} pointerEvents="box-none">
+          {right ??
+            (onCustomize ? (
+              <Pressable
+                onPress={() => {
+                  tap();
+                  onCustomize();
+                }}
+                hitSlop={10}
+                accessibilityLabel="Personnaliser l'accueil"
+                style={styles.topBtn}>
+                <Ionicons name="options-outline" size={20} color={C.text} />
+              </Pressable>
+            ) : null)}
+        </View>
       </View>
-      {right ??
-        (onCustomize ? (
-          <Pressable
-            onPress={() => {
-              tap();
-              onCustomize();
-            }}
-            hitSlop={10}
-            accessibilityLabel="Personnaliser l'accueil"
-            style={styles.topBtn}>
-            <Ionicons name="options-outline" size={20} color={C.text} />
-          </Pressable>
-        ) : null)}
+      {/* Pastille (ex. rang) sous le nom, pour ne plus chevaucher les boutons */}
+      {badge ? (
+        <View style={styles.badgeRow} pointerEvents="box-none">
+          {badge}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -210,5 +218,7 @@ const styles = StyleSheet.create({
   pageDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.3)' },
   topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20 },
   topBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
-  brand: { color: C.text, fontSize: 26, fontWeight: '900', letterSpacing: -0.6 },
+  brand: { color: C.text, fontSize: 26, fontWeight: '900', letterSpacing: -0.6, flexShrink: 1, marginRight: 10 },
+  right: { flexShrink: 0 },
+  badgeRow: { flexDirection: 'row', paddingHorizontal: 20, marginTop: 6 },
 });

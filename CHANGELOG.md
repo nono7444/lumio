@@ -6,6 +6,7 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Bêta : accueil — la pastille du rang passe sous « Lumio », elle ne chevauche plus les boutons du haut.
 - Bêta : Lumio Secour n'utilise plus que Movix (recherches, téléchargements de secours et contrôle de nuit, adresse suivie toute seule) ; réglage « Sources utilisées » pour en remettre d'autres.
 - Bêta : fiche allégée — genre dans les pastilles (plus de ligne de genres ni d'étiquette d'état), résumé sur 3 lignes avec « Plus », 2 avis de la famille affichés (« Voir les avis » pour le reste).
 - Bêta : Lumio Secour ne contrôle plus les sites toutes les minutes, mais une fois par nuit vers minuit.
