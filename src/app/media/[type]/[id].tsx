@@ -26,7 +26,6 @@ import { RequestSection } from '@/components/request-section';
 import { TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { grab, mediaFlavor } from '@/lib/grab';
 import { useServerRequests } from '@/lib/requests';
-import { serverHealth } from '@/lib/lumio-server';
 import { IS_BETA, secourAdminApi, secourApi } from '@/lib/secour';
 import { SeasonRequests } from '@/components/season-requests';
 import { WatchlistButton } from '@/components/watchlist-button';
@@ -58,8 +57,6 @@ export default function MediaScreen() {
   const insets = useSafeAreaInsets();
   const [details, setDetails] = useState<Details | null>(null);
   const [fullOverview, setFullOverview] = useState(false);
-  // Streaming TorBox annoncé par le serveur Lumio (bouton « Regarder » sur les titres pas encore sur Jellyfin)
-  const [canStream, setCanStream] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -84,13 +81,6 @@ export default function MediaScreen() {
   const manager = isManager(settings);
   // Serveur Lumio : demandes façon Seerr pour tout le monde (admin compris)
   const serverReq = useServerRequests();
-  useEffect(() => {
-    if (!settings.chatUrl || !IS_BETA) return;
-    serverHealth(settings)
-      .then((h) => setCanStream(Boolean(h?.features?.includes('secour-stream'))))
-      .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.chatUrl]);
   const configured = manager && serverReq === false && Boolean(service.url && service.apiKey);
   const ready = arrReady(service);
 
@@ -361,9 +351,9 @@ export default function MediaScreen() {
           {/* ——— Barre d'actions : Lire (ou « À voir »), puis Proposer et Lumio Secour en petits boutons ——— */}
           {!Platform.isTV ? (
             <View style={styles.actionBar}>
-              {jfItem || (canStream && !upcoming) ? (
+              {jfItem ? (
                 <Button
-                  title={jfItem ? 'Lire' : 'Regarder'}
+                  title="Lire"
                   icon="play"
                   small
                   onPress={() => router.push({ pathname: '/watch', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title } })}
@@ -372,7 +362,7 @@ export default function MediaScreen() {
               ) : (
                 <WatchlistButton item={wlItem} variant="pill" />
               )}
-              {jfItem || (canStream && !upcoming) ? <WatchlistButton item={wlItem} variant="icon" /> : <View style={{ flex: 1 }} />}
+              {jfItem ? <WatchlistButton item={wlItem} variant="icon" /> : <View style={{ flex: 1 }} />}
               {/* Proposer dans le chat famille : seulement pour un titre pas encore sur le serveur */}
               {settings.chatUrl && settings.jellyfin && !jfItem ? (
                 <Button title="" icon="chatbubbles-outline" variant="glass" small onPress={propose} style={{ width: 46, paddingHorizontal: 0 }} />

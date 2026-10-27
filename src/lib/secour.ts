@@ -17,8 +17,6 @@ export type SecourStatus = {
   error?: string;
   /** Moteur intégré au serveur Lumio (même conteneur) */
   embedded?: boolean;
-  /** Service de téléchargement choisi */
-  service?: 'torbox' | 'alldebrid';
   auto?: SecourAuto;
 };
 
@@ -28,10 +26,6 @@ export type SecourAuto = {
   enabled: boolean;
   /** Simulation : Radarr / Sonarr considérés en panne */
   force?: boolean;
-  service?: 'torbox' | 'alldebrid';
-  /** Streaming pour la famille (TorBox seulement) */
-  stream?: boolean;
-  streamReady?: boolean;
   ready: boolean;
   alldebrid: boolean;
   engine: boolean;
@@ -131,36 +125,13 @@ export type AlldebridStatus = {
   error?: string;
 };
 
-export type SecourStream = { url: string; name?: string; quality?: string; language?: string; size?: string; source?: string; hoster?: string };
-
-/** Toute la famille (TorBox seulement) : lien de lecture direct quand le titre n'est pas (encore) sur Jellyfin. */
-export const secourStreamApi = {
-  get: (s: Settings, q: { type: 'movie' | 'tv'; tmdbId: number; imdb?: string; season?: number; episode?: number; retry?: boolean }) =>
-    serverCall<SecourStream>(s, '/api/secour/stream', { method: 'POST', body: JSON.stringify(q) }),
-};
-
-
-/** Service de téléchargement de Lumio Secour (TorBox ou AllDebrid), clés gardées sur le serveur. */
-export type SecourDebrid = {
-  service: 'torbox' | 'alldebrid';
-  fromEnv: boolean;
-  torbox: { configured: boolean; fromEnv: boolean; account?: { email?: string | null; plan?: string; premium?: boolean; premiumUntil?: string | null; error?: string } };
-  alldebrid: { configured: boolean; fromEnv: boolean };
-};
-
-export const secourDebridApi = {
-  get: (s: Settings, check = false) => serverCall<SecourDebrid>(s, `/api/secour/debrid${check ? '?check=1' : ''}`),
-  save: (s: Settings, body: { service?: 'torbox' | 'alldebrid'; torboxKey?: string }) =>
-    serverCall<{ service: string }>(s, '/api/secour/debrid', { method: 'PUT', body: JSON.stringify(body) }),
-};
-
 export type SecourGrab = { type: 'movie' | 'tv'; tmdbId: number; tvdbId?: number; title: string; year?: string; poster?: string; backdrop?: string; seasons?: number[]; source?: string };
 
 export const secourAdminApi = {
   /** Bouton « LS » : téléchargement direct par Lumio Secour (meilleur lien, AllDebrid, disques) */
   grab: (s: Settings, g: SecourGrab) => serverCall<{ request: { id: string }; already?: boolean }>(s, '/api/secour/grab', { method: 'POST', body: JSON.stringify(g) }),
   auto: (s: Settings) => serverCall<SecourAuto>(s, '/api/secour/auto'),
-  saveAuto: (s: Settings, body: Partial<{ enabled: boolean; force: boolean; stream: boolean; movie: SecourTarget; tv: SecourTarget }>) =>
+  saveAuto: (s: Settings, body: Partial<{ enabled: boolean; force: boolean; movie: SecourTarget; tv: SecourTarget }>) =>
     serverCall<SecourAuto>(s, '/api/secour/auto', { method: 'PUT', body: JSON.stringify(body) }),
   settings: (s: Settings) => serverCall<{ categories: SecourCategory[] }>(s, '/api/secour/settings').then((r) => r.categories),
   saveSettings: (s: Settings, updates: Record<string, unknown>) =>
