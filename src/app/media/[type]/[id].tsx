@@ -11,9 +11,7 @@ import { C, R } from '@/constants/theme';
 import {
   formatBytes,
   invalidateLibrary,
-  movieState,
   radarr,
-  seriesState,
   sonarr,
   type RadarrMovie,
   type SonarrSeries,
@@ -28,6 +26,7 @@ import { RequestSection } from '@/components/request-section';
 import { TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { grab, mediaFlavor } from '@/lib/grab';
 import { useServerRequests } from '@/lib/requests';
+import { serverHealth } from '@/lib/lumio-server';
 import { IS_BETA, secourAdminApi, secourApi } from '@/lib/secour';
 import { SeasonRequests } from '@/components/season-requests';
 import { WatchlistButton } from '@/components/watchlist-button';
@@ -58,6 +57,9 @@ export default function MediaScreen() {
   const { width, height: screenH } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [details, setDetails] = useState<Details | null>(null);
+  const [fullOverview, setFullOverview] = useState(false);
+  // Streaming TorBox annoncé par le serveur Lumio (bouton « Regarder » sur les titres pas encore sur Jellyfin)
+  const [canStream, setCanStream] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -82,6 +84,13 @@ export default function MediaScreen() {
   const manager = isManager(settings);
   // Serveur Lumio : demandes façon Seerr pour tout le monde (admin compris)
   const serverReq = useServerRequests();
+  useEffect(() => {
+    if (!settings.chatUrl || !IS_BETA) return;
+    serverHealth(settings)
+      .then((h) => setCanStream(Boolean(h?.features?.includes('secour-stream'))))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.chatUrl]);
   const configured = manager && serverReq === false && Boolean(service.url && service.apiKey);
   const ready = arrReady(service);
 
@@ -158,7 +167,6 @@ export default function MediaScreen() {
   const date = details.kind === 'movie' ? details.data.release_date : details.data.first_air_date;
   // « Disponible le … » si le titre n'est pas encore sorti (et pas déjà sur le serveur)
   const upcoming = jfItem ? null : upcomingRelease(details.kind, details.data);
-  const state = details.arr ? (details.kind === 'movie' ? movieState(details.arr) : seriesState(details.arr)) : null;
   const seasonsList = details.kind === 'tv' ? details.data.seasons.filter((s) => s.season_number > 0) : [];
 
 
@@ -337,11 +345,8 @@ export default function MediaScreen() {
               {runtime ? <Pill icon="time-outline">{`${runtime} min`}</Pill> : null}
               {details.kind === 'tv' ? <Pill>{`${seasonsList.length} saison${seasonsList.length > 1 ? 's' : ''}`}</Pill> : null}
               {d.vote_average ? <Pill icon="star">{d.vote_average.toFixed(1)}</Pill> : null}
+              {d.genres?.[0] ? <Pill>{d.genres[0].name}</Pill> : null}
             </View>
-            {d.genres?.length ? (
-              <Text style={styles.genres}>{d.genres.slice(0, 3).map((g) => g.name).join('  •  ')}</Text>
-            ) : null}
-            {state && <Chip label={state.label} color={state.color} />}
             {upcoming ? (
               <View style={styles.upcoming}>
                 <Ionicons name="calendar-outline" size={15} color="#FFC93C" />
@@ -356,9 +361,9 @@ export default function MediaScreen() {
           {/* ——— Barre d'actions : Lire (ou « À voir »), puis Proposer et Lumio Secour en petits boutons ——— */}
           {!Platform.isTV ? (
             <View style={styles.actionBar}>
-              {jfItem ? (
+              {jfItem || (canStream && !upcoming) ? (
                 <Button
-                  title="Lire"
+                  title={jfItem ? 'Lire' : 'Regarder'}
                   icon="play"
                   small
                   onPress={() => router.push({ pathname: '/watch', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title } })}
@@ -367,7 +372,7 @@ export default function MediaScreen() {
               ) : (
                 <WatchlistButton item={wlItem} variant="pill" />
               )}
-              {jfItem ? <WatchlistButton item={wlItem} variant="icon" /> : <View style={{ flex: 1 }} />}
+              {jfItem || (canStream && !upcoming) ? <WatchlistButton item={wlItem} variant="icon" /> : <View style={{ flex: 1 }} />}
               {/* Proposer dans le chat famille : seulement pour un titre pas encore sur le serveur */}
               {settings.chatUrl && settings.jellyfin && !jfItem ? (
                 <Button title="" icon="chatbubbles-outline" variant="glass" small onPress={propose} style={{ width: 46, paddingHorizontal: 0 }} />
@@ -428,7 +433,14 @@ export default function MediaScreen() {
             />
           ) : null}
 
-          {d.overview && !Platform.isTV ? <Text style={styles.overview}>{d.overview}</Text> : null}
+          {d.overview && !Platform.isTV ? (
+            <Pressable onPress={() => setFullOverview((x) => !x)} focusable={false}>
+              <Text style={styles.overview} numberOfLines={fullOverview ? undefined : 3}>
+                {d.overview}
+              </Text>
+              {d.overview.length > 160 ? <Text style={[styles.dim, { color: C.accent, fontWeight: '700', marginTop: 4 }]}>{fullOverview ? 'Moins' : 'Plus'}</Text> : null}
+            </Pressable>
+          ) : null}
 
           {/* ——— Série dans Jellyfin : choix de la saison et de l'épisode ——— */}
           {jfItem && details.kind === 'tv' ? <JfEpisodes seriesId={jfItem.Id} /> : null}

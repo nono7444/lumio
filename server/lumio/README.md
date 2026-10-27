@@ -111,7 +111,12 @@ Une notification part au début, à la fin, ou en cas d'échec.
 
 Configuration :
 
-- **Clé AllDebrid** : celle du serveur (Accueil → Téléchargements, ou `ALLDEBRID_KEY`). Elle n'est jamais enregistrée par le moteur.
+- **Service de téléchargement** : TorBox (clé dans Lumio Secour, ou `TORBOX_KEY`) ou AllDebrid (`ALLDEBRID_KEY`). TorBox est choisi dès que sa clé est là
+  (forcer avec `SECOUR_DEBRID=torbox|alldebrid`). La clé n'est jamais enregistrée par le moteur. TorBox ne prend pas en charge Wawacity.
+- **Streaming (TorBox seulement)** : un titre pas encore sur Jellyfin se lit tout de suite (`POST /api/secour/stream`, toute la famille),
+  pendant que Radarr / Sonarr le téléchargent. TorBox accepte plusieurs adresses IP. Désactivable : `PUT /api/secour/auto { stream: false }`.
+- **Contrôle des sites** : une fois par nuit vers minuit (heure de Paris) ; un site qui redirige vers sa nouvelle adresse est mis à jour tout seul
+  (notification à l'admin).
 - **TMDB** : la clé TMDB du serveur Lumio est transmise automatiquement.
 - **Sites** : aucun n'est fourni. Renseigne-les dans l'appli (Profil → Administration → Lumio Secour → réglages), ou dans le compose
   avec le préfixe `SECOUR_` : `SECOUR_WAWACITY_URL=https://…`, `SECOUR_ZONE_TELECHARGEMENT_URL=…`, `SECOUR_DARKI_API_URL=…`…
@@ -142,4 +147,6 @@ sudo sh /data/lumio-server/host/install-host-actions.sh   # le bouton « Mettre 
 |---|---|---|
 | GET / PUT | `/api/secour/auto` | Admin : groupe de secours `{ enabled, movie: { root, folder }, tv: { root, folder } }` |
 | POST | `/api/secour/requests/:id` | Admin : passer une demande par Lumio Secour à la main |
+| GET / PUT | `/api/secour/debrid` | Admin : `{ service: 'torbox' \| 'alldebrid', torboxKey? }` (clé gardée sur le serveur) |
+| POST | `/api/secour/stream` | Toute la famille (TorBox) : `{ type, tmdbId, season?, episode?, retry? }` → lien de lecture direct |
 | POST | `/api/secour/grab` | Admin (bouton « LS ») : `{ type, tmdbId, tvdbId?, title, year, poster, seasons? }` → téléchargement direct par Lumio Secour |

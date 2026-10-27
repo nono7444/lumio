@@ -10,6 +10,9 @@ import { Toasts } from '@/components/toast';
 import { Button, Fade } from '@/components/ui';
 import { C } from '@/constants/theme';
 import { useSettings } from '@/lib/settings';
+import { serverHealth } from '@/lib/lumio-server';
+import { requestsApi } from '@/lib/requests';
+import { secourStreamApi } from '@/lib/secour';
 import { resolveWatch } from '@/lib/smart-play';
 import { tmdb, tmdbImg } from '@/lib/tmdb';
 
@@ -30,7 +33,7 @@ export default function Watch() {
   const p = useLocalSearchParams<Params>();
   const { settings } = useSettings();
   const insets = useSafeAreaInsets();
-  const [step] = useState('Recherche dans ta bibliothèque…');
+  const [step, setStep] = useState('Recherche dans ta bibliothèque…');
   const [failure, setFailure] = useState<string | null>(null);
   const [backdrop, setBackdrop] = useState<string | undefined>();
   const cancelled = useRef(false);
@@ -72,7 +75,47 @@ export default function Watch() {
           return;
         }
 
-        // ——— Pas (encore) sur Jellyfin ———
+        // ——— Pas (encore) sur Jellyfin : demande à Radarr / Sonarr, et lecture tout de suite via Lumio Secour ———
+        const health = settings.chatUrl ? await serverHealth(settings).catch(() => null) : null;
+        if (settings.chatUrl && settings.jellyfin && health?.features?.includes('secour-stream')) {
+          const season = type === 'tv' ? res.season ?? 1 : undefined;
+          const episode = type === 'tv' ? res.episode ?? 1 : undefined;
+          // Demande (déjà demandé, quota… : ignoré, la lecture n'en dépend pas)
+          requestsApi
+            .create(settings, {
+              type,
+              tmdbId,
+              tvdbId: type === 'tv' ? (details as any).external_ids?.tvdb_id ?? undefined : undefined,
+              seasons: type === 'tv' ? [season!] : undefined,
+              title: p.title,
+              year: ((details as any).release_date ?? (details as any).first_air_date ?? '').slice(0, 4) || undefined,
+              poster: tmdbImg(details.poster_path, 'w342') ?? undefined,
+              backdrop: tmdbImg(details.backdrop_path, 'w780') ?? undefined,
+            })
+            .catch(() => {});
+          setStep('Pas encore sur le serveur : recherche d’un lien de lecture…');
+          try {
+            const st = await secourStreamApi.get(settings, { type, tmdbId, imdb, season, episode });
+            if (cancelled.current) return;
+            const ep = type === 'tv' ? `S${season}E${episode}` : '';
+            router.replace({
+              pathname: '/player',
+              params: {
+                kind: 'url',
+                uri: st.url,
+                title: type === 'tv' ? `${p.title} · ${ep}` : p.title,
+                subtitle: `Lumio Secour${st.quality && st.quality !== 'Unknown' ? ` · ${st.quality}` : ''} · en attendant le téléchargement`,
+                // Épisode suivant : le lecteur repasse par cet écran
+                ...(type === 'tv' ? { tmdbId: String(tmdbId), imdb, series: p.title, season: String(season), episode: String(episode) } : {}),
+              },
+            });
+            return;
+          } catch (e: any) {
+            throw new Error(
+              `${e?.message ?? String(e)}\n\nLa demande est envoyée : ${type === 'tv' ? 'l’épisode' : 'le film'} arrivera sur le serveur dès qu’il sera téléchargé.`
+            );
+          }
+        }
         throw new Error(
           type === 'tv' && res.season != null
             ? `L’épisode S${res.season}E${res.episode} n’est pas encore sur ton serveur. Demande-le depuis la fiche.`

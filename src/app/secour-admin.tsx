@@ -17,7 +17,9 @@ import {
   type AlldebridStatus,
   type SecourCategory,
   type SecourField,
+  secourDebridApi,
   type SecourAuto,
+  type SecourDebrid,
   type SecourHealth,
   type SecourStatus,
   type SecourTarget,
@@ -132,7 +134,7 @@ export default function SecourAdmin() {
     }
   };
 
-  const saveAuto = async (body: Partial<{ enabled: boolean; force: boolean; movie: SecourTarget; tv: SecourTarget }>) => {
+  const saveAuto = async (body: Partial<{ enabled: boolean; force: boolean; stream: boolean; movie: SecourTarget; tv: SecourTarget }>) => {
     try {
       setAuto(await secourAdminApi.saveAuto(settings, body));
       toast('Groupe de secours enregistré');
@@ -275,8 +277,11 @@ export default function SecourAdmin() {
           <Button title="Enregistrer et tester" icon="link-outline" onPress={saveConnection} disabled={!status?.fromEnv && !url.trim()} />
         </View>}
 
-        {/* ——— AllDebrid ——— */}
-        <View style={styles.card}>
+        {/* ——— Service de téléchargement : TorBox ou AllDebrid ——— */}
+        <DebridCard onChange={load} />
+
+        {/* ——— AllDebrid (si c'est le service choisi) ——— */}
+        {status?.service === 'torbox' ? null : <View style={styles.card}>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <Text style={[styles.cardTitle, { flex: 1 }]}>AllDebrid</Text>
             <Pressable onPress={() => router.push('/downloads')} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
@@ -335,7 +340,7 @@ export default function SecourAdmin() {
               </View>
             </>
           )}
-        </View>
+        </View>}
 
         {/* ——— Sources ——— */}
         {online ? (
@@ -422,8 +427,83 @@ export default function SecourAdmin() {
   );
 }
 
+/** Service de téléchargement de Lumio Secour : TorBox (plusieurs IP acceptées, streaming possible) ou AllDebrid. */
+function DebridCard({ onChange }: { onChange: () => void }) {
+  const { settings } = useSettings();
+  const [d, setD] = useState<SecourDebrid | null>(null);
+  const [key, setKey] = useState('');
+  const load = useCallback(() => {
+    secourDebridApi.get(settings, true).then(setD).catch(() => setD(null));
+  }, [settings]);
+  useEffect(load, [load]);
+  const save = async (body: { service?: 'torbox' | 'alldebrid'; torboxKey?: string }) => {
+    try {
+      await secourDebridApi.save(settings, body);
+      setKey('');
+      toast(body.torboxKey !== undefined ? (body.torboxKey ? 'Clé TorBox enregistrée sur le serveur' : 'Clé TorBox retirée') : 'Service enregistré');
+      load();
+      onChange();
+    } catch (e: any) {
+      toast(e?.message ?? String(e), 'error');
+    }
+  };
+  if (!d) return null;
+  const acc = d.torbox.account;
+  return (
+    <View style={styles.card}>
+      <Text style={styles.cardTitle}>Service de téléchargement</Text>
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        <SegChip label="TorBox" on={d.service === 'torbox'} onPress={() => !d.fromEnv && save({ service: 'torbox' })} />
+        <SegChip label="AllDebrid" on={d.service === 'alldebrid'} onPress={() => !d.fromEnv && save({ service: 'alldebrid' })} />
+      </View>
+      <Text style={styles.faint}>
+        TorBox accepte plusieurs adresses IP : c'est lui qui permet aussi de regarder en attendant le téléchargement. Sources prises en charge par TorBox : Zone-Téléchargement,
+        Free-Telecharger, Darki-API, Movix, Webshare (pas Wawacity).
+      </Text>
+      {d.service === 'torbox' ? (
+        <>
+          {d.torbox.configured ? (
+            acc && !acc.error ? (
+              <Text style={styles.dim}>
+                <Text style={{ color: C.text, fontWeight: '700' }}>{acc.email ?? 'Compte TorBox'}</Text>
+                {acc.premium ? <Text style={{ color: C.success }}> · {acc.plan}{acc.premiumUntil ? ` jusqu’au ${fmtDate(acc.premiumUntil)}` : ''}</Text> : <Text style={{ color: C.danger }}> · offre gratuite</Text>}
+              </Text>
+            ) : (
+              <Text style={[styles.dim, { color: acc?.error ? C.danger : C.textDim }]}>{acc?.error ? `Clé enregistrée, mais : ${acc.error}` : 'Clé enregistrée'}</Text>
+            )
+          ) : (
+            <Text style={styles.dim}>Aucune clé : torbox.app → Settings → API Key. Elle reste sur le serveur Lumio, jamais sur le téléphone.</Text>
+          )}
+          {d.torbox.fromEnv ? (
+            <Text style={styles.dim}>
+              <Ionicons name="lock-closed" size={11} color={C.textDim} /> Clé fixée dans le docker-compose (TORBOX_KEY).
+            </Text>
+          ) : (
+            <>
+              <TextInput
+                value={key}
+                onChangeText={setKey}
+                placeholder={d.torbox.configured ? 'Nouvelle clé (remplace l’actuelle)' : 'Clé API TorBox'}
+                placeholderTextColor={C.textFaint}
+                autoCapitalize="none"
+                autoCorrect={false}
+                secureTextEntry
+                style={styles.input}
+              />
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <Button title="Enregistrer" icon="key-outline" onPress={() => save({ torboxKey: key.trim() })} disabled={!key.trim()} style={{ flex: 1 }} />
+                {d.torbox.configured ? <Button title="Retirer" variant="danger" onPress={() => save({ torboxKey: '' })} /> : null}
+              </View>
+            </>
+          )}
+        </>
+      ) : null}
+    </View>
+  );
+}
+
 /** Groupe de secours : activé ou non, disque et dossier des films et des séries. */
-function AutoCard({ auto, onSave }: { auto: SecourAuto; onSave: (b: Partial<{ enabled: boolean; force: boolean; movie: SecourTarget; tv: SecourTarget }>) => void }) {
+function AutoCard({ auto, onSave }: { auto: SecourAuto; onSave: (b: Partial<{ enabled: boolean; force: boolean; stream: boolean; movie: SecourTarget; tv: SecourTarget }>) => void }) {
   const [movie, setMovie] = useState<SecourTarget>(auto.movie ?? { root: auto.disks[0] ?? '', folder: 'Films' });
   const [tv, setTv] = useState<SecourTarget>(auto.tv ?? { root: auto.disks[0] ?? '', folder: 'Séries' });
   const missing = [!auto.engine && 'moteur hors ligne', !auto.alldebrid && 'clé AllDebrid', !auto.disks.length && 'disques (LUMIO_DISKS)'].filter(Boolean);
@@ -484,6 +564,17 @@ function AutoCard({ auto, onSave }: { auto: SecourAuto; onSave: (b: Partial<{ en
         />
       </View>
       {auto.force ? <Text style={[styles.dim, { color: C.warning, fontWeight: '700' }]}>⚠️ Simulation active : Radarr et Sonarr sont ignorés.</Text> : null}
+      {auto.service === 'torbox' ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.fieldLabel, { flex: 0 }]}>Regarder en attendant le téléchargement</Text>
+            <Text style={styles.faint}>
+              Un titre pas encore sur Jellyfin se lit tout de suite avec TorBox (bouton « Regarder »), pendant que Radarr / Sonarr le téléchargent. Pour toute la famille.
+            </Text>
+          </View>
+          <Switch value={auto.stream !== false} onValueChange={(v) => onSave({ stream: v })} trackColor={{ true: C.success, false: C.border }} />
+        </View>
+      ) : null}
       {auto.disks.length ? (
         <>
           {target('Films', movie, setMovie)}

@@ -5,8 +5,10 @@
 #   POST /lumio/resolve {link, hoster, source, season, episode, type} → { url } (lien direct AllDebrid)
 #   GET/PUT /lumio/settings · DELETE /lumio/settings/{KEY} → réglages du fork
 #   GET  /lumio/health?refresh=true       → état des sources
-# Sécurité : en-tête X-Lumio-Key = LUMIO_API_KEY (obligatoire). La clé AllDebrid arrive à chaque appel
-# dans X-Debrid-Key : elle n'est jamais enregistrée ici. Le jeton TMDB peut venir de X-Tmdb-Key.
+# Sécurité : en-tête X-Lumio-Key = LUMIO_API_KEY (obligatoire). La clé du service de téléchargement
+# (X-Debrid-Service : torbox ou alldebrid) arrive à chaque appel dans X-Debrid-Key : elle n'est jamais
+# enregistrée ici. Le jeton TMDB peut venir de X-Tmdb-Key.
+#   POST /lumio/check                      → contrôle des sources + mise à jour des domaines (le soir, par le serveur)
 
 import hmac
 import time
@@ -48,13 +50,18 @@ def _debrid_key(request: Request) -> str:
     return (request.headers.get("X-Debrid-Key") or "").strip()
 
 
+def _service(request: Request) -> str:
+    s = (request.headers.get("X-Debrid-Service") or "alldebrid").strip().lower()
+    return s if s in ("alldebrid", "torbox") else "alldebrid"
+
+
 def _tmdb_token(request: Request) -> str:
     return (settings.TMDB_API_KEY or request.headers.get("X-Tmdb-Key") or "").strip()
 
 
-def _config(debrid_key: str, tmdb: str) -> Dict[str, Any]:
+def _config(debrid_key: str, tmdb: str, service: str = "alldebrid") -> Dict[str, Any]:
     return {
-        "debrid_services": [{"service": "alldebrid", "api_key": debrid_key}] if debrid_key else [],
+        "debrid_services": [{"service": service, "api_key": debrid_key}] if debrid_key else [],
         "tmdb_api_token": tmdb,
     }
 
@@ -81,6 +88,7 @@ async def ping(request: Request):
         "sources": _sources(),
         "tmdb": bool(_tmdb_token(request)),
         "debrid": bool(_debrid_key(request)),
+        "service": _service(request),
     }
 
 
@@ -99,7 +107,7 @@ async def links(
     if not tmdb:
         raise HTTPException(status_code=400, detail="Jeton TMDB manquant (réglage TMDB_API_KEY de Lumio Secour)")
     debrid_key = _debrid_key(request)
-    config = _config(debrid_key, tmdb)
+    config = _config(debrid_key, tmdb, _service(request))
 
     metadata = await stream_service._get_metadata(imdb, tmdb)
     if not metadata:
@@ -168,19 +176,20 @@ async def resolve(request: Request, body: Dict[str, Any] = Body(...)):
     _check_key(request)
     debrid_key = _debrid_key(request)
     if not debrid_key:
-        raise HTTPException(status_code=400, detail="Clé AllDebrid manquante")
+        raise HTTPException(status_code=400, detail="Clé du service de téléchargement manquante")
     link = str(body.get("link") or "").strip()
     if not link.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="Lien invalide")
     season = body.get("season")
     episode = body.get("episode")
     content_type = "series" if body.get("type") in ("series", "tv") else "movie"
+    service = _service(request)
     result = await stream_service.resolve_link(
         link,
-        _config(debrid_key, _tmdb_token(request)),
+        _config(debrid_key, _tmdb_token(request), service),
         str(season) if season not in (None, "") else None,
         str(episode) if episode not in (None, "") else None,
-        "alldebrid",
+        service,
         content_type,
         None,
         body.get("source") or None,
@@ -190,10 +199,10 @@ async def resolve(request: Request, body: Dict[str, Any] = Body(...)):
         return {"url": result}
     messages = {
         "LINK_DOWN": "Lien mort",
-        "LINK_SERVICE_DOWN": "Hébergeur indisponible chez AllDebrid",
-        "LINK_UNSUPPORTED": "Hébergeur non pris en charge par AllDebrid",
-        "LINK_UNCACHED": "Fichier pas encore prêt chez AllDebrid",
-        "RETRY_ERROR": "AllDebrid ne répond pas, réessaie",
+        "LINK_SERVICE_DOWN": "Hébergeur indisponible chez le service de téléchargement",
+        "LINK_UNSUPPORTED": "Hébergeur non pris en charge par le service de téléchargement",
+        "LINK_UNCACHED": "Fichier pas encore prêt (le service le prépare, réessaie dans un moment)",
+        "RETRY_ERROR": "Le service de téléchargement ne répond pas, réessaie",
     }
     raise HTTPException(status_code=422, detail=messages.get(str(result), f"Conversion impossible ({result or 'erreur'})"))
 
@@ -230,3 +239,14 @@ async def health(request: Request, refresh: bool = Query(False)):
     _check_key(request)
     data = await check_sources_only() if refresh else get_health_status()
     return {"sources": data.get("sources", []), "summary": data.get("summary", {}), "last_check": data.get("last_sources_check")}
+
+
+@router.post("/check")
+async def nightly_check(request: Request):
+    """Contrôle des sources (suit les redirections vers une nouvelle adresse) puis chaînes Telegram si activées."""
+    _check_key(request)
+    from lumio_secour.services.domain_sync import trigger_domain_sync
+
+    data = await check_sources_only()
+    sync = await trigger_domain_sync() if settings.DOMAIN_SYNC_ENABLED else "disabled"
+    return {"summary": data.get("summary", {}), "domain_sync": sync}

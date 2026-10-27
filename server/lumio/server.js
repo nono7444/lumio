@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.49.0';
+const VERSION = '3.50.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2284,6 +2284,9 @@ function startEmbeddedSecour() {
     DATABASE_TYPE: 'sqlite',
     DATABASE_PATH: path.join(dir, 'secour.db'),
     LOG_LEVEL: process.env.SECOUR_LOG_LEVEL || 'INFO',
+    // Contrôle des sites : une fois par nuit vers minuit (déclenché par ce serveur), plus toutes les minutes
+    HEALTH_CHECK_INTERVAL: process.env.SECOUR_HEALTH_CHECK_INTERVAL || String(7 * 86400),
+    DOMAIN_SYNC_INTERVAL: process.env.SECOUR_DOMAIN_SYNC_INTERVAL || String(7 * 86400),
   };
   for (const [k, v] of Object.entries(process.env)) if (k.startsWith('SECOUR_') && k !== 'SECOUR_LOG_LEVEL') env[k.slice(7)] = v;
   const { spawn } = require('child_process');
@@ -2317,10 +2320,86 @@ for (const sig of ['SIGTERM', 'SIGINT'])
     process.exit(0);
   });
 
+// ——— Streaming Lumio Secour (TorBox seulement) : lien direct en attendant que Radarr / Sonarr téléchargent ———
+// Réservé à TorBox, qui accepte un compte utilisé depuis plusieurs adresses IP (la famille regarde depuis chez elle).
+const secourStreamReady = () => config.secourStream !== false && secourService() === 'torbox' && Boolean(torboxKey()) && Boolean(secourUrl() && secourKey());
+const streamCache = new Map(); // "movie:603" / "tv:1399:1:2" → { at, value }
+const streamPending = new Map();
+async function secourStream(b, user) {
+  const type = b.type === 'tv' ? 'tv' : 'movie';
+  const tmdbId = Number(b.tmdbId);
+  if (!tmdbId) throw new HttpError(400, 'Identifiant TMDB manquant');
+  const season = type === 'tv' ? Number(b.season) || 1 : null;
+  const episode = type === 'tv' ? Number(b.episode) || 1 : null;
+  const key = `${type}:${tmdbId}${type === 'tv' ? `:${season}:${episode}` : ''}`;
+  const hit = streamCache.get(key);
+  // Liens AllDebrid valables quelques heures : gardés 2 h (b.retry : le lecteur n'a pas pu lire, on en cherche un autre)
+  if (hit && Date.now() - hit.at < 2 * 3600e3 && !b.retry) return hit.value;
+  if (streamPending.has(key)) return streamPending.get(key);
+  const job = (async () => {
+    let imdb = typeof b.imdb === 'string' && /^tt\d+$/.test(b.imdb) ? b.imdb : '';
+    if (!imdb) {
+      const ext = await tmdbGet(`/${type}/${tmdbId}/external_ids`).catch(() => null);
+      imdb = (ext && ext.imdb_id) || '';
+    }
+    if (!imdb) throw new HttpError(404, 'Identifiant IMDb introuvable pour ce titre');
+    const qs = new URLSearchParams({ imdb, type: type === 'tv' ? 'series' : 'movie' });
+    if (type === 'tv') {
+      qs.set('season', String(season));
+      qs.set('episode', String(episode));
+    }
+    const found = await secour(`/lumio/links?${qs}`, { timeout: 120000 });
+    const skip = new Set(b.retry && hit ? hit.tried || [] : []);
+    // Lecture : un fichier prêt chez AllDebrid d'abord, en évitant les très gros fichiers (4K remux) pour le réseau
+    const list = rankSecourLinks(((found && found.links) || []).filter((l) => !skip.has(l.link)));
+    const candidates = [...list.filter((l) => l.cached), ...list.filter((l) => !l.cached)].slice(0, 5);
+    if (!candidates.length) throw new HttpError(404, 'Aucun lien trouvé par Lumio Secour pour le moment');
+    const tried = [...skip];
+    for (const l of candidates) {
+      tried.push(l.link);
+      try {
+        const r = await secour('/lumio/resolve', {
+          method: 'POST',
+          body: { link: l.link, hoster: l.hoster, source: l.source, season: l.season ?? season, episode: l.episode ?? episode, type: type === 'tv' ? 'series' : 'movie' },
+          timeout: 90000,
+        });
+        if (!r || !r.url) continue;
+        const value = { url: r.url, name: l.name || fileNameFromUrl(r.url), quality: l.quality, language: l.language, size: l.size, source: l.source, hoster: l.hoster };
+        streamCache.set(key, { at: Date.now(), value, tried });
+        console.log(`Streaming Lumio Secour : ${user.name} → ${key} (${l.source} · ${l.hoster} · ${l.quality})`);
+        return value;
+      } catch (e) {
+        console.log(`Streaming Lumio Secour : ${key} — ${l.hoster} en échec (${e.message})`);
+      }
+    }
+    throw new HttpError(502, 'Les liens trouvés ne sont pas lisibles pour le moment');
+  })().finally(() => streamPending.delete(key));
+  streamPending.set(key, job);
+  return job;
+}
+
+// ——— Chaque nuit vers minuit (heure de Paris) : contrôle des sites, nouvelles adresses suivies toutes seules ———
+setInterval(async () => {
+  if (!secourUrl() || !secourKey()) return;
+  const now = new Date();
+  const paris = new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
+  const part = (t) => (paris.find((x) => x.type === t) || {}).value;
+  const day = `${part('year')}-${part('month')}-${part('day')}`;
+  if (part('hour') !== '00' || config.secourNightly === day) return;
+  config.secourNightly = day;
+  saveConfig();
+  try {
+    const r = await secour('/lumio/check', { method: 'POST', timeout: 300000 });
+    console.log(`Lumio Secour : contrôle de nuit — ${r.summary ? `${r.summary.online}/${r.summary.total} sources en ligne` : 'fait'}`);
+  } catch (e) {
+    console.log(`Lumio Secour : contrôle de nuit impossible — ${e.message}`);
+  }
+}, 5 * 60_000);
+
 // ——— Groupe de secours : quand Radarr / Sonarr ne marchent plus, Lumio Secour prend le relais ———
 // La demande reste « approuvée » : Lumio cherche les liens, les convertit avec la clé AllDebrid du serveur
 // et range les fichiers façon Jellyfin (Films/Titre (année)/…, Séries/Titre (année)/Season 01/…), un à la fois.
-const secourAutoOn = () => config.secourAuto !== false && Boolean(secourUrl() && secourKey()) && Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey) && disks().length > 0;
+const secourAutoOn = () => config.secourAuto !== false && Boolean(secourUrl() && secourKey()) && Boolean(secourDebridKey()) && disks().length > 0;
 
 /** Dossier de destination : réglé dans l'appli, sinon SECOUR_MOVIES / SECOUR_SERIES (« disque:dossier »), sinon deviné. */
 function secourTarget(kind, r) {
@@ -2343,7 +2422,10 @@ function secourAutoView() {
     enabled: config.secourAuto !== false,
     force: Boolean(config.secourForce),
     ready: secourAutoOn(),
-    alldebrid: Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey),
+    alldebrid: Boolean(secourDebridKey()),
+    service: secourService(),
+    stream: config.secourStream !== false,
+    streamReady: secourStreamReady(),
     engine: Boolean(secourUrl() && secourKey()),
     disks: disks().map((d) => d.name),
     movie: secourTarget('movie'),
@@ -2375,7 +2457,7 @@ const secourStopped = (r) => !requests.includes(r) || r.status === RequestStatus
 let secourBusy = false;
 function startSecour(r, reason, opts = {}) {
   if (!secourUrl() || !secourKey()) throw new HttpError(400, 'Lumio Secour n’est pas prêt');
-  if (!(process.env.ALLDEBRID_KEY || config.alldebridKey)) throw new HttpError(400, 'Clé AllDebrid non configurée (Téléchargements)');
+  if (!secourDebridKey()) throw new HttpError(400, `Clé ${secourServiceName()} non configurée (Lumio Secour)`);
   if (!secourTarget(r.type === 'movie' ? 'movie' : 'tv', r)) throw new HttpError(400, 'Aucun disque configuré (LUMIO_DISKS)');
   r.status = RequestStatus.APPROVED;
   r.via = 'secour';
@@ -2537,6 +2619,26 @@ async function runSecourQueue() {
   }
 }
 
+// ——— Service de téléchargement de Lumio Secour : TorBox (par défaut dès qu'une clé est là) ou AllDebrid ———
+// Les clés restent sur ce serveur (config.json ou .env), jamais dans l'appli ni dans Git.
+const torboxKey = () => process.env.TORBOX_KEY || config.torboxKey || '';
+const secourService = () => {
+  const s = process.env.SECOUR_DEBRID || config.secourDebrid;
+  if (s === 'torbox' || s === 'alldebrid') return s;
+  return torboxKey() ? 'torbox' : 'alldebrid';
+};
+const secourDebridKey = () => (secourService() === 'torbox' ? torboxKey() : process.env.ALLDEBRID_KEY || config.alldebridKey || '');
+const secourServiceName = () => (secourService() === 'torbox' ? 'TorBox' : 'AllDebrid');
+/** Compte TorBox (formule, fin d'abonnement), pour l'écran Lumio Secour. */
+async function torboxAccount() {
+  const r = await fetch('https://api.torbox.app/v1/api/user/me', { headers: { Authorization: `Bearer ${torboxKey()}` } });
+  const j = await r.json().catch(() => null);
+  if (!r.ok || !j || j.success === false) throw new Error((j && (j.detail || j.error)) || `HTTP ${r.status}`);
+  const d = j.data || {};
+  const plans = { 0: 'Gratuit', 1: 'Essential', 2: 'Pro', 3: 'Standard' };
+  return { email: d.email || null, plan: plans[d.plan] ?? String(d.plan ?? ''), premium: Number(d.plan) > 0, premiumUntil: d.premium_expires_at || null };
+}
+
 // ——— Lumio Secour : liens d'hébergeurs pour un film ou un épisode ———
 // Adresse et clé : LUMIO_SECOUR_URL / LUMIO_SECOUR_KEY, ou envoyées par l'appli de l'admin.
 // La clé AllDebrid reste ici : elle est transmise à Lumio Secour à chaque appel, jamais à l'appli.
@@ -2548,14 +2650,14 @@ async function secour(pathname, { method = 'GET', body, timeout = 60000 } = {}) 
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeout);
   try {
-    const adKey = process.env.ALLDEBRID_KEY || config.alldebridKey;
+    const adKey = secourDebridKey();
     const tk = tmdbKey();
     const r = await fetch(`${secourUrl()}${pathname}`, {
       method,
       signal: ctrl.signal,
       headers: {
         'X-Lumio-Key': secourKey(),
-        ...(adKey ? { 'X-Debrid-Key': adKey } : {}),
+        ...(adKey ? { 'X-Debrid-Key': adKey, 'X-Debrid-Service': secourService() } : {}),
         ...(tk ? { 'X-Tmdb-Key': tk } : {}),
         ...(body ? { 'Content-Type': 'application/json' } : {}),
       },
@@ -2878,7 +2980,7 @@ const server = http.createServer(async (req, res) => {
       ok: true,
       version: VERSION,
       messages: messages.length,
-      features: ['chat', 'requests', 'status', 'ideas', 'ratings', 'files', 'watchlist', ...(tmdbKey() ? ['tmdb'] : [])],
+      features: ['chat', 'requests', 'status', 'ideas', 'ratings', 'files', 'watchlist', ...(tmdbKey() ? ['tmdb'] : []), ...(secourStreamReady() ? ['secour-stream'] : [])],
       radarr: Boolean(arrConfig('radarr')),
       sonarr: Boolean(arrConfig('sonarr')),
     });
@@ -3919,12 +4021,22 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       }
     }
 
+    // ——— Lumio Secour en streaming (toute la famille) : pas encore sur Jellyfin → lien direct pour le lecteur ———
+    // Le serveur cherche, choisit le meilleur fichier (prêt chez TorBox d'abord) et le convertit avec sa clé TorBox :
+    // l'appli ne reçoit qu'un lien de lecture temporaire, jamais la clé. Coupable avec config.secourStream = false.
+    if (req.method === 'POST' && p === '/api/secour/stream') {
+      if (config.secourStream === false) throw new HttpError(403, 'Le streaming Lumio Secour est désactivé par l’admin');
+      if (!secourStreamReady()) throw new HttpError(503, 'Streaming disponible seulement avec TorBox (Lumio Secour)');
+      const b = await readBody(req);
+      return send(res, 200, await secourStream(b, user));
+    }
+
     // ——— Admin : Lumio Secour (liens d'hébergeurs → AllDebrid → disques) ———
     if (p === '/api/secour' || p.startsWith('/api/secour/')) {
       requireAdmin(user);
       if (req.method === 'GET' && p === '/api/secour') {
         const out = { configured: Boolean(secourUrl() && secourKey()), url: secourUrl() || null, fromEnv: Boolean(process.env.LUMIO_SECOUR_URL) || secourEmbedded(),
-          embedded: secourEmbedded() || Boolean(secourInstall), install: secourInstall || undefined, alldebrid: Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey), disks: disks().length,
+          embedded: secourEmbedded() || Boolean(secourInstall), install: secourInstall || undefined, alldebrid: Boolean(secourDebridKey()), service: secourService(), disks: disks().length,
           auto: secourAutoView() };
         if (secourInstall) Object.assign(out, { online: false, error: secourInstall.message });
         else if (out.configured) {
@@ -3945,12 +4057,36 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         saveConfig();
         return send(res, 200, { configured: Boolean(secourUrl() && secourKey()) });
       }
+      // Service de téléchargement : TorBox ou AllDebrid, et clé TorBox (gardée sur le serveur)
+      if (req.method === 'GET' && p === '/api/secour/debrid') {
+        const out = {
+          service: secourService(),
+          fromEnv: Boolean(process.env.SECOUR_DEBRID),
+          torbox: { configured: Boolean(torboxKey()), fromEnv: Boolean(process.env.TORBOX_KEY) },
+          alldebrid: { configured: Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey), fromEnv: Boolean(process.env.ALLDEBRID_KEY) },
+        };
+        if (q.get('check') && torboxKey()) out.torbox.account = await torboxAccount().catch((e) => ({ error: e.message }));
+        return send(res, 200, out);
+      }
+      if (req.method === 'PUT' && p === '/api/secour/debrid') {
+        const b = await readBody(req);
+        if (b.service === 'torbox' || b.service === 'alldebrid') config.secourDebrid = b.service;
+        if (typeof b.torboxKey === 'string') {
+          const k = b.torboxKey.trim();
+          if (k) config.torboxKey = k;
+          else delete config.torboxKey;
+        }
+        saveConfig();
+        streamCache.clear();
+        return send(res, 200, { service: secourService(), torbox: { configured: Boolean(torboxKey()) } });
+      }
       // Groupe de secours : activé ou non, dossiers de destination
       if (req.method === 'GET' && p === '/api/secour/auto') return send(res, 200, secourAutoView());
       if (req.method === 'PUT' && p === '/api/secour/auto') {
         const b = await readBody(req);
         if (typeof b.enabled === 'boolean') config.secourAuto = b.enabled;
         if (typeof b.force === 'boolean') config.secourForce = b.force;
+        if (typeof b.stream === 'boolean') config.secourStream = b.stream;
         for (const k of ['movie', 'tv']) {
           const t = b[k];
           if (t && typeof t === 'object') {
@@ -4044,7 +4180,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         return send(res, 200, await secour(`/lumio/links?${qs}`, { timeout: 90000 }));
       }
       if (req.method === 'POST' && p === '/api/secour/download') {
-        if (!(process.env.ALLDEBRID_KEY || config.alldebridKey)) throw new HttpError(400, 'Clé AllDebrid non configurée (Téléchargements)');
+        if (!secourDebridKey()) throw new HttpError(400, `Clé ${secourServiceName()} non configurée (Lumio Secour)`);
         const b = await readBody(req);
         const link = String(b.link || '').trim();
         if (!/^https?:\/\//.test(link)) throw new HttpError(400, 'Lien invalide');

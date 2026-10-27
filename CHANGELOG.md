@@ -6,6 +6,10 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Bêta : fiche allégée — genre dans les pastilles (plus de ligne de genres ni d'étiquette d'état), résumé sur 3 lignes avec « Plus », 2 avis de la famille affichés (« Voir les avis » pour le reste).
+- Bêta : Lumio Secour fonctionne avec TorBox (ou AllDebrid) : choix du service et clé TorBox dans les réglages de Lumio Secour, compte et formule affichés.
+- Bêta : avec TorBox, bouton « Regarder » sur les titres pas encore sur le serveur : lecture tout de suite pendant que Radarr / Sonarr téléchargent (la demande part en même temps). Désactivable.
+- Bêta : Lumio Secour ne contrôle plus les sites toutes les minutes, mais une fois par nuit vers minuit.
 - Bêta : ton rang en haut de l'accueil, avec son écusson (10 rangs, du bois à l'or) ; un appui ouvre ta page de stats. Les écussons remplacent aussi les émojis dans Récompenses.
 - Bêta : Lumio Secour suit tout seul les changements d'adresse d'un site (redirection vers le nouveau domaine), avec une notification à l'admin.
 - Bêta : fiche plus claire — une seule ligne d'actions (Lire ou « À voir », puis petits boutons Proposer et « LS »), ensuite la demande, le résumé, les épisodes / saisons, les notes de la famille et le casting.
