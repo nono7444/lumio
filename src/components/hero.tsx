@@ -163,21 +163,30 @@ export function HeroTopBar({
   season,
   right,
   badge,
+  lead,
 }: {
   title: string;
   onCustomize?: () => void;
   season?: Season | null;
   right?: ReactNode;
-  /** À côté du nom (ex. pastille du rang) */
+  /** Sous le nom (ex. pastille du rang) */
   badge?: ReactNode;
+  /** Remplace le nom à gauche (ex. nom du profil + rang) ; il rétrécit sans passer sous les boutons */
+  lead?: ReactNode;
 }) {
   return (
     <View pointerEvents="box-none">
       <View style={styles.topBar} pointerEvents="box-none">
-        <Text style={styles.brand} numberOfLines={1}>
-          {title}
-          {season ? <Text style={{ fontSize: 22 }}> {season.emoji}</Text> : null}
-        </Text>
+        {lead ? (
+          <View style={styles.lead} pointerEvents="box-none">
+            {lead}
+          </View>
+        ) : (
+          <Text style={styles.brand} numberOfLines={1}>
+            {title}
+            {season ? <Text style={{ fontSize: 22 }}> {season.emoji}</Text> : null}
+          </Text>
+        )}
         {/* Les boutons de droite ne rétrécissent jamais : rien ne passe dessous */}
         <View style={styles.right} pointerEvents="box-none">
           {right ??
@@ -220,5 +229,6 @@ const styles = StyleSheet.create({
   topBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
   brand: { color: C.text, fontSize: 26, fontWeight: '900', letterSpacing: -0.6, flexShrink: 1, marginRight: 10 },
   right: { flexShrink: 0 },
+  lead: { flexShrink: 1, marginRight: 10 },
   badgeRow: { flexDirection: 'row', paddingHorizontal: 20, marginTop: 6 },
 });

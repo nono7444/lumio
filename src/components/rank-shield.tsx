@@ -118,6 +118,28 @@ export function useMyRank(nonce = 0): MyRank | null {
   return me;
 }
 
+/** Haut de l'accueil : nom du profil, puis l'écusson et le rang ; un appui ouvre les stats et les bonus. */
+export function ProfileRank({ nonce = 0 }: { nonce?: number }) {
+  const { settings } = useSettings();
+  const me = useMyRank(nonce);
+  const name = settings.jellyfin?.userName ?? 'Lumio';
+  return (
+    <Pressable onPress={() => router.push('/rewards')} hitSlop={8} style={pill.profile} accessibilityLabel={`${name}${me ? `, rang ${me.name}` : ''} : voir mes stats`}>
+      <Text style={pill.user} numberOfLines={1}>
+        {name}
+      </Text>
+      {me ? (
+        <View style={[pill.wrap, { flexShrink: 0 }]}>
+          <RankShield tier={me.tier} size={18} />
+          <Text style={pill.name} numberOfLines={1}>
+            {me.name}
+          </Text>
+        </View>
+      ) : null}
+    </Pressable>
+  );
+}
+
 export function RankPill({ nonce = 0 }: { nonce?: number }) {
   const me = useMyRank(nonce);
   if (!me) return null;
@@ -134,6 +156,9 @@ export function RankPill({ nonce = 0 }: { nonce?: number }) {
 }
 
 const pill = StyleSheet.create({
+  profile: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 },
+  user: { color: C.text, fontSize: 26, fontWeight: '900', letterSpacing: -0.6, flexShrink: 1 },
+  // la pastille du rang garde sa taille, c'est le nom qui rétrécit
   wrap: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.14)', borderRadius: 999, paddingLeft: 6, paddingRight: 11, paddingVertical: 4 },
   name: { color: C.text, fontSize: 13, fontWeight: '800' },
 });

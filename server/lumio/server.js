@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.51.0';
+const VERSION = '3.52.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -203,8 +203,21 @@ function permissionsOf(user) {
 }
 
 /** Quota restant, compté comme Seerr : films = nombre de demandes, séries = nombre de saisons. */
+/** Bonus du rang d'un membre (films, saisons en plus sur le quota), d'après le dernier classement calculé. */
+function gradeBonusOf(userId) {
+  const u = rewardsCache && rewardsCache.value.users.find((x) => x.id === userId);
+  return (u && u.grade && u.grade.bonus) || { movies: 0, seasons: 0 };
+}
+
 function quotaOf(user) {
-  const perm = permissionsOf(user);
+  const base = permissionsOf(user);
+  const bonus = gradeBonusOf(user.id);
+  // Un quota de 0 = illimité : le bonus ne s'ajoute qu'aux quotas fixés
+  const perm = {
+    ...base,
+    movieQuotaLimit: base.movieQuotaLimit ? base.movieQuotaLimit + (bonus.movies || 0) : 0,
+    tvQuotaLimit: base.tvQuotaLimit ? base.tvQuotaLimit + (bonus.seasons || 0) : 0,
+  };
   const since = (days) => Date.now() - days * 86400000;
   const mine = requests.filter((r) => r.requestedBy.id === user.id && r.status !== RequestStatus.DECLINED);
   const movieUsed = mine.filter((r) => r.type === 'movie' && Date.parse(r.createdAt) > since(perm.movieQuotaDays)).length;
@@ -214,6 +227,7 @@ function quotaOf(user) {
   return {
     movie: { limit: perm.movieQuotaLimit, days: perm.movieQuotaDays, used: movieUsed, remaining: perm.movieQuotaLimit ? Math.max(0, perm.movieQuotaLimit - movieUsed) : null },
     tv: { limit: perm.tvQuotaLimit, days: perm.tvQuotaDays, used: tvUsed, remaining: perm.tvQuotaLimit ? Math.max(0, perm.tvQuotaLimit - tvUsed) : null },
+    bonus,
   };
 }
 
@@ -1303,18 +1317,19 @@ async function arrWanted() {
 
 // ——— Récompenses de la famille : points, grades et badges ———
 // Heures regardées et coups de cœur (Jellyfin), notes données, demandes, messages du chat, titres « À voir ».
-// 10 rangs, un écusson chacun dans l'appli (tier 0 à 9 : bois, bronze, cuivre, argent, acier, puis écussons dorés)
+// 10 rangs, un écusson chacun dans l'appli (tier 0 à 9 : bois, bronze, cuivre, argent, acier, puis écussons dorés).
+// Bonus de rang : demandes en plus sur le quota (films, saisons), pour les membres qui ont un quota.
 const GRADES = [
-  { min: 0, name: 'Spectateur', emoji: '🍿', tier: 0 },
-  { min: 100, name: 'Habitué', emoji: '🎟️', tier: 1 },
-  { min: 250, name: 'Cinéphile', emoji: '🎬', tier: 2 },
-  { min: 500, name: 'Critique', emoji: '📝', tier: 3 },
-  { min: 900, name: 'Expert', emoji: '🔎', tier: 4 },
-  { min: 1500, name: 'Réalisateur', emoji: '🎥', tier: 5 },
-  { min: 2500, name: 'Producteur', emoji: '💼', tier: 6 },
-  { min: 4000, name: 'Star', emoji: '🌟', tier: 7 },
-  { min: 6000, name: 'Icône', emoji: '👑', tier: 8 },
-  { min: 9000, name: 'Légende', emoji: '🏆', tier: 9 },
+  { min: 0, name: 'Spectateur', emoji: '🍿', tier: 0, bonus: { movies: 0, seasons: 0 } },
+  { min: 100, name: 'Habitué', emoji: '🎟️', tier: 1, bonus: { movies: 0, seasons: 1 } },
+  { min: 250, name: 'Cinéphile', emoji: '🎬', tier: 2, bonus: { movies: 1, seasons: 1 } },
+  { min: 500, name: 'Critique', emoji: '📝', tier: 3, bonus: { movies: 1, seasons: 2 } },
+  { min: 900, name: 'Expert', emoji: '🔎', tier: 4, bonus: { movies: 2, seasons: 2 } },
+  { min: 1500, name: 'Réalisateur', emoji: '🎥', tier: 5, bonus: { movies: 2, seasons: 3 } },
+  { min: 2500, name: 'Producteur', emoji: '💼', tier: 6, bonus: { movies: 3, seasons: 3 } },
+  { min: 4000, name: 'Star', emoji: '🌟', tier: 7, bonus: { movies: 3, seasons: 4 } },
+  { min: 6000, name: 'Icône', emoji: '👑', tier: 8, bonus: { movies: 4, seasons: 5 } },
+  { min: 9000, name: 'Légende', emoji: '🏆', tier: 9, bonus: { movies: 5, seasons: 6 } },
 ];
 const BADGES = [
   { id: 'marathon', emoji: '🏃', name: 'Marathonien', desc: '100 heures regardées', test: (x) => x.hours >= 100 },
@@ -1358,7 +1373,7 @@ async function rewardsBoard(token) {
     x.rank = i + 1;
     const g = [...GRADES].reverse().find((g) => x.points >= g.min) || GRADES[0];
     const next = GRADES.find((n) => n.min > x.points) || null;
-    x.grade = { name: g.name, emoji: g.emoji, min: g.min, tier: g.tier };
+    x.grade = { name: g.name, emoji: g.emoji, min: g.min, tier: g.tier, bonus: g.bonus };
     x.next = next ? { name: next.name, emoji: next.emoji, min: next.min, tier: next.tier } : null;
     x.badges = BADGES.filter((b) => b.test(x, x.rank)).map(({ id, emoji, name, desc }) => ({ id, emoji, name, desc }));
   });
@@ -1366,6 +1381,12 @@ async function rewardsBoard(token) {
   rewardsCache = { at: Date.now(), value };
   return value;
 }
+
+// Classement recalculé régulièrement : les bonus de rang (quotas) restent à jour même si personne n'ouvre les stats
+setInterval(() => {
+  const t = jfAdminToken || process.env.JELLYFIN_API_KEY;
+  if (t) rewardsBoard(t).catch(() => {});
+}, 15 * 60_000);
 
 /** Saisons d'une série dans la numérotation de Sonarr (TheTVDB), avec le nombre d'épisodes. */
 async function arrSeasons(tvdbId) {

@@ -1,5 +1,5 @@
 import { HomeShortcuts } from '@/components/home-shortcuts';
-import { RankPill } from '@/components/rank-shield';
+import { ProfileRank } from '@/components/rank-shield';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
@@ -476,7 +476,8 @@ export default function Home() {
         <HeroTopBar
           title="Lumio"
           season={season}
-          badge={settings.chatUrl && settings.jellyfin ? <RankPill nonce={nonce} /> : null}
+          // Nom du profil avec son rang à la place de « Lumio » ; un appui ouvre les stats et les bonus de rang
+          lead={settings.chatUrl && settings.jellyfin ? <ProfileRank nonce={nonce} /> : undefined}
           right={<HomeShortcuts onCustomize={() => router.push('/customize')} />}
         />
       </View>
