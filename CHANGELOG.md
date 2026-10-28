@@ -6,11 +6,14 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.109 — 28 octobre 2026
+
 - Accueil : rangée « Plateformes » (Netflix, Disney+, Prime Video, Apple TV+, Max, Canal+). Un appui ouvre la plateforme : ses titres sur ton serveur, puis ses dernières sorties (celles qui manquent se demandent depuis leur fiche). Tri du plus récent au plus ancien, ou l'inverse.
 - Profil → Serveur : la mise à jour des conteneurs affiche son avancement en pourcentage, avec l'étape en cours.
 - Vibrations au toucher coupées par défaut ; réglage « Vibrations au toucher » dans Profil → Lecture pour les remettre.
 - Affiches : plus de pastille bleue (nombre d'épisodes non vus) sur les séries.
 - Intro Skipper retiré (bouton d'installation dans Profil → Serveur).
+
 ## 1.0.108 — 28 octobre 2026
 
 - Accueil : ton nom de profil avec l'écusson de ton rang (10 rangs, du bois à l'or) à la place de « Lumio » ; un appui ouvre tes stats.
