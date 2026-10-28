@@ -23,7 +23,7 @@ import {
   type Req,
   type RequestFilter,
 } from '@/lib/requests';
-import { IS_BETA, secourAdminApi } from '@/lib/secour';
+import { secourAdminApi } from '@/lib/secour';
 import { useSettings } from '@/lib/settings';
 
 const FILTERS: { id: RequestFilter; label: string }[] = [
@@ -171,10 +171,10 @@ function RequestCard({ r, admin, meId, onChanged }: { r: Req; admin: boolean; me
 
       {/* Recherche en attente : relancer pour voir s'il y a enfin une version dispo ; « DL » (admin) : Lumio Secour télécharge à la place */}
       {(r.status === RequestStatus.APPROVED && (!r.download || ['searching', 'partial', 'warning'].includes(r.download.state)) && r.download?.via !== 'secour' && (admin || mine)) ||
-      (IS_BETA && admin && r.status === RequestStatus.FAILED) ? (
+      (admin && r.status === RequestStatus.FAILED) ? (
         <View style={styles.actions}>
           {r.status === RequestStatus.APPROVED && r.download?.state !== 'warning' ? <RecheckButton r={r} onDone={onChanged} style={styles.actBtn} /> : null}
-          {IS_BETA && admin ? <SecourRelayButton r={r} onDone={onChanged} /> : null}
+          {admin ? <SecourRelayButton r={r} onDone={onChanged} /> : null}
         </View>
       ) : null}
 

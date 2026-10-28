@@ -6,26 +6,14 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
-- Bêta : le bouton « LS » s'appelle maintenant « DL », et il n'apparaît que si le film ou la série n'est pas encore disponible ; plus de relais automatique quand Radarr / Sonarr ne trouvent rien (Lumio Secour seulement à la main, ou si Radarr / Sonarr ne répondent plus du tout).
-- Bêta (admin) : Profil → Serveur → « Mettre à jour les conteneurs » : la machine télécharge les dernières versions de tes conteneurs et redémarre ceux qui ont changé ; le résultat s'affiche sous le bouton.
-- Bêta (admin) : bouton « DL » sur les demandes bloquées ou en échec, pour lancer Lumio Secour tout de suite.
-- Bêta : en haut de l'accueil, ton nom de profil avec l'écusson de ton rang à la place de « Lumio » ; un appui ouvre tes stats.
-- Bêta : bonus de rang — chaque rang donne des demandes en plus sur ton quota (films et saisons) ; la page des stats montre ton bonus et tous les rangs avec leurs bonus.
-- Bêta : accueil — la pastille du rang passe sous « Lumio », elle ne chevauche plus les boutons du haut.
-- Bêta : Lumio Secour n'utilise plus que Movix (recherches, téléchargements de secours et contrôle de nuit, adresse suivie toute seule) ; réglage « Sources utilisées » pour en remettre d'autres.
-- Bêta : fiche allégée — genre dans les pastilles (plus de ligne de genres ni d'étiquette d'état), résumé sur 3 lignes avec « Plus », 2 avis de la famille affichés (« Voir les avis » pour le reste).
-- Bêta : Lumio Secour ne contrôle plus les sites toutes les minutes, mais une fois par nuit vers minuit.
-- Bêta : ton rang en haut de l'accueil, avec son écusson (10 rangs, du bois à l'or) ; un appui ouvre ta page de stats. Les écussons remplacent aussi les émojis dans Récompenses.
-- Bêta : Lumio Secour suit tout seul les changements d'adresse d'un site (redirection vers le nouveau domaine), avec une notification à l'admin.
-- Bêta : fiche plus claire — une seule ligne d'actions (Lire ou « À voir », puis petits boutons Proposer et « LS »), ensuite la demande, le résumé, les épisodes / saisons, les notes de la famille et le casting.
-- Bêta : Disques → « Recherche Lumio Secour » (admin) : un film ou une série, puis le fichier à télécharger sur un disque ; l'engrenage ouvre les réglages de Lumio Secour.
-- Bêta : Lumio Secour plus discret — le bouton « Liens » des fiches et l'entrée du Profil sont masqués, le bouton « LS » reste.
-- Bêta (admin) : bouton rond « LS » sur les fiches, à côté de « Liens » : choix de la source — « Automatique » télécharge tout seul le meilleur fichier (pour une série : une saison ou toutes), ou un site précis pour choisir soi-même le fichier dans la liste. Suivi dans Demandes.
-- Bêta : bouton « Liens » sur les fiches aussi sur iPhone, et « Simuler une panne de Radarr / Sonarr » dans Lumio Secour pour tester le groupe de secours.
-- Lumio Secour passe dans l'administration (Profil → Lumio Secour) : l'onglet disparaît, l'écran est aussi sur iPhone.
-- Groupe de secours : si Radarr ou Sonarr ne marchent plus, les demandes validées sont téléchargées par Lumio Secour (AllDebrid → disques) ; interrupteur et dossiers Films / Séries dans l'administration.
-- Demandes : la progression affiche « Lumio Secour » quand le groupe de secours télécharge à la place de Radarr / Sonarr.
-- Stockage : la liste « À nettoyer » (titres jamais ou plus regardés proposés à la suppression) est retirée ; il reste la place des disques et les plus gros fichiers, à supprimer soi-même si besoin.
+- Accueil : ton nom de profil avec l'écusson de ton rang (10 rangs, du bois à l'or) à la place de « Lumio » ; un appui ouvre tes stats.
+- Stats : ton rang, tes points, ta progression et tous les rangs avec leurs bonus ; chaque rang donne des demandes en plus sur ton quota (films et saisons).
+- Fiche plus claire : une ligne d'actions (Lire ou « À voir », puis Proposer et « DL »), genre dans les pastilles, résumé sur 3 lignes avec « Plus », 2 avis de la famille affichés.
+- Lumio Secour (admin) : bouton « DL » sur les fiches des titres pas encore disponibles et sur les demandes bloquées ou en échec — « Automatique » télécharge le meilleur fichier, ou choix de la source puis du fichier. Suivi dans Demandes.
+- Groupe de secours : si Radarr ou Sonarr ne répondent plus du tout, les demandes validées sont téléchargées par Lumio Secour (AllDebrid → disques).
+- Lumio Secour : Movix seulement, sites contrôlés une fois par nuit, nouvelle adresse suivie toute seule (notification à l'admin). Réglages et recherche dans Disques (engrenage) ; plus d'onglet Lumio Secour ni de bouton « Liens ».
+- Profil → Serveur (admin) : « Mettre à jour les conteneurs » (dernières versions de tes conteneurs, résultat sous le bouton).
+- Stockage : la liste « À nettoyer » est retirée ; il reste la place des disques et les plus gros fichiers.
 
 ## 1.0.106 — 24 octobre 2026
 

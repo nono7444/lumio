@@ -26,7 +26,7 @@ import { RequestSection } from '@/components/request-section';
 import { TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { grab, mediaFlavor } from '@/lib/grab';
 import { MediaStatus, requestsApi, useServerRequests } from '@/lib/requests';
-import { IS_BETA, secourAdminApi, secourApi } from '@/lib/secour';
+import { secourAdminApi, secourApi } from '@/lib/secour';
 import { SeasonRequests } from '@/components/season-requests';
 import { WatchlistButton } from '@/components/watchlist-button';
 import { chat } from '@/lib/chat';
@@ -84,7 +84,7 @@ export default function MediaScreen() {
   // Serveur Lumio : demandes façon Seerr pour tout le monde (admin compris)
   const serverReq = useServerRequests();
   useEffect(() => {
-    if (!settings.chatUrl || !IS_BETA || settings.jellyfin?.isAdmin !== true) return;
+    if (!settings.chatUrl || settings.jellyfin?.isAdmin !== true) return;
     requestsApi
       .media(settings, isTv ? 'tv' : 'movie', Number(id))
       .then((m) => setMediaStatus(m.status))
@@ -378,7 +378,7 @@ export default function MediaScreen() {
                 <Button title="" icon="chatbubbles-outline" variant="glass" small onPress={propose} style={{ width: 46, paddingHorizontal: 0 }} />
               ) : null}
               {/* « DL » (admin) : seulement si le titre n'est pas (entièrement) disponible */}
-              {settings.chatUrl && settings.jellyfin?.isAdmin === true && IS_BETA && !(details.kind === 'movie' && jfItem) && mediaStatus !== MediaStatus.AVAILABLE ? (
+              {settings.chatUrl && settings.jellyfin?.isAdmin === true && !(details.kind === 'movie' && jfItem) && mediaStatus !== MediaStatus.AVAILABLE ? (
                 <LsButton
                   loadSources={() => secourApi.status(settings).then((st) => st.sources ?? [])}
                   onPickSource={(source) =>
@@ -399,15 +399,6 @@ export default function MediaScreen() {
                   }
                   title={title}
                   seasons={seasonsList.map((s) => s.season_number)}
-                />
-              ) : settings.chatUrl && settings.jellyfin?.isAdmin === true && Platform.OS !== 'ios' ? (
-                <Button
-                  title=""
-                  icon="link-outline"
-                  variant="glass"
-                  small
-                  onPress={() => router.push({ pathname: '/secour', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title } })}
-                  style={{ width: 46, paddingHorizontal: 0 }}
                 />
               ) : null}
             </View>
