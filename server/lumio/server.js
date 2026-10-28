@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.57.0';
+const VERSION = '3.58.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1694,7 +1694,12 @@ async function platformPage(pf, token, sort) {
     .slice(0, 60)
     .map((x) => ({ ...x, available: onServer.has(`${x.type}:${x.tmdbId}`) }));
 
-  const value = { id: pf.id, name: pf.name, logo: info.logo, library: await withPosters(library), latest: latestOut };
+  const libraryOut = await withPosters(library);
+  // Tout mélangé (sur ton serveur ou à demander), par date de sortie : surtout les dernières sorties
+  const mixed = new Map();
+  for (const x of [...latestOut, ...libraryOut]) if (!mixed.has(`${x.type}:${x.tmdbId}`)) mixed.set(`${x.type}:${x.tmdbId}`, x);
+  const items = order([...mixed.values()]).slice(0, 120);
+  const value = { id: pf.id, name: pf.name, logo: info.logo, items, library: libraryOut, latest: latestOut };
   platformCache.set(key, { at: Date.now(), value });
   return value;
 }

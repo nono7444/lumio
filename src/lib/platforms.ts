@@ -13,7 +13,12 @@ export type PlatformTitle = {
   /** Déjà sur ton serveur */
   available: boolean;
 };
-export type PlatformPage = Platform & { library: PlatformTitle[]; latest: PlatformTitle[] };
+export type PlatformPage = Platform & {
+  /** Tout mélangé (dispo ou pas), trié par date de sortie */
+  items?: PlatformTitle[];
+  library: PlatformTitle[];
+  latest: PlatformTitle[];
+};
 
 let listCache: Platform[] | null = null;
 

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { GlassLogo } from '@/components/platforms-row';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { SegChip, tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
@@ -61,20 +62,31 @@ export default function PlatformScreen() {
                 {t.title}
               </Text>
             )}
+            <View style={[styles.badge, t.available ? styles.badgeOn : styles.badgeOff]}>
+              <Ionicons name={t.available ? 'checkmark' : 'download-outline'} size={11} color="#fff" />
+              <Text style={styles.badgeTxt}>{t.available ? 'Dispo' : 'À demander'}</Text>
+            </View>
           </View>
           <Text style={styles.title} numberOfLines={1}>
             {t.title}
           </Text>
           <Text style={styles.sub} numberOfLines={1}>
             {[t.type === 'tv' ? 'Série' : 'Film', t.year].filter(Boolean).join(' · ')}
-            {!t.available ? <Text style={{ color: C.accent }}> · à demander</Text> : null}
           </Text>
         </Pressable>
       ))}
     </View>
   );
 
-  const missing = page?.latest.filter((t) => !t.available) ?? [];
+  // Tout mélangé (dispo ou pas), par date de sortie ; ancien serveur : on fusionne ici
+  const items = page
+    ? page.items ??
+      [...page.latest, ...page.library.filter((l) => !page.latest.some((x) => x.type === l.type && x.tmdbId === l.tmdbId))].sort((a, b) => {
+        const d = (Date.parse(b.date ?? '') || 0) - (Date.parse(a.date ?? '') || 0);
+        return sort === 'asc' ? -d : d;
+      })
+    : [];
+  const missing = items.filter((t) => !t.available).length;
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -82,12 +94,10 @@ export default function PlatformScreen() {
         <Pressable onPress={() => router.back()} hitSlop={10} style={styles.round} accessibilityLabel="Retour">
           <Ionicons name="chevron-back" size={22} color={C.text} />
         </Pressable>
-        {page?.logo ? (
-          <View style={styles.logoBox}>
-            <Image source={page.logo} style={{ width: '100%', height: '100%' }} contentFit="contain" />
-          </View>
+        {page ? (
+          <GlassLogo logo={page.logo} name={page.name} style={{ width: 150, height: 52 }} logoPad={12} />
         ) : (
-          <Text style={styles.h1}>{page?.name ?? name ?? ''}</Text>
+          <Text style={styles.h1}>{name ?? ''}</Text>
         )}
       </View>
       <View style={styles.sortRow}>
@@ -114,15 +124,11 @@ export default function PlatformScreen() {
               tintColor={C.text}
             />
           }>
-          <Text style={styles.h2}>Sur ton serveur ({page.library.length})</Text>
-          {page.library.length ? grid(page.library) : <Text style={styles.sub}>Aucun titre de {page.name} sur ton serveur pour l’instant.</Text>}
-          <Text style={[styles.h2, { marginTop: 10 }]}>Dernières sorties</Text>
+          <Text style={styles.h2}>{sort === 'desc' ? 'Dernières sorties' : 'Plus anciennes sorties'}</Text>
           <Text style={styles.sub}>
-            {missing.length
-              ? `${missing.length} pas encore sur ton serveur : ouvre la fiche pour les demander.`
-              : 'Tu as déjà tout ce qui est sorti récemment.'}
+            {items.length - missing} sur ton serveur · {missing} à demander (ouvre la fiche pour les demander)
           </Text>
-          {grid(page.latest)}
+          {items.length ? grid(items) : <Text style={styles.sub}>Rien pour {page.name} pour l’instant.</Text>}
         </ScrollView>
       )}
     </View>
@@ -132,7 +138,10 @@ export default function PlatformScreen() {
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingBottom: 10 },
   round: { width: 38, height: 38, borderRadius: 19, backgroundColor: C.surface, alignItems: 'center', justifyContent: 'center' },
-  logoBox: { height: 44, width: 150, borderRadius: R.md, backgroundColor: '#F2F2F4', padding: 8 },
+  badge: { position: 'absolute', top: 6, left: 6, flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: 999, paddingHorizontal: 6, paddingVertical: 2 },
+  badgeOn: { backgroundColor: 'rgba(30,160,90,0.92)' },
+  badgeOff: { backgroundColor: 'rgba(0,0,0,0.72)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.35)' },
+  badgeTxt: { color: '#fff', fontSize: 10, fontWeight: '800' },
   h1: { color: C.text, fontSize: 26, fontWeight: '900' },
   h2: { color: C.text, fontSize: 19, fontWeight: '800' },
   sortRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingBottom: 12 },
