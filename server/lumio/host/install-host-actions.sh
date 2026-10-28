@@ -59,6 +59,44 @@ Description=Lumio : mise à jour du serveur demandée depuis l'appli
 Type=oneshot
 ExecStart=/bin/sh $CODE/update.sh "$DIR" "$CODE" "$COMPOSE_DIR"
 UNIT
+# Mise à jour des conteneurs Docker (images les plus récentes, puis redémarrage de ceux qui ont changé)
+cat > "$CODE/update-containers.sh" <<'SCRIPT'
+#!/bin/sh
+# Lumio : mise à jour des conteneurs demandée depuis l'appli (Profil → Serveur)
+DIR="$1"; COMPOSE_DIR="$2"
+rm -f "$DIR/update-containers"
+LOG="$DIR/containers-last.log"
+{
+  echo "Début : $(date '+%d/%m/%Y %H:%M')"
+  cd "$COMPOSE_DIR" || exit 1
+  # Les images construites ici (lumio) sont ignorées : elles se mettent à jour par « Mettre à jour le serveur Lumio »
+  docker compose pull --ignore-buildable 2>&1 || docker compose pull --ignore-pull-failures 2>&1
+  docker compose up -d 2>&1
+  code=$?
+  docker image prune -f 2>&1 | tail -n 1
+  echo "Fin : $(date '+%d/%m/%Y %H:%M')"
+  echo "LUMIO_EXIT=$code"
+} > "$LOG" 2>&1
+SCRIPT
+chmod +x "$CODE/update-containers.sh"
+cat > /etc/systemd/system/lumio-containers.path <<UNIT
+[Unit]
+Description=Lumio : demande de mise à jour des conteneurs depuis l'appli
+[Path]
+PathExists=$DIR/update-containers
+[Install]
+WantedBy=multi-user.target
+UNIT
+cat > /etc/systemd/system/lumio-containers.service <<UNIT
+[Unit]
+Description=Lumio : mise à jour des conteneurs demandée depuis l'appli
+[Service]
+Type=oneshot
+TimeoutStartSec=1800
+ExecStart=/bin/sh $CODE/update-containers.sh "$DIR" "$COMPOSE_DIR"
+UNIT
+touch "$DIR/.helper-containers"
+
 # Redémarrage de Jellyfin (quand il ne sait pas se relancer seul dans Docker)
 cat > /etc/systemd/system/lumio-jellyfin.path <<UNIT
 [Unit]
@@ -76,5 +114,5 @@ Type=oneshot
 ExecStart=/bin/sh -c 'rm -f "$DIR/restart-jellyfin"; docker restart jellyfin'
 UNIT
 systemctl daemon-reload
-systemctl enable --now lumio-reboot.path lumio-update.path lumio-jellyfin.path
-echo "OK : boutons « Redémarrer le PC serveur », « Redémarrer Jellyfin » et « Mettre à jour le serveur Lumio » prêts (dossier surveillé : $DIR)."
+systemctl enable --now lumio-reboot.path lumio-update.path lumio-jellyfin.path lumio-containers.path
+echo "OK : boutons « Redémarrer le PC serveur », « Redémarrer Jellyfin », « Mettre à jour le serveur Lumio » et « Mettre à jour les conteneurs » prêts (dossier surveillé : $DIR)."

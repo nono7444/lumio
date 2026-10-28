@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.51.0';
+const VERSION = '3.54.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -203,8 +203,21 @@ function permissionsOf(user) {
 }
 
 /** Quota restant, compté comme Seerr : films = nombre de demandes, séries = nombre de saisons. */
+/** Bonus du rang d'un membre (films, saisons en plus sur le quota), d'après le dernier classement calculé. */
+function gradeBonusOf(userId) {
+  const u = rewardsCache && rewardsCache.value.users.find((x) => x.id === userId);
+  return (u && u.grade && u.grade.bonus) || { movies: 0, seasons: 0 };
+}
+
 function quotaOf(user) {
-  const perm = permissionsOf(user);
+  const base = permissionsOf(user);
+  const bonus = gradeBonusOf(user.id);
+  // Un quota de 0 = illimité : le bonus ne s'ajoute qu'aux quotas fixés
+  const perm = {
+    ...base,
+    movieQuotaLimit: base.movieQuotaLimit ? base.movieQuotaLimit + (bonus.movies || 0) : 0,
+    tvQuotaLimit: base.tvQuotaLimit ? base.tvQuotaLimit + (bonus.seasons || 0) : 0,
+  };
   const since = (days) => Date.now() - days * 86400000;
   const mine = requests.filter((r) => r.requestedBy.id === user.id && r.status !== RequestStatus.DECLINED);
   const movieUsed = mine.filter((r) => r.type === 'movie' && Date.parse(r.createdAt) > since(perm.movieQuotaDays)).length;
@@ -214,6 +227,7 @@ function quotaOf(user) {
   return {
     movie: { limit: perm.movieQuotaLimit, days: perm.movieQuotaDays, used: movieUsed, remaining: perm.movieQuotaLimit ? Math.max(0, perm.movieQuotaLimit - movieUsed) : null },
     tv: { limit: perm.tvQuotaLimit, days: perm.tvQuotaDays, used: tvUsed, remaining: perm.tvQuotaLimit ? Math.max(0, perm.tvQuotaLimit - tvUsed) : null },
+    bonus,
   };
 }
 
@@ -1303,18 +1317,19 @@ async function arrWanted() {
 
 // ——— Récompenses de la famille : points, grades et badges ———
 // Heures regardées et coups de cœur (Jellyfin), notes données, demandes, messages du chat, titres « À voir ».
-// 10 rangs, un écusson chacun dans l'appli (tier 0 à 9 : bois, bronze, cuivre, argent, acier, puis écussons dorés)
+// 10 rangs, un écusson chacun dans l'appli (tier 0 à 9 : bois, bronze, cuivre, argent, acier, puis écussons dorés).
+// Bonus de rang : demandes en plus sur le quota (films, saisons), pour les membres qui ont un quota.
 const GRADES = [
-  { min: 0, name: 'Spectateur', emoji: '🍿', tier: 0 },
-  { min: 100, name: 'Habitué', emoji: '🎟️', tier: 1 },
-  { min: 250, name: 'Cinéphile', emoji: '🎬', tier: 2 },
-  { min: 500, name: 'Critique', emoji: '📝', tier: 3 },
-  { min: 900, name: 'Expert', emoji: '🔎', tier: 4 },
-  { min: 1500, name: 'Réalisateur', emoji: '🎥', tier: 5 },
-  { min: 2500, name: 'Producteur', emoji: '💼', tier: 6 },
-  { min: 4000, name: 'Star', emoji: '🌟', tier: 7 },
-  { min: 6000, name: 'Icône', emoji: '👑', tier: 8 },
-  { min: 9000, name: 'Légende', emoji: '🏆', tier: 9 },
+  { min: 0, name: 'Spectateur', emoji: '🍿', tier: 0, bonus: { movies: 0, seasons: 0 } },
+  { min: 100, name: 'Habitué', emoji: '🎟️', tier: 1, bonus: { movies: 0, seasons: 1 } },
+  { min: 250, name: 'Cinéphile', emoji: '🎬', tier: 2, bonus: { movies: 1, seasons: 1 } },
+  { min: 500, name: 'Critique', emoji: '📝', tier: 3, bonus: { movies: 1, seasons: 2 } },
+  { min: 900, name: 'Expert', emoji: '🔎', tier: 4, bonus: { movies: 2, seasons: 2 } },
+  { min: 1500, name: 'Réalisateur', emoji: '🎥', tier: 5, bonus: { movies: 2, seasons: 3 } },
+  { min: 2500, name: 'Producteur', emoji: '💼', tier: 6, bonus: { movies: 3, seasons: 3 } },
+  { min: 4000, name: 'Star', emoji: '🌟', tier: 7, bonus: { movies: 3, seasons: 4 } },
+  { min: 6000, name: 'Icône', emoji: '👑', tier: 8, bonus: { movies: 4, seasons: 5 } },
+  { min: 9000, name: 'Légende', emoji: '🏆', tier: 9, bonus: { movies: 5, seasons: 6 } },
 ];
 const BADGES = [
   { id: 'marathon', emoji: '🏃', name: 'Marathonien', desc: '100 heures regardées', test: (x) => x.hours >= 100 },
@@ -1358,7 +1373,7 @@ async function rewardsBoard(token) {
     x.rank = i + 1;
     const g = [...GRADES].reverse().find((g) => x.points >= g.min) || GRADES[0];
     const next = GRADES.find((n) => n.min > x.points) || null;
-    x.grade = { name: g.name, emoji: g.emoji, min: g.min, tier: g.tier };
+    x.grade = { name: g.name, emoji: g.emoji, min: g.min, tier: g.tier, bonus: g.bonus };
     x.next = next ? { name: next.name, emoji: next.emoji, min: next.min, tier: next.tier } : null;
     x.badges = BADGES.filter((b) => b.test(x, x.rank)).map(({ id, emoji, name, desc }) => ({ id, emoji, name, desc }));
   });
@@ -1366,6 +1381,12 @@ async function rewardsBoard(token) {
   rewardsCache = { at: Date.now(), value };
   return value;
 }
+
+// Classement recalculé régulièrement : les bonus de rang (quotas) restent à jour même si personne n'ouvre les stats
+setInterval(() => {
+  const t = jfAdminToken || process.env.JELLYFIN_API_KEY;
+  if (t) rewardsBoard(t).catch(() => {});
+}, 15 * 60_000);
 
 /** Saisons d'une série dans la numérotation de Sonarr (TheTVDB), avec le nombre d'épisodes. */
 async function arrSeasons(tvdbId) {
@@ -2320,6 +2341,82 @@ for (const sig of ['SIGTERM', 'SIGINT'])
     process.exit(0);
   });
 
+// ——— Relais quand Radarr / Sonarr répondent mais restent bloqués ———
+// Téléchargement bloqué (avertissement : import impossible, échec…) depuis 2 h, ou aucune version trouvée en 24 h :
+// Lumio Secour prend le relais (une seule fois par demande). Réglable : config.secourStuck (false = jamais),
+// config.secourStuckHours, config.secourNotFoundHours.
+const stuckHours = () => Number(config.secourStuckHours) || 2;
+const notFoundHours = () => Number(config.secourNotFoundHours) || 24;
+async function watchStuckRequests() {
+  if (config.secourStuck === false || !secourAutoOn()) return;
+  const lib = await loadLibrary(true).catch(() => null);
+  if (!lib) return;
+  const now = Date.now();
+  let changed = false;
+  for (const r of requests) {
+    if (r.status !== RequestStatus.APPROVED || r.via === 'secour' || r.secourStuckTried) continue;
+    const d = downloadOf(r, lib);
+    const app = r.type === 'movie' ? 'Radarr' : 'Sonarr';
+    let reason = null;
+    if (d && d.state === 'warning') {
+      if (!r.stuckSince) {
+        r.stuckSince = new Date().toISOString();
+        changed = true;
+      } else if (now - Date.parse(r.stuckSince) >= stuckHours() * 3600e3) {
+        reason = `${app} bloqué depuis ${stuckHours()} h${d.message ? ` (${String(d.message).slice(0, 100)})` : ''}`;
+      }
+    } else {
+      if (r.stuckSince) {
+        delete r.stuckSince;
+        changed = true;
+      }
+      // Rien en cours (ni téléchargement ni import, pas de saison partielle) depuis trop longtemps
+      const since = Date.parse(r.modifiedAt || r.createdAt);
+      if ((!d || d.state === 'searching') && now - since >= notFoundHours() * 3600e3) {
+        reason = `${app} n’a rien trouvé en ${notFoundHours()} h`;
+      }
+    }
+    if (!reason) continue;
+    r.secourStuckTried = true;
+    try {
+      startSecour(r, reason);
+    } catch (e) {
+      console.log(`Relais Lumio Secour impossible pour « ${r.title} » : ${e.message}`);
+    }
+    changed = true;
+  }
+  if (changed) saveRequests();
+}
+setInterval(() => watchStuckRequests().catch((e) => console.log(`Surveillance des demandes bloquées : ${e.message}`)), 15 * 60_000);
+
+/** Après un téléchargement Lumio Secour : Radarr / Sonarr arrêtent de chercher ce titre (pas de doublon), sans rien effacer. */
+async function arrHandOff(r) {
+  try {
+    if (r.type === 'movie') {
+      if (!arrConfig('radarr')) return;
+      const m = (await arr('radarr', `/movie?tmdbId=${r.tmdbId}`))[0];
+      if (!m) return;
+      if (m.monitored) await arr('radarr', `/movie/${m.id}`, { method: 'PUT', body: JSON.stringify({ ...m, monitored: false }) });
+      const q = await arr('radarr', '/queue?page=1&pageSize=200').catch(() => ({ records: [] }));
+      for (const x of (q.records || []).filter((x) => x.movieId === m.id))
+        await arr('radarr', `/queue/${x.id}?removeFromClient=true&blocklist=false`, { method: 'DELETE' }).catch(() => {});
+    } else {
+      if (!arrConfig('sonarr') || !r.tvdbId) return;
+      const s = (await arr('sonarr', `/series?tvdbId=${r.tvdbId}`))[0];
+      if (!s) return;
+      const wanted = new Set((r.seasons || []).map(Number));
+      if (s.seasons.some((x) => wanted.has(x.seasonNumber) && x.monitored))
+        await arr('sonarr', `/series/${s.id}`, { method: 'PUT', body: JSON.stringify({ ...s, seasons: s.seasons.map((x) => (wanted.has(x.seasonNumber) ? { ...x, monitored: false } : x)) }) });
+      const q = await arr('sonarr', '/queue?page=1&pageSize=500&includeEpisode=true').catch(() => ({ records: [] }));
+      for (const x of (q.records || []).filter((x) => x.seriesId === s.id && (!x.episode || wanted.has(x.episode.seasonNumber))))
+        await arr('sonarr', `/queue/${x.id}?removeFromClient=true&blocklist=false`, { method: 'DELETE' }).catch(() => {});
+    }
+    console.log(`Lumio Secour : « ${r.title} » retiré de la recherche ${r.type === 'movie' ? 'Radarr' : 'Sonarr'}`);
+  } catch (e) {
+    console.log(`Lumio Secour : ${r.type === 'movie' ? 'Radarr' : 'Sonarr'} pas mis à jour pour « ${r.title} » (${e.message})`);
+  }
+}
+
 // ——— Chaque nuit vers minuit (heure de Paris) : contrôle des sites, nouvelles adresses suivies toutes seules ———
 setInterval(async () => {
   if (!secourUrl() || !secourKey()) return;
@@ -2363,6 +2460,9 @@ function secourAutoView() {
   return {
     enabled: config.secourAuto !== false,
     force: Boolean(config.secourForce),
+    stuck: config.secourStuck !== false,
+    stuckHours: stuckHours(),
+    notFoundHours: notFoundHours(),
     ready: secourAutoOn(),
     alldebrid: Boolean(secourDebridKey()),
     service: secourService(),
@@ -2537,6 +2637,7 @@ async function runSecourQueue() {
           r.secour.state = 'done';
           r.status = RequestStatus.COMPLETED;
           r.completedAt = new Date().toISOString();
+          arrHandOff(r).catch(() => {});
           const missing = r.secour.items.filter((i) => !['done', 'present'].includes(i.status)).length;
           const what = r.type === 'tv' ? ` (${r.secour.done}/${r.secour.total} épisodes${missing ? `, ${missing} introuvable${missing > 1 ? 's' : ''}` : ''})` : '';
           notify({ title: '🛟 Disponible via Lumio Secour', message: `${r.title}${what} · demandé par ${r.requestedBy.name}`, tags: ['tada'], image: r.poster }).catch(() => {});
@@ -3631,13 +3732,44 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       console.log(`Mise à jour du serveur demandée par ${user.name}`);
       return send(res, 200, { ok: true, message: 'Mise à jour lancée : Lumio sera indisponible environ 1 minute.' });
     }
+    // Mise à jour des conteneurs Docker de la maison (docker compose pull + up -d), faite par la machine
+    if (req.method === 'POST' && p === '/api/admin/server/containers') {
+      requireAdmin(user);
+      const dir = path.join(DATA_DIR, 'host-actions');
+      if (!fs.existsSync(path.join(dir, '.helper-containers')))
+        throw new HttpError(409, 'Le service de la machine doit d’abord être réinstallé une fois (install-host-actions.sh) pour mettre à jour les conteneurs.');
+      fs.writeFileSync(path.join(dir, 'update-containers'), JSON.stringify({ by: user.name, at: new Date().toISOString() }));
+      console.log(`Mise à jour des conteneurs demandée par ${user.name}`);
+      return send(res, 200, { ok: true, message: 'Mise à jour des conteneurs lancée : les services mis à jour redémarrent un par un (quelques minutes).' });
+    }
     if (req.method === 'GET' && p === '/api/admin/host/status') {
       requireAdmin(user);
-      const pending = fs.existsSync(path.join(DATA_DIR, 'host-actions', 'reboot'));
+      const dir = path.join(DATA_DIR, 'host-actions');
+      const pending = fs.existsSync(path.join(dir, 'reboot'));
+      // Résultat de la dernière mise à jour des conteneurs (écrit par la machine)
+      let containers = null;
+      try {
+        const log = fs.readFileSync(path.join(dir, 'containers-last.log'), 'utf8');
+        const st = fs.statSync(path.join(dir, 'containers-last.log'));
+        const code = (log.match(/LUMIO_EXIT=(\d+)/) || [])[1];
+        const updated = [...log.matchAll(/Container (\S+)\s+(?:Recreated|Started)/g)].map((m) => m[1]);
+        containers = {
+          at: st.mtime.toISOString(),
+          running: code === undefined,
+          ok: code === '0',
+          updated: [...new Set(updated)],
+          tail: log.trim().split('\n').slice(-6).join('\n').slice(-600),
+        };
+      } catch {
+        containers = null;
+      }
       return send(res, 200, {
         rebootPending: pending,
-        updatePending: fs.existsSync(path.join(DATA_DIR, 'host-actions', 'update')),
-        helperInstalled: fs.existsSync(path.join(DATA_DIR, 'host-actions', '.helper')),
+        updatePending: fs.existsSync(path.join(dir, 'update')),
+        containersPending: fs.existsSync(path.join(dir, 'update-containers')),
+        helperInstalled: fs.existsSync(path.join(dir, '.helper')),
+        containersHelper: fs.existsSync(path.join(dir, '.helper-containers')),
+        containers,
         version: VERSION,
       });
     }
@@ -3978,6 +4110,9 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         const b = await readBody(req);
         if (typeof b.enabled === 'boolean') config.secourAuto = b.enabled;
         if (typeof b.force === 'boolean') config.secourForce = b.force;
+        if (typeof b.stuck === 'boolean') config.secourStuck = b.stuck;
+        if (Number(b.stuckHours) > 0) config.secourStuckHours = Math.min(72, Number(b.stuckHours));
+        if (Number(b.notFoundHours) > 0) config.secourNotFoundHours = Math.min(720, Number(b.notFoundHours));
         for (const k of ['movie', 'tv']) {
           const t = b[k];
           if (t && typeof t === 'object') {
