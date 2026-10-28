@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.110 — 28 octobre 2026
+
 - Plateformes : vignettes noires en verre (Liquid Glass sur iOS 26) avec les logos en blanc, façon Apple TV.
 - Page d'une plateforme : sorties mélangées (déjà sur ton serveur ou à demander, avec une pastille) et triées par date de sortie.
 
