@@ -1,4 +1,4 @@
-// Profil → Serveur (admin) : scan des bibliothèques, redémarrage de Jellyfin, mise à jour du serveur Lumio, redémarrage du PC.
+// Profil → Serveur (admin) : scan des bibliothèques, redémarrage de Jellyfin, mise à jour du serveur Lumio et des conteneurs, redémarrage du PC.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Platform, StyleSheet, Text, View } from 'react-native';
 
@@ -8,7 +8,7 @@ import { C } from '@/constants/theme';
 import { serverCall } from '@/lib/chat';
 import { useSettings } from '@/lib/settings';
 
-type Action = 'scan' | 'intro' | 'jellyfin' | 'reboot' | 'update';
+type Action = 'scan' | 'intro' | 'jellyfin' | 'reboot' | 'update' | 'containers';
 
 const ASK: Record<Action, { title: string; text: string; ok: string; path: string }> = {
   scan: { title: 'Scanner les bibliothèques ?', text: 'Jellyfin va chercher les nouveaux fichiers sur les disques.', ok: 'Scanner', path: '/api/admin/jellyfin/scan' },
@@ -25,12 +25,29 @@ const ASK: Record<Action, { title: string; text: string; ok: string; path: strin
     ok: 'Mettre à jour',
     path: '/api/admin/server/update',
   },
+  containers: {
+    title: 'Mettre à jour les conteneurs ?',
+    text: 'La machine télécharge les dernières versions de tes conteneurs (Jellyfin…), puis redémarre ceux qui ont changé. Quelques minutes, avec de courtes coupures.',
+    ok: 'Mettre à jour',
+    path: '/api/admin/server/containers',
+  },
   reboot: {
     title: 'Redémarrer le PC serveur ?',
     text: 'Tout sera coupé 2 à 3 minutes (Jellyfin, Lumio, téléchargements), puis tout redémarre tout seul.',
     ok: 'Redémarrer le PC',
     path: '/api/admin/host/reboot',
   },
+};
+
+type ContainersResult = { at: string; running: boolean; ok: boolean; updated: string[]; tail: string };
+type HostStatus = {
+  rebootPending: boolean;
+  updatePending?: boolean;
+  containersPending?: boolean;
+  helperInstalled: boolean;
+  containersHelper?: boolean;
+  containers?: ContainersResult | null;
+  version?: string;
 };
 
 type RefreshStatus = { active: boolean; progress: number; libraries: { name: string; active: boolean; progress: number }[] };
@@ -48,6 +65,13 @@ export function ServerActionsSection() {
     serverCall<{ installed: boolean; version?: string }>(settings, '/api/admin/jellyfin/intro-skipper').then(setIntro).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allowed, busy]);
+  const [host, setHost] = useState<HostStatus | null>(null);
+  const loadHost = useCallback(() => serverCall<HostStatus>(settings, '/api/admin/host/status').then((h) => (setHost(h), h)).catch(() => null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [settings.chatUrl, settings.jellyfin?.token]);
+  useEffect(() => {
+    if (allowed) loadHost();
+  }, [allowed, loadHost]);
   const [watch, setWatch] = useState(0);
   const sawActive = useRef(false);
   const poll = useCallback(async () => {
@@ -90,6 +114,18 @@ export function ServerActionsSection() {
       const r = await serverCall<{ message?: string }>(settings, ASK[a].path, { method: 'POST', body: '{}' });
       toast(r.message ?? 'C’est parti');
       if (a === 'scan') setWatch((n) => n + 1);
+      if (a === 'containers') {
+        // Suivi toutes les 10 s jusqu'à la fin (au plus 30 min)
+        const started = Date.now();
+        const follow = async () => {
+          const h = await loadHost();
+          const done = h && !h.containersPending && h.containers && !h.containers.running && Date.parse(h.containers.at) >= started - 5000;
+          if (done) {
+            toast(h!.containers!.ok ? `Conteneurs à jour${h!.containers!.updated.length ? ` : ${h!.containers!.updated.join(', ')}` : ' (rien de nouveau)'}` : 'Mise à jour des conteneurs : erreur, voir le détail', h!.containers!.ok ? 'ok' : 'error');
+          } else if (Date.now() - started < 30 * 60_000) setTimeout(follow, 10_000);
+        };
+        setTimeout(follow, 10_000);
+      }
       if (a === 'reboot' || a === 'update') {
         // Si le service de la machine n'est pas installé, la demande reste en attente : on prévient
         setTimeout(async () => {
@@ -153,6 +189,24 @@ export function ServerActionsSection() {
         />
         <Button title="Redémarrer Jellyfin" icon="reload-circle-outline" variant="secondary" loading={busy === 'jellyfin'} onPress={() => confirm('jellyfin')} />
         <Button title="Mettre à jour le serveur Lumio" icon="cloud-download-outline" variant="secondary" loading={busy === 'update'} onPress={() => confirm('update')} />
+        <Button
+          title={host?.containersPending || host?.containers?.running ? 'Mise à jour des conteneurs en cours…' : 'Mettre à jour les conteneurs'}
+          icon="layers-outline"
+          variant="secondary"
+          loading={busy === 'containers'}
+          disabled={Boolean(host?.containersPending || host?.containers?.running)}
+          onPress={() => confirm('containers')}
+        />
+        {host && !host.containersHelper ? (
+          <Text style={[styles.help, { marginBottom: 0 }]}>
+            Pour ce bouton, relance une fois sur le serveur : sudo sh /data/lumio-server/host/install-host-actions.sh
+          </Text>
+        ) : host?.containers && !host.containers.running ? (
+          <Text style={[styles.help, { marginBottom: 0, color: host.containers.ok ? C.textDim : C.danger }]} numberOfLines={3}>
+            Dernière mise à jour des conteneurs : {new Date(host.containers.at).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+            {host.containers.ok ? (host.containers.updated.length ? ` · mis à jour : ${host.containers.updated.join(', ')}` : ' · rien de nouveau') : ` · erreur : ${host.containers.tail.split('\n').slice(-2).join(' ')}`}
+          </Text>
+        ) : null}
         <Button title="Redémarrer le PC serveur" icon="power" variant="danger" loading={busy === 'reboot'} onPress={() => confirm('reboot')} />
       </View>
     </Section>

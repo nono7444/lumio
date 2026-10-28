@@ -1,0 +1,140 @@
+name: Build Lumio Bêta (iPhone)
+
+# IPA bêta, à côté de Lumio : autre identifiant (lol.wawanono.lumio.beta), autre nom (« Lumio Bêta »),
+# publiée en pré-version (jamais « latest ») : la source FlareStore et l'appli Lumio ne bougent pas.
+# Lancée à chaque push sur la branche beta, ou à la main depuis l'onglet Actions.
+on:
+  push:
+    branches: [beta]
+  workflow_dispatch:
+
+concurrency:
+  group: beta-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+
+  ios-beta:
+    needs: check
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Lumio Bêta (identifiant, nom, groupe d'appli et version à part)
+        run: |
+          node -e "
+            const fs=require('fs');const f='app.json';const a=require('./'+f);const e=a.expo;
+            e.name='Lumio Bêta';
+            e.scheme='lumiobeta';
+            e.version='1.1.${{ github.run_number }}';
+            e.ios.bundleIdentifier='lol.wawanono.lumio.beta';
+            e.ios.buildNumber='${{ github.run_number }}';
+            e.ios.entitlements['com.apple.security.application-groups']=['group.lol.wawanono.lumio.beta'];
+            fs.writeFileSync(f,JSON.stringify(a,null,2));"
+          sed -i '' 's/group\.lol\.wawanono\.lumio"/group.lol.wawanono.lumio.beta"/' targets/widget/Widget.swift
+          sed -i '' "s/'group\.lol\.wawanono\.lumio'/'group.lol.wawanono.lumio.beta'/" src/lib/widget.ts
+          sed -i '' "s/'lol\.wawanono\.lumio\.backup'/'lol.wawanono.lumio.beta.backup'/" src/lib/backup.ts
+          grep -n '"name"\|bundleIdentifier\|"version"\|group\.' app.json
+          grep -n 'appGroup' targets/widget/Widget.swift | head -2
+      - name: Génère le projet iOS
+        run: npx expo prebuild --platform ios --no-install --clean
+      - name: Installe les pods
+        working-directory: ios
+        run: pod install
+      - name: Compile l'app (non signée)
+        run: |
+          WS=$(ls -d ios/*.xcworkspace | head -1)
+          SCHEME=$(basename "$WS" .xcworkspace)
+          echo "Projet : $WS · schéma : $SCHEME"
+          xcodebuild \
+            -workspace "$WS" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            > xcodebuild.log 2>&1 || {
+              grep -E "error:|\*\* BUILD FAILED" xcodebuild.log | sort -u | head -30 | while IFS= read -r l; do echo "::error::$l"; done
+              tail -n 80 xcodebuild.log
+              exit 1
+            }
+          tail -n 20 xcodebuild.log
+          APP=$(ls -d build/Build/Products/Release-iphoneos/*.app | head -1)
+          test -f "$APP/Info.plist"
+          echo "APP=$APP" >> "$GITHUB_ENV"
+      - name: Emballe l'IPA bêta
+        run: |
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -qry lumio-beta-unsigned.ipa Payload
+          size=$(stat -f %z lumio-beta-unsigned.ipa)
+          echo "IPA bêta : $size octets"
+          if [ "$size" -lt 5000000 ]; then echo "::error::IPA anormalement petite ($size octets)"; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lumio-beta-ios
+          path: lumio-beta-unsigned.ipa
+
+  release-beta:
+    needs: ios-beta
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: lumio-beta-ios
+      - name: Source FlareStore bêta
+        run: |
+          RELEASE_NOTES="$(node scripts/changelog.mjs notes || true)" SOURCE_KIND=beta \
+            node scripts/make-source.mjs "1.1.${{ github.run_number }}" "beta-${{ github.run_number }}" lumio-beta-unsigned.ipa
+          cat altstore-beta.json | head -30
+      - name: Texte de la pré-version
+        run: |
+          {
+            echo "## Lumio Bêta 1.1.${{ github.run_number }}"
+            echo
+            node scripts/changelog.mjs notes || true
+            echo
+            echo "---"
+            echo "Appli à part (« Lumio Bêta », identifiant lol.wawanono.lumio.beta) : elle s'installe à côté de Lumio sans la remplacer."
+            echo "FlareStore : ajoute la source https://github.com/${{ github.repository }}/releases/download/beta-source/altstore-beta.json (une seule fois), ou importe lumio-beta-unsigned.ipa."
+          } > body.md
+          cat body.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: beta-${{ github.run_number }}
+          name: Lumio Bêta 1.1.${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
+          body_path: body.md
+          files: lumio-beta-unsigned.ipa
+      # Adresse fixe de la source bêta : pré-version « beta-source », son fichier est remplacé à chaque build
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: beta-source
+          name: Source FlareStore — Lumio Bêta
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
+          body: |
+            Source FlareStore de Lumio Bêta (à ajouter une seule fois) :
+            https://github.com/${{ github.repository }}/releases/download/beta-source/altstore-beta.json
+          files: altstore-beta.json

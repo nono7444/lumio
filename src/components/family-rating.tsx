@@ -23,6 +23,7 @@ export const scoreColor = (n: number) => (n >= 7 ? '#34C759' : n >= 4 ? '#FF9F0A
 export function FamilyRating({ type, tmdbId, title, poster }: { type: 'movie' | 'tv'; tmdbId: number; title: string; poster?: string }) {
   const { settings } = useSettings();
   const [info, setInfo] = useState<RatingInfo | null>(null);
+  const [allReviews, setAllReviews] = useState(false);
   const { prompt, element } = usePrompt();
 
   const load = useCallback(() => {
@@ -87,7 +88,7 @@ export function FamilyRating({ type, tmdbId, title, poster }: { type: 'movie' | 
       </View>
       {info.mine?.comment ? <Text style={[styles.comment, { color: C.text }]}>« {info.mine.comment} »</Text> : null}
 
-      {others.map((v, i) => (
+      {(allReviews ? others : others.slice(0, 2)).map((v, i) => (
         <View key={i} style={styles.other}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Text style={styles.name}>{v.name}</Text>
@@ -97,9 +98,14 @@ export function FamilyRating({ type, tmdbId, title, poster }: { type: 'movie' | 
             </View>
             <Text style={styles.dim}>{timeAgo(v.at)}</Text>
           </View>
-          {v.comment ? <Text style={styles.comment}>{v.comment}</Text> : null}
+          {v.comment ? <Text style={styles.comment} numberOfLines={allReviews ? undefined : 2}>{v.comment}</Text> : null}
         </View>
       ))}
+      {others.length > 2 ? (
+        <Pressable onPress={() => setAllReviews((x) => !x)} hitSlop={8}>
+          <Text style={[styles.dim, { color: C.accent, fontWeight: '700' }]}>{allReviews ? 'Moins d’avis' : `Voir les ${others.length} avis`}</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }

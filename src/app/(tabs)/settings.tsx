@@ -249,6 +249,7 @@ export default function SettingsScreen() {
           </Section>
         ) : null}
 
+
         {serverReq && !Platform.isTV ? (
           <Section title="Idées & signalements">
             <Text style={styles.help}>

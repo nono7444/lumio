@@ -5,12 +5,14 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { RankShield } from '@/components/rank-shield';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { C, R } from '@/constants/theme';
 import { serverCall } from '@/lib/chat';
 import { useSettings } from '@/lib/settings';
 
-type Grade = { name: string; emoji: string; min: number };
+type Bonus = { movies: number; seasons: number };
+type Grade = { name: string; emoji: string; min: number; tier?: number; bonus?: Bonus };
 type Badge = { id: string; emoji: string; name: string; desc: string };
 type Member = {
   id: string;
@@ -29,7 +31,15 @@ type Member = {
   next: Grade | null;
   badges: Badge[];
 };
-type Board = { users: Member[]; badges: Badge[]; me: string };
+type Board = { users: Member[]; badges: Badge[]; me: string; grades?: Grade[] };
+
+/** « +1 film, +2 saisons » : bonus de quota d'un rang. */
+const bonusText = (b?: Bonus) =>
+  !b || (!b.movies && !b.seasons)
+    ? 'Pas encore de bonus'
+    : [b.movies ? `+${b.movies} film${b.movies > 1 ? 's' : ''}` : null, b.seasons ? `+${b.seasons} saison${b.seasons > 1 ? 's' : ''}` : null]
+        .filter(Boolean)
+        .join(', ') + ' sur ton quota';
 
 const MEDAL = ['🥇', '🥈', '🥉'];
 
@@ -52,7 +62,7 @@ export default function RewardsScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
-        <Text style={styles.h1}>Récompenses</Text>
+        <Text style={styles.h1}>{me ? `Stats de ${me.name}` : 'Mes stats'}</Text>
         <Pressable onPress={() => router.back()} hitSlop={10} style={styles.round}>
           <Ionicons name="close" size={20} color={C.text} />
         </Pressable>
@@ -67,7 +77,7 @@ export default function RewardsScreen() {
         <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: insets.bottom + 40 }}>
           {me ? (
             <View style={styles.hero}>
-              <Text style={styles.gradeEmoji}>{me.grade.emoji}</Text>
+              <RankShield tier={me.grade.tier} size={78} />
               <Text style={styles.gradeName}>{me.grade.name}</Text>
               <Text style={styles.points}>
                 {me.points} points · {me.rank === 1 ? '1er' : `${me.rank}e`} de la famille
@@ -78,12 +88,13 @@ export default function RewardsScreen() {
                     <View style={[styles.fill, { width: `${Math.max(3, pct)}%` }]} />
                   </View>
                   <Text style={styles.dim}>
-                    Encore {me.next.min - me.points} points pour devenir {me.next.emoji} {me.next.name}
+                    Encore {me.next.min - me.points} points pour devenir {me.next.name}
                   </Text>
                 </>
               ) : (
                 <Text style={styles.dim}>Grade maximum atteint 🎉</Text>
               )}
+              <Text style={[styles.dim, { color: '#FFC93C', fontWeight: '700' }]}>Bonus de ton rang : {bonusText(me.grade.bonus)}</Text>
             </View>
           ) : null}
 
@@ -106,6 +117,35 @@ export default function RewardsScreen() {
                 </View>
               ))}
             </View>
+          ) : null}
+
+          {/* ——— Rangs et bonus : ce que chaque rang débloque (demandes en plus sur le quota) ——— */}
+          {board.grades?.length ? (
+            <>
+              <Text style={styles.h2}>Rangs et bonus</Text>
+              <Text style={styles.dim}>Chaque rang donne des demandes en plus sur ton quota (films et saisons), quand l’admin t’en a fixé un.</Text>
+              <View style={styles.card}>
+                {board.grades.map((g, i) => {
+                  const mine = me?.grade.name === g.name;
+                  const reached = (me?.points ?? 0) >= g.min;
+                  return (
+                    <View
+                      key={g.name}
+                      style={[styles.gradeRow, i === board.grades!.length - 1 && { borderBottomWidth: 0 }, mine && styles.rankMe, !reached && { opacity: 0.45 }]}>
+                      <RankShield tier={g.tier} size={30} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.rankName}>
+                          {g.name}
+                          {mine ? '  · ton rang' : ''}
+                        </Text>
+                        <Text style={styles.dim}>{bonusText(g.bonus)}</Text>
+                      </View>
+                      <Text style={styles.dim}>{g.min} pts</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            </>
           ) : null}
 
           <Text style={styles.h2}>Badges</Text>
@@ -133,7 +173,7 @@ export default function RewardsScreen() {
                 <Text style={styles.rankNum}>{MEDAL[i] ?? `${u.rank}.`}</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.rankName}>
-                    {u.name} {u.grade.emoji}
+                    {u.name}
                   </Text>
                   <Text style={styles.dim}>
                     {u.grade.name} · {u.hours} h · {u.badges.map((b) => b.emoji).join(' ')}
@@ -173,6 +213,7 @@ const styles = StyleSheet.create({
   badgeName: { color: C.text, fontSize: 12, fontWeight: '800' },
   badgeDesc: { color: C.textDim, fontSize: 10, textAlign: 'center' },
   card: { backgroundColor: C.surface, borderRadius: R.lg, paddingHorizontal: 14 },
+  gradeRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
   rankRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
   rankMe: { backgroundColor: 'rgba(255,201,60,0.08)', marginHorizontal: -14, paddingHorizontal: 14 },
   rankNum: { width: 30, fontSize: 18, textAlign: 'center', color: C.text, fontWeight: '800' },

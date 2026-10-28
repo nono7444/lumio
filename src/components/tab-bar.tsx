@@ -30,7 +30,6 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   chat: 'chatbubbles',
   activity: 'file-tray-full',
   watchlist: 'bookmark',
-  secour: 'link',
 };
 
 // Libellés courts, affichés sous chaque icône (comme la barre d'onglets d'iOS)
@@ -43,7 +42,6 @@ const SHORT: Record<string, string> = {
   chat: 'Chat',
   activity: 'Demandes',
   watchlist: 'À voir',
-  secour: 'Secour',
   settings: 'Profil',
 };
 
@@ -82,8 +80,6 @@ function PhoneTabBar({ state, descriptors, navigation }: TabBarProps) {
   const initial = (settings.jellyfin?.userName ?? 'L').slice(0, 1).toUpperCase();
 
   const visible = state.routes.filter((r) => {
-    // iPhone : pas d'onglet Lumio Secour
-    if (Platform.OS === 'ios' && r.name === 'secour') return false;
     const opts = descriptors[r.key].options as { href?: string | null };
     return opts.href !== null;
   });

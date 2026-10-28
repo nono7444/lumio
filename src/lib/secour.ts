@@ -1,4 +1,6 @@
 // Admin : liens d'hébergeurs trouvés par Lumio Secour, téléchargés via AllDebrid sur les disques du serveur.
+import Constants from 'expo-constants';
+
 import { serverCall } from './chat';
 import type { Settings } from './settings';
 
@@ -13,6 +15,24 @@ export type SecourStatus = {
   sources?: string[];
   tmdb?: boolean;
   error?: string;
+  /** Moteur intégré au serveur Lumio (même conteneur) */
+  embedded?: boolean;
+  auto?: SecourAuto;
+};
+
+/** Groupe de secours : Lumio Secour prend le relais quand Radarr / Sonarr ne marchent plus. */
+export type SecourTarget = { root: string; folder: string };
+export type SecourAuto = {
+  enabled: boolean;
+  /** Simulation : Radarr / Sonarr considérés en panne */
+  force?: boolean;
+  ready: boolean;
+  alldebrid: boolean;
+  engine: boolean;
+  disks: string[];
+  movie: SecourTarget | null;
+  tv: SecourTarget | null;
+  queue: number;
 };
 
 export type SecourLink = {
@@ -28,6 +48,9 @@ export type SecourLink = {
   season: number | null;
   episode: number | null;
 };
+
+/** Build « Lumio Bêta » (identifiant .beta) : fonctions encore en test, aussi sur iPhone. */
+export const IS_BETA = Boolean(Constants.expoConfig?.ios?.bundleIdentifier?.endsWith('.beta'));
 
 export type SecourQuery = { type: 'movie' | 'tv'; tmdbId?: number; imdb?: string; season?: number; episode?: number };
 
@@ -102,7 +125,16 @@ export type AlldebridStatus = {
   error?: string;
 };
 
+export type SecourGrab = { type: 'movie' | 'tv'; tmdbId: number; tvdbId?: number; title: string; year?: string; poster?: string; backdrop?: string; seasons?: number[]; source?: string };
+
 export const secourAdminApi = {
+  /** Bouton « DL » d'une demande bloquée : Lumio Secour la télécharge à la place de Radarr / Sonarr */
+  viaRequest: (s: Settings, id: string) => serverCall<{ request: { id: string } }>(s, `/api/secour/requests/${id}`, { method: 'POST', body: '{}' }),
+  /** Bouton « DL » : téléchargement direct par Lumio Secour (meilleur lien, AllDebrid, disques) */
+  grab: (s: Settings, g: SecourGrab) => serverCall<{ request: { id: string }; already?: boolean }>(s, '/api/secour/grab', { method: 'POST', body: JSON.stringify(g) }),
+  auto: (s: Settings) => serverCall<SecourAuto>(s, '/api/secour/auto'),
+  saveAuto: (s: Settings, body: Partial<{ enabled: boolean; force: boolean; movie: SecourTarget; tv: SecourTarget }>) =>
+    serverCall<SecourAuto>(s, '/api/secour/auto', { method: 'PUT', body: JSON.stringify(body) }),
   settings: (s: Settings) => serverCall<{ categories: SecourCategory[] }>(s, '/api/secour/settings').then((r) => r.categories),
   saveSettings: (s: Settings, updates: Record<string, unknown>) =>
     serverCall<{ success: boolean; results: Record<string, string> }>(s, '/api/secour/settings', { method: 'PUT', body: JSON.stringify({ updates }) }),
@@ -136,6 +168,7 @@ export const CATEGORY_FR: Record<string, string> = {
 
 export const FIELD_FR: Record<string, { label: string; hint?: string }> = {
   ADDON_NAME: { label: 'Nom' },
+  LUMIO_SOURCES: { label: 'Sources utilisées', hint: 'Une par ligne : movix, wawacity, zone-telechargement, free-telecharger, darki-api, webshare. Vide = toutes. Par défaut : movix seulement.' },
   WAWACITY_URL: { label: 'Wawacity', hint: 'Adresse du site (https://…)' },
   FREE_TELECHARGER_URL: { label: 'Free-Telecharger', hint: 'Adresse du site (https://…)' },
   DARKI_API_URL: { label: 'Darki-API', hint: 'Adresse de l’API (https://…)' },
@@ -148,6 +181,7 @@ export const FIELD_FR: Record<string, { label: string; hint?: string }> = {
   CONTENT_CACHE_MODE: { label: 'Mode du cache', hint: 'background : attend si expiré · live : instantané puis rafraîchit' },
   DEAD_LINK_TTL: { label: 'Mémoire des liens morts (s)', hint: '-1 = permanent' },
   STREAM_REQUEST_TIMEOUT: { label: 'Délai max d’une recherche (s)' },
+  DOMAIN_FOLLOW_REDIRECTS: { label: 'Suivre les changements d’adresse', hint: 'Si un site redirige vers sa nouvelle adresse, elle est mise à jour toute seule (et tu reçois une notification)' },
   DOMAIN_SYNC_ENABLED: { label: 'Mettre à jour les domaines tout seul', hint: 'Via les chaînes Telegram renseignées ci-dessous' },
   PASTEBIN_SCRAPER_URLS: { label: 'Liens Pastebin à importer', hint: 'Un par ligne' },
   IDRIX_SCRAPER_URLS: { label: 'Liens Idrix à importer', hint: 'Un par ligne' },

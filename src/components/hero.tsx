@@ -157,26 +157,59 @@ export function Hero({ items, season }: { items: HeroItem[]; season?: Season | n
   );
 }
 
-export function HeroTopBar({ title, onCustomize, season, right }: { title: string; onCustomize?: () => void; season?: Season | null; right?: ReactNode }) {
+export function HeroTopBar({
+  title,
+  onCustomize,
+  season,
+  right,
+  badge,
+  lead,
+}: {
+  title: string;
+  onCustomize?: () => void;
+  season?: Season | null;
+  right?: ReactNode;
+  /** Sous le nom (ex. pastille du rang) */
+  badge?: ReactNode;
+  /** Remplace le nom à gauche (ex. nom du profil + rang) ; il rétrécit sans passer sous les boutons */
+  lead?: ReactNode;
+}) {
   return (
-    <View style={styles.topBar} pointerEvents="box-none">
-      <Text style={styles.brand}>
-        {title}
-        {season ? <Text style={{ fontSize: 22 }}> {season.emoji}</Text> : null}
-      </Text>
-      {right ??
-        (onCustomize ? (
-          <Pressable
-            onPress={() => {
-              tap();
-              onCustomize();
-            }}
-            hitSlop={10}
-            accessibilityLabel="Personnaliser l'accueil"
-            style={styles.topBtn}>
-            <Ionicons name="options-outline" size={20} color={C.text} />
-          </Pressable>
-        ) : null)}
+    <View pointerEvents="box-none">
+      <View style={styles.topBar} pointerEvents="box-none">
+        {lead ? (
+          <View style={styles.lead} pointerEvents="box-none">
+            {lead}
+          </View>
+        ) : (
+          <Text style={styles.brand} numberOfLines={1}>
+            {title}
+            {season ? <Text style={{ fontSize: 22 }}> {season.emoji}</Text> : null}
+          </Text>
+        )}
+        {/* Les boutons de droite ne rétrécissent jamais : rien ne passe dessous */}
+        <View style={styles.right} pointerEvents="box-none">
+          {right ??
+            (onCustomize ? (
+              <Pressable
+                onPress={() => {
+                  tap();
+                  onCustomize();
+                }}
+                hitSlop={10}
+                accessibilityLabel="Personnaliser l'accueil"
+                style={styles.topBtn}>
+                <Ionicons name="options-outline" size={20} color={C.text} />
+              </Pressable>
+            ) : null)}
+        </View>
+      </View>
+      {/* Pastille (ex. rang) sous le nom, pour ne plus chevaucher les boutons */}
+      {badge ? (
+        <View style={styles.badgeRow} pointerEvents="box-none">
+          {badge}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -194,5 +227,8 @@ const styles = StyleSheet.create({
   pageDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.3)' },
   topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20 },
   topBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
-  brand: { color: C.text, fontSize: 26, fontWeight: '900', letterSpacing: -0.6 },
+  brand: { color: C.text, fontSize: 26, fontWeight: '900', letterSpacing: -0.6, flexShrink: 1, marginRight: 10 },
+  right: { flexShrink: 0 },
+  lead: { flexShrink: 1, marginRight: 10 },
+  badgeRow: { flexDirection: 'row', paddingHorizontal: 20, marginTop: 6 },
 });

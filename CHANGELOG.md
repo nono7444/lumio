@@ -6,6 +6,14 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Accueil : ton nom de profil avec l'écusson de ton rang (10 rangs, du bois à l'or) à la place de « Lumio » ; un appui ouvre tes stats.
+- Stats : ton rang, tes points, ta progression et tous les rangs avec leurs bonus ; chaque rang donne des demandes en plus sur ton quota (films et saisons).
+- Fiche plus claire : une ligne d'actions (Lire ou « À voir », puis Proposer et « DL »), genre dans les pastilles, résumé sur 3 lignes avec « Plus », 2 avis de la famille affichés.
+- Lumio Secour (admin) : bouton « DL » sur les fiches des titres pas encore disponibles et sur les demandes bloquées ou en échec — « Automatique » télécharge le meilleur fichier, ou choix de la source puis du fichier. Suivi dans Demandes.
+- Groupe de secours : si Radarr ou Sonarr ne répondent plus du tout, les demandes validées sont téléchargées par Lumio Secour (AllDebrid → disques).
+- Lumio Secour : Movix seulement, sites contrôlés une fois par nuit, nouvelle adresse suivie toute seule (notification à l'admin). Réglages et recherche dans Disques (engrenage) ; plus d'onglet Lumio Secour ni de bouton « Liens ».
+- Profil → Serveur (admin) : « Mettre à jour les conteneurs » (dernières versions de tes conteneurs, résultat sous le bouton).
+
 ## 1.0.107 — 25 octobre 2026
 
 - Stockage : la liste « À nettoyer » (titres jamais ou plus regardés proposés à la suppression) est retirée ; il reste la place des disques et les plus gros fichiers, à supprimer soi-même si besoin.
