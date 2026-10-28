@@ -118,7 +118,7 @@ export function useMyRank(nonce = 0): MyRank | null {
   return me;
 }
 
-/** Haut de l'accueil : nom du profil, puis l'écusson et le rang ; un appui ouvre les stats et les bonus. */
+/** Haut de l'accueil : nom du profil et écusson du rang ; un appui ouvre les stats et les bonus. */
 export function ProfileRank({ nonce = 0 }: { nonce?: number }) {
   const { settings } = useSettings();
   const me = useMyRank(nonce);
@@ -128,12 +128,10 @@ export function ProfileRank({ nonce = 0 }: { nonce?: number }) {
       <Text style={pill.user} numberOfLines={1}>
         {name}
       </Text>
+      {/* Le rang se lit sur l'écusson (son nom est dans les stats) */}
       {me ? (
-        <View style={[pill.wrap, { flexShrink: 0 }]}>
-          <RankShield tier={me.tier} size={18} />
-          <Text style={pill.name} numberOfLines={1}>
-            {me.name}
-          </Text>
+        <View style={{ flexShrink: 0 }}>
+          <RankShield tier={me.tier} size={26} />
         </View>
       ) : null}
     </Pressable>

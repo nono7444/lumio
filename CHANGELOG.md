@@ -6,7 +6,7 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
-- Bêta : en haut de l'accueil, ton nom de profil avec ton rang à la place de « Lumio » ; un appui ouvre tes stats.
+- Bêta : en haut de l'accueil, ton nom de profil avec l'écusson de ton rang à la place de « Lumio » ; un appui ouvre tes stats.
 - Bêta : bonus de rang — chaque rang donne des demandes en plus sur ton quota (films et saisons) ; la page des stats montre ton bonus et tous les rangs avec leurs bonus.
 - Bêta : accueil — la pastille du rang passe sous « Lumio », elle ne chevauche plus les boutons du haut.
 - Bêta : Lumio Secour n'utilise plus que Movix (recherches, téléchargements de secours et contrôle de nuit, adresse suivie toute seule) ; réglage « Sources utilisées » pour en remettre d'autres.
