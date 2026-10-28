@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.53.0';
+const VERSION = '3.54.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3732,13 +3732,44 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       console.log(`Mise à jour du serveur demandée par ${user.name}`);
       return send(res, 200, { ok: true, message: 'Mise à jour lancée : Lumio sera indisponible environ 1 minute.' });
     }
+    // Mise à jour des conteneurs Docker de la maison (docker compose pull + up -d), faite par la machine
+    if (req.method === 'POST' && p === '/api/admin/server/containers') {
+      requireAdmin(user);
+      const dir = path.join(DATA_DIR, 'host-actions');
+      if (!fs.existsSync(path.join(dir, '.helper-containers')))
+        throw new HttpError(409, 'Le service de la machine doit d’abord être réinstallé une fois (install-host-actions.sh) pour mettre à jour les conteneurs.');
+      fs.writeFileSync(path.join(dir, 'update-containers'), JSON.stringify({ by: user.name, at: new Date().toISOString() }));
+      console.log(`Mise à jour des conteneurs demandée par ${user.name}`);
+      return send(res, 200, { ok: true, message: 'Mise à jour des conteneurs lancée : les services mis à jour redémarrent un par un (quelques minutes).' });
+    }
     if (req.method === 'GET' && p === '/api/admin/host/status') {
       requireAdmin(user);
-      const pending = fs.existsSync(path.join(DATA_DIR, 'host-actions', 'reboot'));
+      const dir = path.join(DATA_DIR, 'host-actions');
+      const pending = fs.existsSync(path.join(dir, 'reboot'));
+      // Résultat de la dernière mise à jour des conteneurs (écrit par la machine)
+      let containers = null;
+      try {
+        const log = fs.readFileSync(path.join(dir, 'containers-last.log'), 'utf8');
+        const st = fs.statSync(path.join(dir, 'containers-last.log'));
+        const code = (log.match(/LUMIO_EXIT=(\d+)/) || [])[1];
+        const updated = [...log.matchAll(/Container (\S+)\s+(?:Recreated|Started)/g)].map((m) => m[1]);
+        containers = {
+          at: st.mtime.toISOString(),
+          running: code === undefined,
+          ok: code === '0',
+          updated: [...new Set(updated)],
+          tail: log.trim().split('\n').slice(-6).join('\n').slice(-600),
+        };
+      } catch {
+        containers = null;
+      }
       return send(res, 200, {
         rebootPending: pending,
-        updatePending: fs.existsSync(path.join(DATA_DIR, 'host-actions', 'update')),
-        helperInstalled: fs.existsSync(path.join(DATA_DIR, 'host-actions', '.helper')),
+        updatePending: fs.existsSync(path.join(dir, 'update')),
+        containersPending: fs.existsSync(path.join(dir, 'update-containers')),
+        helperInstalled: fs.existsSync(path.join(dir, '.helper')),
+        containersHelper: fs.existsSync(path.join(dir, '.helper-containers')),
+        containers,
         version: VERSION,
       });
     }

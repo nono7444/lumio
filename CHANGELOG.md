@@ -6,6 +6,7 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Bêta (admin) : Profil → Serveur → « Mettre à jour les conteneurs » : la machine télécharge les dernières versions de tes conteneurs et redémarre ceux qui ont changé ; le résultat s'affiche sous le bouton.
 - Bêta : Lumio Secour prend aussi le relais quand Radarr / Sonarr répondent mais restent bloqués (téléchargement bloqué depuis 2 h, ou rien trouvé en 24 h) ; ensuite Radarr / Sonarr arrêtent de chercher ce titre (pas de doublon). Interrupteur dans les réglages de Lumio Secour.
 - Bêta (admin) : bouton « LS » sur les demandes bloquées ou en échec, pour lancer Lumio Secour tout de suite.
 - Bêta : en haut de l'accueil, ton nom de profil avec l'écusson de ton rang à la place de « Lumio » ; un appui ouvre tes stats.
