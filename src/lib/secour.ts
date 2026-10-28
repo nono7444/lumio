@@ -26,10 +26,6 @@ export type SecourAuto = {
   enabled: boolean;
   /** Simulation : Radarr / Sonarr considérés en panne */
   force?: boolean;
-  /** Relais quand Radarr / Sonarr répondent mais restent bloqués (avertissement depuis stuckHours, rien trouvé en notFoundHours) */
-  stuck?: boolean;
-  stuckHours?: number;
-  notFoundHours?: number;
   ready: boolean;
   alldebrid: boolean;
   engine: boolean;
@@ -132,12 +128,12 @@ export type AlldebridStatus = {
 export type SecourGrab = { type: 'movie' | 'tv'; tmdbId: number; tvdbId?: number; title: string; year?: string; poster?: string; backdrop?: string; seasons?: number[]; source?: string };
 
 export const secourAdminApi = {
-  /** Bouton « LS » d'une demande bloquée : Lumio Secour la télécharge à la place de Radarr / Sonarr */
+  /** Bouton « DL » d'une demande bloquée : Lumio Secour la télécharge à la place de Radarr / Sonarr */
   viaRequest: (s: Settings, id: string) => serverCall<{ request: { id: string } }>(s, `/api/secour/requests/${id}`, { method: 'POST', body: '{}' }),
-  /** Bouton « LS » : téléchargement direct par Lumio Secour (meilleur lien, AllDebrid, disques) */
+  /** Bouton « DL » : téléchargement direct par Lumio Secour (meilleur lien, AllDebrid, disques) */
   grab: (s: Settings, g: SecourGrab) => serverCall<{ request: { id: string }; already?: boolean }>(s, '/api/secour/grab', { method: 'POST', body: JSON.stringify(g) }),
   auto: (s: Settings) => serverCall<SecourAuto>(s, '/api/secour/auto'),
-  saveAuto: (s: Settings, body: Partial<{ enabled: boolean; force: boolean; stuck: boolean; movie: SecourTarget; tv: SecourTarget }>) =>
+  saveAuto: (s: Settings, body: Partial<{ enabled: boolean; force: boolean; movie: SecourTarget; tv: SecourTarget }>) =>
     serverCall<SecourAuto>(s, '/api/secour/auto', { method: 'PUT', body: JSON.stringify(body) }),
   settings: (s: Settings) => serverCall<{ categories: SecourCategory[] }>(s, '/api/secour/settings').then((r) => r.categories),
   saveSettings: (s: Settings, updates: Record<string, unknown>) =>

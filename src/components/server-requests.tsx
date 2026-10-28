@@ -169,7 +169,7 @@ function RequestCard({ r, admin, meId, onChanged }: { r: Req; admin: boolean; me
         </View>
       </View>
 
-      {/* Recherche en attente : relancer pour voir s'il y a enfin une version dispo ; « LS » (admin) : Lumio Secour prend le relais */}
+      {/* Recherche en attente : relancer pour voir s'il y a enfin une version dispo ; « DL » (admin) : Lumio Secour télécharge à la place */}
       {(r.status === RequestStatus.APPROVED && (!r.download || ['searching', 'partial', 'warning'].includes(r.download.state)) && r.download?.via !== 'secour' && (admin || mine)) ||
       (IS_BETA && admin && r.status === RequestStatus.FAILED) ? (
         <View style={styles.actions}>
@@ -206,7 +206,7 @@ function RequestCard({ r, admin, meId, onChanged }: { r: Req; admin: boolean; me
   );
 }
 
-/** « LS » sur une demande bloquée (admin) : Lumio Secour la télécharge à la place de Radarr / Sonarr. */
+/** « DL » sur une demande bloquée (admin) : Lumio Secour la télécharge à la place de Radarr / Sonarr. */
 function SecourRelayButton({ r, onDone }: { r: Req; onDone: () => void }) {
   const { settings } = useSettings();
   const [busy, setBusy] = useState(false);
@@ -232,7 +232,7 @@ function SecourRelayButton({ r, onDone }: { r: Req; onDone: () => void }) {
     ]);
   return (
     <Pressable onPress={go} disabled={busy} style={styles.ls} accessibilityLabel="Télécharger avec Lumio Secour">
-      {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.lsText}>LS</Text>}
+      {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.lsText}>DL</Text>}
     </Pressable>
   );
 }

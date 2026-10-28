@@ -6,9 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Bêta : le bouton « LS » s'appelle maintenant « DL », et il n'apparaît que si le film ou la série n'est pas encore disponible ; plus de relais automatique quand Radarr / Sonarr ne trouvent rien (Lumio Secour seulement à la main, ou si Radarr / Sonarr ne répondent plus du tout).
 - Bêta (admin) : Profil → Serveur → « Mettre à jour les conteneurs » : la machine télécharge les dernières versions de tes conteneurs et redémarre ceux qui ont changé ; le résultat s'affiche sous le bouton.
-- Bêta : Lumio Secour prend aussi le relais quand Radarr / Sonarr répondent mais restent bloqués (téléchargement bloqué depuis 2 h, ou rien trouvé en 24 h) ; ensuite Radarr / Sonarr arrêtent de chercher ce titre (pas de doublon). Interrupteur dans les réglages de Lumio Secour.
-- Bêta (admin) : bouton « LS » sur les demandes bloquées ou en échec, pour lancer Lumio Secour tout de suite.
+- Bêta (admin) : bouton « DL » sur les demandes bloquées ou en échec, pour lancer Lumio Secour tout de suite.
 - Bêta : en haut de l'accueil, ton nom de profil avec l'écusson de ton rang à la place de « Lumio » ; un appui ouvre tes stats.
 - Bêta : bonus de rang — chaque rang donne des demandes en plus sur ton quota (films et saisons) ; la page des stats montre ton bonus et tous les rangs avec leurs bonus.
 - Bêta : accueil — la pastille du rang passe sous « Lumio », elle ne chevauche plus les boutons du haut.

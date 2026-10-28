@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.54.0';
+const VERSION = '3.55.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2341,54 +2341,6 @@ for (const sig of ['SIGTERM', 'SIGINT'])
     process.exit(0);
   });
 
-// ——— Relais quand Radarr / Sonarr répondent mais restent bloqués ———
-// Téléchargement bloqué (avertissement : import impossible, échec…) depuis 2 h, ou aucune version trouvée en 24 h :
-// Lumio Secour prend le relais (une seule fois par demande). Réglable : config.secourStuck (false = jamais),
-// config.secourStuckHours, config.secourNotFoundHours.
-const stuckHours = () => Number(config.secourStuckHours) || 2;
-const notFoundHours = () => Number(config.secourNotFoundHours) || 24;
-async function watchStuckRequests() {
-  if (config.secourStuck === false || !secourAutoOn()) return;
-  const lib = await loadLibrary(true).catch(() => null);
-  if (!lib) return;
-  const now = Date.now();
-  let changed = false;
-  for (const r of requests) {
-    if (r.status !== RequestStatus.APPROVED || r.via === 'secour' || r.secourStuckTried) continue;
-    const d = downloadOf(r, lib);
-    const app = r.type === 'movie' ? 'Radarr' : 'Sonarr';
-    let reason = null;
-    if (d && d.state === 'warning') {
-      if (!r.stuckSince) {
-        r.stuckSince = new Date().toISOString();
-        changed = true;
-      } else if (now - Date.parse(r.stuckSince) >= stuckHours() * 3600e3) {
-        reason = `${app} bloqué depuis ${stuckHours()} h${d.message ? ` (${String(d.message).slice(0, 100)})` : ''}`;
-      }
-    } else {
-      if (r.stuckSince) {
-        delete r.stuckSince;
-        changed = true;
-      }
-      // Rien en cours (ni téléchargement ni import, pas de saison partielle) depuis trop longtemps
-      const since = Date.parse(r.modifiedAt || r.createdAt);
-      if ((!d || d.state === 'searching') && now - since >= notFoundHours() * 3600e3) {
-        reason = `${app} n’a rien trouvé en ${notFoundHours()} h`;
-      }
-    }
-    if (!reason) continue;
-    r.secourStuckTried = true;
-    try {
-      startSecour(r, reason);
-    } catch (e) {
-      console.log(`Relais Lumio Secour impossible pour « ${r.title} » : ${e.message}`);
-    }
-    changed = true;
-  }
-  if (changed) saveRequests();
-}
-setInterval(() => watchStuckRequests().catch((e) => console.log(`Surveillance des demandes bloquées : ${e.message}`)), 15 * 60_000);
-
 /** Après un téléchargement Lumio Secour : Radarr / Sonarr arrêtent de chercher ce titre (pas de doublon), sans rien effacer. */
 async function arrHandOff(r) {
   try {
@@ -2460,9 +2412,6 @@ function secourAutoView() {
   return {
     enabled: config.secourAuto !== false,
     force: Boolean(config.secourForce),
-    stuck: config.secourStuck !== false,
-    stuckHours: stuckHours(),
-    notFoundHours: notFoundHours(),
     ready: secourAutoOn(),
     alldebrid: Boolean(secourDebridKey()),
     service: secourService(),
@@ -2502,7 +2451,7 @@ function startSecour(r, reason, opts = {}) {
   r.status = RequestStatus.APPROVED;
   r.via = 'secour';
   r.secour = { state: 'queued', reason: String(reason || '').slice(0, 200), startedAt: new Date().toISOString(), done: 0, total: 0, items: [] };
-  // Source imposée (bouton « LS » → choix du site), sinon toutes les sources
+  // Source imposée (bouton « DL » → choix du site), sinon toutes les sources
   if (opts.source) r.secour.source = String(opts.source).slice(0, 60);
   delete r.error;
   saveRequests();
@@ -4110,9 +4059,6 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         const b = await readBody(req);
         if (typeof b.enabled === 'boolean') config.secourAuto = b.enabled;
         if (typeof b.force === 'boolean') config.secourForce = b.force;
-        if (typeof b.stuck === 'boolean') config.secourStuck = b.stuck;
-        if (Number(b.stuckHours) > 0) config.secourStuckHours = Math.min(72, Number(b.stuckHours));
-        if (Number(b.notFoundHours) > 0) config.secourNotFoundHours = Math.min(720, Number(b.notFoundHours));
         for (const k of ['movie', 'tv']) {
           const t = b[k];
           if (t && typeof t === 'object') {
@@ -4123,7 +4069,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         saveConfig();
         return send(res, 200, secourAutoView());
       }
-      // Admin : bouton « LS » d'une fiche → téléchargement direct par Lumio Secour (crée ou reprend la demande)
+      // Admin : bouton « DL » d'une fiche → téléchargement direct par Lumio Secour (crée ou reprend la demande)
       if (req.method === 'POST' && p === '/api/secour/grab') {
         const b = await readBody(req);
         const type = b.type === 'tv' ? 'tv' : 'movie';

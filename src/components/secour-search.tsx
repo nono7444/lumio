@@ -1,5 +1,5 @@
 // Disques (admin, bêta) : recherche d'un film ou d'une série → liens Lumio Secour → téléchargement sur un disque.
-// Sert « au cas où » : Lumio Secour reste discret ailleurs dans l'appli (bouton « LS » sur les fiches).
+// Sert « au cas où » : Lumio Secour reste discret ailleurs dans l'appli (bouton « DL » sur les fiches).
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
@@ -44,7 +44,7 @@ export function SecourSearch() {
     <View style={styles.card}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <View style={styles.ls}>
-          <Text style={styles.lsText}>LS</Text>
+          <Text style={styles.lsText}>DL</Text>
         </View>
         <Text style={styles.title}>Recherche Lumio Secour</Text>
         <Pressable onPress={() => router.push('/secour-admin')} hitSlop={10} style={styles.round} accessibilityLabel="Réglages de Lumio Secour">

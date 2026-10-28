@@ -132,7 +132,7 @@ export default function SecourAdmin() {
     }
   };
 
-  const saveAuto = async (body: Partial<{ enabled: boolean; force: boolean; stuck: boolean; movie: SecourTarget; tv: SecourTarget }>) => {
+  const saveAuto = async (body: Partial<{ enabled: boolean; force: boolean; movie: SecourTarget; tv: SecourTarget }>) => {
     try {
       setAuto(await secourAdminApi.saveAuto(settings, body));
       toast('Groupe de secours enregistré');
@@ -423,7 +423,7 @@ export default function SecourAdmin() {
 }
 
 /** Groupe de secours : activé ou non, disque et dossier des films et des séries. */
-function AutoCard({ auto, onSave }: { auto: SecourAuto; onSave: (b: Partial<{ enabled: boolean; force: boolean; stuck: boolean; movie: SecourTarget; tv: SecourTarget }>) => void }) {
+function AutoCard({ auto, onSave }: { auto: SecourAuto; onSave: (b: Partial<{ enabled: boolean; force: boolean; movie: SecourTarget; tv: SecourTarget }>) => void }) {
   const [movie, setMovie] = useState<SecourTarget>(auto.movie ?? { root: auto.disks[0] ?? '', folder: 'Films' });
   const [tv, setTv] = useState<SecourTarget>(auto.tv ?? { root: auto.disks[0] ?? '', folder: 'Séries' });
   const missing = [!auto.engine && 'moteur hors ligne', !auto.alldebrid && 'clé AllDebrid', !auto.disks.length && 'disques (LUMIO_DISKS)'].filter(Boolean);
@@ -484,16 +484,6 @@ function AutoCard({ auto, onSave }: { auto: SecourAuto; onSave: (b: Partial<{ en
         />
       </View>
       {auto.force ? <Text style={[styles.dim, { color: C.warning, fontWeight: '700' }]}>⚠️ Simulation active : Radarr et Sonarr sont ignorés.</Text> : null}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.fieldLabel, { flex: 0 }]}>Prendre le relais si Radarr / Sonarr bloquent</Text>
-          <Text style={styles.faint}>
-            Téléchargement bloqué depuis {auto.stuckHours ?? 2} h, ou rien trouvé en {auto.notFoundHours ?? 24} h : Lumio Secour télécharge à leur place, puis Radarr / Sonarr arrêtent de
-            chercher ce titre (pas de doublon).
-          </Text>
-        </View>
-        <Switch value={auto.stuck !== false} onValueChange={(v) => onSave({ stuck: v })} trackColor={{ true: C.success, false: C.border }} />
-      </View>
       {auto.disks.length ? (
         <>
           {target('Films', movie, setMovie)}

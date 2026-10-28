@@ -25,7 +25,7 @@ import { ReportProblemButton } from '@/components/report-problem';
 import { RequestSection } from '@/components/request-section';
 import { TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { grab, mediaFlavor } from '@/lib/grab';
-import { useServerRequests } from '@/lib/requests';
+import { MediaStatus, requestsApi, useServerRequests } from '@/lib/requests';
 import { IS_BETA, secourAdminApi, secourApi } from '@/lib/secour';
 import { SeasonRequests } from '@/components/season-requests';
 import { WatchlistButton } from '@/components/watchlist-button';
@@ -57,6 +57,8 @@ export default function MediaScreen() {
   const insets = useSafeAreaInsets();
   const [details, setDetails] = useState<Details | null>(null);
   const [fullOverview, setFullOverview] = useState(false);
+  // Statut sur le serveur Lumio (disponible, partiel…) : le bouton « DL » ne s'affiche que si le titre manque
+  const [mediaStatus, setMediaStatus] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -81,6 +83,14 @@ export default function MediaScreen() {
   const manager = isManager(settings);
   // Serveur Lumio : demandes façon Seerr pour tout le monde (admin compris)
   const serverReq = useServerRequests();
+  useEffect(() => {
+    if (!settings.chatUrl || !IS_BETA || settings.jellyfin?.isAdmin !== true) return;
+    requestsApi
+      .media(settings, isTv ? 'tv' : 'movie', Number(id))
+      .then((m) => setMediaStatus(m.status))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.chatUrl, id, mediaKey]);
   const configured = manager && serverReq === false && Boolean(service.url && service.apiKey);
   const ready = arrReady(service);
 
@@ -348,7 +358,7 @@ export default function MediaScreen() {
         </View>
 
         <View style={[{ paddingHorizontal: 16, gap: 20, marginTop: 4 }, Platform.isTV && { width: '100%', maxWidth: 1100, alignSelf: 'flex-start', paddingLeft: 48 }]}>
-          {/* ——— Barre d'actions : Lire (ou « À voir »), puis Proposer et Lumio Secour en petits boutons ——— */}
+          {/* ——— Barre d'actions : Lire (ou « À voir »), puis Proposer et « DL » (Lumio Secour) en petits boutons ——— */}
           {!Platform.isTV ? (
             <View style={styles.actionBar}>
               {jfItem ? (
@@ -367,7 +377,8 @@ export default function MediaScreen() {
               {settings.chatUrl && settings.jellyfin && !jfItem ? (
                 <Button title="" icon="chatbubbles-outline" variant="glass" small onPress={propose} style={{ width: 46, paddingHorizontal: 0 }} />
               ) : null}
-              {settings.chatUrl && settings.jellyfin?.isAdmin === true && IS_BETA ? (
+              {/* « DL » (admin) : seulement si le titre n'est pas (entièrement) disponible */}
+              {settings.chatUrl && settings.jellyfin?.isAdmin === true && IS_BETA && !(details.kind === 'movie' && jfItem) && mediaStatus !== MediaStatus.AVAILABLE ? (
                 <LsButton
                   loadSources={() => secourApi.status(settings).then((st) => st.sources ?? [])}
                   onPickSource={(source) =>
@@ -595,7 +606,7 @@ function Notice({ icon, text, color = C.textDim }: { icon: keyof typeof Ionicons
   );
 }
 
-/** Bouton rond « LS » : télécharge directement avec Lumio Secour (film, ou saisons au choix pour une série). */
+/** Bouton « DL » : télécharge directement avec Lumio Secour (film, ou saisons au choix pour une série). */
 function LsButton({
   title,
   seasons,
@@ -648,7 +659,7 @@ function LsButton({
   };
   return (
     <Pressable onPress={press} disabled={busy} style={styles.ls} accessibilityLabel="Télécharger avec Lumio Secour">
-      {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.lsText}>LS</Text>}
+      {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.lsText}>DL</Text>}
     </Pressable>
   );
 }

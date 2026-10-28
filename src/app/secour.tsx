@@ -49,7 +49,7 @@ export default function Secour() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('Toutes');
   const [cachedOnly, setCachedOnly] = useState(false);
-  // Source choisie depuis le bouton « LS » (sinon toutes)
+  // Source choisie depuis le bouton « DL » (sinon toutes)
   const [source, setSource] = useState<string>(typeof p.source === 'string' ? p.source : '');
   const [sending, setSending] = useState<string | null>(null);
 
