@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { setHapticsEnabled } from './haptics';
 import { createContext, ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
 import { loadFromJellyfin, loadFromKeychain, saveToJellyfin, saveToKeychain } from './backup';
@@ -87,6 +88,8 @@ export type Settings = {
   libraryLayout: HomeRow[];
   /** Enchaîner automatiquement l'épisode suivant */
   autoNext: boolean;
+  /** Vibrations au toucher (coupées par défaut) */
+  haptics: boolean;
   /** Addon Stremio des sorties numériques (onglet Calendrier) */
   calendarAddon: string;
   /** Thème saisonnier : 'auto' (selon la date), 'off', ou un thème forcé */
@@ -151,6 +154,7 @@ const DEFAULTS: Settings = {
   tabsLayout: [],
   libraryLayout: [],
   autoNext: true,
+  haptics: false,
   calendarAddon: 'https://releasio-pearl.vercel.app/%7B%22posterSource%22%3A%22btttr%22%2C%22badge%22%3A%22bar%22%2C%22availability%22%3A%22all%22%2C%22titleMode%22%3A%22title%22%7D',
   seasonTheme: 'auto',
   chatUrl: '',
@@ -211,6 +215,8 @@ const SettingsContext = createContext<Ctx | null>(null);
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Settings>(DEFAULTS);
+  // Vibrations : suivent le réglage (coupées par défaut)
+  useEffect(() => setHapticsEnabled(settings.haptics === true), [settings.haptics]);
   const [ready, setReady] = useState(false);
   const current = useRef(settings);
   current.current = settings;

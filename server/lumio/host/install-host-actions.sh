@@ -41,6 +41,8 @@ cp "$TMP/server.js" "$CODE/server.js"
 cp "$TMP/Dockerfile" "$CODE/Dockerfile"
 rm -rf "$CODE/secour"
 cp -R "$TMP/secour" "$CODE/secour"
+rm -rf "$CODE/host"
+cp -R "$TMP/host" "$CODE/host"
 cd "$COMPOSE_DIR" && docker compose up -d --build --force-recreate lumio
 SCRIPT
 chmod +x "$CODE/update.sh"
@@ -60,23 +62,11 @@ Type=oneshot
 ExecStart=/bin/sh $CODE/update.sh "$DIR" "$CODE" "$COMPOSE_DIR"
 UNIT
 # Mise à jour des conteneurs Docker (images les plus récentes, puis redémarrage de ceux qui ont changé)
+# Le vrai script est livré avec le serveur (host/update-containers.sh) : il se met à jour avec « Mettre à jour le serveur Lumio »
 cat > "$CODE/update-containers.sh" <<'SCRIPT'
 #!/bin/sh
-# Lumio : mise à jour des conteneurs demandée depuis l'appli (Profil → Serveur)
-DIR="$1"; COMPOSE_DIR="$2"
-rm -f "$DIR/update-containers"
-LOG="$DIR/containers-last.log"
-{
-  echo "Début : $(date '+%d/%m/%Y %H:%M')"
-  cd "$COMPOSE_DIR" || exit 1
-  # Les images construites ici (lumio) sont ignorées : elles se mettent à jour par « Mettre à jour le serveur Lumio »
-  docker compose pull --ignore-buildable 2>&1 || docker compose pull --ignore-pull-failures 2>&1
-  docker compose up -d 2>&1
-  code=$?
-  docker image prune -f 2>&1 | tail -n 1
-  echo "Fin : $(date '+%d/%m/%Y %H:%M')"
-  echo "LUMIO_EXIT=$code"
-} > "$LOG" 2>&1
+HERE=$(dirname "$0")
+exec /bin/sh "$HERE/host/update-containers.sh" "$@"
 SCRIPT
 chmod +x "$CODE/update-containers.sh"
 cat > /etc/systemd/system/lumio-containers.path <<UNIT

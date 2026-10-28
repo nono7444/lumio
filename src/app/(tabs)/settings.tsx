@@ -292,6 +292,7 @@ export default function SettingsScreen() {
             onChange={(v) => update({ quality: String(v) })}
           />
           <Toggle label="Enchaîner l'épisode suivant" value={settings.autoNext} onChange={(v) => update({ autoNext: v })} />
+          {Platform.isTV ? null : <Toggle label="Vibrations au toucher" value={settings.haptics === true} onChange={(v) => update({ haptics: v })} />}
         </Section>
 
         {settings.chatUrl && settings.jellyfin && !Platform.isTV ? (

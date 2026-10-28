@@ -1,4 +1,5 @@
 import { HomeShortcuts } from '@/components/home-shortcuts';
+import { PlatformsRow } from '@/components/platforms-row';
 import { ProfileRank } from '@/components/rank-shield';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
@@ -426,6 +427,8 @@ export default function Home() {
         }>
         {ordered.map((r, idx) => {
           const spacer = idx === 1 && withHero ? <View key="sp" style={{ height: 20 }} /> : null;
+          // Plateformes (Netflix, Disney+…) : juste après le carrousel du haut
+          const platforms = (withHero ? idx === 1 : idx === 0) ? <PlatformsRow key="pf" /> : null;
           let el: React.ReactNode = null;
           switch (r.kind) {
             case 'hero': {
@@ -458,6 +461,7 @@ export default function Home() {
           return (
             <View key={r.id}>
               {spacer}
+              {platforms}
               {el}
             </View>
           );

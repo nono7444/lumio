@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
-import * as Haptics from 'expo-haptics';
+import { hapticImpact, hapticTap } from '@/lib/haptics';
 import { type Tabs } from 'expo-router';
 import { useRef, useState, type ComponentProps } from 'react';
 import { Animated, LayoutAnimation, Platform, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
@@ -112,7 +112,7 @@ function PhoneTabBar({ state, descriptors, navigation }: TabBarProps) {
     lensX.setValue(x - lensW / 2);
     const i = indexAt(pageX);
     if (i !== lens.current.idx) {
-      if (lens.current.idx !== -1) Haptics.selectionAsync().catch(() => {});
+      if (lens.current.idx !== -1) hapticTap();
       lens.current.idx = i;
     }
   };
@@ -130,7 +130,7 @@ function PhoneTabBar({ state, descriptors, navigation }: TabBarProps) {
       lens.current.idx = -1;
       setLensOn(true);
       placeLens(lens.current.startX);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+      hapticImpact();
       Animated.spring(lensScale, { toValue: 1, useNativeDriver: true, speed: 18, bounciness: 9 }).start();
     }, 280);
   };

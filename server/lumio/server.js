@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.55.0';
+const VERSION = '3.57.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -859,59 +859,13 @@ setInterval(async () => {
   });
 }, 60 * 60_000);
 
-// ——— Intro Skipper (extension Jellyfin qui repère intros, récaps et génériques) : installée depuis Lumio ———
-const INTRO_SKIPPER_REPO = 'https://intro-skipper.org/manifest.json';
+// ——— Appels JSON à Jellyfin ———
 async function jfJson(token, p2, init = {}) {
   const r = await fetch(`${JELLYFIN_URL}${p2}`, { ...init, headers: { ...jfHeaders(token), ...(init.body ? { 'Content-Type': 'application/json' } : {}) } });
   if (!r.ok) throw new HttpError(502, `Jellyfin a refusé ${p2} (HTTP ${r.status})`);
   const t = await r.text();
   return t ? JSON.parse(t) : null;
 }
-async function introSkipperStatus(token) {
-  const plugins = (await jfJson(token, '/Plugins')) || [];
-  const p = plugins.find((x) => /intro\s*skipper/i.test(x.Name || ''));
-  return p ? { installed: true, version: p.Version, status: p.Status } : { installed: false };
-}
-/** Lance l'analyse des épisodes / films (tâches planifiées de l'extension). */
-async function startIntroSkipperTasks(token) {
-  const tasks = (await jfJson(token, '/ScheduledTasks').catch(() => [])) || [];
-  const mine = tasks.filter((t) => /intro\s*skipper/i.test(t.Category || '') || /intro|credit|générique|recap/i.test(t.Name || ''));
-  for (const t of mine.filter((t) => t.State !== 'Running')) await fetch(`${JELLYFIN_URL}/ScheduledTasks/Running/${t.Id}`, { method: 'POST', headers: jfHeaders(token) }).catch(() => {});
-  return mine.length;
-}
-async function installIntroSkipper(token) {
-  const st = await introSkipperStatus(token);
-  if (st.installed && st.status !== 'Restart') {
-    const n = await startIntroSkipperTasks(token);
-    return { ok: true, message: `Intro Skipper est déjà installé (version ${st.version}). Analyse relancée (${n} tâche${n > 1 ? 's' : ''}).` };
-  }
-  // 1) Dépôt de l'extension ajouté à Jellyfin (s'il n'y est pas)
-  const repos = (await jfJson(token, '/Repositories')) || [];
-  if (!repos.some((r) => (r.Url || '').includes('intro-skipper'))) {
-    repos.push({ Name: 'Intro Skipper', Url: INTRO_SKIPPER_REPO, Enabled: true });
-    await jfJson(token, '/Repositories', { method: 'POST', body: JSON.stringify(repos) });
-  }
-  // 2) Paquet trouvé dans le catalogue puis installé
-  let pkg = null;
-  for (let i = 0; i < 6 && !pkg; i++) {
-    const list = (await jfJson(token, '/Packages').catch(() => [])) || [];
-    pkg = list.find((x) => /intro\s*skipper/i.test(x.name || ''));
-    if (!pkg) await new Promise((ok) => setTimeout(ok, 3000));
-  }
-  if (!pkg) throw new HttpError(502, 'Intro Skipper introuvable dans le catalogue de Jellyfin (Jellyfin 10.10 ou plus récent requis).');
-  const q = new URLSearchParams({ assemblyGuid: pkg.guid, repositoryUrl: INTRO_SKIPPER_REPO });
-  const r = await fetch(`${JELLYFIN_URL}/Packages/Installed/${encodeURIComponent(pkg.name)}?${q}`, { method: 'POST', headers: jfHeaders(token) });
-  if (!r.ok) throw new HttpError(502, `Installation refusée par Jellyfin (HTTP ${r.status})`);
-  // 3) Jellyfin redémarre pour charger l'extension, puis on lance l'analyse
-  setTimeout(() => fetch(`${JELLYFIN_URL}/System/Restart`, { method: 'POST', headers: jfHeaders(token) }).catch(() => {}), 15_000);
-  setTimeout(() => startIntroSkipperTasks(token).then((n) => console.log(`Intro Skipper : analyse lancée (${n} tâches)`)).catch(() => {}), 150_000);
-  console.log('Intro Skipper : installation lancée');
-  return {
-    ok: true,
-    message: 'Intro Skipper s’installe : Jellyfin redémarre dans 15 s (1 minute de coupure), puis l’analyse de la bibliothèque démarre toute seule. Les boutons « Passer l’intro » apparaîtront au fur et à mesure.',
-  };
-}
-
 // ——— Retrait d'une demande de Radarr / Sonarr (suppression d'une demande par l'admin) ———
 // Film : téléchargements en cours annulés, film retiré de Radarr (fichiers gardés ou effacés).
 // Série : saisons de la demande plus surveillées, téléchargements annulés, épisodes effacés si demandé ;
@@ -1603,6 +1557,146 @@ async function recheckRequest(r) {
   }
   if (st && st.status !== 'completed') return { found: false, pending: true, message: `${label(kind)} cherche encore, regarde dans quelques minutes.` };
   return { found: false, message: `Toujours rien de disponible. ${label(kind)} continue de chercher tout seul régulièrement.` };
+}
+
+// ——— Plateformes (mode « production ») : Netflix, Disney+, Prime Video, Apple TV+, Max, Canal+ ———
+// Dans ta bibliothèque : titres dont le studio / la chaîne (renseignés par Jellyfin depuis TMDB) correspond à la plateforme.
+// Dernières sorties : créations récentes de la plateforme (TMDB : chaînes pour les séries, sociétés de production pour les films),
+// marquées « sur ton serveur » ou non, pour pouvoir demander ce qu'on a raté.
+const PLATFORMS = [
+  { id: 'netflix', name: 'Netflix', networks: [213], companies: ['Netflix'], studio: /netflix/i },
+  {
+    id: 'disney',
+    name: 'Disney+',
+    networks: [2739],
+    companies: ['Walt Disney Pictures', 'Pixar', 'Marvel Studios', 'Lucasfilm Ltd.', 'Walt Disney Animation Studios'],
+    studio: /disney|pixar|marvel studios|lucasfilm/i,
+  },
+  { id: 'prime', name: 'Prime Video', networks: [1024], companies: ['Amazon Studios', 'Amazon MGM Studios'], studio: /amazon|prime video/i },
+  { id: 'apple', name: 'Apple TV+', networks: [2552], companies: ['Apple Studios', 'Apple Original Films'], studio: /apple tv|apple studios|apple original/i },
+  { id: 'max', name: 'Max', networks: [49, 3186], companies: ['HBO Films'], studio: /\bhbo\b|^max$/i },
+  { id: 'canal', name: 'Canal+', networks: [285], companies: ['Canal+', 'StudioCanal'], studio: /canal\+|studiocanal/i },
+];
+const platformMeta = new Map(); // id → { logo, networks (vérifiés), companies (ids), at }
+async function platformInfo(pf) {
+  const hit = platformMeta.get(pf.id);
+  if (hit && Date.now() - hit.at < 7 * 86400e3) return hit;
+  // Chaînes : identifiants TMDB vérifiés par leur nom (une chaîne inconnue est ignorée) ; logo de la première
+  let logo = null;
+  const networks = [];
+  for (const id of pf.networks) {
+    const n = await tmdbGet(`/network/${id}`).catch(() => null);
+    if (!n || !n.name) continue;
+    networks.push(id);
+    if (!logo && n.logo_path) logo = n.logo_path;
+  }
+  // Sociétés de production : retrouvées par leur nom exact
+  const companies = [];
+  for (const name of pf.companies) {
+    const r = await tmdbGet('/search/company', { query: name }).catch(() => null);
+    const exact = ((r && r.results) || []).filter((c) => String(c.name).toLowerCase() === name.toLowerCase());
+    for (const c of exact.slice(0, 2)) {
+      companies.push(c.id);
+      if (!logo && c.logo_path) logo = c.logo_path;
+    }
+  }
+  const v = { logo: logo ? `https://image.tmdb.org/t/p/w300${logo}` : null, networks, companies, at: Date.now() };
+  platformMeta.set(pf.id, v);
+  return v;
+}
+
+/** Bibliothèque Jellyfin avec studios / chaînes (gardée 30 min). */
+let studioLib = null;
+async function jfStudioLibrary(token) {
+  if (studioLib && Date.now() - studioLib.at < 30 * 60_000) return studioLib.items;
+  const q = new URLSearchParams({ Recursive: 'true', IncludeItemTypes: 'Movie,Series', Fields: 'Studios,ProviderIds,PremiereDate,DateCreated', EnableImages: 'false', EnableUserData: 'false' });
+  const r = await fetch(`${JELLYFIN_URL}/Items?${q}`, { headers: jfHeaders(token) });
+  if (!r.ok) throw new HttpError(502, `Jellyfin : HTTP ${r.status}`);
+  const items = ((await r.json()).Items || [])
+    .map((i) => ({
+      type: i.Type === 'Series' ? 'tv' : 'movie',
+      tmdbId: Number(i.ProviderIds && i.ProviderIds.Tmdb) || 0,
+      title: i.Name,
+      year: i.ProductionYear ? String(i.ProductionYear) : undefined,
+      date: i.PremiereDate || (i.ProductionYear ? `${i.ProductionYear}-01-01` : null),
+      added: i.DateCreated || null,
+      studios: (i.Studios || []).map((x) => x.Name).filter(Boolean),
+    }))
+    .filter((i) => i.tmdbId);
+  studioLib = { at: Date.now(), items };
+  return items;
+}
+
+/** Affiches TMDB (en cache), quelques-unes à la fois. */
+async function withPosters(list) {
+  const out = [...list];
+  let i = 0;
+  const worker = async () => {
+    while (i < out.length) {
+      const k = i++;
+      const x = out[k];
+      if (x.poster) continue;
+      const art = await tmdbArt(x.type, x.tmdbId).catch(() => null);
+      out[k] = { ...x, poster: art && art.p ? `https://image.tmdb.org/t/p/w342${art.p}` : null };
+    }
+  };
+  await Promise.all(Array.from({ length: 6 }, worker));
+  return out;
+}
+
+const platformCache = new Map(); // `${id}:${sort}` → { at, value }
+async function platformPage(pf, token, sort) {
+  const key = `${pf.id}:${sort}`;
+  const hit = platformCache.get(key);
+  if (hit && Date.now() - hit.at < 15 * 60_000) return hit.value;
+  const info = await platformInfo(pf);
+  const all = await jfStudioLibrary(token);
+  const onServer = new Set(all.map((x) => `${x.type}:${x.tmdbId}`));
+  const byDate = (a, b) => (Date.parse(b.date || 0) || 0) - (Date.parse(a.date || 0) || 0);
+  const order = (list) => (sort === 'asc' ? [...list].sort(byDate).reverse() : [...list].sort(byDate));
+
+  // Sur ton serveur
+  const library = order(all.filter((x) => x.studios.some((n) => pf.studio.test(n)))).map(({ studios, added, ...x }) => ({ ...x, available: true }));
+
+  // Dernières sorties de la plateforme (films et séries déjà sortis)
+  const today = new Date().toISOString().slice(0, 10);
+  const latest = [];
+  if (info.companies.length) {
+    for (const page of [1, 2]) {
+      const d = await tmdbGet('/discover/movie', {
+        with_companies: info.companies.join('|'),
+        sort_by: 'primary_release_date.desc',
+        'primary_release_date.lte': today,
+        'vote_count.gte': '10',
+        include_adult: 'false',
+        page: String(page),
+      }).catch(() => null);
+      for (const m of (d && d.results) || [])
+        latest.push({ type: 'movie', tmdbId: m.id, title: m.title, year: (m.release_date || '').slice(0, 4) || undefined, date: m.release_date || null, poster: m.poster_path ? `https://image.tmdb.org/t/p/w342${m.poster_path}` : null });
+    }
+  }
+  if (info.networks.length) {
+    for (const page of [1, 2]) {
+      const d = await tmdbGet('/discover/tv', {
+        with_networks: info.networks.join('|'),
+        sort_by: 'first_air_date.desc',
+        'first_air_date.lte': today,
+        'vote_count.gte': '5',
+        include_adult: 'false',
+        page: String(page),
+      }).catch(() => null);
+      for (const t of (d && d.results) || [])
+        latest.push({ type: 'tv', tmdbId: t.id, title: t.name, year: (t.first_air_date || '').slice(0, 4) || undefined, date: t.first_air_date || null, poster: t.poster_path ? `https://image.tmdb.org/t/p/w342${t.poster_path}` : null });
+    }
+  }
+  const seen = new Set();
+  const latestOut = order(latest.filter((x) => !seen.has(`${x.type}:${x.tmdbId}`) && seen.add(`${x.type}:${x.tmdbId}`)))
+    .slice(0, 60)
+    .map((x) => ({ ...x, available: onServer.has(`${x.type}:${x.tmdbId}`) }));
+
+  const value = { id: pf.id, name: pf.name, logo: info.logo, library: await withPosters(library), latest: latestOut };
+  platformCache.set(key, { at: Date.now(), value });
+  return value;
 }
 
 // ——— Collections : regroupe les films de Jellyfin par saga TMDB (« belongs_to_collection »), au moins 2 films ———
@@ -3559,6 +3653,19 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       return send(res, 200, { ...b, me: user.id });
     }
 
+    // ——— Plateformes (Netflix, Disney+…) : logos, puis titres de la bibliothèque et dernières sorties ———
+    if (req.method === 'GET' && p === '/api/platforms') {
+      const list = await Promise.all(PLATFORMS.map(async (pf) => ({ id: pf.id, name: pf.name, logo: (await platformInfo(pf).catch(() => ({}))).logo || null })));
+      return send(res, 200, { platforms: list });
+    }
+    const pfMatch = p.match(/^\/api\/platforms\/([a-z]+)$/);
+    if (req.method === 'GET' && pfMatch) {
+      const pf = PLATFORMS.find((x) => x.id === pfMatch[1]);
+      if (!pf) throw new HttpError(404, 'Plateforme inconnue');
+      if (!tmdbKey()) throw new HttpError(503, 'Clé TMDB manquante sur le serveur');
+      return send(res, 200, await platformPage(pf, user.token, q.get('sort') === 'asc' ? 'asc' : 'desc'));
+    }
+
     // ——— À voir (liste personnelle) ———
     if (p === '/api/watchlist') {
       const list = watchlists[user.id] || [];
@@ -3640,14 +3747,6 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       const progress = libs.length ? Math.round(libs.reduce((n, l) => n + l.progress, 0) / libs.length) : 100;
       return send(res, 200, { active: running.length > 0, progress, libraries: libs });
     }
-    if (req.method === 'GET' && p === '/api/admin/jellyfin/intro-skipper') {
-      requireAdmin(user);
-      return send(res, 200, await introSkipperStatus(user.token));
-    }
-    if (req.method === 'POST' && p === '/api/admin/jellyfin/intro-skipper') {
-      requireAdmin(user);
-      return send(res, 200, await installIntroSkipper(user.token));
-    }
     if (req.method === 'POST' && p === '/api/admin/jellyfin/replace-metadata') {
       requireAdmin(user);
       const names = await jellyfinReplaceAllMetadata(user.token);
@@ -3712,7 +3811,18 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       } catch {
         containers = null;
       }
+      // Avancement en direct (pourcentage et étape), écrit par la machine pendant la mise à jour
+      let containersProgress = null;
+      try {
+        const raw = fs.readFileSync(path.join(dir, 'containers-progress'), 'utf8').trim();
+        const m = raw.match(/^(\d+)\s*(.*)$/);
+        if (m) containersProgress = { pct: Math.min(100, Number(m[1])), step: m[2] || '' };
+      } catch {
+        containersProgress = null;
+      }
+      if (containers && containersProgress && containersProgress.pct < 100) containers.running = true;
       return send(res, 200, {
+        containersProgress,
         rebootPending: pending,
         updatePending: fs.existsSync(path.join(dir, 'update')),
         containersPending: fs.existsSync(path.join(dir, 'update-containers')),

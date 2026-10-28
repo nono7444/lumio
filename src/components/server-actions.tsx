@@ -8,16 +8,10 @@ import { C } from '@/constants/theme';
 import { serverCall } from '@/lib/chat';
 import { useSettings } from '@/lib/settings';
 
-type Action = 'scan' | 'intro' | 'jellyfin' | 'reboot' | 'update' | 'containers';
+type Action = 'scan' | 'jellyfin' | 'reboot' | 'update' | 'containers';
 
 const ASK: Record<Action, { title: string; text: string; ok: string; path: string }> = {
   scan: { title: 'Scanner les bibliothèques ?', text: 'Jellyfin va chercher les nouveaux fichiers sur les disques.', ok: 'Scanner', path: '/api/admin/jellyfin/scan' },
-  intro: {
-    title: 'Installer Intro Skipper ?',
-    text: 'L’extension Jellyfin qui repère intros, récaps et génériques (bouton « Passer l’intro »). Jellyfin redémarre une fois (environ 1 minute), puis analyse la bibliothèque en arrière-plan.',
-    ok: 'Installer',
-    path: '/api/admin/jellyfin/intro-skipper',
-  },
   jellyfin: { title: 'Redémarrer Jellyfin ?', text: 'Les lectures en cours seront coupées environ 1 minute.', ok: 'Redémarrer', path: '/api/admin/jellyfin/restart' },
   update: {
     title: 'Mettre à jour le serveur Lumio ?',
@@ -47,6 +41,8 @@ type HostStatus = {
   helperInstalled: boolean;
   containersHelper?: boolean;
   containers?: ContainersResult | null;
+  /** Avancement en direct de la mise à jour des conteneurs */
+  containersProgress?: { pct: number; step: string } | null;
   version?: string;
 };
 
@@ -58,13 +54,6 @@ export function ServerActionsSection() {
   const allowed = Boolean(settings.chatUrl) && settings.jellyfin?.isAdmin === true && !Platform.isTV;
   // Avancement de Jellyfin (scan des bibliothèques) : vérifié toutes les 3 s tant qu'il travaille
   const [refresh, setRefresh] = useState<RefreshStatus | null>(null);
-  // Intro Skipper déjà installé dans Jellyfin ?
-  const [intro, setIntro] = useState<{ installed: boolean; version?: string } | null>(null);
-  useEffect(() => {
-    if (!allowed) return;
-    serverCall<{ installed: boolean; version?: string }>(settings, '/api/admin/jellyfin/intro-skipper').then(setIntro).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allowed, busy]);
   const [host, setHost] = useState<HostStatus | null>(null);
   const loadHost = useCallback(() => serverCall<HostStatus>(settings, '/api/admin/host/status').then((h) => (setHost(h), h)).catch(() => null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -72,6 +61,13 @@ export function ServerActionsSection() {
   useEffect(() => {
     if (allowed) loadHost();
   }, [allowed, loadHost]);
+  // Mise à jour des conteneurs en cours : avancement rafraîchi toutes les 3 s
+  const containersRunning = Boolean(host?.containersPending || host?.containers?.running || (host?.containersProgress && host.containersProgress.pct < 100));
+  useEffect(() => {
+    if (!allowed || !containersRunning) return;
+    const t = setTimeout(loadHost, 3000);
+    return () => clearTimeout(t);
+  }, [allowed, containersRunning, host, loadHost]);
   const [watch, setWatch] = useState(0);
   const sawActive = useRef(false);
   const poll = useCallback(async () => {
@@ -122,9 +118,9 @@ export function ServerActionsSection() {
           const done = h && !h.containersPending && h.containers && !h.containers.running && Date.parse(h.containers.at) >= started - 5000;
           if (done) {
             toast(h!.containers!.ok ? `Conteneurs à jour${h!.containers!.updated.length ? ` : ${h!.containers!.updated.join(', ')}` : ' (rien de nouveau)'}` : 'Mise à jour des conteneurs : erreur, voir le détail', h!.containers!.ok ? 'ok' : 'error');
-          } else if (Date.now() - started < 30 * 60_000) setTimeout(follow, 10_000);
+          } else if (Date.now() - started < 30 * 60_000) setTimeout(follow, 5_000);
         };
-        setTimeout(follow, 10_000);
+        setTimeout(follow, 5_000);
       }
       if (a === 'reboot' || a === 'update') {
         // Si le service de la machine n'est pas installé, la demande reste en attente : on prévient
@@ -154,7 +150,7 @@ export function ServerActionsSection() {
   const confirm = (a: Action) =>
     Alert.alert(ASK[a].title, ASK[a].text, [
       { text: 'Annuler', style: 'cancel' },
-      { text: ASK[a].ok, style: a === 'scan' || a === 'intro' ? 'default' : 'destructive', onPress: () => run(a) },
+      { text: ASK[a].ok, style: a === 'scan' ? 'default' : 'destructive', onPress: () => run(a) },
     ]);
 
   return (
@@ -180,28 +176,34 @@ export function ServerActionsSection() {
               ))}
           </View>
         ) : null}
-        <Button
-          title={intro?.installed ? `Intro Skipper installé${intro.version ? ` (${intro.version})` : ''} · relancer l’analyse` : 'Installer Intro Skipper (passer l’intro)'}
-          icon="play-skip-forward-outline"
-          variant="secondary"
-          loading={busy === 'intro'}
-          onPress={() => confirm('intro')}
-        />
         <Button title="Redémarrer Jellyfin" icon="reload-circle-outline" variant="secondary" loading={busy === 'jellyfin'} onPress={() => confirm('jellyfin')} />
         <Button title="Mettre à jour le serveur Lumio" icon="cloud-download-outline" variant="secondary" loading={busy === 'update'} onPress={() => confirm('update')} />
         <Button
-          title={host?.containersPending || host?.containers?.running ? 'Mise à jour des conteneurs en cours…' : 'Mettre à jour les conteneurs'}
+          title={containersRunning ? 'Mise à jour des conteneurs en cours…' : 'Mettre à jour les conteneurs'}
           icon="layers-outline"
           variant="secondary"
           loading={busy === 'containers'}
-          disabled={Boolean(host?.containersPending || host?.containers?.running)}
+          disabled={containersRunning}
           onPress={() => confirm('containers')}
         />
+        {containersRunning ? (
+          <View style={styles.progressBox}>
+            <View style={styles.progressHead}>
+              <Text style={styles.progressTitle} numberOfLines={2}>
+                {host?.containersProgress?.step || (host?.containersPending ? 'En attente de la machine…' : 'Mise à jour des conteneurs')}
+              </Text>
+              <Text style={styles.progressPct}>{host?.containersProgress?.pct ?? 0} %</Text>
+            </View>
+            <View style={styles.track}>
+              <View style={[styles.fill, { width: `${host?.containersProgress?.pct ?? 0}%` }]} />
+            </View>
+          </View>
+        ) : null}
         {host && !host.containersHelper ? (
           <Text style={[styles.help, { marginBottom: 0 }]}>
             Pour ce bouton, relance une fois sur le serveur : sudo sh /data/lumio-server/host/install-host-actions.sh
           </Text>
-        ) : host?.containers && !host.containers.running ? (
+        ) : host?.containers && !containersRunning ? (
           <Text style={[styles.help, { marginBottom: 0, color: host.containers.ok ? C.textDim : C.danger }]} numberOfLines={3}>
             Dernière mise à jour des conteneurs : {new Date(host.containers.at).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
             {host.containers.ok ? (host.containers.updated.length ? ` · mis à jour : ${host.containers.updated.join(', ')}` : ' · rien de nouveau') : ` · erreur : ${host.containers.tail.split('\n').slice(-2).join(' ')}`}

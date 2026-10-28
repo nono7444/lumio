@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import { hapticTap } from '@/lib/haptics';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
@@ -14,7 +14,8 @@ import type { PosterIds } from '@/lib/better-posters';
 import { useFamilyRatingBadge } from '@/lib/ratings';
 import { useSettings } from '@/lib/settings';
 
-export const tap = () => Haptics.selectionAsync().catch(() => {});
+// Vibration au toucher : seulement si elle est activée dans Profil (coupée par défaut)
+export const tap = () => hapticTap();
 
 export type PosterItem = {
   key: string;

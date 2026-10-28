@@ -42,7 +42,6 @@ const progressOf = (i: JfItem) => Math.min(1, Math.max(0, (i.UserData?.PlayedPer
 export function JfPosterCard({ item, width = POSTER_W }: { item: JfItem; width?: number }) {
   const { settings } = useSettings();
   const pct = progressOf(item);
-  const unplayed = item.UserData?.UnplayedItemCount;
   const [failed, setFailed] = useState(false);
   // Affiche de Jellyfin ; si elle ne se charge pas, celle de TMDB (via le serveur Lumio)
   const poster = failed ? tmdbArtFor(settings, item, 'poster') : jfPoster(settings, item);
@@ -76,11 +75,6 @@ export function JfPosterCard({ item, width = POSTER_W }: { item: JfItem; width?:
         {item.UserData?.Played && (
           <View style={styles.played}>
             <Ionicons name="checkmark" size={13} color="#fff" />
-          </View>
-        )}
-        {!!unplayed && !item.UserData?.Played && (
-          <View style={styles.count}>
-            <Text style={styles.countText}>{unplayed}</Text>
           </View>
         )}
         {pct > 0 && pct < 1 ? (
