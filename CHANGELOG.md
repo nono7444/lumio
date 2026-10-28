@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.108 — 28 octobre 2026
+
 - Accueil : ton nom de profil avec l'écusson de ton rang (10 rangs, du bois à l'or) à la place de « Lumio » ; un appui ouvre tes stats.
 - Stats : ton rang, tes points, ta progression et tous les rangs avec leurs bonus ; chaque rang donne des demandes en plus sur ton quota (films et saisons).
 - Fiche plus claire : une ligne d'actions (Lire ou « À voir », puis Proposer et « DL »), genre dans les pastilles, résumé sur 3 lignes avec « Plus », 2 avis de la famille affichés.
