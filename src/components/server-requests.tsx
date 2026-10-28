@@ -23,6 +23,7 @@ import {
   type Req,
   type RequestFilter,
 } from '@/lib/requests';
+import { IS_BETA, secourAdminApi } from '@/lib/secour';
 import { useSettings } from '@/lib/settings';
 
 const FILTERS: { id: RequestFilter; label: string }[] = [
@@ -168,10 +169,12 @@ function RequestCard({ r, admin, meId, onChanged }: { r: Req; admin: boolean; me
         </View>
       </View>
 
-      {/* Recherche en attente : relancer pour voir s'il y a enfin une version dispo */}
-      {r.status === RequestStatus.APPROVED && (!r.download || r.download.state === 'searching' || r.download.state === 'partial') && (admin || mine) ? (
+      {/* Recherche en attente : relancer pour voir s'il y a enfin une version dispo ; « LS » (admin) : Lumio Secour prend le relais */}
+      {(r.status === RequestStatus.APPROVED && (!r.download || ['searching', 'partial', 'warning'].includes(r.download.state)) && r.download?.via !== 'secour' && (admin || mine)) ||
+      (IS_BETA && admin && r.status === RequestStatus.FAILED) ? (
         <View style={styles.actions}>
-          <RecheckButton r={r} onDone={onChanged} style={styles.actBtn} />
+          {r.status === RequestStatus.APPROVED && r.download?.state !== 'warning' ? <RecheckButton r={r} onDone={onChanged} style={styles.actBtn} /> : null}
+          {IS_BETA && admin ? <SecourRelayButton r={r} onDone={onChanged} /> : null}
         </View>
       ) : null}
 
@@ -199,6 +202,37 @@ function RequestCard({ r, admin, meId, onChanged }: { r: Req; admin: boolean; me
           ) : null}
         </View>
       )}
+    </Pressable>
+  );
+}
+
+/** « LS » sur une demande bloquée (admin) : Lumio Secour la télécharge à la place de Radarr / Sonarr. */
+function SecourRelayButton({ r, onDone }: { r: Req; onDone: () => void }) {
+  const { settings } = useSettings();
+  const [busy, setBusy] = useState(false);
+  const app = r.type === 'movie' ? 'Radarr' : 'Sonarr';
+  const go = () =>
+    Alert.alert('Lumio Secour', `Télécharger « ${r.title} » avec Lumio Secour à la place de ${app} ?`, [
+      { text: 'Annuler', style: 'cancel' },
+      {
+        text: 'Télécharger',
+        onPress: async () => {
+          setBusy(true);
+          try {
+            await secourAdminApi.viaRequest(settings, r.id);
+            toast(`« ${r.title} » part avec Lumio Secour`);
+            onDone();
+          } catch (e: any) {
+            toast(e?.message ?? String(e), 'error');
+          } finally {
+            setBusy(false);
+          }
+        },
+      },
+    ]);
+  return (
+    <Pressable onPress={go} disabled={busy} style={styles.ls} accessibilityLabel="Télécharger avec Lumio Secour">
+      {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.lsText}>LS</Text>}
     </Pressable>
   );
 }
@@ -359,6 +393,8 @@ export function ServerRequests({ header }: { header: React.ReactNode }) {
 }
 
 const styles = StyleSheet.create({
+  ls: { width: 48, height: 40, borderRadius: 12, backgroundColor: '#30D158', alignItems: 'center', justifyContent: 'center' },
+  lsText: { color: '#fff', fontSize: 15, fontWeight: '900', letterSpacing: 0.5 },
   seasonToggle: { width: 24, height: 22, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
   card: { borderRadius: R.lg, overflow: 'hidden', backgroundColor: C.surface },
   cardBody: { flexDirection: 'row', gap: 14, padding: 14 },

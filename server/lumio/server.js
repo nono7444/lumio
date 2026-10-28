@@ -25,7 +25,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.52.0';
+const VERSION = '3.53.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2341,6 +2341,82 @@ for (const sig of ['SIGTERM', 'SIGINT'])
     process.exit(0);
   });
 
+// ——— Relais quand Radarr / Sonarr répondent mais restent bloqués ———
+// Téléchargement bloqué (avertissement : import impossible, échec…) depuis 2 h, ou aucune version trouvée en 24 h :
+// Lumio Secour prend le relais (une seule fois par demande). Réglable : config.secourStuck (false = jamais),
+// config.secourStuckHours, config.secourNotFoundHours.
+const stuckHours = () => Number(config.secourStuckHours) || 2;
+const notFoundHours = () => Number(config.secourNotFoundHours) || 24;
+async function watchStuckRequests() {
+  if (config.secourStuck === false || !secourAutoOn()) return;
+  const lib = await loadLibrary(true).catch(() => null);
+  if (!lib) return;
+  const now = Date.now();
+  let changed = false;
+  for (const r of requests) {
+    if (r.status !== RequestStatus.APPROVED || r.via === 'secour' || r.secourStuckTried) continue;
+    const d = downloadOf(r, lib);
+    const app = r.type === 'movie' ? 'Radarr' : 'Sonarr';
+    let reason = null;
+    if (d && d.state === 'warning') {
+      if (!r.stuckSince) {
+        r.stuckSince = new Date().toISOString();
+        changed = true;
+      } else if (now - Date.parse(r.stuckSince) >= stuckHours() * 3600e3) {
+        reason = `${app} bloqué depuis ${stuckHours()} h${d.message ? ` (${String(d.message).slice(0, 100)})` : ''}`;
+      }
+    } else {
+      if (r.stuckSince) {
+        delete r.stuckSince;
+        changed = true;
+      }
+      // Rien en cours (ni téléchargement ni import, pas de saison partielle) depuis trop longtemps
+      const since = Date.parse(r.modifiedAt || r.createdAt);
+      if ((!d || d.state === 'searching') && now - since >= notFoundHours() * 3600e3) {
+        reason = `${app} n’a rien trouvé en ${notFoundHours()} h`;
+      }
+    }
+    if (!reason) continue;
+    r.secourStuckTried = true;
+    try {
+      startSecour(r, reason);
+    } catch (e) {
+      console.log(`Relais Lumio Secour impossible pour « ${r.title} » : ${e.message}`);
+    }
+    changed = true;
+  }
+  if (changed) saveRequests();
+}
+setInterval(() => watchStuckRequests().catch((e) => console.log(`Surveillance des demandes bloquées : ${e.message}`)), 15 * 60_000);
+
+/** Après un téléchargement Lumio Secour : Radarr / Sonarr arrêtent de chercher ce titre (pas de doublon), sans rien effacer. */
+async function arrHandOff(r) {
+  try {
+    if (r.type === 'movie') {
+      if (!arrConfig('radarr')) return;
+      const m = (await arr('radarr', `/movie?tmdbId=${r.tmdbId}`))[0];
+      if (!m) return;
+      if (m.monitored) await arr('radarr', `/movie/${m.id}`, { method: 'PUT', body: JSON.stringify({ ...m, monitored: false }) });
+      const q = await arr('radarr', '/queue?page=1&pageSize=200').catch(() => ({ records: [] }));
+      for (const x of (q.records || []).filter((x) => x.movieId === m.id))
+        await arr('radarr', `/queue/${x.id}?removeFromClient=true&blocklist=false`, { method: 'DELETE' }).catch(() => {});
+    } else {
+      if (!arrConfig('sonarr') || !r.tvdbId) return;
+      const s = (await arr('sonarr', `/series?tvdbId=${r.tvdbId}`))[0];
+      if (!s) return;
+      const wanted = new Set((r.seasons || []).map(Number));
+      if (s.seasons.some((x) => wanted.has(x.seasonNumber) && x.monitored))
+        await arr('sonarr', `/series/${s.id}`, { method: 'PUT', body: JSON.stringify({ ...s, seasons: s.seasons.map((x) => (wanted.has(x.seasonNumber) ? { ...x, monitored: false } : x)) }) });
+      const q = await arr('sonarr', '/queue?page=1&pageSize=500&includeEpisode=true').catch(() => ({ records: [] }));
+      for (const x of (q.records || []).filter((x) => x.seriesId === s.id && (!x.episode || wanted.has(x.episode.seasonNumber))))
+        await arr('sonarr', `/queue/${x.id}?removeFromClient=true&blocklist=false`, { method: 'DELETE' }).catch(() => {});
+    }
+    console.log(`Lumio Secour : « ${r.title} » retiré de la recherche ${r.type === 'movie' ? 'Radarr' : 'Sonarr'}`);
+  } catch (e) {
+    console.log(`Lumio Secour : ${r.type === 'movie' ? 'Radarr' : 'Sonarr'} pas mis à jour pour « ${r.title} » (${e.message})`);
+  }
+}
+
 // ——— Chaque nuit vers minuit (heure de Paris) : contrôle des sites, nouvelles adresses suivies toutes seules ———
 setInterval(async () => {
   if (!secourUrl() || !secourKey()) return;
@@ -2384,6 +2460,9 @@ function secourAutoView() {
   return {
     enabled: config.secourAuto !== false,
     force: Boolean(config.secourForce),
+    stuck: config.secourStuck !== false,
+    stuckHours: stuckHours(),
+    notFoundHours: notFoundHours(),
     ready: secourAutoOn(),
     alldebrid: Boolean(secourDebridKey()),
     service: secourService(),
@@ -2558,6 +2637,7 @@ async function runSecourQueue() {
           r.secour.state = 'done';
           r.status = RequestStatus.COMPLETED;
           r.completedAt = new Date().toISOString();
+          arrHandOff(r).catch(() => {});
           const missing = r.secour.items.filter((i) => !['done', 'present'].includes(i.status)).length;
           const what = r.type === 'tv' ? ` (${r.secour.done}/${r.secour.total} épisodes${missing ? `, ${missing} introuvable${missing > 1 ? 's' : ''}` : ''})` : '';
           notify({ title: '🛟 Disponible via Lumio Secour', message: `${r.title}${what} · demandé par ${r.requestedBy.name}`, tags: ['tada'], image: r.poster }).catch(() => {});
@@ -3999,6 +4079,9 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         const b = await readBody(req);
         if (typeof b.enabled === 'boolean') config.secourAuto = b.enabled;
         if (typeof b.force === 'boolean') config.secourForce = b.force;
+        if (typeof b.stuck === 'boolean') config.secourStuck = b.stuck;
+        if (Number(b.stuckHours) > 0) config.secourStuckHours = Math.min(72, Number(b.stuckHours));
+        if (Number(b.notFoundHours) > 0) config.secourNotFoundHours = Math.min(720, Number(b.notFoundHours));
         for (const k of ['movie', 'tv']) {
           const t = b[k];
           if (t && typeof t === 'object') {
