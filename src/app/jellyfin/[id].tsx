@@ -109,7 +109,7 @@ function FolderGrid({ folder }: { folder: JfItem }) {
           search: search || undefined,
         });
         if (my !== gen.current) return; // une recherche ou un tri plus récent a pris le relais
-        offset.current += res.Items.length;
+        offset.current += res.Received;
         setTotal(res.TotalRecordCount);
         setItems((prev) => {
           const base = reset ? [] : prev;

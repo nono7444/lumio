@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Accueil et Bibliothèque : chaque bibliothèque n'affiche plus que ses propres titres (plus de films dans « Séries » ni de films pour adultes dans « Kids »). Il faut le serveur Lumio 3.60.0.
+
 - Déplacer : si Jellyfin n'est pas à jour (titre déjà déplacé), Lumio retrouve le vrai emplacement sur le disque au lieu d'afficher l'erreur « ENOENT ».
 
 ## 1.0.114 — 31 octobre 2026

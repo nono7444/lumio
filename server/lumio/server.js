@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.59.0';
+const VERSION = '3.60.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4316,6 +4316,18 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       const r = await fetch(`${JELLYFIN_URL}/Library/Refresh`, { method: 'POST', headers: jfHeaders(user.token) });
       if (!r.ok) throw new HttpError(502, `Jellyfin a refusé le scan (HTTP ${r.status})`);
       return send(res, 200, { ok: true, message: 'Scan des bibliothèques lancé.' });
+    }
+    // Dossiers de chaque bibliothèque Jellyfin : l'appli trie les titres par bibliothèque d'après leur chemin
+    // (Jellyfin renvoie parfois des titres d'autres bibliothèques). Rien de secret : seulement les noms et les chemins.
+    if (req.method === 'GET' && p === '/api/jf/libraries') {
+      const token = user.admin ? user.token : jfAdminToken || process.env.JELLYFIN_API_KEY;
+      if (!token) return send(res, 200, { libraries: [] });
+      const r = await fetch(`${JELLYFIN_URL}/Library/VirtualFolders`, { headers: jfHeaders(token) });
+      if (!r.ok) return send(res, 200, { libraries: [] });
+      const libraries = (await r.json())
+        .filter((l) => l.ItemId)
+        .map((l) => ({ id: l.ItemId, name: l.Name, type: l.CollectionType ?? null, locations: l.Locations ?? [] }));
+      return send(res, 200, { libraries });
     }
     // Avancement de l'actualisation des bibliothèques Jellyfin (remplacement TMDB, scan) : pourcentage par bibliothèque
     if (req.method === 'GET' && p === '/api/admin/jellyfin/refresh-status') {
