@@ -29,6 +29,7 @@ import { SeasonRequests } from '@/components/season-requests';
 import { WatchlistButton } from '@/components/watchlist-button';
 import { TvActionRow, TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { MetadataEditor } from '@/components/metadata-editor';
+import { MoveFolder } from '@/components/move-folder';
 import { FamilyRating } from '@/components/family-rating';
 import { ReportProblemButton } from '@/components/report-problem';
 import { useServerRequests } from '@/lib/requests';
@@ -543,9 +544,16 @@ function AdminItemActions({ item, reload }: { item: JfItem; reload: () => void }
     <View style={{ gap: 10 }}>
       <View style={{ flexDirection: 'row', gap: 10 }}>
         <Button title="Voir dans le disque" icon="folder-open-outline" variant="secondary" small loading={busy === 'disk'} onPress={showOnDisk} style={{ flex: 1 }} />
+        {item.Path ? (
+          <MoveFolder path={item.Path!} title={item.Name}>
+            {(open, moving) => <Button title="Déplacer" icon="move-outline" variant="secondary" small loading={moving} onPress={open} style={{ flex: 1 }} />}
+          </MoveFolder>
+        ) : null}
+      </View>
+      <View style={{ flexDirection: 'row', gap: 10 }}>
+        <Button title="Corriger les infos" icon="create-outline" variant="secondary" small onPress={() => setEditing(true)} style={{ flex: 1 }} />
         <Button title="Supprimer" icon="trash-outline" variant="danger" small loading={busy === 'delete'} onPress={remove} style={{ flex: 1 }} />
       </View>
-      <Button title="Corriger les infos" icon="create-outline" variant="secondary" small onPress={() => setEditing(true)} />
       <MetadataEditor item={item} visible={editing} onClose={() => setEditing(false)} onDone={reload} />
     </View>
   );
