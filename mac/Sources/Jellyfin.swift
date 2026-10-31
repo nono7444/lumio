@@ -169,15 +169,21 @@ final class JellyfinClient {
         try await request("Shows/NextUp", query: ["UserId": userId!, "Limit": "20", "Fields": fields], as: JFList.self).Items
     }
 
-    func latest(parent: String) async throws -> [JFItem] {
-        try await request("Users/\(userId!)/Items/Latest", query: ["ParentId": parent, "Limit": "24", "Fields": fields], as: [JFItem].self)
+    func latest(parent: String, types: String) async throws -> [JFItem] {
+        try await request("Users/\(userId!)/Items/Latest", query: ["ParentId": parent, "Limit": "24", "Fields": fields, "IncludeItemTypes": types], as: [JFItem].self)
     }
 
-    func items(parent: String, sort: String = "SortName", order: String = "Ascending", start: Int = 0, limit: Int = 120) async throws -> JFList {
+    /// Titres d'une bibliothèque, du seul type de cette bibliothèque (films OU séries)
+    func items(parent: String, types: String, sort: String = "SortName", order: String = "Ascending", start: Int = 0, limit: Int = 120) async throws -> JFList {
         try await request("Users/\(userId!)/Items", query: [
-            "ParentId": parent, "Recursive": "true", "IncludeItemTypes": "Movie,Series",
-            "SortBy": sort, "SortOrder": order, "StartIndex": String(start), "Limit": String(limit), "Fields": fields,
+            "ParentId": parent, "Recursive": "true", "IncludeItemTypes": types,
+            "SortBy": sort + ",SortName", "SortOrder": order, "StartIndex": String(start), "Limit": String(limit), "Fields": fields,
         ])
+    }
+
+    func itemsByIds(_ ids: [String]) async throws -> [JFItem] {
+        guard !ids.isEmpty else { return [] }
+        return try await request("Users/\(userId!)/Items", query: ["Ids": ids.joined(separator: ","), "Fields": fields, "SortBy": "PremiereDate"], as: JFList.self).Items
     }
 
     func search(_ term: String) async throws -> [JFItem] {
@@ -196,6 +202,24 @@ final class JellyfinClient {
 
     func episodes(series: String, season: String) async throws -> [JFItem] {
         try await request("Shows/\(series)/Episodes", query: ["UserId": userId!, "SeasonId": season, "Fields": "Overview"], as: JFList.self).Items
+    }
+
+    /// « movie:603 » / « tv:1399 » → identifiant Jellyfin, pour toute la bibliothèque
+    func providerIndex() async throws -> [String: String] {
+        struct Light: Decodable {
+            let Id: String; let kind: String?; let ProviderIds: [String: String]?
+            enum CodingKeys: String, CodingKey { case Id, kind = "Type", ProviderIds }
+        }
+        struct L: Decodable { let Items: [Light] }
+        let all = try await request("Users/\(userId!)/Items", query: [
+            "Recursive": "true", "IncludeItemTypes": "Movie,Series", "Fields": "ProviderIds", "EnableImages": "false",
+        ], as: L.self).Items
+        var out: [String: String] = [:]
+        for i in all {
+            guard let t = i.ProviderIds?["Tmdb"] ?? i.ProviderIds?["tmdb"] else { continue }
+            out["\(i.kind == "Series" ? "tv" : "movie"):\(t)"] = i.Id
+        }
+        return out
     }
 
     // ——— Images ———

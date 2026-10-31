@@ -1,72 +1,78 @@
-// Fenêtre principale : barre latérale (Accueil, Recherche, bibliothèques) et contenu.
+// Fenêtre principale : barre latérale (comme les onglets de l'iPhone) et contenu.
 import SwiftUI
 
-enum SidebarItem: Hashable {
-    case home
-    case search
-    case library(String, String) // id, nom
+enum SidebarItem: String, Hashable, CaseIterable {
+    case home, search, library, calendar, requests, watchlist, chat, profile
+
+    var label: String {
+        switch self {
+        case .home: return "Accueil"
+        case .search: return "Recherche"
+        case .library: return "Bibliothèque"
+        case .calendar: return "Agenda"
+        case .requests: return "Demandes"
+        case .watchlist: return "À voir"
+        case .chat: return "Chat"
+        case .profile: return "Profil"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .home: return "house"
+        case .search: return "magnifyingglass"
+        case .library: return "rectangle.stack"
+        case .calendar: return "calendar"
+        case .requests: return "tray.and.arrow.down"
+        case .watchlist: return "bookmark"
+        case .chat: return "bubble.left.and.bubble.right"
+        case .profile: return "person.crop.circle"
+        }
+    }
 }
 
 struct MainView: View {
     @EnvironmentObject var session: Session
     @State private var selection: SidebarItem? = .home
-    @State private var libraries: [JFItem] = []
     @State private var path = NavigationPath()
 
     var body: some View {
         NavigationSplitView {
             List(selection: $selection) {
-                Label("Accueil", systemImage: "house").tag(SidebarItem.home)
-                Label("Recherche", systemImage: "magnifyingglass").tag(SidebarItem.search)
-                if !libraries.isEmpty {
-                    Section("Bibliothèques") {
-                        ForEach(libraries) { lib in
-                            Label(lib.title, systemImage: icon(lib.CollectionType)).tag(SidebarItem.library(lib.Id, lib.title))
-                        }
+                ForEach([SidebarItem.home, .search, .library], id: \.self) { item in
+                    Label(item.label, systemImage: item.icon).tag(item)
+                }
+                Section("Lumio") {
+                    ForEach([SidebarItem.calendar, .requests, .watchlist, .chat], id: \.self) { item in
+                        Label(item.label, systemImage: item.icon).tag(item)
                     }
+                }
+                Section {
+                    Label(SidebarItem.profile.label, systemImage: SidebarItem.profile.icon).tag(SidebarItem.profile)
                 }
             }
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 190, ideal: 210)
-            .safeAreaInset(edge: .bottom) {
-                HStack {
-                    Image(systemName: "person.crop.circle.fill").foregroundStyle(Theme.dim)
-                    Text(session.userName).lineLimit(1)
-                    Spacer()
-                    Button { session.logout() } label: { Image(systemName: "rectangle.portrait.and.arrow.right") }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Theme.dim)
-                        .help("Se déconnecter")
-                }
-                .padding(12)
-            }
         } detail: {
             NavigationStack(path: $path) {
-                content
-                    .navigationDestination(for: JFItem.self) { DetailView(item: $0) }
+                content.lumioDestinations()
             }
             .background(Theme.bg)
         }
         .onChange(of: selection) { _ in path = NavigationPath() }
-        .task {
-            if let c = session.client { libraries = (try? await c.views()) ?? [] }
-        }
+        .task { await session.prepare() }
     }
 
     @ViewBuilder private var content: some View {
         switch selection ?? .home {
         case .home: HomeView()
         case .search: SearchView()
-        case .library(let id, let name): LibraryView(parentId: id, name: name).id(id)
-        }
-    }
-
-    private func icon(_ type: String?) -> String {
-        switch type {
-        case "movies": return "film"
-        case "tvshows": return "tv"
-        case "boxsets": return "square.stack"
-        default: return "folder"
+        case .library: LibraryHomeView()
+        case .calendar: CalendarView()
+        case .requests: RequestsView()
+        case .watchlist: WatchlistView()
+        case .chat: ChatView()
+        case .profile: ProfileView()
         }
     }
 }

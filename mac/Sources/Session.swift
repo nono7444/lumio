@@ -7,6 +7,40 @@ final class Session: ObservableObject {
     @Published private(set) var client: JellyfinClient?
     @Published private(set) var userName: String = ""
     @Published var player: PlayRequest?
+    @Published var lumioURL: String = UserDefaults.standard.string(forKey: "lumio.serverLumio") ?? "https://lumio.wawanono.lol"
+    /// Clé TMDB donnée par le serveur Lumio (jamais écrite dans l'appli)
+    @Published private(set) var tmdb: Tmdb?
+    @Published var me: LumioMe?
+
+    var lumio: LumioServer? {
+        guard let client, let u = URL(string: lumioURL.trimmingCharacters(in: .whitespaces)) else { return nil }
+        return LumioServer(base: u, jellyfin: client)
+    }
+
+    func setLumioURL(_ s: String) {
+        var u = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        while u.hasSuffix("/") { u.removeLast() }
+        if !u.isEmpty, !u.lowercased().hasPrefix("http") { u = "https://" + u }
+        lumioURL = u
+        d.set(u, forKey: "lumio.serverLumio")
+        tmdb = nil
+        Task { await prepare() }
+    }
+
+    /// Clé TMDB et profil Lumio, chargés après la connexion
+    func prepare() async {
+        guard let l = lumio else { return }
+        if tmdb == nil, let k = try? await l.tmdbKey(), !k.isEmpty { tmdb = Tmdb(key: k) }
+        me = try? await l.me()
+    }
+
+    // Index TMDB → Jellyfin (pour « Lire » depuis une fiche TMDB)
+    private var index: [String: String]?
+    func jellyfinId(type: String, tmdbId: Int) async -> String? {
+        if index == nil, let c = client { index = try? await c.providerIndex() }
+        return index?["\(type):\(tmdbId)"]
+    }
+    func resetIndex() { index = nil }
 
     private let d = UserDefaults.standard
 
@@ -39,6 +73,9 @@ final class Session: ObservableObject {
         d.removeObject(forKey: "lumio.userId")
         client = nil
         player = nil
+        tmdb = nil
+        me = nil
+        index = nil
     }
 
     func play(_ item: JFItem, fromStart: Bool = false) {
