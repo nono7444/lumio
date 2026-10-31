@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Platform, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -57,9 +57,9 @@ const FILTERS = [
 const SORTS = [
   // Par défaut : date de sortie, du plus récent au plus ancien
   { label: 'Sortie', sort: 'PremiereDate,ProductionYear,SortName', order: 'Descending' as const },
-  { label: 'Ajouts', sort: 'DateCreated', order: 'Descending' as const },
+  { label: 'Ajouts', sort: 'DateCreated,SortName', order: 'Descending' as const },
   { label: 'A-Z', sort: 'SortName', order: 'Ascending' as const },
-  { label: 'Note', sort: 'CommunityRating', order: 'Descending' as const },
+  { label: 'Note', sort: 'CommunityRating,SortName', order: 'Descending' as const },
 ];
 
 function FolderGrid({ folder }: { folder: JfItem }) {
@@ -82,10 +82,18 @@ function FolderGrid({ folder }: { folder: JfItem }) {
   const types =
     folder.CollectionType === 'movies' ? 'Movie' : folder.CollectionType === 'tvshows' ? 'Series' : 'Movie,Series,BoxSet';
 
+  // Pages chargées une seule fois : un verrou et un compteur en « ref » (l'état React arrive trop tard
+  // quand la liste demande deux pages d'affilée), et chaque titre n'est gardé qu'une fois.
+  const busy = useRef(false);
+  const offset = useRef(0);
+  const gen = useRef(0);
   const loadPage = useCallback(
     async (reset: boolean) => {
-      if (loading) return;
+      if (busy.current && !reset) return;
+      const my = ++gen.current;
+      busy.current = true;
       setLoading(true);
+      if (reset) offset.current = 0;
       try {
         const s = SORTS[sortIdx];
         const res = await jf.items(settings, {
@@ -93,20 +101,29 @@ function FolderGrid({ folder }: { folder: JfItem }) {
           types,
           sort: s.sort,
           order: s.order,
-          start: reset ? 0 : items.length,
+          start: offset.current,
           limit: 60,
           filters: filter || undefined,
           genres: genre ?? undefined,
           search: search || undefined,
         });
+        if (my !== gen.current) return; // une recherche ou un tri plus récent a pris le relais
+        offset.current += res.Items.length;
         setTotal(res.TotalRecordCount);
-        setItems((prev) => (reset ? res.Items : [...prev, ...res.Items]));
+        setItems((prev) => {
+          const base = reset ? [] : prev;
+          const seen = new Set(base.map((i) => i.Id));
+          return [...base, ...res.Items.filter((i) => !seen.has(i.Id) && seen.add(i.Id))];
+        });
       } finally {
-        setLoading(false);
+        if (my === gen.current) {
+          busy.current = false;
+          setLoading(false);
+        }
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [settings, folder.Id, sortIdx, items.length, types, filter, genre, search]
+    [settings, folder.Id, sortIdx, types, filter, genre, search]
   );
 
   useEffect(() => {
@@ -137,7 +154,7 @@ function FolderGrid({ folder }: { folder: JfItem }) {
         columnWrapperStyle={{ gap }}
         contentContainerStyle={{ paddingTop: insets.top + 56, paddingHorizontal: 16, paddingBottom: insets.bottom + 40, gap: 18 }}
         onEndReachedThreshold={0.6}
-        onEndReached={() => items.length < total && loadPage(false)}
+        onEndReached={() => offset.current < total && loadPage(false)}
         ListHeaderComponent={
           <View style={{ marginBottom: 6 }}>
             <Text style={styles.screenTitle}>{folder.Name}</Text>

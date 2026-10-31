@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Bibliothèques : un même film ou une même série ne s'affiche plus plusieurs fois en faisant défiler la liste.
+
 ## 1.0.112 — 31 octobre 2026
 
 - L'onglet Book est retiré de l'appli.
