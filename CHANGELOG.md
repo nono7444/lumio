@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Bibliothèques : retour à l'affichage d'avant les deux derniers changements (chargement et tri des bibliothèques comme en 1.0.112).
+
 ## 1.0.116 — 31 octobre 2026
 
 - Accueil et Bibliothèque : chaque bibliothèque n'affiche plus que ses propres titres (plus de films dans « Séries » ni de films pour adultes dans « Kids »). Il faut le serveur Lumio 3.60.0.

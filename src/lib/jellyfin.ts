@@ -2,7 +2,6 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
-import { serverCall } from './chat';
 import type { JellyfinSession, Settings } from './settings';
 
 export const TICKS_PER_SECOND = 10_000_000;
@@ -204,31 +203,6 @@ function api(s: Settings) {
   return { j, get, post };
 }
 
-// Dossiers de chaque bibliothèque (donnés par le serveur Lumio) : Jellyfin renvoie parfois des titres
-// d'autres bibliothèques quand on lui demande une seule bibliothèque ; on garde ceux dont le chemin est dans ses dossiers.
-let rootsCache: { key: string; at: number; p: Promise<Map<string, string[]>> } | null = null;
-const normPath = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
-function libraryRoots(s: Settings) {
-  const key = `${s.chatUrl}|${s.jellyfin?.userId}`;
-  if (!rootsCache || rootsCache.key !== key || Date.now() - rootsCache.at > 10 * 60_000) {
-    const p = serverCall<{ libraries: { id: string; locations: string[] }[] }>(s, '/api/jf/libraries')
-      .then((r) => new Map(r.libraries.map((l) => [l.id, l.locations.map(normPath)] as [string, string[]])))
-      .catch(() => new Map<string, string[]>());
-    rootsCache = { key, at: Date.now(), p };
-  }
-  return rootsCache.p;
-}
-async function keepIn<T extends { Path?: string }>(s: Settings, parentId: string | undefined, items: T[]): Promise<T[]> {
-  if (!parentId || !s.chatUrl) return items;
-  const roots = (await libraryRoots(s)).get(parentId);
-  if (!roots?.length) return items;
-  return items.filter((i) => {
-    if (!i.Path) return true;
-    const p = normPath(i.Path);
-    return roots.some((r) => p === r || p.startsWith(r + '/'));
-  });
-}
-
 // Index « type:tmdb:id » / « type:imdb:id » → Id Jellyfin, pour savoir si un titre est déjà sur le serveur
 let providerCache: { key: string; at: number; map: Promise<Map<string, string>> } | null = null;
 function providerIndex(s: Settings) {
@@ -317,9 +291,7 @@ export const jf = {
 
   latest: (s: Settings, parentId: string) => {
     const { j, get } = api(s);
-    return get<JfItem[]>(`/Users/${j.userId}/Items/Latest?ParentId=${parentId}&Limit=30&Fields=${FIELDS}&GroupItems=true`).then((l) =>
-      keepIn(s, parentId, l)
-    );
+    return get<JfItem[]>(`/Users/${j.userId}/Items/Latest?ParentId=${parentId}&Limit=30&Fields=${FIELDS}&GroupItems=true`);
   },
 
   items: (
@@ -351,11 +323,7 @@ export const jf = {
     if (opts.search) q.set('SearchTerm', opts.search);
     if (opts.filters) q.set('Filters', opts.filters);
     if (opts.genres) q.set('Genres', opts.genres);
-    return get<{ Items: JfItem[]; TotalRecordCount: number }>(`/Users/${j.userId}/Items?${q}`).then(async (r) => {
-      // Pour la pagination, StartIndex compte les titres reçus (même ceux écartés ici)
-      const kept = await keepIn(s, opts.parentId, r.Items);
-      return { ...r, Items: kept, Received: r.Items.length };
-    });
+    return get<{ Items: JfItem[]; TotalRecordCount: number }>(`/Users/${j.userId}/Items?${q}`);
   },
 
   /**
@@ -385,7 +353,7 @@ export const jf = {
         return get<{ Items: (JfItem & { DateCreated?: string })[] }>(`/Users/${j.userId}/Items?${q}`).then((r) => r.Items);
       };
       const [movies, series] = await Promise.all([
-        opts.kind !== 'series' ? base('Movie', opts.parentId ? limit * 3 : limit).then((l) => keepIn(s, opts.parentId, l)) : Promise.resolve([]),
+        opts.kind !== 'series' ? base('Movie', limit) : Promise.resolve([]),
         opts.kind !== 'movies'
           ? (async () => {
               // Épisodes sortis cette année, regroupés par série dans l'ordre d'ajout
@@ -397,14 +365,13 @@ export const jf = {
                   added.set(e.SeriesId, e.DateCreated ?? '');
                   order.push(e.SeriesId);
                 }
-              const ids = order.slice(0, opts.parentId ? limit * 2 : limit);
+              const ids = order.slice(0, limit);
               if (!ids.length) return [];
               const r = await get<{ Items: JfItem[] }>(`/Users/${j.userId}/Items?Ids=${ids.join(',')}&Fields=${FIELDS}`);
-              const list = ids
+              return ids
                 .map((id) => r.Items.find((x) => x.Id === id))
                 .filter((x): x is JfItem => Boolean(x))
                 .map((x) => ({ ...x, DateCreated: added.get(x.Id) }));
-              return (await keepIn(s, opts.parentId, list)).slice(0, limit);
             })()
           : Promise.resolve([]),
       ]);
