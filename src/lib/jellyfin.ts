@@ -234,6 +234,11 @@ function libraryRoots(s: Settings) {
   }
   return rootsCache.p;
 }
+/** Dossiers racines de toutes les bibliothèques (chemins Jellyfin), pour ne jamais déplacer une bibliothèque entière. */
+export async function jfLibraryFolders(s: Settings): Promise<string[]> {
+  if (!s.chatUrl) return [];
+  return [...new Set([...(await libraryRoots(s)).values()].flat())];
+}
 async function keepIn<T extends { Path?: string }>(s: Settings, parentId: string | undefined, items: T[]): Promise<T[]> {
   if (!parentId || !s.chatUrl) return items;
   const roots = (await libraryRoots(s)).get(parentId);

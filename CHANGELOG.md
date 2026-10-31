@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Déplacer : Lumio ne propose plus jamais de déplacer un dossier de bibliothèque entier (KIDS, FILMS…). Un film rangé directement dans sa bibliothèque se déplace seul.
+- Déplacer : le texte des choix ne se chevauche plus.
+
 ## 1.0.118 — 31 octobre 2026
 
 - Bibliothèques : chaque bibliothèque n'affiche plus que ses propres titres, aussi avec Jellyfin 12 (le lien entre une bibliothèque et ses dossiers se fait aussi par son nom). Plus de doublons en faisant défiler. Il faut le serveur Lumio 3.60.0.

@@ -9,6 +9,7 @@ import { usePrompt } from '@/components/prompt-modal';
 import { toast } from '@/components/toast';
 import { C } from '@/constants/theme';
 import { filesApi, formatSize, joinPath, parentPath, type Disk, type FileEntry } from '@/lib/files';
+import { jfLibraryFolders } from '@/lib/jellyfin';
 import { useSettings } from '@/lib/settings';
 
 type Src = { root: string; folder: string; name: string | null };
@@ -86,15 +87,28 @@ export function MoveFolder({ path, title, children }: { path: string; title: str
       if (loc.root !== found.root || loc.folder !== found.folder) {
         toast(`Jellyfin n’était pas à jour : il est en fait dans ${[loc.root, ...loc.folder.split('/').slice(0, -1)].filter(Boolean).join(' / ')}`);
       }
+      // Jamais une bibliothèque entière (KIDS, FILMS…) ni un dossier du premier niveau d'un disque :
+      // un film rangé directement dans sa bibliothèque se déplace seul.
+      const libs = await jfLibraryFolders(settings).catch(() => [] as string[]);
+      const abs = (path.replace(/\\/g, '/').replace(/\/+$/, ''));
+      const absFolder = loc.name && loc.root === found.root && loc.folder === found.folder ? abs.split('/').slice(0, -1).join('/') : loc.name ? '' : abs;
+      const isLib = (a: string) => !!a && libs.some((l) => l === a || l.startsWith(a + '/'));
+      const safeFolder = !!loc.folder && loc.folder.includes('/') && !isLib(absFolder);
       setDisks(d);
-      setSrc(loc);
       if (!loc.name) {
         // Série (ou film rangé dans un dossier) : on déplace tout le dossier
+        if (!safeFolder) {
+          Alert.alert('Déplacer', `« ${last(loc.folder)} » est un dossier de bibliothèque : Lumio ne le déplace pas en entier. Utilise Disques pour ça.`);
+          return;
+        }
+        setSrc(loc);
         choose({ root: loc.root, path: loc.folder, name: last(loc.folder), dir: true });
-      } else if (!loc.folder) {
-        choose({ root: loc.root, path: loc.name, name: loc.name, dir: false });
+      } else if (!safeFolder) {
+        setSrc(loc);
+        choose({ root: loc.root, path: joinPath(loc.folder, loc.name), name: loc.name, dir: false });
       } else {
-        // Film dans son dossier : demander s'il faut déplacer le dossier entier ou le fichier seul
+        // Film dans son propre dossier : demander s'il faut déplacer le dossier entier ou le fichier seul
+        setSrc(loc);
         setWhat(null);
       }
     } catch (e: any) {
@@ -116,6 +130,10 @@ export function MoveFolder({ path, title, children }: { path: string; title: str
 
   const doMove = async () => {
     if (!what) return;
+    if (what.dir && !what.path.includes('/')) {
+      Alert.alert('Déplacer', 'Lumio ne déplace pas un dossier du premier niveau d’un disque (une bibliothèque entière).');
+      return;
+    }
     setMoving(true);
     try {
       const r = await filesApi.move(settings, what.root, what.path, joinPath(dir, what.name), root === what.root ? undefined : root);
@@ -233,7 +251,7 @@ function Pill({ icon, label, hint, onPress }: { icon: keyof typeof Ionicons.glyp
     <Pressable onPress={onPress} style={st.row}>
       <Ionicons name={icon} size={22} color={C.accent} />
       <View style={{ flex: 1 }}>
-        <Text style={st.rowTxt} numberOfLines={1}>{label}</Text>
+        <Text style={st.pillTxt} numberOfLines={1}>{label}</Text>
         <Text style={st.chipFree} numberOfLines={1}>{hint}</Text>
       </View>
       <Ionicons name="chevron-forward" size={16} color={C.textDim} />
@@ -255,6 +273,7 @@ const st = StyleSheet.create({
   crumbTxt: { color: C.text, fontWeight: '600', flex: 1 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 18, borderRadius: 999, backgroundColor: C.surfaceHigh },
   rowTxt: { color: C.text, fontSize: 15, fontWeight: '600', flex: 1 },
+  pillTxt: { color: C.text, fontSize: 15, fontWeight: '600' },
   go: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderRadius: 999, backgroundColor: C.accent },
   goTxt: { color: '#fff', fontWeight: '800', fontSize: 16 },
 });
