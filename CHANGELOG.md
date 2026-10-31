@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- L'onglet Book est retiré de l'appli.
+
 ## 1.0.111 — 31 octobre 2026
 
 - Nouvel onglet Book : recherche de mangas, BD, comics, livres et livres audio sur C411, Tr4ker et Wawacity. Les résultats sont rangés par tome et par collection. Le téléchargement passe par AllDebrid et arrive sur le disque du serveur.
