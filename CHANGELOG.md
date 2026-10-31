@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Déplacer : si Jellyfin n'est pas à jour (titre déjà déplacé), Lumio retrouve le vrai emplacement sur le disque au lieu d'afficher l'erreur « ENOENT ».
+
 ## 1.0.114 — 31 octobre 2026
 
 - Bouton Déplacer (admin), sur la fiche Jellyfin et sur la fiche d'un titre : déplace le dossier ou le fichier seul où tu veux, sur n'importe quel disque. Tu peux parcourir les dossiers et en créer un. Marche aussi pour les titres que Radarr et Sonarr ne gèrent pas.

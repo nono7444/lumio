@@ -48,10 +48,44 @@ export function MoveFolder({ path, title, children }: { path: string; title: str
     browse(w.root, parentPath(w.path));
   };
 
+  /** Le fichier ou dossier existe-t-il vraiment à cet endroit sur le disque ? */
+  const exists = async (root: string, rel: string) => {
+    try {
+      const list = await filesApi.list(settings, root, parentPath(rel));
+      return list.some((e) => e.name === last(rel));
+    } catch {
+      return false;
+    }
+  };
+
+  /** Jellyfin n'est pas toujours à jour (titre déjà déplacé) : on cherche le vrai emplacement par son nom. */
+  const relocate = async (loc: Src): Promise<Src | null> => {
+    const target = loc.folder || loc.name || '';
+    if (await exists(loc.root, loc.name ? joinPath(loc.folder, loc.name) : loc.folder)) return loc;
+    const wanted = loc.folder ? last(loc.folder) : loc.name!;
+    const words = wanted.replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    if (!target || !words) return null;
+    const hits = (await filesApi.search(settings, words).catch(() => [])).filter((r) => r.name === wanted && r.dir === Boolean(loc.folder));
+    const hit = hits[0];
+    if (!hit) return null;
+    return loc.folder ? { root: hit.root, folder: hit.path, name: loc.name } : { root: hit.root, folder: parentPath(hit.path), name: hit.name };
+  };
+
   const open = async () => {
     setBusy(true);
     try {
-      const [loc, d] = await Promise.all([filesApi.locate(settings, path), filesApi.disks(settings)]);
+      const [found, d] = await Promise.all([filesApi.locate(settings, path), filesApi.disks(settings)]);
+      const loc = await relocate(found);
+      if (!loc) {
+        Alert.alert(
+          'Introuvable sur le disque',
+          `Jellyfin le range dans « ${found.folder || found.name} » sur ${found.root}, mais il n’y est plus et Lumio ne l’a trouvé nulle part.\n\nLance une analyse de la bibliothèque dans Jellyfin, puis réessaie.`
+        );
+        return;
+      }
+      if (loc.root !== found.root || loc.folder !== found.folder) {
+        toast(`Jellyfin n’était pas à jour : il est en fait dans ${[loc.root, ...loc.folder.split('/').slice(0, -1)].filter(Boolean).join(' / ')}`);
+      }
       setDisks(d);
       setSrc(loc);
       if (!loc.name) {
