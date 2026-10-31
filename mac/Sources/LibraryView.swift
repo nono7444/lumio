@@ -135,6 +135,7 @@ struct LibraryView: View {
     @State private var total = 0
     @State private var sort = "DateCreated"
     @State private var loading = false
+    @State private var fetched = 0
 
     private let sorts: [(String, String)] = [("DateCreated", "Ajouts récents"), ("SortName", "Titre"), ("PremiereDate", "Date de sortie"), ("CommunityRating", "Note")]
 
@@ -164,17 +165,22 @@ struct LibraryView: View {
         .task(id: sort) {
             items = []
             total = 0
+            fetched = 0
             await more()
         }
     }
 
     private func more() async {
-        guard let c = session.client, !loading, items.isEmpty || items.count < total else { return }
+        guard let c = session.client, !loading, fetched == 0 || fetched < total else { return }
         loading = true
         let order = sort == "SortName" ? "Ascending" : "Descending"
-        if let page = try? await c.items(parent: lib.id, types: itemTypes(for: lib.collectionType), sort: sort, order: order, start: items.count, limit: 120) {
-            items += page.Items
-            total = page.TotalRecordCount ?? items.count
+        let by = sort == "SortName" ? sort : "\(sort),SortName"
+        if let page = try? await c.items(parent: lib.id, types: itemTypes(for: lib.collectionType), sort: by, order: order, start: fetched, limit: 120) {
+            fetched += page.Items.count
+            // Chaque titre une seule fois, même si deux pages se chevauchent
+            var seen = Set(items.map(\.Id))
+            items += page.Items.filter { seen.insert($0.Id).inserted }
+            total = page.TotalRecordCount ?? fetched
         }
         loading = false
     }

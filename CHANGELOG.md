@@ -6,7 +6,7 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
-- Bibliothèques : retour à l'affichage d'avant les deux derniers changements (chargement et tri des bibliothèques comme en 1.0.112).
+- Bibliothèques : chaque bibliothèque n'affiche plus que ses propres titres, aussi avec Jellyfin 12 (le lien entre une bibliothèque et ses dossiers se fait aussi par son nom). Plus de doublons en faisant défiler. Il faut le serveur Lumio 3.60.0.
 
 ## 1.0.116 — 31 octobre 2026
 
