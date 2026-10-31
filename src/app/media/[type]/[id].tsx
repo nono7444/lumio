@@ -29,7 +29,7 @@ import { MediaStatus, requestsApi, useServerRequests } from '@/lib/requests';
 import { secourAdminApi, secourApi } from '@/lib/secour';
 import { SeasonRequests } from '@/components/season-requests';
 import { WatchlistButton } from '@/components/watchlist-button';
-import { chat } from '@/lib/chat';
+import { chat, serverCall } from '@/lib/chat';
 import { arrReady, hasTmdb, isManager, useSettings } from '@/lib/settings';
 import { pickLogo, tmdb, tmdbImg, upcomingRelease, type TmdbMovie, type TmdbTv } from '@/lib/tmdb';
 
@@ -377,6 +377,10 @@ export default function MediaScreen() {
               {settings.chatUrl && settings.jellyfin && !jfItem ? (
                 <Button title="" icon="chatbubbles-outline" variant="glass" small onPress={propose} style={{ width: 46, paddingHorizontal: 0 }} />
               ) : null}
+              {/* Déplacer (admin) : titre rangé dans le mauvais dossier → Radarr / Sonarr le déplacent */}
+              {settings.chatUrl && settings.jellyfin?.isAdmin === true && (jfItem || mediaStatus === MediaStatus.AVAILABLE || mediaStatus === MediaStatus.PARTIALLY_AVAILABLE) ? (
+                <MoveButton type={details.kind} tmdbId={tmdbId} title={title} />
+              ) : null}
               {/* « DL » (admin) : seulement si le titre n'est pas (entièrement) disponible */}
               {settings.chatUrl && settings.jellyfin?.isAdmin === true && !(details.kind === 'movie' && jfItem) && mediaStatus !== MediaStatus.AVAILABLE ? (
                 <LsButton
@@ -597,6 +601,50 @@ function Notice({ icon, text, color = C.textDim }: { icon: keyof typeof Ionicons
   );
 }
 
+/** Bouton « Déplacer » : choisir un autre dossier (Films, Kids, Animés…) ; Radarr / Sonarr déplacent les fichiers. */
+function MoveButton({ type, tmdbId, title }: { type: 'movie' | 'tv'; tmdbId: number; title: string }) {
+  const { settings } = useSettings();
+  const [busy, setBusy] = useState(false);
+  const nom = (p: string) => p.replace(/\/+$/, '').split('/').pop() || p;
+  const press = async () => {
+    setBusy(true);
+    try {
+      const r = await serverCall<{ current: string; folders: { path: string; freeSpace?: number }[] }>(settings, `/api/arr/move?type=${type}&tmdbId=${tmdbId}`);
+      const autres = r.folders.filter((f) => f.path.replace(/\/+$/, '') !== r.current);
+      Alert.alert(
+        'Déplacer',
+        `« ${title} » est dans ${nom(r.current) || r.current}.\nVers quel dossier le déplacer ?`,
+        [
+          ...autres.map((f) => ({
+            text: `📁 ${nom(f.path)}`,
+            onPress: async () => {
+              try {
+                const m = await serverCall<{ message: string }>(settings, `/api/arr/move?type=${type}&tmdbId=${tmdbId}`, {
+                  method: 'POST',
+                  body: JSON.stringify({ rootFolderPath: f.path }),
+                });
+                Alert.alert('Déplacement lancé', `${m.message}.\nJellyfin le retrouvera à sa prochaine analyse.`);
+              } catch (e: any) {
+                Alert.alert('Déplacement impossible', e?.message ?? String(e));
+              }
+            },
+          })),
+          { text: 'Annuler', style: 'cancel' as const },
+        ]
+      );
+    } catch (e: any) {
+      Alert.alert('Déplacer', e?.message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Pressable onPress={press} disabled={busy} style={styles.move} accessibilityLabel="Déplacer dans un autre dossier">
+      {busy ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="folder-open-outline" size={20} color="#fff" />}
+    </Pressable>
+  );
+}
+
 /** Bouton « DL » : télécharge directement avec Lumio Secour (film, ou saisons au choix pour une série). */
 function LsButton({
   title,
@@ -657,6 +705,7 @@ function LsButton({
 
 const styles = StyleSheet.create({
   ls: { width: 46, height: 40, borderRadius: 12, backgroundColor: '#30D158', alignItems: 'center', justifyContent: 'center' },
+  move: { width: 46, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center' },
   actionBar: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   lsText: { color: '#fff', fontSize: 15, fontWeight: '900', letterSpacing: 0.5 },
   heroContentTv: { position: 'absolute', left: 48, bottom: 36, width: '48%', alignItems: 'flex-start', gap: 10 },

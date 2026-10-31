@@ -234,7 +234,7 @@ export default function SettingsScreen() {
         </Section>
 
         {/* TV : profil épuré (serveur, demandes, idées, clés et options téléphone masqués) */}
-        {Platform.isTV ? null : <ChatSection />}
+        {Platform.isTV || settings.jellyfin?.isAdmin === false ? null : <ChatSection />}
 
         {serverReq && !Platform.isTV ? <NotifySubscribeSection /> : null}
         {serverReq && settings.jellyfin?.isAdmin !== false && !Platform.isTV ? <AnnouncementEditor /> : null}
@@ -345,7 +345,8 @@ export default function SettingsScreen() {
           )}
         </Section>
 
-        {Platform.isTV ? null : (
+        {/* Clé TMDB : réglage d'admin (les autres la reçoivent du serveur Lumio) */}
+        {Platform.isTV || settings.jellyfin?.isAdmin === false ? null : (
         <Section title="TMDB">
           <Field
             label="Clé API"

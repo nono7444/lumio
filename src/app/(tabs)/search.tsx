@@ -193,7 +193,7 @@ export default function Search() {
                     setQuery('');
                     setThemeOpen(false);
                   }}
-                  style={[styles.menuItem, theme?.id === t.id && { backgroundColor: 'rgba(61,139,255,0.18)' }]}>
+                  style={[styles.menuItem, theme?.id === t.id && { backgroundColor: 'rgba(61,139,255,0.25)', borderWidth: 1, borderColor: 'rgba(61,139,255,0.7)' }]}>
                   <Text style={styles.menuText}>
                     {t.emoji}  {t.label}
                   </Text>
@@ -258,7 +258,8 @@ const styles = StyleSheet.create({
   msg: { color: C.textDim, textAlign: 'center', marginTop: 24 },
   themeHint: { color: C.textDim, fontSize: 13, paddingHorizontal: 16, marginTop: 10 },
   menuBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 40 },
-  menu: { backgroundColor: C.surface, borderRadius: R.lg, maxHeight: '75%', paddingVertical: 6 },
-  menuItem: { paddingVertical: 13, paddingHorizontal: 18 },
+  menu: { backgroundColor: C.surface, borderRadius: 28, maxHeight: '75%', padding: 10 },
+  // Pastilles rondes
+  menuItem: { paddingVertical: 12, paddingHorizontal: 18, borderRadius: 999, backgroundColor: C.surfaceHigh, marginVertical: 4 },
   menuText: { color: C.text, fontSize: 16, fontWeight: '600' },
 });

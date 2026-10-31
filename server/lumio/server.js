@@ -12,6 +12,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const zlib = require('zlib');
 
 const PORT = Number(process.env.PORT || 3456);
 const JELLYFIN_URL = (process.env.JELLYFIN_URL || 'http://jellyfin:8096').replace(/\/+$/, '');
@@ -25,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.58.0';
+const VERSION = '3.59.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2890,6 +2891,550 @@ const publicJob = (j) => ({
   createdAt: j.createdAt, finishedAt: j.finishedAt,
 });
 
+// ——— Book : livres, BD, mangas et livres audio (C411, Tr4ker, Wawacity) → AllDebrid → disque, puis lecture dans l'appli ———
+// Analyse des titres et des pages Wawacity reprise de Book Loo Store (licence MIT, github.com/Loo-stick/bookloo).
+// Les clés C411 / Tr4ker restent sur ce serveur (réglées par l'admin dans l'appli), comme la clé AllDebrid.
+const BOOK_KINDS = {
+  mangas: { label: 'Mangas', torznab: [7030], wawa: 'mangas' },
+  bd: { label: 'BD', torznab: [7030], wawa: 'bd' },
+  comics: { label: 'Comics', torznab: [7030], wawa: 'bd' },
+  livres: { label: 'Livres', torznab: [7020], wawa: 'ebooks' },
+  audio: { label: 'Livres audio', torznab: [3030], wawa: null },
+};
+const BOOK_TRACKERS = {
+  c411: { label: 'C411', url: 'https://c411.org/api', key: () => process.env.BOOKS_C411_KEY || (config.books && config.books.c411Key) || '' },
+  tr4ker: { label: 'Tr4ker', url: 'https://tr4ker.net/torznab', key: () => process.env.BOOKS_TR4KER_KEY || (config.books && config.books.tr4kerKey) || '' },
+};
+const BOOK_EXT = { '.cbz': 'bd', '.cbr': 'bd', '.zip': 'bd', '.epub': 'epub', '.pdf': 'pdf', '.mp3': 'audio', '.m4b': 'audio', '.m4a': 'audio', '.aac': 'audio', '.ogg': 'audio', '.flac': 'audio' };
+const bookFound = new Map(); // id → { kind: 'torrent'|'wawa', link, title, source, at }
+const wawaBase = () => String(process.env.BOOKS_WAWACITY_URL || (config.books && config.books.wawacity) || process.env.SECOUR_WAWACITY_URL || 'https://www.wawacity.estate').replace(/\/+$/, '');
+
+function booksDir() {
+  const b = config.books || {};
+  const d = disks();
+  if (!d.length) return null;
+  const root = b.root && d.some((x) => x.name === b.root) ? b.root : d[0].name;
+  return { root, folder: b.root ? b.folder || '' : 'Livres' };
+}
+
+const decodeHtml = (s) =>
+  String(s)
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;|&#39;/g, "'").replace(/&nbsp;/g, ' ');
+const textOf = (html) => decodeHtml(String(html).replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+
+/** Numéro de tome, plage (pack) ou intégrale, depuis le nom d'une release. */
+function bookVolumes(title) {
+  const t = String(title).replace(/[._]+/g, ' ');
+  if (/\bint[eé]grale?\b|\bcomplete\b|\bcollection compl[eè]te\b/i.test(t)) return { genre: 'pack', range: 'Intégrale' };
+  let m = t.match(/\b(?:T(?:ome)?s?|Vol(?:ume)?s?\.?)\s*0*(\d{1,4})\s*(?:-|à|a|au|to)\s*(?:T(?:ome)?\s*)?0*(\d{1,4})\b/i);
+  if (m && Number(m[2]) > Number(m[1])) return { genre: 'pack', range: `T${Number(m[1])} à T${Number(m[2])}` };
+  m = t.match(/\(\s*Tomes?\s*0*(\d{1,4})\s*(?:-|à)\s*0*(\d{1,4})\s*\)/i);
+  if (m && Number(m[2]) > Number(m[1])) return { genre: 'pack', range: `T${Number(m[1])} à T${Number(m[2])}` };
+  m = t.match(/\b(?:T(?:ome)?|Vol(?:ume)?\.?|#)\s*0*(\d{1,4})\b/i);
+  if (m) return { genre: 'tome', tome: Number(m[1]) };
+  return { genre: 'livre' };
+}
+const bookFormat = (t) => {
+  const m = String(t).match(/\b(cbz|cbr|epub|pdf|mobi|azw3|mp3|m4b|flac)\b/i);
+  return m ? m[1].toUpperCase() : '';
+};
+const notFrench = (t) => /\b(ENG|ENGLISH|VO|SPANISH|ITA|GERMAN|JAP|RAW)\b/i.test(t) && !/\b(FR|FRENCH|VF|VOSTFR|MULTI)\b/i.test(t);
+
+async function torznabSearch(id, q, kind) {
+  const tr = BOOK_TRACKERS[id];
+  const key = tr.key();
+  if (!key) return { id, label: tr.label, state: 'nokey', items: [] };
+  const url = `${tr.url}?t=search&q=${encodeURIComponent(q)}&cat=${BOOK_KINDS[kind].torznab.join(',')}&limit=100&apikey=${encodeURIComponent(key)}`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const r = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Lumio' } });
+    const xml = await r.text();
+    const err = xml.match(/<error[^>]*description="([^"]*)"/i);
+    if (err) return { id, label: tr.label, state: 'error', message: decodeHtml(err[1]), items: [] };
+    if (!r.ok) return { id, label: tr.label, state: 'error', message: `HTTP ${r.status}`, items: [] };
+    const items = [];
+    for (const block of xml.split(/<item>/i).slice(1)) {
+      const title = decodeHtml((block.match(/<title>([\s\S]*?)<\/title>/i) || [])[1] || '').replace(/^<!\[CDATA\[|\]\]>$/g, '').trim();
+      const enc = block.match(/<enclosure[^>]*url="([^"]+)"/i);
+      const link = decodeHtml(enc ? enc[1] : ((block.match(/<link>([\s\S]*?)<\/link>/i) || [])[1] || '').trim());
+      const attr = (n) => (block.match(new RegExp(`name="${n}"\\s+value="([^"]*)"`, 'i')) || [])[1];
+      const size = Number(attr('size') || (block.match(/<size>(\d+)<\/size>/i) || [])[1] || 0);
+      if (!title || !link) continue;
+      items.push({ title, link, size, seeders: Number(attr('seeders') || 0), hash: (attr('infohash') || '').toLowerCase(), source: tr.label });
+    }
+    return { id, label: tr.label, state: 'ok', items };
+  } catch (e) {
+    return { id, label: tr.label, state: 'error', message: ctrl.signal.aborted ? 'pas de réponse' : String(e.message || e), items: [] };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function wawaSearch(q, kind) {
+  if (!BOOK_KINDS[kind].wawa) return { id: 'wawacity', label: 'Wawacity', state: 'skip', items: [] };
+  try {
+    const r = await fetch(`${wawaBase()}/?p=ebooks&search=${encodeURIComponent(q)}`, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(15000) });
+    const html = (await r.text()).replace(/<!--[\s\S]*?-->/g, '');
+    const items = [];
+    const seen = new Set();
+    const re = /<a\s+href="\?p=ebook&(?:amp;)?id=(\d+)-[^"]*"([\s\S]*?)<\/a>/g;
+    let m;
+    while ((m = re.exec(html)) && items.length < 40) {
+      if (seen.has(m[1])) continue;
+      const title = textOf(m[2]);
+      if (!title) continue;
+      seen.add(m[1]);
+      items.push({ title, link: m[1], size: 0, seeders: null, source: 'Wawacity', wawa: true });
+    }
+    return { id: 'wawacity', label: 'Wawacity', state: 'ok', items };
+  } catch (e) {
+    return { id: 'wawacity', label: 'Wawacity', state: 'error', message: String(e.message || e), items: [] };
+  }
+}
+
+/** Liens d'une fiche Wawacity : dl-protect → (redirecteur AllDebrid) → hébergeur → AllDebrid. */
+async function wawaLinks(id) {
+  const r = await fetch(`${wawaBase()}/?p=ebook&id=${encodeURIComponent(id)}`, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(20000) });
+  const html = (await r.text()).replace(/<!--[\s\S]*?-->/g, '');
+  const out = [];
+  for (const block of html.split(/<tr[^>]*class="link-row"[^>]*>/i).slice(1)) {
+    const l = block.match(/href="(https?:\/\/dl-protect[^"]+)"/i);
+    if (!l) continue;
+    const url = decodeHtml(l[1]);
+    const fn = url.match(/[?&]fn=([^&]+)/);
+    if (fn) {
+      try {
+        const v = Buffer.from(decodeURIComponent(fn[1]), 'base64').toString('utf8');
+        if (v.includes('|')) continue; // encart publicitaire
+      } catch {}
+    }
+    const cells = block.split(/<\/td>/i).map(textOf).filter(Boolean);
+    if (!cells[1] || /^anonyme$/i.test(cells[1])) continue;
+    out.push({ host: cells[1], url });
+  }
+  return out;
+}
+
+async function wawaResolve(id) {
+  const links = await wawaLinks(id);
+  if (!links.length) throw new HttpError(422, 'Cette fiche Wawacity ne donne aucun lien');
+  for (const l of links) {
+    for (let i = 0; i < 3; i++) {
+      try {
+        const d = await ad('/v4/link/redirector', { link: l.url });
+        const host = (d.links || []).find((x) => /^https?:\/\//.test(x));
+        if (host) return host;
+        break;
+      } catch (e) {
+        if (!/REDIRECTOR_ERROR|TEMPORARY|UNAVAILABLE/i.test(String(e.message))) break;
+        await sleep(3000);
+      }
+    }
+  }
+  throw new HttpError(502, 'AllDebrid n’a pu ouvrir aucun lien de cette fiche');
+}
+
+// ——— Lecture : liens signés (images, lecteur PDF et audio n'envoient pas de jeton) ———
+const BOOK_SECRET = (() => {
+  const f = path.join(DATA_DIR, 'books.secret');
+  try {
+    const s = fs.readFileSync(f);
+    if (s.length >= 32) return s;
+  } catch {}
+  const s = crypto.randomBytes(32);
+  try { fs.writeFileSync(f, s, { mode: 0o600 }); } catch {}
+  return s;
+})();
+function bookSign(root, rel) {
+  const body = Buffer.from(JSON.stringify({ r: root, p: rel, e: Date.now() + 24 * 3600_000 })).toString('base64url');
+  return `${body}.${crypto.createHmac('sha256', BOOK_SECRET).update(body).digest('base64url')}`;
+}
+function bookVerify(tok) {
+  const [body, sig] = String(tok).split('.');
+  if (!body || !sig) return null;
+  const want = crypto.createHmac('sha256', BOOK_SECRET).update(body).digest('base64url');
+  if (sig.length !== want.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return null;
+  try {
+    const t = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (t.e < Date.now()) return null;
+    return safePath(t.r, t.p).full;
+  } catch {
+    return null;
+  }
+}
+
+// ——— ZIP (CBZ, EPUB) lu directement sur le disque ———
+const zipCache = new Map();
+async function zipEntries(file) {
+  const st = await fs.promises.stat(file);
+  const hit = zipCache.get(file);
+  if (hit && hit.mtime === st.mtimeMs) return hit.entries;
+  const fh = await fs.promises.open(file, 'r');
+  try {
+    const tailLen = Math.min(st.size, 66000);
+    const tail = Buffer.alloc(tailLen);
+    await fh.read(tail, 0, tailLen, st.size - tailLen);
+    let eocd = -1;
+    for (let i = tailLen - 22; i >= 0; i--) if (tail.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+    if (eocd < 0) throw new Error('Archive illisible (pas un ZIP / CBZ)');
+    const count = tail.readUInt16LE(eocd + 10);
+    const cdSize = tail.readUInt32LE(eocd + 12);
+    const cdOff = tail.readUInt32LE(eocd + 16);
+    const cd = Buffer.alloc(cdSize);
+    await fh.read(cd, 0, cdSize, cdOff);
+    const entries = [];
+    let p = 0;
+    for (let i = 0; i < count && p + 46 <= cd.length; i++) {
+      if (cd.readUInt32LE(p) !== 0x02014b50) break;
+      const method = cd.readUInt16LE(p + 10);
+      const csize = cd.readUInt32LE(p + 20);
+      const size = cd.readUInt32LE(p + 24);
+      const nlen = cd.readUInt16LE(p + 28);
+      const xlen = cd.readUInt16LE(p + 30);
+      const clen = cd.readUInt16LE(p + 32);
+      const off = cd.readUInt32LE(p + 42);
+      const name = cd.subarray(p + 46, p + 46 + nlen).toString('utf8');
+      if (!name.endsWith('/')) entries.push({ name, method, csize, size, off });
+      p += 46 + nlen + xlen + clen;
+    }
+    zipCache.set(file, { mtime: st.mtimeMs, entries });
+    if (zipCache.size > 30) zipCache.delete(zipCache.keys().next().value);
+    return entries;
+  } finally {
+    await fh.close();
+  }
+}
+async function zipRead(file, e) {
+  if (e.size > 200 * 1024 * 1024) throw new Error('Fichier trop gros');
+  const fh = await fs.promises.open(file, 'r');
+  try {
+    const h = Buffer.alloc(30);
+    await fh.read(h, 0, 30, e.off);
+    if (h.readUInt32LE(0) !== 0x04034b50) throw new Error('Entrée illisible');
+    const start = e.off + 30 + h.readUInt16LE(26) + h.readUInt16LE(28);
+    const raw = Buffer.alloc(e.csize);
+    await fh.read(raw, 0, e.csize, start);
+    if (e.method === 0) return raw;
+    if (e.method === 8) return zlib.inflateRawSync(raw);
+    throw new Error('Compression non prise en charge');
+  } finally {
+    await fh.close();
+  }
+}
+const isImage = (n) => /\.(jpe?g|png|gif|webp|avif|bmp)$/i.test(n) && !/(^|\/)(__MACOSX|\.)/.test(n);
+const natural = (a, b) => a.localeCompare(b, 'fr', { numeric: true, sensitivity: 'base' });
+const IMG_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp', svg: 'image/svg+xml' };
+const imgType = (n) => IMG_TYPES[String(n).split('.').pop().toLowerCase()] || 'application/octet-stream';
+
+async function epubBook(file) {
+  const entries = await zipEntries(file);
+  const by = (n) => entries.find((e) => e.name === n);
+  const container = by('META-INF/container.xml');
+  if (!container) throw new Error('Ce fichier n’est pas un EPUB');
+  const opfPath = ((await zipRead(file, container)).toString('utf8').match(/full-path="([^"]+)"/i) || [])[1];
+  const opfE = opfPath && by(opfPath);
+  if (!opfE) throw new Error('Livre sans manifeste');
+  const opf = (await zipRead(file, opfE)).toString('utf8');
+  const dir = opfPath.includes('/') ? opfPath.replace(/\/[^/]*$/, '') : '';
+  const manifest = {};
+  for (const m of opf.matchAll(/<item\b[^>]*>/gi)) {
+    const id = (m[0].match(/\bid="([^"]+)"/i) || [])[1];
+    const href = (m[0].match(/\bhref="([^"]+)"/i) || [])[1];
+    if (id && href) manifest[id] = path.posix.normalize((dir ? `${dir}/` : '') + decodeURIComponent(href));
+  }
+  const chapters = [...opf.matchAll(/<itemref\b[^>]*idref="([^"]+)"/gi)].map((m) => manifest[m[1]]).filter(Boolean);
+  const title = textOf((opf.match(/<dc:title[^>]*>([\s\S]*?)<\/dc:title>/i) || [])[1] || '');
+  return { entries, chapters, title };
+}
+
+function bookTitle(name) {
+  return String(name)
+    .replace(/\.[a-z0-9]{2,4}$/i, '')
+    .replace(/[._]+/g, ' ')
+    .replace(/\[[^\]]*\]/g, '')
+    .replace(/\b(FRENCH|FR|VF|MULTi|CBZ|CBR|EPUB|PDF|Digital|NoTag)\b.*$/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim() || name;
+}
+
+async function bookLibrary() {
+  const dir = booksDir();
+  if (!dir) return { dir: null, books: [] };
+  const { full } = safePath(dir.root, dir.folder);
+  await fs.promises.mkdir(full, { recursive: true }).catch(() => {});
+  const found = [];
+  const walk = async (rel, depth) => {
+    if (depth > 5 || found.length > 3000) return;
+    let list = [];
+    try { list = await fs.promises.readdir(path.join(full, rel), { withFileTypes: true }); } catch { return; }
+    for (const e of list) {
+      if (e.name.startsWith('.')) continue;
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) await walk(r, depth + 1);
+      else if (BOOK_EXT[path.extname(e.name).toLowerCase()] && !e.name.endsWith('.part')) {
+        try { found.push({ rel: r, name: e.name, st: await fs.promises.stat(path.join(full, r)) }); } catch {}
+      }
+    }
+  };
+  await walk('', 0);
+  return {
+    dir,
+    books: found
+      .sort((a, b) => b.st.mtimeMs - a.st.mtimeMs)
+      .map((f) => {
+        const rel = dir.folder ? `${dir.folder}/${f.rel}` : f.rel;
+        return {
+          name: f.name,
+          title: bookTitle(f.name),
+          folder: f.rel.includes('/') ? f.rel.replace(/\/[^/]*$/, '') : '',
+          path: rel,
+          format: BOOK_EXT[path.extname(f.name).toLowerCase()],
+          size: f.st.size,
+          modified: f.st.mtime.toISOString(),
+          token: bookSign(dir.root, rel),
+        };
+      }),
+  };
+}
+
+/** Routes de lecture par lien signé (sans jeton Jellyfin). Renvoie true si la requête est traitée. */
+async function bookFileRoutes(req, res, p, q) {
+  const m = p.match(/^\/api\/books\/f\/([A-Za-z0-9_.-]+)\/(file|pages|page\/\d+|epub|epub\/\d+|res)$/);
+  if (!m || req.method !== 'GET') return false;
+  const file = bookVerify(m[1]);
+  if (!file) {
+    send(res, 403, { error: 'Lien expiré : rouvre le livre depuis Book' });
+    return true;
+  }
+  const what = m[2];
+  try {
+    if (what === 'file') {
+      const st = await fs.promises.stat(file);
+      const ext = path.extname(file).toLowerCase();
+      const type = { '.pdf': 'application/pdf', '.epub': 'application/epub+zip', '.mp3': 'audio/mpeg', '.m4b': 'audio/mp4', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.flac': 'audio/flac' }[ext] || 'application/octet-stream';
+      const range = String(req.headers.range || '').match(/bytes=(\d*)-(\d*)/);
+      let start = 0;
+      let end = st.size - 1;
+      if (range) {
+        if (range[1]) start = Number(range[1]);
+        if (range[2]) end = Math.min(end, Number(range[2]));
+        if (!range[1] && range[2]) start = Math.max(0, st.size - Number(range[2]));
+      }
+      res.writeHead(range ? 206 : 200, {
+        'Content-Type': type,
+        'Content-Length': end - start + 1,
+        'Accept-Ranges': 'bytes',
+        ...(range ? { 'Content-Range': `bytes ${start}-${end}/${st.size}` } : {}),
+        'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(path.basename(file))}`,
+      });
+      fs.createReadStream(file, { start, end }).pipe(res);
+      return true;
+    }
+    if (what === 'pages' || what.startsWith('page/')) {
+      const pages = (await zipEntries(file)).filter((e) => isImage(e.name)).sort((a, b) => natural(a.name, b.name));
+      if (!pages.length) throw new Error('Aucune planche lisible (seuls les CBZ s’ouvrent ici)');
+      if (what === 'pages') {
+        send(res, 200, { title: bookTitle(path.basename(file)), pages: pages.length });
+        return true;
+      }
+      const e = pages[Number(what.slice(5))];
+      if (!e) throw new Error('Page absente');
+      const buf = await zipRead(file, e);
+      res.writeHead(200, { 'Content-Type': imgType(e.name), 'Content-Length': buf.length, 'Cache-Control': 'private, max-age=86400' });
+      res.end(buf);
+      return true;
+    }
+    const book = await epubBook(file);
+    if (what === 'epub') {
+      const titles = [];
+      for (const [i, c] of book.chapters.entries()) {
+        const e = book.entries.find((x) => x.name === c);
+        let t = null;
+        if (e) {
+          const html = (await zipRead(file, e)).toString('utf8');
+          t = textOf((html.match(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/i) || html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '');
+        }
+        titles.push(t && t.length < 120 ? t : `Chapitre ${i + 1}`);
+      }
+      send(res, 200, { title: book.title || bookTitle(path.basename(file)), chapters: titles });
+      return true;
+    }
+    if (what === 'res') {
+      const name = String(q.get('f') || '');
+      const e = book.entries.find((x) => x.name === name);
+      if (!e || !isImage(name) && !/\.svg$/i.test(name)) throw new Error('Ressource absente');
+      const buf = await zipRead(file, e);
+      res.writeHead(200, { 'Content-Type': imgType(name), 'Content-Length': buf.length, 'Cache-Control': 'private, max-age=86400' });
+      res.end(buf);
+      return true;
+    }
+    // Un chapitre en page HTML, prête à lire (taille et thème choisis dans l'appli)
+    const n = Number(what.slice(5));
+    const c = book.chapters[n];
+    const e = c && book.entries.find((x) => x.name === c);
+    if (!e) throw new Error('Chapitre absent');
+    const base = c.includes('/') ? c.replace(/\/[^/]*$/, '') : '';
+    let html = (await zipRead(file, e)).toString('utf8');
+    html = (html.match(/<body[^>]*>([\s\S]*)<\/body>/i) || [null, html])[1]
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<(link|meta|style)[^>]*>(?:[\s\S]*?<\/style>)?/gi, '')
+      .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*')/gi, '')
+      .replace(/\s(src|xlink:href|href)="([^"]+)"/gi, (all, attr, val) => {
+        if (/^(https?:|#|mailto:|data:)/i.test(val)) return attr.toLowerCase() === 'href' ? '' : all;
+        if (attr.toLowerCase() === 'href' && !isImage(val)) return '';
+        const target = path.posix.normalize((base ? `${base}/` : '') + decodeURIComponent(val.split('#')[0]));
+        return ` ${attr}="/api/books/f/${m[1]}/res?f=${encodeURIComponent(target)}"`;
+      });
+    const theme = q.get('theme') === 'clair' ? ['#fff', '#111'] : q.get('theme') === 'sepia' ? ['#f4ecd8', '#3b2f1e'] : ['#000', '#e8e6e3'];
+    const size = Math.min(32, Math.max(13, Number(q.get('size')) || 19));
+    const page = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><style>
+html,body{margin:0;background:${theme[0]};color:${theme[1]}}
+body{font:${size}px/1.6 "New York","Iowan Old Style",Georgia,serif;padding:calc(env(safe-area-inset-top) + 64px) 22px calc(env(safe-area-inset-bottom) + 90px);word-wrap:break-word;-webkit-hyphens:auto;hyphens:auto}
+article{max-width:680px;margin:0 auto}img,svg{max-width:100%;height:auto;display:block;margin:1em auto}
+h1,h2,h3{line-height:1.25;font-family:-apple-system,system-ui,sans-serif}p{margin:0 0 .9em;text-align:justify}a{color:inherit}
+</style></head><body><article>${html}</article></body></html>`;
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(page);
+    return true;
+  } catch (e) {
+    send(res, 422, { error: String(e.message || e) });
+    return true;
+  }
+}
+
+/** Routes Book (utilisateur connecté). Renvoie true si la requête est traitée. */
+async function bookRoutes(req, res, p, q, user) {
+  if (!p.startsWith('/api/books')) return false;
+  if (req.method === 'GET' && p === '/api/books/settings') {
+    const dir = booksDir();
+    send(res, 200, {
+      c411: Boolean(BOOK_TRACKERS.c411.key()),
+      tr4ker: Boolean(BOOK_TRACKERS.tr4ker.key()),
+      alldebrid: Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey),
+      wawacity: wawaBase(),
+      dir,
+      disks: disks().map((d) => d.name),
+      admin: Boolean(user.admin),
+    });
+    return true;
+  }
+  if (req.method === 'PUT' && p === '/api/books/settings') {
+    requireAdmin(user);
+    const b = await readBody(req);
+    const cur = config.books || {};
+    if (typeof b.c411Key === 'string') cur.c411Key = b.c411Key.trim() || undefined;
+    if (typeof b.tr4kerKey === 'string') cur.tr4kerKey = b.tr4kerKey.trim() || undefined;
+    if (typeof b.wawacity === 'string') cur.wawacity = b.wawacity.trim().replace(/\/+$/, '') || undefined;
+    if (typeof b.root === 'string') {
+      safePath(b.root, b.folder || '');
+      cur.root = b.root;
+      cur.folder = String(b.folder || '');
+    }
+    config.books = cur;
+    saveConfig();
+    send(res, 200, { ok: true });
+    return true;
+  }
+  if (req.method === 'GET' && p === '/api/books/search') {
+    const query = String(q.get('q') || '').trim();
+    const kind = BOOK_KINDS[q.get('kind')] ? q.get('kind') : 'mangas';
+    if (query.length < 2) {
+      send(res, 200, { results: [], sources: [] });
+      return true;
+    }
+    const all = await Promise.all([torznabSearch('c411', query, kind), torznabSearch('tr4ker', query, kind), wawaSearch(query, kind)]);
+    const now = Date.now();
+    for (const [k, v] of bookFound) if (now - v.at > 3 * 3600_000) bookFound.delete(k);
+    const words = query.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').split(/\s+/).filter((w) => w.length > 1);
+    const seen = new Set();
+    const results = [];
+    for (const s of all) {
+      for (const it of s.items) {
+        if (notFrench(it.title)) continue;
+        const dedupe = it.hash || `${it.source}:${it.title}`;
+        if (seen.has(dedupe)) continue;
+        seen.add(dedupe);
+        const id = crypto.randomBytes(6).toString('hex');
+        bookFound.set(id, { kind: it.wawa ? 'wawa' : 'torrent', link: it.link, title: it.title, source: it.source, at: now, hash: it.hash });
+        const norm = it.title.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[._]+/g, ' ');
+        results.push({
+          id,
+          title: it.title,
+          source: it.source,
+          size: it.size || 0,
+          seeders: it.seeders,
+          format: bookFormat(it.title),
+          close: words.every((w) => norm.includes(w)),
+          ...bookVolumes(it.title),
+        });
+      }
+    }
+    const weight = { tome: 0, livre: 1, pack: 2 };
+    results.sort((a, b) => Number(b.close) - Number(a.close) || weight[a.genre] - weight[b.genre] || (a.tome ?? 0) - (b.tome ?? 0) || (b.seeders ?? 0) - (a.seeders ?? 0));
+    send(res, 200, { results, sources: all.map((s) => ({ id: s.id, label: s.label, state: s.state, count: s.items.length, message: s.message })) });
+    return true;
+  }
+  if (req.method === 'POST' && p === '/api/books/download') {
+    const b = await readBody(req);
+    const found = bookFound.get(String(b.id || ''));
+    if (!found) throw new HttpError(404, 'Résultat expiré : relance la recherche');
+    const dir = booksDir();
+    if (!dir) throw new HttpError(503, 'Aucun disque n’est relié au serveur Lumio');
+    let link;
+    let name = found.title;
+    if (found.kind === 'torrent') {
+      const r = await fetch(found.link, { headers: { 'User-Agent': 'Lumio' }, signal: AbortSignal.timeout(30000) });
+      if (!r.ok) throw new HttpError(502, `${found.source} n’a pas donné le .torrent (HTTP ${r.status})`);
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (buf[0] !== 0x64) throw new HttpError(502, `${found.source} n’a pas donné un vrai .torrent`);
+      const up = await uploadTorrentFile(`${cleanName(found.title)}.torrent`, buf);
+      link = `adid:${up.id}`;
+      name = up.name || name;
+    } else {
+      link = await wawaResolve(found.link);
+    }
+    const job = { id: crypto.randomBytes(5).toString('hex'), link, root: dir.root, folder: dir.folder, status: 'queued', book: true, quiet: true,
+      name, size: 0, done: 0, speed: 0, token: null, createdAt: new Date().toISOString(), by: user.name };
+    downloads.push(job);
+    runDownload(job);
+    send(res, 201, { job: publicJob(job) });
+    return true;
+  }
+  if (req.method === 'GET' && p === '/api/books/jobs') {
+    send(res, 200, { jobs: downloads.filter((j) => j.book).map(publicJob).reverse() });
+    return true;
+  }
+  const jm = p.match(/^\/api\/books\/jobs\/([\w-]+)$/);
+  if (req.method === 'DELETE' && jm) {
+    const i = downloads.findIndex((x) => x.id === jm[1] && x.book);
+    if (i < 0) throw new HttpError(404, 'introuvable');
+    const job = downloads[i];
+    if (['queued', 'debrid', 'downloading'].includes(job.status)) {
+      job.cancelled = true;
+      if (job.abort) job.abort();
+    } else downloads.splice(i, 1);
+    send(res, 200, { ok: true });
+    return true;
+  }
+  if (req.method === 'GET' && p === '/api/books/library') {
+    send(res, 200, await bookLibrary());
+    return true;
+  }
+  if (req.method === 'POST' && p === '/api/books/delete') {
+    const b = await readBody(req);
+    const file = bookVerify(String(b.token || ''));
+    if (!file) throw new HttpError(403, 'Lien expiré');
+    await fs.promises.rm(file, { force: true });
+    zipCache.delete(file);
+    send(res, 200, { ok: true });
+    return true;
+  }
+  return false;
+}
+
 const requireAdmin = (user) => {
   if (!user.admin) throw new HttpError(403, 'réservé aux admins Jellyfin');
 };
@@ -3054,7 +3599,7 @@ const server = http.createServer(async (req, res) => {
       ok: true,
       version: VERSION,
       messages: messages.length,
-      features: ['chat', 'requests', 'status', 'ideas', 'ratings', 'files', 'watchlist', ...(tmdbKey() ? ['tmdb'] : [])],
+      features: ['chat', 'requests', 'status', 'ideas', 'ratings', 'files', 'watchlist', 'books', ...(tmdbKey() ? ['tmdb'] : [])],
       radarr: Boolean(arrConfig('radarr')),
       sonarr: Boolean(arrConfig('sonarr')),
     });
@@ -3201,6 +3746,9 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
     });
   }
 
+  // Book : lecture des livres par lien signé (sans jeton Jellyfin)
+  if (url.pathname.startsWith('/api/books/f/') && (await bookFileRoutes(req, res, url.pathname, url.searchParams))) return;
+
   if (!url.pathname.startsWith('/api/')) return send(res, 404, { error: 'introuvable' });
 
   const user = await whoAmI(req.headers['x-jellyfin-token']);
@@ -3229,6 +3777,8 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
   try {
     const p = url.pathname;
     const q = url.searchParams;
+    // Book (livres, BD, mangas, audio)
+    if (await bookRoutes(req, res, p, q, user)) return;
 
     // ——— Moi : droits et quotas ———
     if (req.method === 'GET' && p === '/api/me') {
@@ -3522,6 +4072,36 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       const kind = kindOf(q.get('type'));
       const [f, pr] = await Promise.all([folders(kind), user.admin ? profiles(kind) : null]);
       return send(res, 200, { ...f, profiles: pr ? pr.profiles : [], defaultProfile: pr ? pr.default : null, lockedProfile: pr ? pr.locked : null });
+    }
+
+    // ——— Déplacer un film / une série vers un autre dossier (admin) : Radarr / Sonarr déplacent les fichiers ———
+    if (p === '/api/arr/move') {
+      requireAdmin(user);
+      const type = q.get('type') === 'tv' ? 'tv' : 'movie';
+      const kind = kindOf(type);
+      const tmdbId = Number(q.get('tmdbId'));
+      if (!tmdbId) throw new HttpError(400, 'Identifiant TMDB manquant');
+      const list = await arr(kind, type === 'movie' ? `/movie?tmdbId=${tmdbId}` : '/series');
+      const found = (Array.isArray(list) ? list : []).find((x) => Number(x.tmdbId) === tmdbId);
+      if (!found) throw new HttpError(404, `${label(kind)} ne connaît pas ce titre`);
+      const current = String(found.rootFolderPath || (found.path ? found.path.replace(/\/[^/]+\/?$/, '') : '')).replace(/\/+$/, '');
+      if (req.method === 'GET') {
+        const f = await folders(kind);
+        return send(res, 200, { current, path: found.path || null, folders: f.folders });
+      }
+      if (req.method === 'POST') {
+        const b = await readBody(req);
+        const target = String(b.rootFolderPath || '').trim();
+        const f = await folders(kind);
+        if (!f.folders.some((x) => x.path.replace(/\/+$/, '') === target.replace(/\/+$/, ''))) throw new HttpError(400, 'Dossier inconnu');
+        if (target.replace(/\/+$/, '') === current) return send(res, 200, { moved: false, message: 'Déjà dans ce dossier' });
+        await arr(kind, type === 'movie' ? '/movie/editor' : '/series/editor', {
+          method: 'PUT',
+          body: JSON.stringify({ [type === 'movie' ? 'movieIds' : 'seriesIds']: [found.id], rootFolderPath: target, moveFiles: true }),
+        });
+        console.log(`${user.name} déplace « ${found.title} » vers ${target}`);
+        return send(res, 200, { moved: true, message: `${label(kind)} déplace les fichiers vers ${target}` });
+      }
     }
 
     // ——— Message épinglé sur l'accueil (écrit par l'admin) ———

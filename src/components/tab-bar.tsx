@@ -30,6 +30,7 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   chat: 'chatbubbles',
   activity: 'file-tray-full',
   watchlist: 'bookmark',
+  books: 'book',
 };
 
 // Libellés courts, affichés sous chaque icône (comme la barre d'onglets d'iOS)
@@ -42,6 +43,7 @@ const SHORT: Record<string, string> = {
   chat: 'Chat',
   activity: 'Demandes',
   watchlist: 'À voir',
+  books: 'Book',
   settings: 'Profil',
 };
 

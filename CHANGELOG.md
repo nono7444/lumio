@@ -6,6 +6,13 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Nouvel onglet Book : recherche de mangas, BD, comics, livres et livres audio sur C411, Tr4ker et Wawacity. Les résultats sont rangés par tome et par collection. Le téléchargement passe par AllDebrid et arrive sur le disque du serveur.
+- Lecteurs intégrés à l'appli : BD et mangas (sens de lecture, zoom, reprise à la bonne page), livres EPUB (taille du texte, thèmes, sommaire), PDF et livres audio (±30 s, vitesse, lecture en arrière-plan).
+- Réglages Book (admin) : clés C411 et Tr4ker gardées sur le serveur, dossier des livres.
+- Fiche d'un film ou d'une série : bouton Déplacer (admin) pour le changer de dossier. Radarr ou Sonarr déplacent les fichiers.
+- Menu Thèmes de la recherche : pastilles rondes.
+- Profil : les parties TMDB et Serveur Lumio sont masquées pour les non-admins.
+
 ## 1.0.110 — 28 octobre 2026
 
 - Plateformes : vignettes noires en verre (Liquid Glass sur iOS 26) avec les logos en blanc, façon Apple TV.
