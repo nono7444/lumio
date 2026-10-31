@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.119 — 31 octobre 2026
+
 - Déplacer : Lumio ne propose plus jamais de déplacer un dossier de bibliothèque entier (KIDS, FILMS…). Un film rangé directement dans sa bibliothèque se déplace seul.
 - Déplacer : le texte des choix ne se chevauche plus.
 
