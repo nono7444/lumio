@@ -1,0 +1,36 @@
+name: LumioMac
+options:
+  bundleIdPrefix: lol.wawanono
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    ENABLE_HARDENED_RUNTIME: NO
+targets:
+  LumioMac:
+    type: application
+    platform: macOS
+    sources:
+      - Sources
+      - Resources
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Lumio
+        CFBundleName: Lumio
+        LSApplicationCategoryType: public.app-category.entertainment
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSHumanReadableCopyright: Lumio — l’appli de la famille
+        LSMinimumSystemVersion: "13.0"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: lol.wawanono.lumio.mac
+        PRODUCT_NAME: Lumio
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_ENTITLEMENTS: Lumio.entitlements
+        COMBINE_HIDPI_IMAGES: YES

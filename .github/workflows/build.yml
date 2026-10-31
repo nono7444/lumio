@@ -5,6 +5,8 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+    # L'appli Mac native a son propre build (mac.yml)
+    paths-ignore: ['mac/**', '.github/workflows/mac.yml']
   workflow_dispatch:
 
 concurrency:

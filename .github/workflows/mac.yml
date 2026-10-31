@@ -1,0 +1,67 @@
+name: Lumio Mac (Swift)
+
+# Appli native pour Mac (dossier mac/) : construite à chaque push qui la touche.
+# Universelle (Intel + Apple Silicon), macOS 13 Ventura minimum, publiée en .dmg dans une Release « mac-N »
+# (jamais marquée « latest », pour ne pas casser la source FlareStore de l'iPhone).
+on:
+  push:
+    branches: [main]
+    paths: ['mac/**', '.github/workflows/mac.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: mac-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: mac
+    steps:
+      - uses: actions/checkout@v4
+      - name: XcodeGen
+        run: brew install xcodegen && xcodegen generate
+      - name: Compile (Intel + Apple Silicon)
+        run: |
+          xcodebuild \
+            -project LumioMac.xcodeproj \
+            -scheme LumioMac \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath build \
+            ARCHS="x86_64 arm64" ONLY_ACTIVE_ARCH=NO \
+            MARKETING_VERSION="1.0.${{ github.run_number }}" CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="" \
+            > xcodebuild.log 2>&1 || {
+              grep -E "error:|\*\* BUILD FAILED" xcodebuild.log | sort -u | head -40 | while IFS= read -r l; do echo "::error::$l"; done
+              tail -n 60 xcodebuild.log
+              exit 1
+            }
+          tail -n 5 xcodebuild.log
+          APP=build/Build/Products/Release/Lumio.app
+          test -d "$APP"
+          lipo -info "$APP/Contents/MacOS/Lumio"
+          codesign --force --deep -s - "$APP"
+      - name: Image disque (.dmg)
+        run: |
+          mkdir dmg
+          cp -R build/Build/Products/Release/Lumio.app dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname "Lumio" -srcfolder dmg -ov -format UDZO Lumio-Mac.dmg
+          ls -la Lumio-Mac.dmg
+      - uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: mac-${{ github.run_number }}
+          name: Lumio Mac 1.0.${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          make_latest: false
+          body: |
+            Lumio pour Mac (appli native, Intel et Apple Silicon, macOS 13 Ventura minimum).
+            1. Ouvre Lumio-Mac.dmg et glisse Lumio dans Applications.
+            2. Premier lancement : clic droit sur Lumio → Ouvrir → Ouvrir (l'appli n'est pas signée par Apple).
+          files: mac/Lumio-Mac.dmg
