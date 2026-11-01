@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.121 — 1 novembre 2026
+
 - Accueil plus fluide : les rangées (nouveautés, Reprendre, À suivre, tendances, catalogues, coups de cœur) s'affichent tout de suite depuis la dernière ouverture, puis se mettent à jour. Revenir sur l'accueil ne recharge plus tout pendant une minute.
 
 ## 1.0.120 — 1 novembre 2026
