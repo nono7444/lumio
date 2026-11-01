@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Nouvelle icône de l'appli : un « L » et une bille de lumière en verre. Sur iOS 26, c'est une vraie icône en couches à laquelle iOS applique son effet de verre. Sur Android, l'icône adaptative et l'icône monochrome suivent le même dessin.
+
 ## 1.0.122 — 1 novembre 2026
 
 - Lecteur : quand tu changes de qualité ou que tu fermes la vidéo, la conversion en cours sur le serveur est arrêtée (avant, elle continuait jusqu'à la fin du film et pouvait bloquer les autres lectures).
