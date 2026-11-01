@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.120 — 1 novembre 2026
+
 - Qualité 720p / 480p : la vidéo est vraiment réencodée à la qualité choisie (avant, Jellyfin gardait souvent l'image d'origine).
 - Lecteur : la barre ne part plus dans tous les sens quand tu la fais glisser ou que tu avances / recules plusieurs fois de suite.
 
