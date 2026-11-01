@@ -1006,7 +1006,17 @@ export async function getPlayback(
         : `${uri}${uri.includes('?') ? '&' : '?'}${k}=${v}`;
     };
     if (!/[?&]api_key=/i.test(uri)) add('api_key', j.token);
-    if (forced?.maxHeight) add('MaxHeight', String(forced.maxHeight));
+    if (forced) {
+      // Sans ça, Jellyfin (12 surtout) recopie la vidéo d'origine telle quelle et ne change que le son :
+      // l'image restait en qualité d'origine même en 720p ou 480p.
+      add('AllowVideoStreamCopy', 'false');
+      add('EnableAutoStreamCopy', 'false');
+      add('VideoCodec', 'h264');
+    }
+    if (forced?.maxHeight) {
+      add('MaxHeight', String(forced.maxHeight));
+      add('MaxWidth', String(Math.round((forced.maxHeight * 16) / 9)));
+    }
     if (forced?.bitrate) {
       add('MaxStreamingBitrate', String(forced.bitrate));
       add('VideoBitrate', String(Math.round(forced.bitrate * 0.9)));

@@ -78,6 +78,11 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
   }
   const [scrub, setScrub] = useState<number | null>(null);
   const [barWidth, setBarWidth] = useState(1);
+  // Barre : position mesurée à l'écran (le doigt peut passer sur le rond, qui fausserait la mesure locale)
+  const barRef = useRef<View>(null);
+  const barX = useRef(0);
+  // Après un saut, on garde la position visée jusqu'à ce que le lecteur y soit (évite l'aller-retour de la barre)
+  const pendingSeek = useRef<{ to: number; until: number } | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const readyOnce = useRef(false);
 
@@ -136,7 +141,12 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
 
   const seekBy = (s: number) => {
     tap();
-    ref.current?.seekBy(s).catch(() => {});
+    // Plusieurs appuis de suite : on cumule à partir de la position déjà visée
+    const from = pendingSeek.current?.to ?? position;
+    const to = Math.max(0, Math.min(duration || Infinity, from + s));
+    pendingSeek.current = { to, until: Date.now() + 4000 };
+    setPosition(to);
+    ref.current?.seekTo(to).catch(() => {});
     bump();
   };
 
@@ -169,7 +179,11 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
   }
 
   // ——— Barre de progression (glisser pour chercher) ———
-  const ratioAt = (e: GestureResponderEvent) => Math.min(1, Math.max(0, e.nativeEvent.locationX / barWidth));
+  const ratioAt = (e: GestureResponderEvent) => Math.min(1, Math.max(0, (e.nativeEvent.pageX - barX.current) / barWidth));
+  const measureBar = () => barRef.current?.measureInWindow((x, _y, w) => {
+    barX.current = x;
+    if (w) setBarWidth(w);
+  });
   const shown = scrub ?? position;
 
   return (
@@ -190,6 +204,11 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
           }
         }}
         onProgress={({ nativeEvent }) => {
+          const pend = pendingSeek.current;
+          if (pend) {
+            if (Math.abs(nativeEvent.position - pend.to) > 3 && Date.now() < pend.until) return;
+            pendingSeek.current = null;
+          }
           setPosition(nativeEvent.position);
           if (nativeEvent.duration) setDuration(nativeEvent.duration);
           setBuffered(nativeEvent.bufferedPosition || 0);
@@ -337,11 +356,17 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
           {/* Bas : progression */}
           <View style={[styles.bottom, { paddingBottom: insets.bottom + 14, paddingLeft: insets.left + 18, paddingRight: insets.right + 18 }]}>
             <View
+              ref={barRef}
               style={styles.barHit}
-              onLayout={(e: LayoutChangeEvent) => setBarWidth(e.nativeEvent.layout.width || 1)}
+              onLayout={(e: LayoutChangeEvent) => {
+                setBarWidth(e.nativeEvent.layout.width || 1);
+                measureBar();
+              }}
               onStartShouldSetResponder={() => true}
               onMoveShouldSetResponder={() => true}
+              onResponderTerminationRequest={() => false}
               onResponderGrant={(e) => {
+                measureBar();
                 setScrub(ratioAt(e) * duration);
                 if (hideTimer.current) clearTimeout(hideTimer.current);
               }}
@@ -350,6 +375,7 @@ export function MpvPlayer({ uri, headers, title, subtitle, startAt, onTime, onRe
                 const target = ratioAt(e) * duration;
                 setScrub(null);
                 setPosition(target);
+                pendingSeek.current = { to: target, until: Date.now() + 4000 };
                 ref.current?.seekTo(target).catch(() => {});
                 bump();
               }}>

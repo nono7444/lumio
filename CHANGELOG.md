@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Qualité 720p / 480p : la vidéo est vraiment réencodée à la qualité choisie (avant, Jellyfin gardait souvent l'image d'origine).
+- Lecteur : la barre ne part plus dans tous les sens quand tu la fais glisser ou que tu avances / recules plusieurs fois de suite.
+
 ## 1.0.119 — 31 octobre 2026
 
 - Déplacer : Lumio ne propose plus jamais de déplacer un dossier de bibliothèque entier (KIDS, FILMS…). Un film rangé directement dans sa bibliothèque se déplace seul.
