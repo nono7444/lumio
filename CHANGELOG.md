@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Icône iPhone : fond aux couleurs floues (bleu, cyan, violet) derrière le L et la bille de lumière en verre, comme sur Lumio TV.
+
 ## 1.0.123 — 1 novembre 2026
 
 - Nouvelle icône de l'appli : un « L » et une bille de lumière en verre. Sur iOS 26, c'est une vraie icône en couches à laquelle iOS applique son effet de verre. Sur Android, l'icône adaptative et l'icône monochrome suivent le même dessin.

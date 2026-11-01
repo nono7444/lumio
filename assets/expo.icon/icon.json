@@ -1,6 +1,6 @@
 {
   "fill": {
-    "automatic-gradient": "extended-srgb:0.16000,0.30000,0.95000,1.00000"
+    "solid": "extended-srgb:0.04314,0.10196,0.24706,1.00000"
   },
   "groups": [
     {
@@ -32,7 +32,24 @@
       },
       "translucency": {
         "enabled": true,
-        "value": 0.5
+        "value": 0.55
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "lumio-fond.png",
+          "name": "lumio-fond",
+          "glass": false
+        }
+      ],
+      "shadow": {
+        "kind": "none",
+        "opacity": 0
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0
       }
     }
   ],
