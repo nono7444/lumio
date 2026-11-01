@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.122 — 1 novembre 2026
+
 - Lecteur : quand tu changes de qualité ou que tu fermes la vidéo, la conversion en cours sur le serveur est arrêtée (avant, elle continuait jusqu'à la fin du film et pouvait bloquer les autres lectures).
 
 ## 1.0.121 — 1 novembre 2026
