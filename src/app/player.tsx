@@ -117,6 +117,11 @@ export default function Player() {
     (async () => {
       try {
         if (p.kind === 'jellyfin' && p.itemId) {
+          // Changement de qualité ou de lecteur : l'ancienne lecture (et sa conversion) est arrêtée d'abord
+          if (target.current) {
+            playback.stop(settings, { target: target.current, positionSeconds: position.current });
+            target.current = null;
+          }
           const t = await getPlayback(
             settings,
             p.itemId,

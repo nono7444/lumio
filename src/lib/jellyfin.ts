@@ -1041,7 +1041,16 @@ const reportBody = ({ target, positionSeconds, isPaused }: Report) => ({
 export const playback = {
   start: (s: Settings, r: Report) => api(s).post('/Sessions/Playing', reportBody(r)).catch(() => {}),
   progress: (s: Settings, r: Report) => api(s).post('/Sessions/Playing/Progress', reportBody(r)).catch(() => {}),
-  stop: (s: Settings, r: Report) => api(s).post('/Sessions/Playing/Stopped', reportBody(r)).catch(() => {}),
+  /** Fin de lecture ; une conversion en cours est aussi arrêtée (sinon Jellyfin continue d'encoder tout le film). */
+  stop: (s: Settings, r: Report) => {
+    const { j, post } = api(s);
+    const done = post('/Sessions/Playing/Stopped', reportBody(r)).catch(() => {});
+    if (r.target.playMethod === 'Transcode') {
+      const q = new URLSearchParams({ DeviceId: s.deviceId, ...(r.target.playSessionId ? { PlaySessionId: r.target.playSessionId } : {}) });
+      call(j.url, s.deviceId, j.token, `/Videos/ActiveEncodings?${q}`, { method: 'DELETE' }).catch(() => {});
+    }
+    return done;
+  },
 };
 
 export const ticksToSeconds = (t?: number) => (t ? t / TICKS_PER_SECOND : 0);
