@@ -2,7 +2,8 @@ import { HomeShortcuts } from '@/components/home-shortcuts';
 import { PlatformsRow } from '@/components/platforms-row';
 import { ProfileRank } from '@/components/rank-shield';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCached } from '@/lib/cached';
 import { StatusBar } from 'expo-status-bar';
 import { Platform, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -47,7 +48,9 @@ function useAsync<T>(fn: () => Promise<T>, deps: unknown[]) {
 
 function CatalogRow({ addon, catalog, nonce }: { addon: Addon; catalog: StremioCatalog; nonce: number }) {
   const { settings } = useSettings();
-  const { data, error, loading } = useAsync(() => fetchCatalog(addon.base, catalog), [addon.base, catalogKey(catalog), nonce]);
+  const data = useCached(`cat:${addon.base}:${catalogKey(catalog)}`, () => fetchCatalog(addon.base, catalog), { nonce });
+  const loading = data === undefined;
+  const error = null;
 
   const items: PosterItem[] = (data ?? []).slice(0, 40).map((m: StremioMeta) => ({
     key: `${m.type}:${m.id}`,
@@ -70,7 +73,9 @@ function CatalogRow({ addon, catalog, nonce }: { addon: Addon; catalog: StremioC
 function Trending({ nonce, part }: { nonce: number; part: 'hero' | 'row' }) {
   const { settings } = useSettings();
   const badge = useLibrary();
-  const { data, error, loading } = useAsync(() => tmdb.trending(settings), [settings.tmdbKey, nonce]);
+  const data = useCached(settings.tmdbKey ? 'trending' : null, () => tmdb.trending(settings), { nonce });
+  const loading = data === undefined;
+  const error = null;
   const all = (data?.results ?? []).filter((r) => (r.media_type === 'movie' || r.media_type === 'tv') && r.poster_path);
 
   const season = useSeason();
@@ -101,17 +106,13 @@ function Trending({ nonce, part }: { nonce: number; part: 'hero' | 'row' }) {
 function JfHero({ nonce }: { nonce: number }) {
   const { settings } = useSettings();
   const season = useSeason();
-  const [items, setItems] = useState<HeroItem[] | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    // Uniquement les sorties récentes (année en cours et suivantes), dans l'ordre d'ajout
-    jf.recentReleases(settings, { kind: 'both', limit: 24 })
-      .then((Items) => {
-        if (!alive) return;
-        // Nouveautés films, séries et enfants : sans les animés
+  // Uniquement les sorties récentes (année en cours et suivantes), dans l'ordre d'ajout ; affichées tout de suite depuis la dernière ouverture
+  const raw = useCached(settings.jellyfin ? `jfhero:${settings.jellyfin.userId}` : null, () => jf.recentReleases(settings, { kind: 'both', limit: 24 }).catch(() => [] as JfItem[]), { nonce });
+  const items = useMemo((): HeroItem[] | null => {
+    if (!raw) return null;
+    const Items = raw;
         const withArt = Items.filter((i) => i.ImageTags?.Primary && !isAnime(i)).slice(0, 7);
-        setItems(
+        return (
           withArt.map((i) => {
             const tmdbId = i.ProviderIds?.Tmdb ? Number(i.ProviderIds.Tmdb) : undefined;
             return {
@@ -131,13 +132,7 @@ function JfHero({ nonce }: { nonce: number }) {
             } as HeroItem;
           })
         );
-      })
-      .catch(() => alive && setItems([]));
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.jellyfin?.token, nonce]);
+  }, [raw, settings]);
 
   if (items === null) return <View style={{ height: 420 }} />;
   return <Hero items={items} season={season} />;
@@ -273,14 +268,7 @@ function SeasonTmdbRow({ nonce }: { nonce: number }) {
 /** Titres les mieux notés par la famille (notes en étoiles du serveur Lumio). */
 function FamilyTopRow({ nonce }: { nonce: number }) {
   const { settings } = useSettings();
-  const [items, setItems] = useState<TopRated[]>([]);
-  useFocusEffect(
-    useCallback(() => {
-      if (!settings.chatUrl || !settings.jellyfin) return;
-      ratingsApi.top(settings).then(setItems).catch(() => {});
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [settings.chatUrl, settings.jellyfin?.token, nonce])
-  );
+  const items: TopRated[] = useCached(settings.chatUrl && settings.jellyfin ? `familytop:${settings.jellyfin.userId}` : null, () => ratingsApi.top(settings), { nonce }) ?? [];
   if (!items.length) return null;
   const posters: PosterItem[] = items.map((r) => ({
     key: `${r.type}:${r.tmdbId}`,
@@ -313,25 +301,20 @@ function MovieNightRow({ nonce }: { nonce: number }) {
 
 function JfDynamicRow({ kind, view, nonce }: { kind: 'continue' | 'nextup' | 'favorites' | 'jf-latest'; view?: JfItem; nonce: number }) {
   const { settings } = useSettings();
-  const [items, setItems] = useState<JfItem[]>([]);
-  useFocusEffect(
-    useCallback(() => {
-      if (!settings.jellyfin) return;
-      const p =
-        kind === 'continue'
-          ? jf.resume(settings)
-          : kind === 'nextup'
-            ? jf.nextUp(settings)
-            : kind === 'favorites'
-              ? jf.favorites(settings)
-              : jf.recentReleases(settings, {
-                  parentId: view!.Id,
-                  kind: view?.CollectionType === 'movies' ? 'movies' : view?.CollectionType === 'tvshows' ? 'series' : 'both',
-                });
-      p.then(setItems).catch(() => {});
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [settings.jellyfin?.token, kind, view?.Id, nonce])
-  );
+  const key = settings.jellyfin ? `jfrow:${settings.jellyfin.userId}:${kind}:${view?.Id ?? ''}` : null;
+  const items =
+    useCached(key, () =>
+      kind === 'continue'
+        ? jf.resume(settings)
+        : kind === 'nextup'
+          ? jf.nextUp(settings)
+          : kind === 'favorites'
+            ? jf.favorites(settings)
+            : jf.recentReleases(settings, {
+                parentId: view!.Id,
+                kind: view?.CollectionType === 'movies' ? 'movies' : view?.CollectionType === 'tvshows' ? 'series' : 'both',
+              }), { nonce }
+    ) ?? [];
   const title =
     kind === 'continue' ? 'Reprendre' : kind === 'nextup' ? 'À suivre' : kind === 'favorites' ? 'Favoris' : `Derniers ajouts · ${view?.Name ?? ''}`;
   return (
