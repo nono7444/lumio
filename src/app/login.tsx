@@ -90,8 +90,10 @@ export default function Login() {
           // Non bloquant : l'utilisateur pourra se reconnecter depuis Profil
         }
       }
-      await update({ jellyfin: session, skipJellyfin: false, seerr: seerrCfg });
-      router.replace('/');
+      // Compte admin : il peut avoir des profils pour la famille → « Qui regarde ? »
+      const household = session.isAdmin ? { owner: session, askOnLaunch: true, count: 0 } : null;
+      await update({ jellyfin: session, household, skipJellyfin: false, seerr: seerrCfg });
+      router.replace(session.isAdmin ? '/profiles' : '/');
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {

@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Profils de la famille : quand tu te connectes avec le compte admin, un écran « Qui regarde ? » te propose ton profil, celui des enfants, de ta femme… Chaque profil a sa propre reprise, ses « vus » et sa liste « À voir ». Un profil enfant peut être limité à certaines bibliothèques et à un âge maximum, et chaque profil peut avoir un code à 4 chiffres. Tu changes de profil dans Profil → Changer de profil. Il faut le serveur Lumio 3.64.0.
+- Fenêtre Demander redessinée : plus compacte, saisons et dossiers en pastilles rondes, infos en petites étiquettes, un seul bouton Demander.
+
 ## 1.0.125 — 2 novembre 2026
 
 - Lecture toujours en qualité d'origine : le choix 1080p / 720p / 480p est retiré (la conversion par le serveur prenait trop de processeur).

@@ -40,7 +40,7 @@ const PREF_ID = 'lumio';
 type DisplayPrefs = { CustomPrefs?: Record<string, string>; [k: string]: unknown };
 
 function jfHeaders(s: Settings) {
-  const auth = `MediaBrowser Client="Lumio", Device="iPhone", DeviceId="${s.deviceId}", Version="1.0.0", Token="${s.jellyfin!.token}"`;
+  const auth = `MediaBrowser Client="Lumio", Device="iPhone", DeviceId="${s.jellyfin?.deviceId || s.deviceId}", Version="1.0.0", Token="${s.jellyfin!.token}"`;
   return { Authorization: auth, 'X-Emby-Authorization': auth, 'Content-Type': 'application/json', Accept: 'application/json' };
 }
 

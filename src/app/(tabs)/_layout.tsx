@@ -1,4 +1,4 @@
-import { Redirect, Tabs } from 'expo-router';
+import { Redirect, router, Tabs } from 'expo-router';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
 
@@ -7,8 +7,20 @@ import { C } from '@/constants/theme';
 import { fetchIsAdmin } from '@/lib/jellyfin';
 import { useSettings } from '@/lib/settings';
 
+// « Qui regarde ? » proposé une fois par ouverture de l'appli (si des profils existent)
+let askedThisLaunch = false;
+
 export default function TabsLayout() {
   const { settings, update } = useSettings();
+
+  useEffect(() => {
+    const h = settings.household;
+    if (askedThisLaunch || Platform.isTV || !h || !h.askOnLaunch || !h.count || !settings.jellyfin) return;
+    askedThisLaunch = true;
+    const t = setTimeout(() => router.push('/profiles'), 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.household?.count]);
 
   // Rôle Jellyfin rafraîchi à chaque lancement (un admin peut retirer ou donner les droits)
   useEffect(() => {
