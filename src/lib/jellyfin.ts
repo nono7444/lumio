@@ -186,7 +186,7 @@ export async function fetchIsAdmin(s: Settings) {
 
 export async function logout(s: Settings) {
   if (!s.jellyfin) return;
-  await call(s.jellyfin.url, s.deviceId, s.jellyfin.token, '/Sessions/Logout', { method: 'POST' }).catch(() => {});
+  await call(s.jellyfin.url, devId(s), s.jellyfin.token, '/Sessions/Logout', { method: 'POST' }).catch(() => {});
 }
 
 // ——— Bibliothèque ———
@@ -195,12 +195,15 @@ const episodeCache = new Map<string, { at: number; p: Promise<JfItem[]>; items?:
 
 const FIELDS = 'PrimaryImageAspectRatio,ProductionYear,Overview,Genres,Tags,Path,ProviderIds,CommunityRating,OfficialRating,ChildCount';
 
+/** Identifiant d'appareil de la session en cours (chaque profil de la famille a le sien). */
+export const devId = (s: Settings) => s.jellyfin?.deviceId || s.deviceId;
+
 function api(s: Settings) {
   const j = s.jellyfin;
   if (!j) throw new JellyfinError('Non connecté à Jellyfin');
-  const get = <T,>(path: string) => call<T>(j.url, s.deviceId, j.token, path);
+  const get = <T,>(path: string) => call<T>(j.url, devId(s), j.token, path);
   const post = <T,>(path: string, body?: unknown) =>
-    call<T>(j.url, s.deviceId, j.token, path, { method: 'POST', body: body ? JSON.stringify(body) : undefined });
+    call<T>(j.url, devId(s), j.token, path, { method: 'POST', body: body ? JSON.stringify(body) : undefined });
   return { j, get, post };
 }
 
@@ -533,7 +536,7 @@ export const jf = {
 
   setFavorite: (s: Settings, id: string, fav: boolean) => {
     const { j } = api(s);
-    return call(j.url, s.deviceId, j.token, `/Users/${j.userId}/FavoriteItems/${id}`, { method: fav ? 'POST' : 'DELETE' });
+    return call(j.url, devId(s), j.token, `/Users/${j.userId}/FavoriteItems/${id}`, { method: fav ? 'POST' : 'DELETE' });
   },
 
   /** Prochain épisode à regarder pour une série (Jellyfin « À suivre »). */
@@ -562,7 +565,7 @@ export const jf = {
   /** Admin : supprime le titre de Jellyfin ET ses fichiers sur le disque */
   deleteItem: (s: Settings, id: string) => {
     const { j } = api(s);
-    return call(j.url, s.deviceId, j.token, `/Items/${id}`, { method: 'DELETE' });
+    return call(j.url, devId(s), j.token, `/Items/${id}`, { method: 'DELETE' });
   },
   // ——— Admin : corriger les métadonnées ———
 
@@ -585,7 +588,7 @@ export const jf = {
     const { j } = api(s);
     providerCache = null;
     // Jellyfin recharge toute la fiche pendant cet appel : on lui laisse le temps
-    await call(j.url, s.deviceId, j.token, `/Items/RemoteSearch/Apply/${id}?ReplaceAllImages=true`, {
+    await call(j.url, devId(s), j.token, `/Items/RemoteSearch/Apply/${id}?ReplaceAllImages=true`, {
       method: 'POST',
       body: JSON.stringify(result),
     }, 90000).catch((e) => {
@@ -599,7 +602,7 @@ export const jf = {
     const { j, get } = api(s);
     const item = await get<JfItem>(`/Users/${j.userId}/Items/${id}`).catch(() => null);
     const dl = (type: string, url: string) =>
-      call(j.url, s.deviceId, j.token, `/Items/${id}/RemoteImages/Download?Type=${type}&ImageUrl=${encodeURIComponent(url)}`, { method: 'POST' }, 60000);
+      call(j.url, devId(s), j.token, `/Items/${id}/RemoteImages/Download?Type=${type}&ImageUrl=${encodeURIComponent(url)}`, { method: 'POST' }, 60000);
     const first = async (type: string) => {
       const r = await get<{ Images?: { Url: string; Language?: string }[] }>(`/Items/${id}/RemoteImages?Type=${type}&Limit=10&IncludeAllLanguages=true`);
       const imgs = r.Images ?? [];
@@ -635,7 +638,7 @@ export const jf = {
 
   setPlayed: (s: Settings, id: string, played: boolean) => {
     const { j } = api(s);
-    return call(j.url, s.deviceId, j.token, `/Users/${j.userId}/PlayedItems/${id}`, { method: played ? 'POST' : 'DELETE' });
+    return call(j.url, devId(s), j.token, `/Users/${j.userId}/PlayedItems/${id}`, { method: played ? 'POST' : 'DELETE' });
   },
 };
 
@@ -986,7 +989,7 @@ export async function getPlayback(
     const p = new URLSearchParams({
       static: 'true',
       MediaSourceId: src.Id,
-      DeviceId: s.deviceId,
+      DeviceId: devId(s),
       api_key: j.token,
       ...(info.PlaySessionId ? { PlaySessionId: info.PlaySessionId } : {}),
     });
@@ -1046,8 +1049,8 @@ export const playback = {
     const { j, post } = api(s);
     const done = post('/Sessions/Playing/Stopped', reportBody(r)).catch(() => {});
     if (r.target.playMethod === 'Transcode') {
-      const q = new URLSearchParams({ DeviceId: s.deviceId, ...(r.target.playSessionId ? { PlaySessionId: r.target.playSessionId } : {}) });
-      call(j.url, s.deviceId, j.token, `/Videos/ActiveEncodings?${q}`, { method: 'DELETE' }).catch(() => {});
+      const q = new URLSearchParams({ DeviceId: devId(s), ...(r.target.playSessionId ? { PlaySessionId: r.target.playSessionId } : {}) });
+      call(j.url, devId(s), j.token, `/Videos/ActiveEncodings?${q}`, { method: 'DELETE' }).catch(() => {});
     }
     return done;
   },

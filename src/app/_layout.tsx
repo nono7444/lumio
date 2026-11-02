@@ -64,6 +64,8 @@ function Root() {
       <Stack.Screen name="invite" options={{ animation: 'fade' }} />
       <Stack.Screen name="connect-tv" options={{ presentation: 'modal' }} />
       <Stack.Screen name="watch" options={{ animation: 'fade', presentation: 'fullScreenModal' }} />
+      <Stack.Screen name="profiles" options={{ animation: 'fade', presentation: 'fullScreenModal' }} />
+      <Stack.Screen name="profile-edit" options={{ presentation: 'modal' }} />
       <Stack.Screen name="player" options={{ animation: 'fade', presentation: 'fullScreenModal', gestureEnabled: false }} />
     </Stack>
     </TvScaleRoot>

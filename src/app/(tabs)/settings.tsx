@@ -205,8 +205,8 @@ export default function SettingsScreen() {
           {settings.jellyfin ? (
             <View style={{ gap: 12 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>{settings.jellyfin.userName.slice(0, 1).toUpperCase()}</Text>
+                <View style={[styles.avatar, settings.jellyfin.profile && { backgroundColor: settings.jellyfin.profile.color }]}>
+                  <Text style={styles.avatarText}>{settings.jellyfin.profile?.avatar ?? settings.jellyfin.userName.slice(0, 1).toUpperCase()}</Text>
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.addonName}>{settings.jellyfin.userName}</Text>
@@ -216,6 +216,9 @@ export default function SettingsScreen() {
                   </Text>
                 </View>
               </View>
+              {settings.household || settings.jellyfin.isAdmin ? (
+                <Button title={settings.household?.count ? 'Changer de profil' : 'Profils de la famille'} icon="people-circle-outline" variant="secondary" onPress={() => router.push('/profiles')} />
+              ) : null}
               <ConnectTvButton />
               <Button
                 title="Se déconnecter"
@@ -223,7 +226,9 @@ export default function SettingsScreen() {
                 variant="danger"
                 onPress={async () => {
                   await logoutJellyfin(settings);
-                  await update({ jellyfin: null, skipJellyfin: false });
+                  if (settings.household?.owner && settings.household.owner.token !== settings.jellyfin?.token)
+                    await logoutJellyfin({ ...settings, jellyfin: settings.household.owner });
+                  await update({ jellyfin: null, household: null, skipJellyfin: false });
                   router.replace('/login');
                 }}
               />

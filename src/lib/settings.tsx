@@ -39,7 +39,13 @@ export type JellyfinSession = {
   serverName?: string;
   /** Admin Jellyfin : ajout direct Radarr/Sonarr. Sinon : demandes via Seerr */
   isAdmin?: boolean;
+  /** Profil de la famille : appareil Jellyfin à part (sinon Jellyfin fermerait la session du compte principal) */
+  deviceId?: string;
+  profile?: { id: string; name: string; avatar: string; color: string; kind: 'adult' | 'kid' };
 };
+
+/** Compte principal (admin) qui possède les profils de la famille : on revient dessus depuis « Qui regarde ? ». */
+export type Household = { owner: JellyfinSession; askOnLaunch: boolean; count: number };
 
 export type SeerrConfig = {
   url: string;
@@ -74,6 +80,7 @@ export type Settings = {
   /** Identifiant d'appareil stable, envoyé à Jellyfin */
   deviceId: string;
   jellyfin: JellyfinSession | null;
+  household?: Household | null;
   /** L'utilisateur a choisi de continuer sans Jellyfin */
   skipJellyfin: boolean;
   betterPosters: BetterPostersConfig;
@@ -271,7 +278,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           // Appli neuve (rien de configuré) : le serveur fait foi ; sinon les réglages locaux priment
           const fresh = !prev.tmdbKey && !prev.radarr.url && !prev.sonarr.url && !prev.seerr;
           const base = fresh ? cloud : { ...cloud, ...stripEmpty(next) };
-          next = { ...mergeSettings(base), jellyfin: next.jellyfin, deviceId: next.deviceId, skipJellyfin: false };
+          next = { ...mergeSettings(base), jellyfin: next.jellyfin, household: next.household, deviceId: next.deviceId, skipJellyfin: false };
         }
       }
       current.current = next;

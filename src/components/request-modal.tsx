@@ -1,13 +1,14 @@
 // Fenêtre « Demander » façon Seerr : choix des saisons, statut de chacune, quota, options avancées.
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FocusPressable as Pressable } from '@/components/tv';
-import { Button, tap } from '@/components/ui';
-import { C, R } from '@/constants/theme';
+import { tap } from '@/components/ui';
+import { C } from '@/constants/theme';
 import { formatBytes } from '@/lib/arr';
 import { suggestFolder } from '@/lib/grab';
 import { MediaStatus, mediaStatusLabel, requestsApi, type ArrOptions, type MediaInfo, type Me } from '@/lib/requests';
@@ -47,7 +48,6 @@ export function RequestModal({
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [folder, setFolder] = useState<string | null>(null);
   const [profile, setProfile] = useState<number | null>(null);
-  const [advanced, setAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const isTv = target.type === 'tv';
@@ -105,44 +105,49 @@ export function RequestModal({
     }
   }
 
+  const folders = opts?.folders ?? [];
+  const showFolders = folders.length > 1;
+  const showProfiles = Boolean(me?.admin && !opts?.lockedProfile && (opts?.profiles.length ?? 0) > 1);
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable focusRing={false} style={styles.backdrop} onPress={onClose} />
-      <View style={[styles.sheet, { paddingBottom: insets.bottom + 14 }]}>
+      <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
+        <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} />
         <View style={styles.grip} />
+        {/* En-tête compact : affiche, titre, fermer */}
         <View style={styles.head}>
           {target.poster ? <Image source={target.poster} style={styles.poster} contentFit="cover" /> : null}
           <View style={{ flex: 1 }}>
-            <Text style={styles.kicker}>{isTv ? 'Demander la série' : 'Demander le film'}</Text>
+            <Text style={styles.kicker}>{isTv ? 'Série' : 'Film'}</Text>
             <Text style={styles.title} numberOfLines={2}>
               {target.title}
-              {target.year ? <Text style={styles.dim}> ({target.year})</Text> : null}
+              {target.year ? <Text style={styles.dim}> {target.year}</Text> : null}
             </Text>
           </View>
+          <Pressable onPress={onClose} hitSlop={10} style={styles.close}>
+            <Ionicons name="close" size={18} color={C.text} />
+          </Pressable>
         </View>
 
-        <ScrollView style={{ maxHeight: 440 }} contentContainerStyle={{ gap: 10, paddingBottom: 6 }}>
-          {/* Saisons */}
+        <ScrollView style={{ maxHeight: 380 }} contentContainerStyle={{ gap: 14, paddingBottom: 4 }}>
+          {/* Saisons : pastilles rondes */}
           {isTv && (
-            <View style={styles.table}>
-              <Pressable
-                disabled={!requestable.length}
-                onPress={() => {
-                  tap();
-                  setSelected(allOn ? new Set() : new Set(requestable));
-                }}
-                style={[styles.seasonRow, styles.tableHead]}>
-                <Switch
-                  value={allOn}
-                  disabled={!requestable.length}
-                  onValueChange={(v) => setSelected(v ? new Set(requestable) : new Set())}
-                  trackColor={{ true: C.accent, false: C.border }}
-                />
-                <Text style={[styles.cell, { flex: 1, fontWeight: '800' }]}>Toutes les saisons</Text>
-                <Text style={[styles.cellDim, { textAlign: 'right' }]}>{selected.size ? `${selected.size} choisie${selected.size > 1 ? 's' : ''}` : ''}</Text>
-              </Pressable>
-              {/* Saisons en grille compacte : toutes visibles d'un coup */}
-              <View style={styles.grid}>
+            <View>
+              <View style={styles.rowBetween}>
+                <Text style={styles.label}>Saisons</Text>
+                {requestable.length ? (
+                  <Pressable
+                    hitSlop={8}
+                    onPress={() => {
+                      tap();
+                      setSelected(allOn ? new Set() : new Set(requestable));
+                    }}>
+                    <Text style={styles.link}>{allOn ? 'Aucune' : 'Toutes'}</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+              <View style={styles.pills}>
                 {seasons.map((s) => {
                   const st = statusOf(s.season_number);
                   const can = st === MediaStatus.UNKNOWN;
@@ -159,17 +164,10 @@ export function RequestModal({
                         else next.add(s.season_number);
                         setSelected(next);
                       }}
-                      style={[
-                        styles.tile,
-                        on && { backgroundColor: C.accent, borderColor: C.accent },
-                        !can && { borderColor: lab?.color ?? C.border, opacity: 0.75 },
-                      ]}>
-                      <Text style={[styles.tileTitle, on && { color: '#fff' }, !can && { color: lab?.color ?? C.textDim }]}>
-                        S{s.season_number}
-                      </Text>
-                      <Text style={[styles.tileSub, on && { color: 'rgba(255,255,255,0.85)' }]} numberOfLines={1}>
-                        {!can && lab ? lab.label : `${s.episode_count} ép.`}
-                      </Text>
+                      style={[styles.season, on && styles.seasonOn, !can && { opacity: 0.55 }]}>
+                      {!can ? <Ionicons name={st === MediaStatus.AVAILABLE ? 'checkmark' : 'time-outline'} size={11} color={lab?.color ?? C.textDim} /> : null}
+                      <Text style={[styles.seasonTxt, on && { color: '#fff' }, !can && { color: lab?.color ?? C.textDim }]}>S{s.season_number}</Text>
+                      <Text style={[styles.seasonSub, on && { color: 'rgba(255,255,255,0.8)' }]}>{s.episode_count}</Text>
                     </Pressable>
                   );
                 })}
@@ -177,161 +175,161 @@ export function RequestModal({
             </View>
           )}
 
-          {/* Quota (comme Seerr) */}
-          {quota && quota.limit > 0 ? (
-            <View style={[styles.note, overQuota && { borderColor: C.danger }]}>
-              <Ionicons name="speedometer-outline" size={18} color={overQuota ? C.danger : C.textDim} />
-              <Text style={[styles.noteText, overQuota && { color: C.danger }]}>
-                {isTv
-                  ? `Il te reste ${quota.remaining} saison(s) sur ${quota.limit} tous les ${quota.days} jours.`
-                  : `Il te reste ${quota.remaining} film(s) sur ${quota.limit} tous les ${quota.days} jours.`}
-              </Text>
-            </View>
-          ) : null}
-
-          {me && !me.permissions.autoApprove ? (
-            <View style={styles.note}>
-              <Ionicons name="hourglass-outline" size={18} color={C.warning} />
-              <Text style={styles.noteText}>Ta demande devra être validée par l’admin avant le téléchargement.</Text>
-            </View>
-          ) : null}
-
-          {/* Options avancées : dossier (tout le monde), profil de qualité (admin) */}
-          {opts && (opts.folders.length > 1 || (me?.admin && opts.profiles.length > 1)) ? (
+          {/* Dossier : pastilles */}
+          {showFolders ? (
             <View>
-              <Pressable
-                onPress={() => {
-                  tap();
-                  setAdvanced((a) => !a);
-                }}
-                style={styles.advHead}>
-                <Ionicons name="options-outline" size={18} color={C.textDim} />
-                <Text style={[styles.cell, { flex: 1 }]}>
-                  Options{folder ? ` · ${folderName(folder)}` : ''}
-                  {opts.lockedProfile ? ` · ${opts.lockedProfile.name}` : me?.admin && profile ? ` · ${opts.profiles.find((p) => p.id === profile)?.name ?? ''}` : ''}
-                </Text>
-                <Ionicons name={advanced ? 'chevron-up' : 'chevron-down'} size={18} color={C.textDim} />
-              </Pressable>
-              {advanced && (
-                <View style={{ gap: 10, marginTop: 10 }}>
-                  <Text style={styles.label}>Dossier</Text>
-                  <View style={styles.chips}>
-                    {opts.folders.map((f) => (
-                      <Pressable
-                        key={f.path}
-                        onPress={() => {
-                          tap();
-                          setFolder(f.path);
-                        }}
-                        style={[styles.chip, folder === f.path && styles.chipOn]}>
-                        <Text style={[styles.chipText, folder === f.path && { color: '#000' }]}>{folderName(f.path)}</Text>
-                        {f.freeSpace ? (
-                          <Text style={[styles.chipSub, folder === f.path && { color: '#333' }]}>{formatBytes(f.freeSpace)} libres</Text>
-                        ) : null}
-                      </Pressable>
-                    ))}
-                  </View>
-                  {opts.lockedProfile ? (
-                    <>
-                      <Text style={styles.label}>Profil de qualité</Text>
-                      <View style={styles.chips}>
-                        <View style={[styles.chip, styles.chipOn]}>
-                          <Text style={[styles.chipText, { color: '#000' }]}>🔒 {opts.lockedProfile.name}</Text>
-                        </View>
-                      </View>
-                    </>
-                  ) : me?.admin && opts.profiles.length > 1 ? (
-                    <>
-                      <Text style={styles.label}>Profil de qualité</Text>
-                      <View style={styles.chips}>
-                        {opts.profiles.map((p) => (
-                          <Pressable
-                            key={p.id}
-                            onPress={() => {
-                              tap();
-                              setProfile(p.id);
-                            }}
-                            style={[styles.chip, profile === p.id && styles.chipOn]}>
-                            <Text style={[styles.chipText, profile === p.id && { color: '#000' }]}>{p.name}</Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                    </>
-                  ) : null}
-                </View>
-              )}
+              <Text style={styles.label}>Dossier</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hpills}>
+                {folders.map((f) => (
+                  <Pressable
+                    key={f.path}
+                    onPress={() => {
+                      tap();
+                      setFolder(f.path);
+                    }}
+                    style={[styles.chip, folder === f.path && styles.chipOn]}>
+                    <Text style={[styles.chipText, folder === f.path && { color: '#000' }]}>{folderName(f.path)}</Text>
+                    {f.freeSpace ? <Text style={[styles.chipSub, folder === f.path && { color: '#555' }]}>{formatBytes(f.freeSpace)}</Text> : null}
+                  </Pressable>
+                ))}
+              </ScrollView>
             </View>
           ) : !opts ? (
             <ActivityIndicator color={C.textDim} />
           ) : null}
+
+          {/* Qualité (admin) */}
+          {showProfiles ? (
+            <View>
+              <Text style={styles.label}>Qualité</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hpills}>
+                {opts!.profiles.map((p) => (
+                  <Pressable
+                    key={p.id}
+                    onPress={() => {
+                      tap();
+                      setProfile(p.id);
+                    }}
+                    style={[styles.chip, profile === p.id && styles.chipOn]}>
+                    <Text style={[styles.chipText, profile === p.id && { color: '#000' }]}>{p.name}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
+
+          {/* Petites infos : qualité imposée, quota, validation */}
+          <View style={styles.pills}>
+            {opts?.lockedProfile ? (
+              <View style={styles.info}>
+                <Ionicons name="lock-closed" size={11} color={C.textDim} />
+                <Text style={styles.infoTxt}>{opts.lockedProfile.name}</Text>
+              </View>
+            ) : null}
+            {quota && quota.limit > 0 ? (
+              <View style={[styles.info, overQuota && { borderColor: C.danger }]}>
+                <Ionicons name="speedometer-outline" size={11} color={overQuota ? C.danger : C.textDim} />
+                <Text style={[styles.infoTxt, overQuota && { color: C.danger }]}>
+                  {quota.remaining}/{quota.limit} {isTv ? 'saisons' : 'films'} · {quota.days} j
+                </Text>
+              </View>
+            ) : null}
+            {me && !me.permissions.autoApprove ? (
+              <View style={styles.info}>
+                <Ionicons name="hourglass-outline" size={11} color={C.warning} />
+                <Text style={styles.infoTxt}>Validation par l’admin</Text>
+              </View>
+            ) : null}
+          </View>
         </ScrollView>
 
-        <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
-          <Button title="Annuler" variant="secondary" onPress={onClose} style={{ flex: 1 }} />
-          <Button
-            title={isTv ? (selected.size ? `Demander (${selected.size})` : 'Demander') : 'Demander'}
-            icon="paper-plane"
-            onPress={submit}
-            loading={busy}
-            disabled={!canSend}
-            style={{ flex: 1.4 }}
-          />
-        </View>
+        <Pressable onPress={submit} disabled={!canSend} style={[styles.send, !canSend && { opacity: 0.45 }]}>
+          {busy ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <>
+              <Ionicons name="paper-plane" size={16} color="#fff" />
+              <Text style={styles.sendTxt}>{isTv ? (selected.size ? `Demander ${selected.size} saison${selected.size > 1 ? 's' : ''}` : 'Choisis une saison') : 'Demander'}</Text>
+            </>
+          )}
+        </Pressable>
       </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' },
-  sheet: { backgroundColor: '#161618', borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingHorizontal: 18, paddingTop: 10 },
-  grip: { alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.2)', marginBottom: 14 },
-  head: { flexDirection: 'row', gap: 14, alignItems: 'center', marginBottom: 16 },
-  poster: { width: 56, height: 84, borderRadius: 8, backgroundColor: C.surfaceHigh },
-  kicker: { color: C.accent, fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 },
-  title: { color: C.text, fontSize: 20, fontWeight: '800', letterSpacing: -0.3, marginTop: 2 },
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
+  sheet: {
+    backgroundColor: 'rgba(22,22,24,0.72)',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    overflow: 'hidden',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  grip: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.25)', marginBottom: 12 },
+  head: { flexDirection: 'row', gap: 12, alignItems: 'center', marginBottom: 14 },
+  poster: { width: 40, height: 60, borderRadius: 8, backgroundColor: C.surfaceHigh },
+  kicker: { color: C.accent, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 },
+  title: { color: C.text, fontSize: 16, fontWeight: '800', letterSpacing: -0.2, marginTop: 1 },
   dim: { color: C.textDim, fontWeight: '500' },
-  table: { backgroundColor: C.surfaceHigh, borderRadius: R.lg, overflow: 'hidden' },
-  tableHead: { backgroundColor: 'rgba(255,255,255,0.05)' },
-  seasonRow: {
+  close: { width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
+  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  label: { color: C.textDim, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 },
+  link: { color: C.accent, fontSize: 13, fontWeight: '700', marginBottom: 8 },
+  pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  hpills: { gap: 6 },
+  season: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 4,
+    paddingHorizontal: 11,
+    height: 30,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  seasonOn: { backgroundColor: C.accent, borderColor: C.accent },
+  seasonTxt: { color: C.text, fontSize: 13, fontWeight: '800' },
+  seasonSub: { color: C.textDim, fontSize: 11, fontWeight: '600' },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: C.border,
+    height: 30,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
   },
-  cell: { color: C.text, fontSize: 15, fontWeight: '600' },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, padding: 8 },
-  tile: {
-    width: '23.5%',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: C.border,
-    paddingVertical: 7,
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.04)',
-  },
-  tileTitle: { color: C.text, fontSize: 15, fontWeight: '800' },
-  tileSub: { color: C.textDim, fontSize: 10, marginTop: 1 },
-  cellDim: { color: C.textDim, fontSize: 12, marginTop: 1 },
-  note: {
+  chipOn: { backgroundColor: '#fff', borderColor: '#fff' },
+  chipText: { color: C.text, fontSize: 13, fontWeight: '700' },
+  chipSub: { color: C.textFaint, fontSize: 11 },
+  info: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    backgroundColor: C.surfaceHigh,
-    borderRadius: R.md,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: 'transparent',
+    gap: 5,
+    paddingHorizontal: 10,
+    height: 24,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.18)',
   },
-  noteText: { color: C.textDim, fontSize: 13, flex: 1, lineHeight: 18 },
-  advHead: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.surfaceHigh, borderRadius: R.md, padding: 12 },
-  label: { color: C.textDim, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { backgroundColor: C.surfaceHigh, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
-  chipOn: { backgroundColor: C.text },
-  chipText: { color: C.text, fontSize: 14, fontWeight: '700' },
-  chipSub: { color: C.textFaint, fontSize: 11, marginTop: 1 },
+  infoTxt: { color: C.textDim, fontSize: 11, fontWeight: '600' },
+  send: {
+    marginTop: 14,
+    height: 46,
+    borderRadius: 999,
+    backgroundColor: C.accent,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  sendTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
 });
