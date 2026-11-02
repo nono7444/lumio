@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.63.0';
+const VERSION = '3.64.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3461,6 +3461,159 @@ async function bookRoutes(req, res, p, q, user) {
   return false;
 }
 
+// ——— Profils de la famille (façon « Qui regarde ? ») ———
+// Un profil = un compte Jellyfin à part (reprise, vus, « À voir » séparés), créé par l'admin depuis l'appli.
+// Le mot de passe de chaque profil est inventé et gardé ici : l'appli ne le voit jamais, elle reçoit juste une session.
+const PROFILES_FILE = path.join(DATA_DIR, 'profiles.json');
+const profileStore = readJson(PROFILES_FILE, {});
+if (!profileStore.owners || typeof profileStore.owners !== 'object') profileStore.owners = {};
+const saveProfiles = () => writeJson(PROFILES_FILE, profileStore);
+const pinHash = (pin, salt) => crypto.createHash('sha256').update(`${salt}:${pin}`).digest('hex');
+const ownerProfiles = (ownerId) => (profileStore.owners[ownerId] = profileStore.owners[ownerId] || []);
+const publicProfile = (p) => ({ id: p.id, jfUserId: p.jfUserId, name: p.name, avatar: p.avatar || '🙂', color: p.color || '#3D8BFF', kind: p.kind === 'kid' ? 'kid' : 'adult', hasPin: Boolean(p.pin), maxAge: p.maxAge || null, libraries: p.libraries || null, linked: Boolean(p.linked) });
+const jfDevice = (deviceId) => String(deviceId || 'lumio-profile').replace(/[^\w.-]/g, '').slice(0, 80) || 'lumio-profile';
+
+async function jfAuthAs(name, password, deviceId) {
+  const r = await fetch(`${JELLYFIN_URL}/Users/AuthenticateByName`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `MediaBrowser Client="Lumio", Device="Lumio", DeviceId="${jfDevice(deviceId)}", Version="${VERSION}"`,
+    },
+    body: JSON.stringify({ Username: name, Pw: password || '' }),
+    signal: AbortSignal.timeout(20000),
+  });
+  if (r.status === 401) throw new HttpError(401, 'Identifiant ou mot de passe refusé par Jellyfin');
+  if (!r.ok) throw new HttpError(502, `Jellyfin a refusé la connexion (HTTP ${r.status})`);
+  return r.json();
+}
+
+/** Règles Jellyfin d'un profil : pas admin ; un profil enfant ne voit que ses bibliothèques et un âge maximum. */
+async function applyProfilePolicy(token, p) {
+  const user = await jfJson(token, `/Users/${p.jfUserId}`);
+  const pol = { ...(user.Policy || {}) };
+  pol.IsAdministrator = false;
+  pol.EnableContentDeletion = false;
+  pol.EnableRemoteControlOfOtherUsers = false;
+  pol.EnableSharedDeviceControl = false;
+  if (p.kind === 'kid') {
+    const libs = Array.isArray(p.libraries) ? p.libraries : [];
+    pol.EnableAllFolders = !libs.length;
+    pol.EnabledFolders = libs;
+    pol.MaxParentalRating = p.maxAge ? Number(p.maxAge) : null;
+    pol.BlockUnratedItems = p.maxAge ? ['Movie', 'Series'] : [];
+  } else {
+    pol.EnableAllFolders = true;
+    pol.EnabledFolders = [];
+    pol.MaxParentalRating = null;
+    pol.BlockUnratedItems = [];
+  }
+  const r = await fetch(`${JELLYFIN_URL}/Users/${p.jfUserId}/Policy`, { method: 'POST', headers: { ...jfHeaders(token), 'Content-Type': 'application/json' }, body: JSON.stringify(pol) });
+  if (!r.ok) throw new HttpError(502, `Jellyfin a refusé les réglages du profil (HTTP ${r.status})`);
+}
+
+function profileFields(p, b) {
+  if (typeof b.name === 'string' && b.name.trim()) p.name = b.name.trim().slice(0, 24);
+  if (typeof b.avatar === 'string' && b.avatar) p.avatar = b.avatar.slice(0, 8);
+  if (typeof b.color === 'string' && /^#[0-9a-f]{6}$/i.test(b.color)) p.color = b.color;
+  if (b.kind === 'kid' || b.kind === 'adult') p.kind = b.kind;
+  if (b.maxAge === null || Number(b.maxAge) > 0) p.maxAge = b.maxAge === null ? null : Number(b.maxAge);
+  if (Array.isArray(b.libraries)) p.libraries = b.libraries.map(String).filter((x) => /^[0-9a-f-]{32,36}$/i.test(x));
+  if (b.pin === null || b.pin === '') delete p.pin;
+  else if (typeof b.pin === 'string' && /^\d{4}$/.test(b.pin)) {
+    p.pinSalt = crypto.randomBytes(8).toString('hex');
+    p.pin = pinHash(b.pin, p.pinSalt);
+  }
+}
+
+async function profileRoutes(req, res, p, q, user) {
+  if (!p.startsWith('/api/profiles')) return false;
+  // Les profils appartiennent au compte admin qui les a créés
+  if (req.method === 'GET' && p === '/api/profiles') {
+    if (!user.admin) return send(res, 200, { owner: false, profiles: [] }), true;
+    send(res, 200, { owner: true, profiles: ownerProfiles(user.id).map(publicProfile) });
+    return true;
+  }
+  requireAdmin(user);
+  const list = ownerProfiles(user.id);
+  if (req.method === 'GET' && p === '/api/profiles/libraries') {
+    const r = await fetch(`${JELLYFIN_URL}/Library/VirtualFolders`, { headers: jfHeaders(user.token) });
+    if (!r.ok) throw new HttpError(502, `Jellyfin a refusé (HTTP ${r.status})`);
+    send(res, 200, { libraries: (await r.json()).filter((l) => l.ItemId).map((l) => ({ id: l.ItemId, name: l.Name, type: l.CollectionType || null })) });
+    return true;
+  }
+  // Nouveau profil : nouveau compte Jellyfin
+  if (req.method === 'POST' && p === '/api/profiles') {
+    const b = await readBody(req);
+    const prof = { id: crypto.randomBytes(5).toString('hex'), kind: 'adult', createdAt: new Date().toISOString() };
+    profileFields(prof, b);
+    if (!prof.name) throw new HttpError(400, 'Choisis un prénom pour le profil');
+    if (b.linkUser) {
+      // Compte Jellyfin qui existe déjà (ex. celui de ta femme) : son mot de passe est vérifié puis gardé ici
+      const a = await jfAuthAs(String(b.linkUser), String(b.linkPassword || ''), `lumio-check-${prof.id}`);
+      prof.jfUserId = a.User.Id;
+      prof.jfName = a.User.Name;
+      prof.pass = String(b.linkPassword || '');
+      prof.linked = true;
+      if (list.some((x) => x.jfUserId === prof.jfUserId)) throw new HttpError(409, 'Ce compte est déjà un profil');
+      fetch(`${JELLYFIN_URL}/Sessions/Logout`, { method: 'POST', headers: jfHeaders(a.AccessToken) }).catch(() => {});
+    } else {
+      const pass = crypto.randomBytes(18).toString('base64url');
+      // Nom Jellyfin unique (deux « Léo » possibles côté Lumio)
+      let jfName = prof.name;
+      const existing = await jfJson(user.token, '/Users').catch(() => []);
+      const taken = new Set((existing || []).map((u) => String(u.Name).toLowerCase()));
+      for (let i = 2; taken.has(jfName.toLowerCase()); i++) jfName = `${prof.name} ${i}`;
+      const r = await fetch(`${JELLYFIN_URL}/Users/New`, { method: 'POST', headers: { ...jfHeaders(user.token), 'Content-Type': 'application/json' }, body: JSON.stringify({ Name: jfName, Password: pass }) });
+      if (!r.ok) throw new HttpError(502, `Jellyfin n’a pas pu créer le compte (HTTP ${r.status})`);
+      const nu = await r.json();
+      prof.jfUserId = nu.Id;
+      prof.jfName = nu.Name;
+      prof.pass = pass;
+    }
+    if (!prof.linked) await applyProfilePolicy(user.token, prof);
+    list.push(prof);
+    saveProfiles();
+    console.log(`Profil « ${prof.name} » ${prof.linked ? 'relié' : 'créé'} par ${user.name}`);
+    send(res, 201, { profile: publicProfile(prof) });
+    return true;
+  }
+  const m = p.match(/^\/api\/profiles\/([a-f0-9]+)(\/switch)?$/);
+  if (!m) throw new HttpError(404, 'Profil introuvable');
+  const prof = list.find((x) => x.id === m[1]);
+  if (!prof) throw new HttpError(404, 'Profil introuvable');
+  // Passer sur ce profil : le serveur ouvre une session Jellyfin à son nom et la donne à l'appli
+  if (req.method === 'POST' && m[2]) {
+    const b = await readBody(req);
+    if (prof.pin && pinHash(String(b.pin || ''), prof.pinSalt) !== prof.pin) throw new HttpError(403, 'Code incorrect');
+    const a = await jfAuthAs(prof.jfName, prof.pass, b.deviceId);
+    send(res, 200, {
+      session: { token: a.AccessToken, userId: a.User.Id, userName: a.User.Name, isAdmin: Boolean(a.User.Policy && a.User.Policy.IsAdministrator), deviceId: jfDevice(b.deviceId) },
+      profile: publicProfile(prof),
+    });
+    return true;
+  }
+  if (req.method === 'PATCH') {
+    const b = await readBody(req);
+    profileFields(prof, b);
+    if (!prof.linked || b.kind || b.libraries || b.maxAge !== undefined) await applyProfilePolicy(user.token, prof);
+    saveProfiles();
+    send(res, 200, { profile: publicProfile(prof) });
+    return true;
+  }
+  if (req.method === 'DELETE') {
+    // Supprimer le profil ; le compte Jellyfin (et son historique) n'est effacé que si on le demande
+    if (q.get('deleteAccount') === '1' && !prof.linked) {
+      await fetch(`${JELLYFIN_URL}/Users/${prof.jfUserId}`, { method: 'DELETE', headers: jfHeaders(user.token) }).catch(() => {});
+    }
+    profileStore.owners[user.id] = list.filter((x) => x !== prof);
+    saveProfiles();
+    send(res, 200, { ok: true });
+    return true;
+  }
+  throw new HttpError(405, 'Action inconnue');
+}
+
 const requireAdmin = (user) => {
   if (!user.admin) throw new HttpError(403, 'réservé aux admins Jellyfin');
 };
@@ -3805,6 +3958,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
     const q = url.searchParams;
     // Book (livres, BD, mangas, audio)
     if (await bookRoutes(req, res, p, q, user)) return;
+    if (await profileRoutes(req, res, p, q, user)) return;
 
     // ——— Moi : droits et quotas ———
     if (req.method === 'GET' && p === '/api/me') {
