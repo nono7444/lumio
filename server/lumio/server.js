@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.60.0';
+const VERSION = '3.61.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -109,7 +109,8 @@ function settings() {
     defaultTvQuotaLimit: Number(config.defaultTvQuotaLimit) || 0,
     defaultTvQuotaDays: Number(config.defaultTvQuotaDays) || 7,
     usersSeeAllRequests: config.usersSeeAllRequests === true,
-    lockedProfile: lockedProfileName(),
+    lockedProfile: lockedProfileName('radarr'),
+    lockedProfileSonarr: lockedProfileName('sonarr'),
   };
 }
 
@@ -289,14 +290,19 @@ async function folders(kind) {
   };
 }
 
-// Profil de qualité imposé à toutes les demandes (films et séries), s'il existe dans Radarr / Sonarr
-const lockedProfileName = () => (config.lockedProfile !== undefined ? config.lockedProfile : process.env.LOCKED_PROFILE || 'HD-1080p nono') || '';
-const normName = (t) => String(t || '').toLowerCase().replace(/\s+/g, ' ').trim();
+// Profil de qualité imposé à toutes les demandes, s'il existe dans Radarr / Sonarr :
+// films → « HD-1080p nono », séries et animés (Sonarr) → « HD-1080p copy »
+const lockedProfileName = (kind) =>
+  kind === 'sonarr'
+    ? (config.lockedProfileSonarr !== undefined ? config.lockedProfileSonarr : process.env.LOCKED_PROFILE_SONARR || 'HD-1080p copy') || ''
+    : (config.lockedProfile !== undefined ? config.lockedProfile : process.env.LOCKED_PROFILE || 'HD-1080p nono') || '';
+// Comparaison souple : « HD - 1080p Copy » = « HD-1080p copy »
+const normName = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 
 async function profiles(kind) {
   const list = await arr(kind, '/qualityprofile');
   const c = arrConfig(kind);
-  const lockName = normName(lockedProfileName());
+  const lockName = normName(lockedProfileName(kind));
   const locked = lockName ? list.find((p) => normName(p.name) === lockName) : null;
   return {
     profiles: list.map((p) => ({ id: p.id, name: p.name })),
@@ -4918,6 +4924,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       if (b.usersSeeAllRequests !== undefined) config.usersSeeAllRequests = Boolean(b.usersSeeAllRequests);
       if (b.ntfyEnabled !== undefined) config.ntfyEnabled = Boolean(b.ntfyEnabled);
       if (typeof b.lockedProfile === 'string') config.lockedProfile = b.lockedProfile.trim();
+      if (typeof b.lockedProfileSonarr === 'string') config.lockedProfileSonarr = b.lockedProfileSonarr.trim();
       if (b.newNtfyTopic) config.ntfyTopic = `lumio-${crypto.randomBytes(8).toString('hex')}`;
       for (const k of ['defaultMovieQuotaLimit', 'defaultMovieQuotaDays', 'defaultTvQuotaLimit', 'defaultTvQuotaDays'])
         if (b[k] !== undefined) config[k] = Math.max(0, Number(b[k]) || 0);
