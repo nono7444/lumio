@@ -21,6 +21,7 @@ import { DEFAULT_TV_SCALE, TV_SCALES } from '@/lib/tv-ui';
 import { AnnouncementEditor } from '@/components/announcement';
 import { NotifySubscribeSection } from '@/components/notify-subscribe';
 import { ServerActionsSection } from '@/components/server-actions';
+import { IS_BETA } from '@/lib/secour';
 import { StorageSection } from '@/components/storage-section';
 import { HOME_BACKGROUNDS, pickHomePhoto } from '@/components/home-backdrop';
 import { Addon, DEFAULT_ADDON, isManager, useSettings, type HomeBackground } from '@/lib/settings';
@@ -246,6 +247,9 @@ export default function SettingsScreen() {
           <Section title="Demandes">
             <Text style={styles.help}>Notifications push des demandes, validation automatique ou par toi, quotas de films et de saisons.</Text>
             <Button title="Utilisateurs, droits et notifications" icon="people-outline" variant="secondary" onPress={() => router.push('/users')} />
+            {IS_BETA ? (
+              <Button title="Lumio Auto (bêta) : remplace Radarr et Sonarr" icon="flash-outline" variant="secondary" onPress={() => router.push('/auto')} style={{ marginTop: 10 }} />
+            ) : null}
           </Section>
         ) : null}
 
