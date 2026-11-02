@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.64.0';
+const VERSION = '3.65.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -273,6 +273,11 @@ async function arr(kind, p, init = {}) {
 }
 
 async function folders(kind) {
+  if (autoOn()) {
+    const list = autoFolderChoices(kind);
+    const def = (autoCfg().folders || {})[kind === 'radarr' ? 'movie' : 'tv'];
+    return { folders: list.map((f) => ({ path: f.path, accessible: true })), default: (list.find((f) => f.path === def) || list[0] || {}).path || null };
+  }
   const list = await arr(kind, '/rootfolder');
   const c = arrConfig(kind);
   // Ordre de préférence : Films d'abord (Kids en dernier) ; pour les séries, Séries puis Animés
@@ -300,6 +305,11 @@ const lockedProfileName = (kind) =>
 const normName = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 
 async function profiles(kind) {
+  if (autoOn()) {
+    const pf = autoProfile();
+    const name = `Lumio Auto · FR ${pf.resolution}p${pf.h265 === 'required' ? ' H.265' : ''}`;
+    return { profiles: [{ id: 1, name }], default: 1, locked: { id: 1, name } };
+  }
   const list = await arr(kind, '/qualityprofile');
   const c = arrConfig(kind);
   const lockName = normName(lockedProfileName(kind));
@@ -436,8 +446,8 @@ async function loadJfIndex() {
     if (!r.ok) throw new Error(`Jellyfin HTTP ${r.status}`);
     return (await r.json()).Items || [];
   };
-  const [items, seasons] = await Promise.all([get('Movie,Series', 'ProviderIds'), get('Season', 'ChildCount')]);
-  const idx = { movies: new Set(), moviesImdb: new Set(), series: new Map(), seriesTvdb: new Map(), seriesById: new Map() };
+  const [items, seasons] = await Promise.all([get('Movie,Series', 'ProviderIds,Path'), get('Season', 'ChildCount')]);
+  const idx = { movies: new Set(), moviesImdb: new Set(), series: new Map(), seriesTvdb: new Map(), seriesById: new Map(), seriesJf: new Map(), seriesJfTvdb: new Map() };
   for (const i of items) {
     const p = i.ProviderIds || {};
     if (i.Type === 'Movie') {
@@ -448,6 +458,8 @@ async function loadJfIndex() {
       idx.seriesById.set(i.Id, set);
       if (p.Tmdb) idx.series.set(Number(p.Tmdb), set);
       if (p.Tvdb) idx.seriesTvdb.set(Number(p.Tvdb), set);
+      if (p.Tmdb) idx.seriesJf.set(Number(p.Tmdb), { id: i.Id, path: i.Path || null });
+      if (p.Tvdb) idx.seriesJfTvdb.set(Number(p.Tvdb), { id: i.Id, path: i.Path || null });
     }
   }
   // Saisons qui ont au moins un épisode dans Jellyfin
@@ -546,7 +558,7 @@ function mediaStatus(lib, type, tmdbId, tvdbId, seasonNumbers) {
 function refreshCompleted(lib) {
   let changed = false;
   for (const r of requests) {
-    if (r.status !== RequestStatus.APPROVED || r.via === 'secour') continue;
+    if (r.status !== RequestStatus.APPROVED || r.via === 'secour' || r.via === 'auto') continue;
     let done = false;
     if (r.type === 'movie') done = Boolean((lib.movies.get(r.tmdbId) || {}).hasFile);
     else {
@@ -1413,6 +1425,7 @@ async function queueIndex() {
 }
 
 function downloadOf(r, lib) {
+  if (r.via === 'auto' && r.status === RequestStatus.APPROVED) return autoDownloadOf(r);
   // Groupe de secours : progression des téléchargements Lumio Secour (même forme que la file Radarr / Sonarr)
   if (r.via === 'secour' && r.status === RequestStatus.APPROVED && r.secour) {
     const cur = r.secour.items.find((i) => i.status === 'downloading' || i.status === 'searching');
@@ -2531,6 +2544,11 @@ function secourAutoView() {
 
 /** Envoie à Radarr / Sonarr ; s'ils sont hors service, bascule sur le groupe de secours. */
 async function sendOrSecour(r) {
+  // Lumio Auto (bêta) actif : il remplace Radarr / Sonarr
+  if (autoOn()) {
+    await autoFromRequest(r);
+    return;
+  }
   // Simulation (admin) : Radarr / Sonarr considérés en panne, tout passe par Lumio Secour
   if (config.secourForce && secourAutoOn()) {
     startSecour(r, 'simulation : Radarr / Sonarr considérés en panne');
@@ -2545,26 +2563,6 @@ async function sendOrSecour(r) {
     startSecour(r, e.message);
   }
 }
-
-// Lumio Auto (essai abandonné) : ses demandes en cours repartent chez Radarr / Sonarr au démarrage
-if (config.auto) {
-  delete config.auto;
-  saveConfig();
-}
-setTimeout(async () => {
-  const left = requests.filter((r) => r.via === 'auto' && r.status === RequestStatus.APPROVED);
-  for (const r of left) {
-    delete r.via;
-    try {
-      await sendOrSecour(r);
-      console.log(`Lumio Auto retiré : ${r.title} renvoyé à ${r.type === 'movie' ? 'Radarr' : 'Sonarr'}`);
-    } catch (e) {
-      r.status = RequestStatus.FAILED;
-      r.error = String((e && e.message) || e);
-    }
-  }
-  if (left.length) saveRequests();
-}, 20_000);
 
 const secourQueue = [];
 // Demande refusée ou supprimée pendant le travail : on s'arrête
@@ -3461,6 +3459,1572 @@ async function bookRoutes(req, res, p, q, user) {
   return false;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// Lumio Auto (bêta) : remplace Radarr / Sonarr pour l'essentiel, écrit pour Lumio (aucun code repris d'eux).
+// - Indexeurs à soi (Torznab : C411, Tr4ker, Jackett…) et/ou Prowlarr, avec limite de requêtes par site
+// - Veille RSS des nouveautés + recherche automatique de ce qui manque (films sortis, épisodes diffusés)
+// - Profil : français, 1080p, H.265 (fichiers légers), tailles maximales
+// - Envoi à rdt-client (API qBittorrent, comme Radarr / Sonarr) ou directement à AllDebrid
+// - Import : renommage propre, rangement dans le bon dossier ([tmdbid-…] pour Jellyfin), analyse Jellyfin
+// Désactivé par défaut : rien ne change tant que l'admin ne l'active pas (appli bêta → Lumio Auto).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+const AUTO_FILE = path.join(DATA_DIR, 'auto.json');
+const auto = readJson(AUTO_FILE, {});
+for (const k of ['items', 'grabs', 'blocked', 'log']) if (!Array.isArray(auto[k])) auto[k] = [];
+if (!auto.have || typeof auto.have !== 'object') auto.have = {};
+let autoSaveTimer = null;
+const autoSave = () => {
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => writeJson(AUTO_FILE, auto), 400);
+};
+const autoCfg = () => {
+  if (!config.auto || typeof config.auto !== 'object') config.auto = {};
+  return config.auto;
+};
+const autoOn = () => autoCfg().enabled === true;
+function autoLog(msg, level = 'info') {
+  auto.log.unshift({ at: new Date().toISOString(), level, msg: String(msg).slice(0, 400) });
+  if (auto.log.length > 300) auto.log.length = 300;
+  autoSave();
+  console.log(`Lumio Auto : ${msg}`);
+}
+const autoId = () => crypto.randomBytes(5).toString('hex');
+
+// ——— Profil de qualité ———
+const AUTO_PROFILE = {
+  resolution: 1080, // 2160 | 1080 | 720
+  allowLower: false, // accepter 720p si rien en 1080p
+  h265: 'required', // 'required' | 'preferred' | 'any'
+  languages: ['multi', 'vff', 'truefrench', 'vf2', 'french', 'vfq'], // ordre de préférence
+  maxMovieGb: 8,
+  maxEpisodeGb: 2.5,
+  minSeeders: 1,
+  maxActive: 1, // téléchargements en même temps (un à la fois par défaut)
+  searchEveryMin: 60,
+  rssEveryMin: 20,
+};
+const autoProfile = () => ({ ...AUTO_PROFILE, ...(autoCfg().profile || {}) });
+
+// ——— Réseau : DNS 1.1.1.1 pour les sites ———
+// Les trackers (c411.org…) sont bloqués ou détournés par certains DNS (box, FAI) : on demande leur adresse
+// directement à Cloudflare (1.1.1.1), puis Quad9 / Google en secours. Les noms internes de Docker
+// (prowlarr, rdt-client, une IP locale…) restent résolus normalement par le conteneur.
+const autoResolver = new (require('dns').promises.Resolver)();
+autoResolver.setServers(['1.1.1.1', '1.0.0.1', '9.9.9.9', '8.8.8.8']);
+const isInternalHost = (h) => !h.includes('.') || /^(\d+\.){3}\d+$/.test(h) || /\.(local|lan|internal|home)$/i.test(h);
+const autoLookup = (hostname, opts, cb) => {
+  const done = (address, family) => cb(null, opts && opts.all ? [{ address, family }] : address, family);
+  const system = (internal) =>
+    require('dns').lookup(hostname, { family: 4 }, (err, address, family) => {
+      // Un site public qui pointe sur la machine elle-même : DNS qui bloque
+      if (err || (!internal && (/^127\./.test(address) || address === '0.0.0.0'))) return cb(err || new Error('adresse bloquée par le DNS'));
+      done(address, family);
+    });
+  if (isInternalHost(hostname)) return system(true);
+  autoResolver
+    .resolve4(hostname)
+    .then((ips) => (ips && ips[0] ? done(ips[0], 4) : system()))
+    .catch(() => system());
+};
+/** Requête HTTP(S) robuste (DNS de secours, redirections, délai) → { status, headers, buf, text() } */
+function autoHttp(url, { method = 'GET', headers = {}, body = null, timeout = 30000, redirects = 5 } = {}) {
+  return new Promise((resolve, reject) => {
+    let u;
+    try {
+      u = new URL(url);
+    } catch {
+      return reject(new Error('adresse invalide'));
+    }
+    const mod = u.protocol === 'https:' ? require('https') : require('http');
+    const req = mod.request(
+      u,
+      { method, headers: { 'User-Agent': 'Lumio', ...headers }, lookup: autoLookup, timeout },
+      (res) => {
+        const loc = res.headers.location;
+        if (res.statusCode >= 300 && res.statusCode < 400 && loc) {
+          res.resume();
+          if (/^magnet:/i.test(loc)) return resolve({ status: 200, headers: res.headers, magnet: loc, buf: Buffer.alloc(0), text: () => '' });
+          if (redirects <= 0) return reject(new Error('trop de redirections'));
+          return autoHttp(new URL(loc, u).toString(), { method: 'GET', headers, timeout, redirects: redirects - 1 }).then(resolve, reject);
+        }
+        const chunks = [];
+        let size = 0;
+        res.on('data', (c) => {
+          size += c.length;
+          if (size > 20e6) req.destroy(new Error('réponse trop grande'));
+          else chunks.push(c);
+        });
+        res.on('end', () => {
+          const buf = Buffer.concat(chunks);
+          resolve({ status: res.statusCode, headers: res.headers, buf, text: () => buf.toString('utf8') });
+        });
+      }
+    );
+    req.on('timeout', () => req.destroy(Object.assign(new Error('pas de réponse'), { name: 'TimeoutError' })));
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+const netError = (e) => {
+  const code = (e && (e.code || (e.cause && e.cause.code))) || '';
+  if (e && e.name === 'TimeoutError') return 'pas de réponse (délai dépassé)';
+  if (code === 'ECONNREFUSED') return 'connexion refusée (ECONNREFUSED) : mauvaise adresse ou port, ou service arrêté';
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return `nom introuvable (${code}) : vérifie l’adresse`;
+  if (code === 'ECONNRESET') return 'connexion coupée par le site';
+  if (/certificate|CERT/i.test(code + (e && e.message))) return 'certificat HTTPS refusé';
+  return String(code || (e && e.message) || e);
+};
+
+// ——— Indexeurs ———
+// { id, name, type: 'c411' | 'torznab' | 'prowlarr', url, key, enabled, rss, search, maxPerHour, catMovie, catTv, catAnime, caps }
+// C411 (d'après sa définition Torznab publique) : https://c411.org/api/torznab, clé API (page Intégrations),
+// 15 requêtes / minute (4,1 s entre deux), recherche séries par tmdbid / imdbid / saison / épisode.
+const IDX_PRESETS = {
+  c411: { name: 'C411', url: 'https://c411.org/api/torznab', gapMs: 4100, maxPerHour: 60, catMovie: '2000', catTv: '5000', catAnime: '5070' },
+  torznab: { gapMs: 3000, maxPerHour: 15, catMovie: '2000', catTv: '5000', catAnime: '5070' },
+  prowlarr: { gapMs: 1000, maxPerHour: 30 },
+};
+const autoIndexers = () => (Array.isArray(autoCfg().indexers) ? autoCfg().indexers : []);
+const idxCalls = new Map(); // id → horodatages des requêtes de la dernière heure
+const idxStatus = new Map(); // id → { ok, at, message, count, url }
+function idxAllowed(ix) {
+  const now = Date.now();
+  const list = (idxCalls.get(ix.id) || []).filter((t) => now - t < 3600e3);
+  idxCalls.set(ix.id, list);
+  const max = Number(ix.maxPerHour) || (IDX_PRESETS[ix.type] || IDX_PRESETS.torznab).maxPerHour;
+  return list.length < max;
+}
+const parseCats = (v, def) =>
+  String(v || def)
+    .split(/[,\s]+/)
+    .map(Number)
+    .filter((n) => n > 0);
+const torznabBase = (ix) => {
+  let u = String(ix.url || '').trim().replace(/\/+$/, '');
+  // « https://c411.org » ou « …/api » tout court : on complète l'adresse Torznab
+  if (ix.type === 'c411' && !/\/api\/torznab$/.test(u)) u = u.replace(/\/api$/, '') + '/api/torznab';
+  return u;
+};
+const hideKey = (u) => String(u).replace(/(apikey=)[^&]+/i, '$1•••');
+
+function parseTorznab(xml, ix) {
+  const items = [];
+  for (const block of xml.split(/<item>/i).slice(1)) {
+    const tag = (n) => decodeHtml(((block.match(new RegExp(`<${n}>([\\s\\S]*?)</${n}>`, 'i')) || [])[1] || '').replace(/^<!\[CDATA\[|\]\]>$/g, '').trim());
+    const attr = (n) => (block.match(new RegExp(`name="${n}"\\s+value="([^"]*)"`, 'i')) || [])[1];
+    const title = tag('title');
+    const enc = block.match(/<enclosure[^>]*url="([^"]+)"/i);
+    let link = decodeHtml(enc ? enc[1] : tag('link'));
+    const magnet = attr('magneturl');
+    if (!link && magnet) link = decodeHtml(magnet);
+    if (!title || !link) continue;
+    const imdb = attr('imdbid') || attr('imdb');
+    items.push({
+      title,
+      link,
+      magnet: magnet ? decodeHtml(magnet) : null,
+      size: Number(attr('size') || tag('size') || 0),
+      seeders: attr('seeders') != null ? Number(attr('seeders')) : null,
+      leechers: attr('peers') != null ? Math.max(0, Number(attr('peers')) - Number(attr('seeders') || 0)) : attr('leechers') != null ? Number(attr('leechers')) : null,
+      grabs: attr('grabs') != null ? Number(attr('grabs')) : null,
+      hash: (attr('infohash') || '').toLowerCase() || null,
+      tmdbId: attr('tmdbid') ? Number(attr('tmdbid')) : null,
+      imdbId: imdb ? (String(imdb).startsWith('tt') ? imdb : `tt${String(imdb).padStart(7, '0')}`) : null,
+      guid: tag('guid') || link,
+      pub: tag('pubDate') || null,
+      details: tag('comments') || (tag('link') !== link ? tag('link') : null),
+      freeleech: attr('downloadvolumefactor') === '0',
+      indexer: ix.name,
+      indexerId: ix.id,
+    });
+  }
+  return items;
+}
+
+/** Ce que l'indexeur sait chercher (t=caps) : par identifiant TMDB / IMDb, saison, épisode. */
+async function idxCaps(ix, force = false) {
+  if (ix.type === 'prowlarr') return null;
+  if (!force && ix.caps && Date.now() - Date.parse(ix.caps.at || 0) < 7 * 864e5) return ix.caps;
+  try {
+    const qs = new URLSearchParams({ t: 'caps' });
+    if (ix.key) qs.set('apikey', ix.key);
+    const base = torznabBase(ix);
+    const r = await autoHttp(`${base}${base.includes('?') ? '&' : '?'}${qs}`, { timeout: 20000 });
+    const xml = r.text();
+    const mode = (n) => {
+      const m = xml.match(new RegExp(`<${n}[^>]*available="yes"[^>]*supportedParams="([^"]*)"`, 'i')) || xml.match(new RegExp(`<${n}[^>]*supportedParams="([^"]*)"[^>]*available="yes"`, 'i'));
+      return m ? m[1].split(',').map((x) => x.trim().toLowerCase()) : null;
+    };
+    ix.caps = { at: new Date().toISOString(), tv: mode('tv-search'), movie: mode('movie-search') };
+    saveConfig();
+  } catch {}
+  return ix.caps || null;
+}
+
+/**
+ * Une requête à un indexeur. Avec des identifiants (tmdbid, imdbid, saison, épisode) quand le site les accepte,
+ * sinon recherche texte ; sans rien : dernières sorties (veille RSS).
+ */
+async function idxQuery(ix, { q = '', cats = [], mode = 'search', ids = {} }) {
+  if (!idxAllowed(ix)) return { skipped: true, items: [] };
+  const preset = IDX_PRESETS[ix.type] || IDX_PRESETS.torznab;
+  const prev = idxCalls.get(ix.id);
+  const gap = prev.length ? (Number(ix.gapMs) || preset.gapMs) - (Date.now() - prev[prev.length - 1]) : 0;
+  if (gap > 0) await sleep(gap);
+  idxCalls.get(ix.id).push(Date.now());
+  let shown = '';
+  try {
+    let items;
+    if (ix.type === 'prowlarr') {
+      const qs = new URLSearchParams({ query: q, type: mode === 'tvsearch' ? 'tvsearch' : mode === 'movie' ? 'movie' : 'search', limit: '100' });
+      for (const c of cats) qs.append('categories', String(c));
+      const url = `${String(ix.url).replace(/\/+$/, '')}/api/v1/search?${qs}`;
+      shown = url;
+      const r = await autoHttp(url, { headers: { 'X-Api-Key': ix.key || '' }, timeout: 90000 });
+      if (r.status === 401) throw new Error('clé API Prowlarr refusée (401)');
+      if (r.status >= 400) throw new Error(`Prowlarr a répondu HTTP ${r.status}`);
+      let list = [];
+      try {
+        list = JSON.parse(r.text());
+      } catch {
+        throw new Error('réponse de Prowlarr illisible (est-ce bien l’adresse de Prowlarr ?)');
+      }
+      items = (Array.isArray(list) ? list : [])
+        .filter((x) => !x.protocol || x.protocol === 'torrent')
+        .map((x) => ({
+          title: x.title,
+          link: x.downloadUrl || x.magnetUrl,
+          magnet: x.magnetUrl || null,
+          size: Number(x.size) || 0,
+          seeders: x.seeders != null ? Number(x.seeders) : null,
+          leechers: x.leechers != null ? Number(x.leechers) : null,
+          grabs: x.grabs != null ? Number(x.grabs) : null,
+          hash: (x.infoHash || '').toLowerCase() || null,
+          tmdbId: x.tmdbId || null,
+          imdbId: x.imdbId ? `tt${String(x.imdbId).replace(/^tt/, '').padStart(7, '0')}` : null,
+          guid: x.guid || x.downloadUrl || x.magnetUrl,
+          pub: x.publishDate || null,
+          details: x.infoUrl || null,
+          indexer: x.indexer ? `${x.indexer} (Prowlarr)` : ix.name,
+          indexerId: ix.id,
+        }))
+        .filter((x) => x.title && x.link);
+    } else {
+      const base = torznabBase(ix);
+      const qs = new URLSearchParams({ t: mode, limit: '100', extended: '1' });
+      if (q) qs.set('q', q);
+      for (const [k, v] of Object.entries(ids)) if (v != null && v !== '') qs.set(k, String(v));
+      if (cats.length) qs.set('cat', cats.join(','));
+      if (ix.key) qs.set('apikey', ix.key);
+      const url = `${base}${base.includes('?') ? '&' : '?'}${qs}`;
+      shown = hideKey(url);
+      const r = await autoHttp(url, { timeout: 30000 });
+      const xml = r.text();
+      const err = xml.match(/<error[^>]*code="(\d+)"[^>]*description="([^"]*)"/i) || xml.match(/<error[^>]*description="([^"]*)"/i);
+      if (err) throw new Error(`${ix.name} : ${decodeHtml(err[err.length - 1])}${err.length > 2 ? ` (code ${err[1]})` : ''}`);
+      if (r.status === 401 || r.status === 403) throw new Error(`clé API refusée (HTTP ${r.status}) : génère-la sur la page Intégrations du site`);
+      if (r.status === 429) throw new Error('trop de requêtes (429) : le site limite, Lumio réessaiera plus tard');
+      if (r.status >= 400) throw new Error(`HTTP ${r.status}`);
+      if (!/<rss|<channel/i.test(xml)) throw new Error('réponse inattendue (pas du Torznab) : vérifie l’adresse');
+      items = parseTorznab(xml, ix);
+    }
+    idxStatus.set(ix.id, { ok: true, at: new Date().toISOString(), count: items.length, url: shown });
+    return { items, url: shown };
+  } catch (e) {
+    const message = netError(e);
+    idxStatus.set(ix.id, { ok: false, at: new Date().toISOString(), message, url: shown });
+    return { error: message, items: [], url: shown };
+  }
+}
+
+const catsFor = (ix, item) =>
+  item.type === 'movie'
+    ? parseCats(ix.catMovie, '2000')
+    : item.anime
+      ? [...parseCats(ix.catTv, '5000'), ...parseCats(ix.catAnime, '5070')]
+      : parseCats(ix.catTv, '5000');
+
+// ——— Lecture des noms de releases ———
+const autoNorm = (t) =>
+  String(t || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/&/g, ' and ')
+    .replace(/['’`]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+const stripArticle = (n) => n.replace(/^(the|le|la|les|l|a|an) /, '');
+
+function autoParse(title) {
+  const t = String(title).replace(/[._]+/g, ' ').replace(/\s+/g, ' ');
+  const low = t.toLowerCase();
+  const r = { raw: title };
+  r.resolution = /\b(2160p|4k|uhd)\b/.test(low) ? 2160 : /\b1080[pi]\b/.test(low) ? 1080 : /\b720p\b/.test(low) ? 720 : /\b(480p|576p|dvdrip|xvid)\b/.test(low) ? 480 : 0;
+  r.codec = /\b(x ?265|h ?265|hevc)\b/.test(low) ? 'h265' : /\b(x ?264|h ?264|avc)\b/.test(low) ? 'h264' : /\bav1\b/.test(low) ? 'av1' : null;
+  const langs = [];
+  if (/\bmulti\b/.test(low)) langs.push('multi');
+  if (/\bvff\b/.test(low)) langs.push('vff');
+  if (/\btruefrench\b/.test(low)) langs.push('truefrench');
+  if (/\bvf2\b/.test(low)) langs.push('vf2');
+  if (/\bvfq\b|\bquebec\b/.test(low)) langs.push('vfq');
+  if (/\bvfi\b|\bfrench\b|\bvf\b/.test(low)) langs.push('french');
+  r.langs = langs;
+  r.vostfr = /\b(vostfr|subfrench|vost)\b/.test(low) && !langs.length;
+  r.bad = /\b(cam|camrip|hdcam|ts|telesync|hdts|tc|telecine|screener|scr|dvdscr|r5)\b/.test(low) ? 'copie de cinéma' : /\bremux\b/.test(low) ? 'remux (trop lourd)' : /\b(3d|sbs)\b/.test(low) ? 'version 3D' : null;
+  r.source = /\bblu ?ray|bdrip|brrip\b/.test(low) ? 'bluray' : /\bweb ?dl\b/.test(low) ? 'webdl' : /\bweb ?rip|\bweb\b/.test(low) ? 'webrip' : /\bhdtv\b/.test(low) ? 'hdtv' : null;
+  // Épisode(s)
+  let m = t.match(/\bS(\d{1,2}) ?E(\d{1,4})(?: ?-? ?E?(\d{1,4}))?\b/i);
+  if (m) {
+    r.season = Number(m[1]);
+    r.episode = Number(m[2]);
+    r.episodeEnd = m[3] && Number(m[3]) > r.episode ? Number(m[3]) : r.episode;
+  } else if ((m = t.match(/\bS(\d{1,2}) ?- ?S?(\d{1,2})\b/i))) {
+    r.seasons = [];
+    for (let s = Number(m[1]); s <= Number(m[2]); s++) r.seasons.push(s);
+  } else if ((m = t.match(/\b(?:S|saison |season )(\d{1,2})\b/i))) {
+    r.season = Number(m[1]);
+    r.pack = true;
+  } else if (/\b(int[ée]grale|complete|compl[eè]te)\b/i.test(t)) {
+    r.complete = true;
+  }
+  // Anime : « Titre - 1093 » ou « Titre E1093 » (numérotation absolue)
+  if (r.episode == null && !r.pack && !r.seasons) {
+    const a = t.match(/(?: - | E| Ep ?)(\d{1,4})\b(?! ?p\b)/i);
+    if (a && Number(a[1]) < 2000) r.absolute = Number(a[1]);
+  }
+  const years = [...t.matchAll(/\b(19[2-9]\d|20[0-4]\d)\b/g)].map((x) => ({ y: Number(x[1]), i: x.index }));
+  // Nom : tout ce qui précède l'année, l'épisode ou la première étiquette technique
+  const stops = [
+    t.search(/\bS\d{1,2}(?: ?E\d{1,4})?\b/i),
+    t.search(/\b(saison|season|int[ée]grale|complete)\b/i),
+    t.search(/\b(2160p|1080[pi]|720p|480p|multi|vff|vf2|vfq|truefrench|french|vostfr|bluray|web|hdtv|x26[45]|h26[45]|hevc|repack|proper)\b/i),
+    r.absolute != null ? t.search(/(?: - | E| Ep ?)\d{1,4}\b/i) : -1,
+  ];
+  // L'année ne coupe le nom que si ce n'est pas le tout début (« 1917 », « 2012 »)
+  const yearHit = years.find((x) => x.i > 0);
+  if (yearHit) stops.push(yearHit.i);
+  const cut = Math.min(...stops.filter((x) => x > 0), t.length);
+  r.year = yearHit ? yearHit.y : null;
+  r.name = autoNorm(t.slice(0, cut).replace(/[\[(].*$/, ''));
+  return r;
+}
+
+const itemNames = (item) => {
+  const set = new Set();
+  for (const n of [item.title, item.originalTitle, ...(item.altTitles || [])]) {
+    const x = autoNorm(n);
+    if (!x) continue;
+    set.add(x);
+    set.add(stripArticle(x));
+  }
+  return [...set];
+};
+const nameMatches = (item, rel) => {
+  const n = rel.name;
+  if (!n) return false;
+  return itemNames(item).some((c) => n === c || stripArticle(n) === c);
+};
+
+/**
+ * Note d'une release pour un titre. Toutes les raisons de refus sont gardées (comme la recherche interactive
+ * de Radarr / Sonarr) : reasons[] ; rejected = la première, ou null si la release est acceptée.
+ */
+function autoScore(rel, item, want) {
+  const pf = autoProfile();
+  const p = autoParse(rel.title);
+  const out = { ...rel, parsed: p, score: 0, rejected: null, reasons: [] };
+  const no = (why) => out.reasons.push(why);
+  // Bon titre : par identifiant quand l'indexeur le donne (TMDB / IMDb), sinon par le nom
+  const idMatch = (rel.tmdbId && rel.tmdbId === item.tmdbId) || (rel.imdbId && item.imdbId && rel.imdbId === item.imdbId);
+  const idOther = (rel.tmdbId && rel.tmdbId !== item.tmdbId) || (rel.imdbId && item.imdbId && rel.imdbId !== item.imdbId);
+  out.matchedBy = idMatch ? 'identifiant' : nameMatches(item, p) ? 'nom' : null;
+  if (autoBlocked(rel)) no('déjà essayée (liste noire)');
+  if (idOther && !idMatch) no('autre titre (identifiant différent)');
+  else if (!out.matchedBy) no(`autre titre (« ${p.name || '?'} »)`);
+  if (item.type === 'movie') {
+    if (p.season != null || p.seasons || p.episode != null) no('c’est une série');
+    if (!idMatch && p.year && item.year && Math.abs(p.year - item.year) > 1) no(`autre année (${p.year})`);
+  } else {
+    if (want.kind === 'episode') {
+      const ok = (p.season === want.season && p.episode != null && p.episode <= want.episode && p.episodeEnd >= want.episode) || (item.anime && p.absolute != null && p.absolute === want.absolute);
+      if (!ok) no(p.pack || p.seasons ? 'pack de saison (épisode demandé)' : p.season != null ? `autre épisode (S${autoPad(p.season)}${p.episode != null ? `E${autoPad(p.episode)}` : ''})` : 'épisode introuvable dans le nom');
+    } else if (want.kind === 'season') {
+      if (!(p.pack && p.season === want.season) && !(p.seasons && p.seasons.includes(want.season))) no(p.episode != null ? 'un seul épisode (saison entière demandée)' : 'pas la saison demandée');
+    }
+  }
+  if (p.bad) no(p.bad);
+  if (p.vostfr) no('VOSTFR seulement');
+  else if (!p.langs.length) no('pas de version française indiquée');
+  else if (!p.langs.some((l) => pf.languages.includes(l))) no(`langue non acceptée (${p.langs.join(', ').toUpperCase()})`);
+  if (p.resolution && p.resolution > pf.resolution) no(`${p.resolution}p (trop lourd)`);
+  else if (p.resolution !== pf.resolution && !(pf.allowLower && p.resolution >= 720)) no(p.resolution ? `${p.resolution}p (${pf.resolution}p demandé)` : 'résolution inconnue');
+  if (pf.h265 === 'required' && p.codec !== 'h265') no(p.codec ? `${p.codec.toUpperCase()} (H.265 demandé)` : 'codec inconnu (H.265 demandé)');
+  const gb = (rel.size || 0) / 1e9;
+  const per = want.kind === 'season' ? Math.max(1, want.count || 1) : 1;
+  const max = item.type === 'movie' ? pf.maxMovieGb : pf.maxEpisodeGb * per;
+  if (gb > max) no(`${gb.toFixed(1)} Go (max ${max.toFixed(1)} Go)`);
+  if (rel.seeders != null && rel.seeders < pf.minSeeders) no(`${rel.seeders} source (minimum ${pf.minSeeders})`);
+  out.rejected = out.reasons[0] || null;
+  // Note : langue d'abord, puis codec, source, sources actives, taille raisonnable
+  const li = p.langs.length ? Math.min(...p.langs.map((l) => (pf.languages.indexOf(l) >= 0 ? pf.languages.indexOf(l) : 9))) : 9;
+  out.score += 100 - li * 8;
+  if (p.codec === 'h265') out.score += pf.h265 === 'any' ? 5 : 30;
+  out.score += { bluray: 12, webdl: 10, webrip: 8, hdtv: 3 }[p.source] || 0;
+  if (p.resolution === pf.resolution) out.score += 20;
+  out.score += Math.min(rel.seeders || 0, 50) / 5;
+  if (idMatch) out.score += 5;
+  if (rel.freeleech) out.score += 3;
+  if (gb > 0 && gb < 0.25 * per) out.score -= 15; // suspect, trop petit
+  if (/\b(repack|proper)\b/i.test(rel.title)) out.score += 2;
+  return out;
+}
+
+// Liste noire : versions en échec ou annulées (clé = guid ou empreinte), avec le titre et la raison
+const blockKey = (b) => (typeof b === 'string' ? b : b.key);
+const autoBlocked = (rel) => auto.blocked.some((b) => blockKey(b) === rel.guid || (rel.hash && blockKey(b) === rel.hash));
+
+// ——— Titres suivis ———
+// item : { id, type, tmdbId, tvdbId, title, originalTitle, altTitles, year, anime, root, folder, seasons, future,
+//          requestIds, addedAt, meta: { at, available, seasons: { n: [{ e, air }] } }, nextSearch, fails, note }
+const autoItemKey = (type, tmdbId) => `${type}:${tmdbId}`;
+const findItem = (type, tmdbId) => auto.items.find((i) => i.type === type && i.tmdbId === Number(tmdbId));
+
+function autoFolderChoices(kind) {
+  const list = [];
+  for (const d of disks()) {
+    let names = [];
+    try {
+      names = fs.readdirSync(d.dir, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => e.name);
+    } catch {}
+    for (const n of names) {
+      const low = n.toLowerCase();
+      const movie = /film|movie|kid|enfant|jeunesse|famil|4k|doc/.test(low);
+      const tv = /s[eé]rie|tv|show|anim/.test(low);
+      if ((kind === 'radarr' && movie && !/s[eé]rie/.test(low)) || (kind === 'sonarr' && tv)) list.push({ path: path.join(d.dir, n), root: d.name, folder: n, name: n });
+    }
+  }
+  const score = (n) => {
+    const low = n.toLowerCase();
+    if (/kid|enfant|jeunesse|famil/.test(low)) return 9;
+    if (kind === 'radarr') return /film|movie/.test(low) ? 0 : 2;
+    return /s[eé]rie|tv|show/.test(low) ? 0 : /anim/.test(low) ? 1 : 2;
+  };
+  return list.sort((a, b) => score(a.name) - score(b.name));
+}
+/** Dossier d'arrivée : chemin Lumio exact, ou même nom de dossier qu'un chemin Radarr / Sonarr (« /movies/KIDS » → KIDS). */
+function autoResolveFolder(kind, wanted) {
+  const list = autoFolderChoices(kind);
+  if (wanted) {
+    const clean = String(wanted).replace(/\/+$/, '');
+    const exact = list.find((f) => f.path === clean);
+    if (exact) return exact;
+    const base = clean.split('/').pop().toLowerCase();
+    const same = list.find((f) => f.name.toLowerCase() === base);
+    if (same) return same;
+  }
+  const def = (autoCfg().folders || {})[kind === 'radarr' ? 'movie' : 'tv'];
+  return list.find((f) => f.path === def) || list[0] || null;
+}
+
+async function autoMeta(item, force = false) {
+  if (!force && item.meta && Date.now() - Date.parse(item.meta.at || 0) < 12 * 3600e3) return item;
+  const today = new Date().toISOString().slice(0, 10);
+  if (item.type === 'movie') {
+    const m = await tmdbGet(`/movie/${item.tmdbId}`, { append_to_response: 'release_dates,alternative_titles' });
+    if (!m) throw new Error('film introuvable sur TMDB');
+    item.title = m.title || item.title;
+    item.originalTitle = m.original_title;
+    item.imdbId = m.imdb_id || item.imdbId || null;
+    item.year = m.release_date ? Number(m.release_date.slice(0, 4)) : item.year;
+    item.altTitles = ((m.alternative_titles && m.alternative_titles.titles) || []).filter((x) => ['FR', 'US', 'GB', 'CA', 'BE'].includes(x.iso_3166_1)).map((x) => x.title).slice(0, 8);
+    // Disponible : sortie numérique / physique passée, ou cinéma depuis plus de 45 jours
+    const dates = [];
+    for (const c of (m.release_dates && m.release_dates.results) || []) for (const d of c.release_dates || []) dates.push({ type: d.type, date: String(d.release_date).slice(0, 10) });
+    const digital = dates.filter((d) => d.type === 4 || d.type === 5).map((d) => d.date).sort()[0];
+    const cinema = dates.filter((d) => d.type === 2 || d.type === 3).map((d) => d.date).sort()[0] || m.release_date;
+    const plus45 = cinema ? new Date(Date.parse(cinema) + 45 * 864e5).toISOString().slice(0, 10) : null;
+    const avail = [digital, plus45].filter(Boolean).sort()[0] || null;
+    item.meta = { at: new Date().toISOString(), availableFrom: avail, available: Boolean(avail && avail <= today) };
+    return item;
+  }
+  const s = await tmdbGet(`/tv/${item.tmdbId}`, { append_to_response: 'alternative_titles,external_ids' });
+  if (!s) throw new Error('série introuvable sur TMDB');
+  item.title = s.name || item.title;
+  item.originalTitle = s.original_name;
+  item.year = s.first_air_date ? Number(s.first_air_date.slice(0, 4)) : item.year;
+  item.tvdbId = item.tvdbId || (s.external_ids && s.external_ids.tvdb_id) || null;
+  item.imdbId = (s.external_ids && s.external_ids.imdb_id) || item.imdbId || null;
+  item.altTitles = ((s.alternative_titles && s.alternative_titles.results) || []).filter((x) => ['FR', 'US', 'GB', 'CA', 'BE', 'JP'].includes(x.iso_3166_1)).map((x) => x.title).slice(0, 8);
+  if (!item.anime) item.anime = (s.genres || []).some((g) => g.id === 16) && (s.origin_country || []).includes('JP');
+  const seasons = {};
+  const all = (s.seasons || []).filter((x) => x.season_number > 0);
+  // Saisons suivies : celles demandées, et les nouvelles saisons si « suivre la suite »
+  if (item.future !== false) {
+    const maxKnown = Math.max(0, ...(item.seasonsKnown || []));
+    for (const x of all) if (x.season_number > maxKnown && item.seasonsKnown && !item.seasons.includes(x.season_number)) item.seasons.push(x.season_number);
+  }
+  item.seasonsKnown = all.map((x) => x.season_number);
+  for (const n of item.seasons || []) {
+    const d = await tmdbGet(`/tv/${item.tmdbId}/season/${n}`).catch(() => null);
+    seasons[n] = ((d && d.episodes) || []).map((e) => ({ e: e.episode_number, air: e.air_date || null }));
+  }
+  item.meta = { at: new Date().toISOString(), status: s.status, seasons };
+  return item;
+}
+
+// ——— Ce qui est déjà là (Jellyfin + ce que Lumio Auto a importé) ———
+async function jfSeriesEpisodes(item) {
+  const token = process.env.JELLYFIN_API_KEY || jfIndexToken;
+  const lib = await loadLibrary().catch(() => null);
+  const jfId = lib && lib.jf && lib.jf.seriesJf && ((item.tvdbId && lib.jf.seriesJfTvdb.get(Number(item.tvdbId))) || lib.jf.seriesJf.get(item.tmdbId));
+  const have = new Set(auto.have[autoItemKey('tv', item.tmdbId)] || []);
+  if (!jfId || !token) return { have, jf: null };
+  try {
+    const r = await fetch(`${JELLYFIN_URL}/Shows/${jfId.id}/Episodes?IsMissing=false&Fields=Path`, { headers: jfHeaders(token), signal: AbortSignal.timeout(15000) });
+    if (r.ok) {
+      for (const e of (await r.json()).Items || []) {
+        if (e.LocationType === 'Virtual' || e.ParentIndexNumber == null || e.IndexNumber == null) continue;
+        for (let n = e.IndexNumber; n <= (e.IndexNumberEnd || e.IndexNumber); n++) have.add(`${e.ParentIndexNumber}:${n}`);
+      }
+    }
+  } catch {}
+  return { have, jf: jfId };
+}
+async function movieInJellyfin(item) {
+  if ((auto.have[autoItemKey('movie', item.tmdbId)] || []).length) return true;
+  const lib = await loadLibrary().catch(() => null);
+  return Boolean(lib && lib.jf && lib.jf.movies.has(item.tmdbId));
+}
+
+/** Ce qu'il reste à trouver pour un titre : [{ kind: 'movie' | 'season' | 'episode', season, episode, count, absolute }] */
+async function autoWanted(item) {
+  const busy = new Set(auto.grabs.filter((g) => g.itemId === item.id && ['sent', 'downloading', 'importing'].includes(g.state)).flatMap((g) => g.episodes || ['movie']));
+  if (item.type === 'movie') {
+    if (busy.has('movie')) return [];
+    if (!(item.meta && item.meta.available)) return [];
+    return (await movieInJellyfin(item)) ? [] : [{ kind: 'movie' }];
+  }
+  const { have } = await jfSeriesEpisodes(item);
+  const today = new Date().toISOString().slice(0, 10);
+  const out = [];
+  let absolute = 0;
+  const seasonNums = Object.keys((item.meta && item.meta.seasons) || {}).map(Number).sort((a, b) => a - b);
+  for (const n of seasonNums) {
+    const eps = item.meta.seasons[n] || [];
+    const aired = eps.filter((e) => e.air && e.air <= today);
+    const missing = aired.filter((e) => !have.has(`${n}:${e.e}`) && !busy.has(`${n}:${e.e}`));
+    const firstAbs = absolute;
+    absolute += eps.length;
+    if (!item.seasons.includes(n) || !missing.length) continue;
+    // Saison terminée et entièrement manquante : on cherche d'abord le pack de la saison
+    if (missing.length === eps.length && aired.length === eps.length && eps.length > 1) out.push({ kind: 'season', season: n, count: eps.length, episodes: eps.map((e) => e.e) });
+    else for (const e of missing) out.push({ kind: 'episode', season: n, episode: e.e, absolute: firstAbs + e.e });
+  }
+  return out;
+}
+
+// ——— Recherche ———
+// ——— Recherche ———
+// Pour chaque indexeur : d'abord par identifiant (tmdbid / imdbid + saison / épisode) si le site sait le faire,
+// puis en texte (« Titre S01E02 », « Titre 2024 ») si rien n'est revenu.
+function autoTextQueries(item, want) {
+  const names = [...new Set([item.title, item.originalTitle].filter(Boolean))];
+  if (item.type === 'movie') return names.map((n) => `${n} ${item.year || ''}`.trim());
+  if (want.kind === 'season') return names.map((n) => `${n} S${autoPad(want.season)}`);
+  const q = names.map((n) => `${n} S${autoPad(want.season)}E${autoPad(want.episode)}`);
+  if (item.anime && want.absolute) q.push(`${names[names.length - 1]} ${want.absolute}`);
+  return q;
+}
+function autoIdQuery(ix, item, want) {
+  const caps = ix.caps || {};
+  if (item.type === 'movie') {
+    const params = caps.movie || [];
+    if (params.includes('tmdbid')) return { mode: 'movie', ids: { tmdbid: item.tmdbId } };
+    if (params.includes('imdbid') && item.imdbId) return { mode: 'movie', ids: { imdbid: item.imdbId } };
+    return null;
+  }
+  const params = caps.tv || [];
+  const ep = want.kind === 'episode' ? { season: want.season, ep: want.episode } : want.kind === 'season' ? { season: want.season } : {};
+  if (params.includes('tmdbid')) return { mode: 'tvsearch', ids: { tmdbid: item.tmdbId, ...ep } };
+  if (params.includes('imdbid') && item.imdbId) return { mode: 'tvsearch', ids: { imdbid: item.imdbId, ...ep } };
+  if (params.includes('tvdbid') && item.tvdbId) return { mode: 'tvsearch', ids: { tvdbid: item.tvdbId, ...ep } };
+  return null;
+}
+
+async function autoSearch(item, want, { interactive = false } = {}) {
+  const ixs = autoIndexers().filter((ix) => ix.enabled !== false && ix.search !== false);
+  const found = new Map();
+  const status = [];
+  for (const ix of ixs) {
+    let seen = 0;
+    let error = null;
+    let skipped = false;
+    const tries = [];
+    await idxCaps(ix);
+    const byId = autoIdQuery(ix, item, want);
+    const plan = [
+      ...(byId ? [{ ...byId, label: `${byId.mode} ${Object.entries(byId.ids).map(([k, v]) => `${k}=${v}`).join(' ')}` }] : []),
+      ...autoTextQueries(item, want).slice(0, interactive ? 3 : 2).map((q) => ({ mode: 'search', q, label: `« ${q} »` })),
+    ];
+    for (const step of plan) {
+      const r = await idxQuery(ix, { q: step.q || '', cats: catsFor(ix, item), mode: step.mode, ids: step.ids || {} });
+      tries.push({ query: step.label, count: r.items.length, error: r.error || null, skipped: Boolean(r.skipped), url: r.url || null });
+      if (r.skipped) skipped = true;
+      if (r.error) error = r.error;
+      for (const rel of r.items) if (!found.has(rel.guid)) found.set(rel.guid, rel), seen++;
+      // Une étape qui a donné des résultats suffit (sauf en recherche interactive : on montre tout)
+      if (r.items.length && !interactive) break;
+      if (r.error || r.skipped) break;
+    }
+    status.push({ id: ix.id, name: ix.name, count: seen, error, skipped, tries });
+  }
+  const scored = [...found.values()].map((rel) => autoScore(rel, item, want)).sort((a, b) => (a.rejected ? 1 : 0) - (b.rejected ? 1 : 0) || b.score - a.score);
+  return { results: scored, status };
+}
+
+// ——— Clients de téléchargement ———
+// rdt-client parle comme qBittorrent (même branchement que dans Radarr / Sonarr)
+let rdtCookie = null;
+async function rdtFetch(p2, init = {}, retry = true) {
+  const c = autoCfg().rdt || {};
+  if (!c.url) throw new Error('adresse de rdt-client manquante');
+  const base = String(c.url).replace(/\/+$/, '');
+  if (!rdtCookie) {
+    const r = await fetch(`${base}/api/v2/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Referer: base },
+      body: new URLSearchParams({ username: c.user || '', password: c.pass || '' }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const txt = await r.text();
+    if (!r.ok || /fail/i.test(txt)) throw new Error('rdt-client refuse l’identifiant ou le mot de passe');
+    rdtCookie = (r.headers.get('set-cookie') || '').split(';')[0] || 'SID=';
+  }
+  const r = await fetch(`${base}${p2}`, { ...init, headers: { ...(init.headers || {}), Cookie: rdtCookie, Referer: base }, signal: AbortSignal.timeout(30000) });
+  if (r.status === 403 && retry) {
+    rdtCookie = null;
+    return rdtFetch(p2, init, false);
+  }
+  if (!r.ok) throw new Error(`rdt-client : HTTP ${r.status}`);
+  return r;
+}
+const rdtCategory = () => (autoCfg().rdt && autoCfg().rdt.category) || 'lumio';
+
+// Empreinte d'un .torrent (SHA-1 du dictionnaire « info »), pour suivre le téléchargement
+function torrentHash(buf) {
+  let i = 0;
+  const skip = () => {
+    const c = buf[i];
+    if (c === 0x69) {
+      i = buf.indexOf(0x65, i) + 1;
+    } else if (c === 0x6c || c === 0x64) {
+      i++;
+      while (buf[i] !== 0x65) {
+        if (c === 0x64) skip();
+        skip();
+      }
+      i++;
+    } else {
+      const colon = buf.indexOf(0x3a, i);
+      const len = Number(buf.slice(i, colon).toString());
+      i = colon + 1 + len;
+    }
+  };
+  if (buf[0] !== 0x64) return null;
+  i = 1;
+  while (i < buf.length && buf[i] !== 0x65) {
+    const colon = buf.indexOf(0x3a, i);
+    const len = Number(buf.slice(i, colon).toString());
+    const key = buf.slice(colon + 1, colon + 1 + len).toString();
+    i = colon + 1 + len;
+    const start = i;
+    skip();
+    if (key === 'info') return crypto.createHash('sha1').update(buf.slice(start, i)).digest('hex');
+  }
+  return null;
+}
+function magnetHash(m) {
+  const x = String(m).match(/xt=urn:btih:([a-z0-9]+)/i);
+  if (!x) return null;
+  const h = x[1];
+  if (h.length === 40) return h.toLowerCase();
+  if (h.length === 32) {
+    const abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    let bits = '';
+    for (const ch of h.toUpperCase()) bits += abc.indexOf(ch).toString(2).padStart(5, '0');
+    return bits.match(/.{4}/g).map((b) => parseInt(b, 2).toString(16)).join('');
+  }
+  return null;
+}
+
+async function fetchTorrent(rel) {
+  if (/^magnet:/i.test(rel.link)) return { magnet: rel.link };
+  let r;
+  try {
+    r = await autoHttp(rel.link, { timeout: 30000 });
+  } catch (e) {
+    if (rel.magnet) return { magnet: rel.magnet };
+    throw new Error(`${rel.indexer} : .torrent injoignable (${netError(e)})`);
+  }
+  if (r.magnet) return { magnet: r.magnet };
+  if (r.status === 401 || r.status === 403) throw new Error(`${rel.indexer} refuse le .torrent (HTTP ${r.status}) : clé ou quota`);
+  if (r.status >= 400) throw new Error(`${rel.indexer} n’a pas donné le .torrent (HTTP ${r.status})`);
+  const buf = r.buf;
+  if (buf[0] !== 0x64) {
+    if (rel.magnet) return { magnet: rel.magnet };
+    throw new Error(`${rel.indexer} n’a pas donné un vrai .torrent (page d’erreur ou limite atteinte)`);
+  }
+  return { buf };
+}
+
+/** Envoie la release au client choisi ; renvoie les infos de suivi. */
+async function autoSend(rel, item, grab) {
+  const t = await fetchTorrent(rel);
+  const client = autoCfg().client === 'alldebrid' ? 'alldebrid' : 'rdt';
+  if (client === 'rdt') {
+    const fd = new FormData();
+    if (t.buf) fd.append('torrents', new Blob([t.buf], { type: 'application/x-bittorrent' }), `${cleanName(rel.title)}.torrent`);
+    else fd.append('urls', t.magnet);
+    fd.append('category', rdtCategory());
+    const r = await rdtFetch('/api/v2/torrents/add', { method: 'POST', body: fd });
+    const txt = await r.text();
+    if (/fail/i.test(txt)) throw new Error('rdt-client a refusé le torrent');
+    grab.client = 'rdt';
+    grab.hash = (t.buf ? torrentHash(t.buf) : magnetHash(t.magnet)) || rel.hash || null;
+    return;
+  }
+  // AllDebrid direct (comme Lumio Secour) : téléchargé dans un dossier caché du disque, puis rangé
+  const dest = autoResolveFolder(item.type === 'movie' ? 'radarr' : 'sonarr', item.folderPath);
+  if (!dest) throw new Error('aucun dossier de destination');
+  let link;
+  if (t.buf) {
+    const up = await uploadTorrentFile(`${cleanName(rel.title)}.torrent`, t.buf);
+    link = `adid:${up.id}`;
+  } else link = t.magnet;
+  const job = {
+    id: crypto.randomBytes(5).toString('hex'),
+    link,
+    root: dest.root,
+    folder: `.lumio-auto/${grab.id}`,
+    status: 'queued',
+    quiet: true,
+    auto: true,
+    name: rel.title,
+    size: 0,
+    done: 0,
+    speed: 0,
+    token: null,
+    createdAt: new Date().toISOString(),
+    by: 'Lumio Auto',
+  };
+  downloads.push(job);
+  runDownload(job);
+  grab.client = 'alldebrid';
+  grab.jobId = job.id;
+}
+
+async function autoGrab(item, rel, want, by = 'auto') {
+  const grab = {
+    id: autoId(),
+    itemId: item.id,
+    title: item.title,
+    release: { title: rel.title, size: rel.size, indexer: rel.indexer, guid: rel.guid, seeders: rel.seeders },
+    episodes: item.type === 'movie' ? ['movie'] : want.kind === 'season' ? (want.episodes || []).map((e) => `${want.season}:${e}`) : episodesOf(rel, want),
+    want,
+    state: 'sent',
+    progress: 0,
+    startedAt: new Date().toISOString(),
+    by,
+  };
+  try {
+    await autoSend(rel, item, grab);
+  } catch (e) {
+    autoBlock(rel, `envoi impossible : ${e.message}`);
+    autoEvent(item, 'failed', `Envoi impossible : ${e.message}`);
+    autoLog(`${item.title} : envoi impossible (${e.message})`, 'error');
+    throw e;
+  }
+  auto.grabs.unshift(grab);
+  if (auto.grabs.length > 200) auto.grabs.length = 200;
+  item.needsChoice = false;
+  autoEvent(item, 'sent', `Envoyé à ${grab.client === 'rdt' ? 'rdt-client' : 'AllDebrid'} : ${rel.title}`, { indexer: rel.indexer, size: rel.size, by });
+  autoSave();
+  autoLog(`${item.title} : ${rel.title} envoyé à ${grab.client === 'rdt' ? 'rdt-client' : 'AllDebrid'} (${rel.indexer})`);
+  notify({ title: '⬇️ Lumio Auto', message: `${item.title} · ${rel.title}`, tags: ['arrow_down'], click: 'lumio://activity' });
+  return grab;
+}
+function episodesOf(rel, want) {
+  const p = autoParse(rel.title);
+  if (p.episode != null && p.season != null) {
+    const out = [];
+    for (let e = p.episode; e <= p.episodeEnd; e++) out.push(`${p.season}:${e}`);
+    return out;
+  }
+  return [`${want.season}:${want.episode}`];
+}
+function autoBlock(rel, reason = null) {
+  for (const key of [rel.guid, rel.hash].filter(Boolean))
+    if (!auto.blocked.some((b) => blockKey(b) === key)) auto.blocked.unshift({ key, title: rel.title, indexer: rel.indexer || null, reason, at: new Date().toISOString() });
+  if (auto.blocked.length > 500) auto.blocked.length = 500;
+  autoSave();
+}
+
+// ——— Suivi des téléchargements et import ———
+const VIDEO_EXT = /\.(mkv|mp4|avi|m4v|ts|mov|wmv)$/i;
+const SUB_EXT = /\.(srt|ass|ssa|sub|idx|vtt)$/i;
+function listFiles(dir, out = []) {
+  let entries = [];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    if (fs.existsSync(dir) && fs.statSync(dir).isFile()) out.push(dir);
+    return out;
+  }
+  for (const e of entries) {
+    const f = path.join(dir, e.name);
+    if (e.isDirectory()) listFiles(f, out);
+    else out.push(f);
+  }
+  return out;
+}
+/** Chemin rdt-client → chemin vu par Lumio (« /data/downloads/lumio/X » → « /media/jellyfin3/downloads/lumio/X »). */
+function rdtLocalPath(remote, name) {
+  const c = autoCfg().rdt || {};
+  const tries = [];
+  if (remote) {
+    const from = String(c.remotePath || '/data/downloads').replace(/\/+$/, '');
+    if (c.localRoot && remote.startsWith(from)) {
+      try {
+        tries.push(safePath(c.localRoot, path.join(c.localFolder || '', remote.slice(from.length))).full);
+      } catch {}
+    }
+    tries.push(remote);
+  }
+  // Dernier recours : le nom du torrent dans le dossier des téléchargements
+  if (c.localRoot && name) {
+    try {
+      const base = safePath(c.localRoot, c.localFolder || '').full;
+      tries.push(path.join(base, rdtCategory(), name), path.join(base, name));
+    } catch {}
+  }
+  return tries.find((p2) => fs.existsSync(p2)) || null;
+}
+
+const autoPad = (n) => String(n).padStart(2, '0');
+const safeFile = (n) => String(n).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/\.+$/, '');
+
+async function moveFile(src, dest) {
+  await fs.promises.mkdir(path.dirname(dest), { recursive: true });
+  if (fs.existsSync(dest)) await fs.promises.unlink(dest).catch(() => {});
+  try {
+    await fs.promises.rename(src, dest);
+  } catch (e) {
+    if (e.code !== 'EXDEV') throw e;
+    await fs.promises.copyFile(src, dest);
+    await fs.promises.unlink(src).catch(() => {});
+  }
+}
+
+/** Dossier de la série dans la bibliothèque : celui que Jellyfin connaît déjà, sinon un nouveau. */
+async function seriesDir(item) {
+  const { jf } = await jfSeriesEpisodes(item);
+  const known = jf && jf.path ? localPath(jf.path) : null;
+  if (known) return known;
+  const dest = autoResolveFolder('sonarr', item.folderPath);
+  if (!dest) throw new Error('aucun dossier pour les séries');
+  return path.join(dest.path, safeFile(`${item.title}${item.year ? ` (${item.year})` : ''} [tmdbid-${item.tmdbId}]`));
+}
+function seasonDir(base, n) {
+  try {
+    const hit = fs.readdirSync(base, { withFileTypes: true }).find((e) => e.isDirectory() && new RegExp(`^(season|saison)\\s*0*${n}$`, 'i').test(e.name.trim()));
+    if (hit) return path.join(base, hit.name);
+  } catch {}
+  return path.join(base, `Season ${autoPad(n)}`);
+}
+
+async function autoImport(grab, srcPath) {
+  const item = auto.items.find((i) => i.id === grab.itemId);
+  if (!item) throw new Error('titre retiré de Lumio Auto');
+  const files = listFiles(srcPath);
+  const videos = files.filter((f) => VIDEO_EXT.test(f) && !/\bsample\b/i.test(path.basename(f)) && fs.statSync(f).size > 30e6);
+  if (!videos.length) throw new Error('aucune vidéo dans le téléchargement');
+  const done = [];
+  if (item.type === 'movie') {
+    const dest = autoResolveFolder('radarr', item.folderPath);
+    if (!dest) throw new Error('aucun dossier pour les films');
+    const main = videos.sort((a, b) => fs.statSync(b).size - fs.statSync(a).size)[0];
+    const base = safeFile(`${item.title}${item.year ? ` (${item.year})` : ''}`);
+    const dir = path.join(dest.path, `${base} [tmdbid-${item.tmdbId}]`);
+    await moveFile(main, path.join(dir, `${base}${path.extname(main)}`));
+    for (const s of files.filter((f) => SUB_EXT.test(f))) await moveFile(s, path.join(dir, `${base}.${path.basename(s).split('.').slice(-2).join('.')}`)).catch(() => {});
+    done.push('movie');
+  } else {
+    const base = await seriesDir(item);
+    const counts = Object.entries((item.meta && item.meta.seasons) || {}).sort((a, b) => a[0] - b[0]);
+    for (const v of videos) {
+      const p = autoParse(path.basename(v));
+      let season = p.season;
+      let ep = p.episode;
+      let epEnd = p.episodeEnd;
+      if (ep == null && p.absolute != null) {
+        // Numérotation absolue (animés) → saison / épisode d'après TMDB
+        let left = p.absolute;
+        for (const [n, eps] of counts) {
+          if (left <= eps.length) {
+            season = Number(n);
+            ep = epEnd = left;
+            break;
+          }
+          left -= eps.length;
+        }
+      }
+      if (season == null && grab.want && grab.want.season != null) season = grab.want.season;
+      if (ep == null) {
+        const m = path.basename(v).match(/(?:\bE|\bEp(?:isode)?\s?|\s-\s)(\d{1,3})\b/i);
+        if (m) ep = epEnd = Number(m[1]);
+      }
+      if (season == null || ep == null) continue;
+      const tag = `S${autoPad(season)}E${autoPad(ep)}${epEnd > ep ? `-E${autoPad(epEnd)}` : ''}`;
+      const name = safeFile(`${item.title} - ${tag}`);
+      const dir = seasonDir(base, season);
+      await moveFile(v, path.join(dir, `${name}${path.extname(v)}`));
+      const stem = path.basename(v, path.extname(v));
+      for (const s of files.filter((f) => SUB_EXT.test(f) && path.basename(f).startsWith(stem))) await moveFile(s, path.join(dir, `${name}${path.basename(s).slice(stem.length)}`)).catch(() => {});
+      for (let e = ep; e <= epEnd; e++) done.push(`${season}:${e}`);
+    }
+    if (!done.length) throw new Error('aucun épisode reconnu dans le téléchargement');
+  }
+  const key = autoItemKey(item.type, item.tmdbId);
+  auto.have[key] = [...new Set([...(auto.have[key] || []), ...done])];
+  autoSave();
+  const token = process.env.JELLYFIN_API_KEY || jfIndexToken;
+  if (token) fetch(`${JELLYFIN_URL}/Library/Refresh`, { method: 'POST', headers: jfHeaders(token) }).catch(() => {});
+  library = null;
+  return done;
+}
+
+async function autoCleanup(grab, srcPath) {
+  try {
+    if (grab.client === 'rdt' && grab.hash) await rdtFetch('/api/v2/torrents/delete', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ hashes: grab.hash, deleteFiles: 'true' }) });
+  } catch {}
+  try {
+    if (grab.client === 'alldebrid' && srcPath && srcPath.includes(`${path.sep}.lumio-auto${path.sep}`)) await fs.promises.rm(srcPath, { recursive: true, force: true });
+  } catch {}
+}
+
+let autoTicking = false;
+async function autoProgressTick() {
+  if (!autoOn() || autoTicking) return;
+  autoTicking = true;
+  try {
+    const active = auto.grabs.filter((g) => ['sent', 'downloading'].includes(g.state));
+    let rdtList = null;
+    if (active.some((g) => g.client === 'rdt')) {
+      try {
+        rdtList = await (await rdtFetch(`/api/v2/torrents/info?category=${encodeURIComponent(rdtCategory())}`)).json();
+      } catch (e) {
+        autoLog(`rdt-client injoignable (${e.message})`, 'error');
+      }
+    }
+    for (const g of active) {
+      let src = null;
+      let finished = false;
+      let failed = null;
+      if (g.client === 'rdt') {
+        if (!rdtList) continue;
+        const t = rdtList.find((x) => (g.hash && x.hash && x.hash.toLowerCase() === g.hash) || x.name === g.release.title);
+        if (!t) {
+          if (Date.now() - Date.parse(g.startedAt) > 15 * 60e3) failed = 'disparu de rdt-client';
+        } else {
+          g.hash = g.hash || (t.hash || '').toLowerCase();
+          g.progress = Math.round((Number(t.progress) || 0) * 100);
+          g.speed = Number(t.dlspeed) || 0;
+          g.state = 'downloading';
+          if (/error|missing/i.test(t.state || '')) failed = `rdt-client : ${t.state}`;
+          else if (Number(t.progress) >= 1 && !/^(downloading|metaDL|queuedDL|stalledDL|checkingDL|allocating|pausedDL|forcedDL)$/i.test(t.state || '')) {
+            src = rdtLocalPath(t.content_path || (t.save_path && path.join(t.save_path, t.name)), t.name);
+            if (src) finished = true;
+            else if (!g.missingSince) g.missingSince = Date.now();
+            else if (Date.now() - g.missingSince > 30 * 60e3) failed = 'fichiers introuvables (vérifie les chemins rdt-client dans les réglages)';
+          }
+        }
+      } else {
+        const job = downloads.find((d) => d.id === g.jobId);
+        if (!job) failed = 'téléchargement AllDebrid perdu';
+        else {
+          g.state = 'downloading';
+          g.progress = job.size ? Math.round((job.done / job.size) * 100) : 0;
+          g.speed = job.speed || 0;
+          if (job.status === 'done') {
+            finished = true;
+            src = safePath(job.root, job.folder).full;
+          } else if (['error', 'cancelled'].includes(job.status)) failed = job.error || 'échec AllDebrid';
+        }
+      }
+      // Bloqué trop longtemps sans avancer : on abandonne et on cherche une autre version
+      if (!finished && !failed && g.state === 'downloading') {
+        if (g.progress !== g.lastProgress) (g.lastProgress = g.progress), (g.lastMoveAt = Date.now());
+        else if (Date.now() - (g.lastMoveAt || Date.parse(g.startedAt)) > 8 * 3600e3) failed = 'bloqué depuis 8 h';
+      }
+      if (failed) {
+        g.state = 'failed';
+        g.error = failed;
+        autoBlock(g.release, failed);
+        await autoCleanup(g, null);
+        autoLog(`${g.title} : échec (${failed}), une autre version sera cherchée`, 'error');
+        const item = auto.items.find((i) => i.id === g.itemId);
+        autoEvent(item, 'failed', `Téléchargement en échec : ${failed}. Version mise en liste noire, une autre sera cherchée.`);
+        if (item) item.nextSearch = Date.now() + 5 * 60e3;
+        continue;
+      }
+      if (finished) {
+        g.state = 'importing';
+        autoSave();
+        try {
+          const done = await autoImport(g, src);
+          g.state = 'done';
+          g.progress = 100;
+          g.doneAt = new Date().toISOString();
+          await autoCleanup(g, src);
+          autoLog(`${g.title} : importé (${done.includes('movie') ? 'film' : done.length + ' épisode(s)'})`);
+          autoEvent(auto.items.find((i) => i.id === g.itemId), 'imported', `Rangé dans la bibliothèque (${done.includes('movie') ? 'film' : done.length + ' épisode(s)'})`);
+          notify({ title: '✅ Lumio Auto · importé', message: g.title, tags: ['white_check_mark'], click: 'lumio://activity' });
+          autoCompleteRequests();
+        } catch (e) {
+          g.state = 'failed';
+          g.error = `import : ${e.message}`;
+          autoLog(`${g.title} : import impossible (${e.message})`, 'error');
+          autoEvent(auto.items.find((i) => i.id === g.itemId), 'failed', `Rangement impossible : ${e.message}`);
+        }
+      }
+    }
+    autoSave();
+  } finally {
+    autoTicking = false;
+  }
+}
+
+/** Demandes passées par Lumio Auto : « Terminée » quand tout ce qui était demandé est arrivé. */
+async function autoCompleteRequests() {
+  let changed = false;
+  for (const r of requests) {
+    if (r.via !== 'auto' || r.status !== RequestStatus.APPROVED) continue;
+    const item = findItem(r.type === 'movie' ? 'movie' : 'tv', r.tmdbId);
+    if (!item) continue;
+    const wanted = await autoWanted(item).catch(() => null);
+    const busy = auto.grabs.some((g) => g.itemId === item.id && ['sent', 'downloading', 'importing'].includes(g.state));
+    const relevant = (wanted || []).filter((w) => item.type === 'movie' || (r.seasons || []).includes(w.season));
+    const ready = item.type === 'movie' ? item.meta && item.meta.available : true;
+    if (wanted && ready && !busy && !relevant.length) {
+      r.status = RequestStatus.COMPLETED;
+      r.completedAt = new Date().toISOString();
+      changed = true;
+      notify({ title: 'Disponible dans Jellyfin', message: `${r.title} · demandé par ${r.requestedBy.name}`, tags: ['tada'], image: r.poster });
+      notifyFamily({ title: '🎉 Disponible', message: `${r.title} est prêt à regarder`, tags: ['tada'], image: r.poster, click: 'lumio://' });
+    }
+  }
+  if (changed) saveRequests();
+}
+
+// Historique d'un titre (comme l'onglet « Historique » de Radarr / Sonarr), affiché dans l'appli
+function autoEvent(item, type, msg, extra = {}) {
+  if (!item) return;
+  item.events = item.events || [];
+  item.events.unshift({ at: new Date().toISOString(), type, msg: String(msg).slice(0, 300), ...extra });
+  if (item.events.length > 40) item.events.length = 40;
+}
+
+// Compte rendu d'une recherche (affiché dans l'appli et dans le journal)
+const wantLabel = (w) => (w.kind === 'movie' ? 'film' : w.kind === 'season' ? `saison ${w.season} complète` : `S${autoPad(w.season)}E${autoPad(w.episode)}`);
+function autoReport(item, want, res) {
+  const kept = res.results.filter((r) => !r.rejected);
+  const reasons = {};
+  for (const r of res.results) if (r.rejected) reasons[r.rejected.replace(/[\d.,]+ Go \(max[^)]*\)/, 'trop lourd')] = (reasons[r.rejected.replace(/[\d.,]+ Go \(max[^)]*\)/, 'trop lourd')] || 0) + 1;
+  const top = Object.entries(reasons).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, n]) => `${n} ${k}`);
+  item.lastReport = {
+    at: new Date().toISOString(),
+    want: wantLabel(want),
+    total: res.results.length,
+    kept: kept.length,
+    best: kept[0] ? kept[0].title : null,
+    sites: res.status.map((x) => ({ name: x.name, count: x.count, error: x.error || null, skipped: Boolean(x.skipped), tries: x.tries || [] })),
+    reasons: top,
+  };
+  autoEvent(
+    item,
+    kept.length ? 'found' : 'none',
+    `Recherche ${wantLabel(want)} : ${res.results.length} résultat(s)${kept.length ? `, ${kept.length} acceptable(s)` : top.length ? ` — écartés : ${top.join(', ')}` : ''}`,
+    { sites: item.lastReport.sites.map((x) => ({ name: x.name, count: x.count, error: x.error })) }
+  );
+  const sites = res.status.map((x) => `${x.name} ${x.error ? `erreur (${x.error})` : x.skipped ? 'limite atteinte' : x.count}`).join(', ');
+  autoLog(
+    `${item.title} · ${wantLabel(want)} : ${res.results.length} trouvé(s) [${sites || 'aucun indexeur'}]${kept.length ? ` → ${kept[0].title}` : res.results.length ? ` → rien de bon (${top.join(', ')})` : ''}`,
+    kept.length ? 'info' : 'warn'
+  );
+}
+
+// ——— Recherche automatique de ce qui manque ———
+let autoSearching = false;
+async function autoSearchTick(force = false) {
+  if (!autoOn() || autoSearching) return;
+  autoSearching = true;
+  try {
+    const pf = autoProfile();
+    const active = () => auto.grabs.filter((g) => ['sent', 'downloading', 'importing'].includes(g.state)).length;
+    let searches = 0;
+    for (const item of [...auto.items].sort((a, b) => (a.nextSearch || 0) - (b.nextSearch || 0))) {
+      if (active() >= pf.maxActive) break;
+      if (!force && (item.nextSearch || 0) > Date.now()) continue;
+      if (item.paused) continue;
+      if (searches >= 6) break; // les sites limitent le nombre de recherches
+      try {
+        await autoMeta(item);
+      } catch (e) {
+        item.note = `TMDB : ${e.message}`;
+        continue;
+      }
+      const wanted = await autoWanted(item);
+      if (!wanted.length) {
+        item.note = item.type === 'movie' && !(item.meta && item.meta.available) ? `pas encore sorti${item.meta && item.meta.availableFrom ? ` (prévu le ${item.meta.availableFrom})` : ''}` : 'rien ne manque';
+        item.nextSearch = Date.now() + 6 * 3600e3;
+        continue;
+      }
+      let grabbed = false;
+      // Une saison complète manquante : le pack d'abord, sinon les épisodes un par un
+      for (const want of wanted.slice(0, 4)) {
+        if (active() >= pf.maxActive) break;
+        searches++;
+        item.searching = wantLabel(want);
+        const res1 = await autoSearch(item, want);
+        autoReport(item, want, res1);
+        const results = res1.results;
+        let best = results.find((r) => !r.rejected);
+        if (!best && want.kind === 'season') {
+          // Pas de pack : on passe aux épisodes de cette saison
+          for (const e of want.episodes.slice(0, 3)) {
+            const w2 = { kind: 'episode', season: want.season, episode: e };
+            item.searching = wantLabel(w2);
+            const r2 = await autoSearch(item, w2);
+            autoReport(item, w2, r2);
+            searches++;
+            const b2 = r2.results.find((r) => !r.rejected);
+            if (b2) {
+              await autoGrab(item, b2, w2).then(() => (grabbed = true)).catch(() => {});
+              break;
+            }
+          }
+          continue;
+        }
+        if (best) await autoGrab(item, best, want).then(() => (grabbed = true)).catch(() => {});
+        if (grabbed && want.kind === 'movie') break;
+      }
+      item.searching = null;
+      item.fails = grabbed ? 0 : (item.fails || 0) + 1;
+      item.needsChoice = !grabbed;
+      item.note = grabbed ? 'téléchargement lancé' : 'rien d’automatique : choisis une version (recherche interactive)';
+      if (!grabbed && !item.choiceNotified) {
+        item.choiceNotified = true;
+        notify({ title: '🔎 Lumio Auto · à toi de choisir', message: `${item.title} : aucune version ne correspond au profil. Ouvre la recherche interactive.`, tags: ['mag'], click: 'lumio://auto' });
+      }
+      if (grabbed) item.choiceNotified = false;
+      // Pas trouvé : on réessaie de moins en moins souvent (1 h, 3 h, 6 h, puis 12 h)
+      const wait = [pf.searchEveryMin, 180, 360, 720][Math.min(item.fails || 0, 3)];
+      item.nextSearch = Date.now() + (grabbed ? 15 : wait) * 60e3;
+      item.lastSearch = new Date().toISOString();
+      autoSave();
+    }
+  } catch (e) {
+    autoLog(`recherche : ${e.message}`, 'error');
+  } finally {
+    for (const i of auto.items) i.searching = null;
+    autoSearching = false;
+  }
+}
+
+// ——— Veille RSS : les dernières sorties de chaque site, comparées à ce qui manque ———
+let autoRssBusy = false;
+async function autoRssTick() {
+  if (!autoOn() || autoRssBusy || !auto.items.length) return;
+  autoRssBusy = true;
+  try {
+    const pf = autoProfile();
+    const releases = [];
+    for (const ix of autoIndexers().filter((x) => x.enabled !== false && x.rss !== false && x.type !== 'prowlarr')) {
+      const cats = [...new Set([...parseCats(ix.catMovie, '2000'), ...parseCats(ix.catTv, '5000'), ...parseCats(ix.catAnime, '5070')])];
+      const r = await idxQuery(ix, { q: '', cats });
+      releases.push(...r.items);
+    }
+    if (!releases.length) return;
+    const active = () => auto.grabs.filter((g) => ['sent', 'downloading', 'importing'].includes(g.state)).length;
+    for (const item of auto.items) {
+      if (item.paused || active() >= pf.maxActive) continue;
+      const names = itemNames(item);
+      const mine = releases.filter((rel) => names.includes(autoParse(rel.title).name) || names.includes(stripArticle(autoParse(rel.title).name)));
+      if (!mine.length) continue;
+      await autoMeta(item).catch(() => null);
+      const wanted = await autoWanted(item).catch(() => []);
+      for (const want of wanted) {
+        const best = mine.map((rel) => autoScore(rel, item, want)).filter((x) => !x.rejected).sort((a, b) => b.score - a.score)[0];
+        if (best) {
+          await autoGrab(item, best, want, 'rss').catch(() => {});
+          break;
+        }
+      }
+    }
+  } catch (e) {
+    autoLog(`veille RSS : ${e.message}`, 'error');
+  } finally {
+    autoRssBusy = false;
+  }
+}
+
+setInterval(() => autoProgressTick().catch(() => {}), 30_000);
+setInterval(() => autoSearchTick().catch(() => {}), 5 * 60_000);
+let autoRssLast = 0;
+setInterval(() => {
+  if (Date.now() - autoRssLast < autoProfile().rssEveryMin * 60e3) return;
+  autoRssLast = Date.now();
+  autoRssTick().catch(() => {});
+}, 60_000);
+
+// ——— Ajout d'un titre (demande validée, ou à la main) ———
+async function autoAdd({ type, tmdbId, tvdbId, title, seasons, folderPath, future, requestId }) {
+  type = type === 'tv' ? 'tv' : 'movie';
+  tmdbId = Number(tmdbId);
+  if (!tmdbId) throw new HttpError(400, 'Identifiant TMDB manquant');
+  let item = findItem(type, tmdbId);
+  if (!item) {
+    item = { id: autoId(), type, tmdbId, tvdbId: tvdbId || null, title: title || `#${tmdbId}`, seasons: [], future: future !== false, requestIds: [], addedAt: new Date().toISOString(), nextSearch: 0 };
+    auto.items.unshift(item);
+  }
+  if (folderPath) item.folderPath = folderPath;
+  if (!item.folderPath) {
+    const f = autoResolveFolder(type === 'movie' ? 'radarr' : 'sonarr', null);
+    item.folderPath = f ? f.path : null;
+  }
+  if (type === 'tv') {
+    for (const n of (seasons || []).map(Number).filter((n) => n > 0)) if (!item.seasons.includes(n)) item.seasons.push(n);
+    item.seasons.sort((a, b) => a - b);
+    if (/anim/i.test(String(item.folderPath || ''))) item.anime = true;
+  }
+  if (requestId && !item.requestIds.includes(requestId)) item.requestIds.push(requestId);
+  item.paused = false;
+  item.nextSearch = 0;
+  item.fails = 0;
+  await autoMeta(item, true).catch((e) => (item.note = `TMDB : ${e.message}`));
+  autoSave();
+  autoLog(`${item.title} ajouté${type === 'tv' ? ` (saisons ${item.seasons.join(', ') || '—'})` : ''}`);
+  autoEvent(item, 'added', requestId ? 'Demande validée : ajouté au suivi' : 'Ajouté à la main au suivi');
+  setTimeout(() => autoSearchTick().catch(() => {}), 1500);
+  return item;
+}
+
+/** Demande validée → Lumio Auto (à la place de Radarr / Sonarr quand il est activé). */
+async function autoFromRequest(r) {
+  await autoAdd({ type: r.type, tmdbId: r.tmdbId, tvdbId: r.tvdbId, title: r.title, seasons: r.seasons, folderPath: r.rootFolderPath, requestId: r.id });
+  r.via = 'auto';
+}
+
+/** Progression d'une demande passée par Lumio Auto (même forme que la file Radarr / Sonarr). */
+function autoDownloadOf(r) {
+  const item = findItem(r.type === 'movie' ? 'movie' : 'tv', r.tmdbId);
+  if (!item) return undefined;
+  const gs = auto.grabs.filter((g) => g.itemId === item.id && ['sent', 'downloading', 'importing'].includes(g.state));
+  if (!gs.length) return { state: 'downloading', via: 'auto', progress: null, title: `Lumio Auto · ${item.note || 'recherche en cours'}` };
+  const g = gs[0];
+  return {
+    state: 'downloading',
+    via: 'auto',
+    progress: g.progress || 0,
+    count: gs.length > 1 ? gs.length : undefined,
+    title: `Lumio Auto · ${g.state === 'importing' ? 'rangement' : g.release.title}`,
+  };
+}
+
+const publicIndexer = (ix) => ({ ...ix, key: undefined, hasKey: Boolean(ix.key), status: idxStatus.get(ix.id) || null, callsLastHour: (idxCalls.get(ix.id) || []).filter((t) => Date.now() - t < 3600e3).length });
+function publicItem(item) {
+  const gs = auto.grabs.filter((g) => g.itemId === item.id);
+  return {
+    id: item.id,
+    type: item.type,
+    tmdbId: item.tmdbId,
+    title: item.title,
+    year: item.year,
+    anime: Boolean(item.anime),
+    seasons: item.seasons,
+    future: item.future !== false,
+    folderPath: item.folderPath,
+    paused: Boolean(item.paused),
+    note: item.note || null,
+    available: item.meta ? item.meta.available !== false : null,
+    availableFrom: item.meta ? item.meta.availableFrom || null : null,
+    have: (auto.have[autoItemKey(item.type, item.tmdbId)] || []).length,
+    nextSearch: item.nextSearch ? new Date(item.nextSearch).toISOString() : null,
+    lastSearch: item.lastSearch || null,
+    active: gs.filter((g) => ['sent', 'downloading', 'importing'].includes(g.state)).length,
+    searching: item.searching || null,
+    lastReport: item.lastReport || null,
+    needsChoice: Boolean(item.needsChoice),
+    imdbId: item.imdbId || null,
+    events: (item.events || []).slice(0, 25),
+    requestedBy: [...new Set(requests.filter((r) => (item.requestIds || []).includes(r.id)).map((r) => r.requestedBy && r.requestedBy.name).filter(Boolean))],
+    addedAt: item.addedAt || null,
+  };
+}
+
+async function autoRoutes(req, res, p, q, user) {
+  if (!p.startsWith('/api/auto')) return false;
+  requireAdmin(user);
+  const c = autoCfg();
+  if (req.method === 'GET' && p === '/api/auto/state') {
+    send(res, 200, {
+      enabled: autoOn(),
+      client: c.client === 'alldebrid' ? 'alldebrid' : 'rdt',
+      rdt: { url: (c.rdt || {}).url || '', user: (c.rdt || {}).user || '', hasPass: Boolean((c.rdt || {}).pass), category: rdtCategory(), remotePath: (c.rdt || {}).remotePath || '/data/downloads', localRoot: (c.rdt || {}).localRoot || '', localFolder: (c.rdt || {}).localFolder || 'downloads' },
+      alldebrid: Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey),
+      profile: autoProfile(),
+      indexers: autoIndexers().map(publicIndexer),
+      folders: { movie: autoFolderChoices('radarr'), tv: autoFolderChoices('sonarr'), defaults: c.folders || {} },
+      disks: disks().map((d) => d.name),
+      items: auto.items.map(publicItem),
+      grabs: auto.grabs.slice(0, 60),
+      log: auto.log.slice(0, 80),
+    });
+    return true;
+  }
+  if (req.method === 'PUT' && p === '/api/auto/settings') {
+    const b = await readBody(req);
+    if (typeof b.enabled === 'boolean') {
+      c.enabled = b.enabled;
+      autoLog(b.enabled ? 'activé : les demandes passent par Lumio Auto' : 'désactivé : les demandes repassent par Radarr / Sonarr');
+    }
+    if (b.client === 'rdt' || b.client === 'alldebrid') c.client = b.client;
+    if (b.rdt && typeof b.rdt === 'object') {
+      c.rdt = c.rdt || {};
+      for (const k of ['url', 'user', 'category', 'remotePath', 'localRoot', 'localFolder']) if (typeof b.rdt[k] === 'string') c.rdt[k] = b.rdt[k].trim();
+      if (typeof b.rdt.pass === 'string' && b.rdt.pass) c.rdt.pass = b.rdt.pass; // jamais renvoyé à l'appli
+      rdtCookie = null;
+    }
+    if (b.profile && typeof b.profile === 'object') {
+      const pf = { ...(c.profile || {}) };
+      for (const [k, v] of Object.entries(b.profile)) {
+        if (!(k in AUTO_PROFILE)) continue;
+        if (k === 'languages' && Array.isArray(v)) pf[k] = v.map(String).filter(Boolean);
+        else if (k === 'h265' && ['required', 'preferred', 'any'].includes(v)) pf[k] = v;
+        else if (k === 'allowLower') pf[k] = Boolean(v);
+        else if (typeof AUTO_PROFILE[k] === 'number' && Number(v) > 0) pf[k] = Number(v);
+      }
+      c.profile = pf;
+    }
+    if (b.folders && typeof b.folders === 'object') c.folders = { movie: b.folders.movie || null, tv: b.folders.tv || null };
+    saveConfig();
+    send(res, 200, { ok: true });
+    return true;
+  }
+  // Indexeurs : ajout / modification (la clé reste sur le serveur)
+  if (req.method === 'POST' && p === '/api/auto/indexers') {
+    const b = await readBody(req);
+    const type = ['c411', 'prowlarr', 'torznab'].includes(b.type) ? b.type : 'torznab';
+    const preset = IDX_PRESETS[type];
+    const url = String(b.url || preset.url || '').trim();
+    if (!/^https?:\/\//.test(url)) throw new HttpError(400, 'Adresse de l’indexeur invalide (elle doit commencer par http:// ou https://)');
+    const list = autoIndexers();
+    let ix = b.id ? list.find((x) => x.id === b.id) : null;
+    if (!ix) {
+      ix = { id: autoId(), enabled: true, rss: type !== 'prowlarr', search: true, maxPerHour: preset.maxPerHour, catMovie: preset.catMovie, catTv: preset.catTv, catAnime: preset.catAnime };
+      list.push(ix);
+    }
+    ix.type = type;
+    ix.name = String(b.name || ix.name || preset.name || 'Indexeur').slice(0, 40);
+    ix.url = url;
+    if (typeof b.key === 'string' && b.key) ix.key = b.key.trim();
+    for (const k of ['enabled', 'rss', 'search']) if (typeof b[k] === 'boolean') ix[k] = b[k];
+    if (Number(b.maxPerHour) > 0) ix.maxPerHour = Math.min(500, Number(b.maxPerHour));
+    for (const k of ['catMovie', 'catTv', 'catAnime']) if (typeof b[k] === 'string' && b[k].trim()) ix[k] = b[k].replace(/[^\d,]/g, '');
+    if (ix.type === 'prowlarr') ix.rss = false;
+    ix.caps = null;
+    c.indexers = list;
+    saveConfig();
+    await idxCaps(ix, true);
+    send(res, 200, { indexer: publicIndexer(ix) });
+    return true;
+  }
+  let m = p.match(/^\/api\/auto\/indexers\/([a-f0-9]+)(\/test)?$/);
+  if (m) {
+    const list = autoIndexers();
+    const ix = list.find((x) => x.id === m[1]);
+    if (!ix) throw new HttpError(404, 'Indexeur introuvable');
+    if (req.method === 'DELETE' && !m[2]) {
+      c.indexers = list.filter((x) => x !== ix);
+      saveConfig();
+      send(res, 200, { ok: true });
+      return true;
+    }
+    if (req.method === 'POST' && m[2]) {
+      idxCalls.set(ix.id, (idxCalls.get(ix.id) || []).filter((t) => Date.now() - t > 5000));
+      const caps = await idxCaps(ix, true);
+      const r = await idxQuery({ ...ix, maxPerHour: 1000 }, { q: ix.type === 'prowlarr' ? 'test' : '', cats: [...parseCats(ix.catMovie, '2000'), ...parseCats(ix.catTv, '5000')] });
+      const capsTxt = caps ? `Recherche films : ${caps.movie ? caps.movie.join(', ') : 'non'} · séries : ${caps.tv ? caps.tv.join(', ') : 'non'}` : ix.type === 'prowlarr' ? 'Prowlarr' : 'capacités inconnues (t=caps sans réponse)';
+      send(res, 200, r.error ? { ok: false, message: r.error, url: r.url, caps: capsTxt } : { ok: true, message: `${r.items.length} résultat(s) reçu(s)`, sample: r.items.slice(0, 5).map((x) => x.title), url: r.url, caps: capsTxt });
+      return true;
+    }
+  }
+  if (req.method === 'POST' && p === '/api/auto/test-client') {
+    if (c.client === 'alldebrid') {
+      send(res, 200, process.env.ALLDEBRID_KEY || config.alldebridKey ? { ok: true, message: 'Clé AllDebrid présente sur le serveur.' } : { ok: false, message: 'Clé AllDebrid non configurée.' });
+      return true;
+    }
+    rdtCookie = null;
+    try {
+      const list = await (await rdtFetch('/api/v2/torrents/info')).json();
+      const probe = rdtLocalPath(null, null);
+      send(res, 200, { ok: true, message: `rdt-client répond (${list.length} torrent(s)).${c.rdt && c.rdt.localRoot ? '' : ' Pense à choisir le dossier des téléchargements vu par Lumio.'}`, probe });
+    } catch (e) {
+      send(res, 200, { ok: false, message: e.message });
+    }
+    return true;
+  }
+  if (req.method === 'POST' && p === '/api/auto/items') {
+    const b = await readBody(req);
+    const item = await autoAdd({ type: b.type, tmdbId: b.tmdbId, title: b.title, seasons: b.seasons, folderPath: b.folderPath, future: b.future });
+    send(res, 200, { item: publicItem(item) });
+    return true;
+  }
+  if (req.method === 'POST' && p === '/api/auto/search-all') {
+    for (const i of auto.items) i.nextSearch = 0;
+    autoSearchTick(true).catch(() => {});
+    autoRssLast = 0;
+    send(res, 200, { ok: true, message: 'Recherche lancée pour tous les titres suivis.' });
+    return true;
+  }
+  m = p.match(/^\/api\/auto\/items\/([a-f0-9]+)(?:\/(search|releases|grab|pause))?$/);
+  if (m) {
+    const item = auto.items.find((i) => i.id === m[1]);
+    if (!item) throw new HttpError(404, 'Titre introuvable');
+    if (req.method === 'DELETE' && !m[2]) {
+      auto.items = auto.items.filter((i) => i !== item);
+      autoSave();
+      send(res, 200, { ok: true });
+      return true;
+    }
+    if (req.method === 'PATCH' && !m[2]) {
+      const b = await readBody(req);
+      if (Array.isArray(b.seasons) && item.type === 'tv') item.seasons = b.seasons.map(Number).filter((n) => n > 0).sort((a, b2) => a - b2);
+      if (typeof b.future === 'boolean') item.future = b.future;
+      if (typeof b.folderPath === 'string') item.folderPath = b.folderPath;
+      if (typeof b.anime === 'boolean') item.anime = b.anime;
+      item.nextSearch = 0;
+      await autoMeta(item, true).catch(() => {});
+      autoSave();
+      send(res, 200, { item: publicItem(item) });
+      return true;
+    }
+    if (req.method === 'POST' && m[2] === 'pause') {
+      item.paused = !item.paused;
+      autoSave();
+      send(res, 200, { item: publicItem(item) });
+      return true;
+    }
+    if (req.method === 'POST' && m[2] === 'search') {
+      item.nextSearch = 0;
+      item.fails = 0;
+      autoSearchTick().catch(() => {});
+      send(res, 200, { ok: true, message: 'Recherche lancée.' });
+      return true;
+    }
+    // Recherche manuelle : toutes les versions trouvées, avec la raison si elles sont écartées
+    if (req.method === 'GET' && m[2] === 'releases') {
+      await autoMeta(item).catch(() => {});
+      const wanted = await autoWanted(item);
+      const season = q.get('season') ? Number(q.get('season')) : null;
+      const episode = q.get('episode') ? Number(q.get('episode')) : null;
+      const want =
+        item.type === 'movie'
+          ? { kind: 'movie' }
+          : episode != null && season != null
+            ? { kind: 'episode', season, episode }
+            : season != null
+              ? { kind: 'season', season, count: ((item.meta && item.meta.seasons[season]) || []).length, episodes: ((item.meta && item.meta.seasons[season]) || []).map((e) => e.e) }
+              : wanted[0] || { kind: 'season', season: item.seasons[0] || 1, count: 1, episodes: [] };
+      const { results, status } = await autoSearch(item, want, { interactive: true });
+      send(res, 200, {
+        want,
+        wanted: wanted.slice(0, 40),
+        status,
+        results: results.slice(0, 100).map((r) => ({
+          title: r.title,
+          size: r.size,
+          seeders: r.seeders,
+          leechers: r.leechers ?? null,
+          grabs: r.grabs ?? null,
+          indexer: r.indexer,
+          guid: r.guid,
+          score: Math.round(r.score),
+          rejected: r.rejected,
+          reasons: r.reasons || [],
+          ageDays: r.pub && !isNaN(Date.parse(r.pub)) ? Math.max(0, Math.round((Date.now() - Date.parse(r.pub)) / 864e5)) : null,
+          quality: [r.parsed.resolution ? `${r.parsed.resolution}p` : null, r.parsed.codec ? r.parsed.codec.toUpperCase().replace('H265', 'H.265').replace('H264', 'H.264') : null, r.parsed.source ? { bluray: 'BluRay', webdl: 'WEB-DL', webrip: 'WEBRip', hdtv: 'HDTV' }[r.parsed.source] : null].filter(Boolean).join(' · '),
+          languages: r.parsed.langs.map((l) => l.toUpperCase()),
+          matchedBy: r.matchedBy || null,
+          freeleech: Boolean(r.freeleech),
+          details: r.details || null,
+        })),
+      });
+      // Gardées 30 min pour « Prendre celle-ci »
+      autoLastResults.set(item.id, { at: Date.now(), want, results });
+      return true;
+    }
+    if (req.method === 'POST' && m[2] === 'grab') {
+      const b = await readBody(req);
+      const last = autoLastResults.get(item.id);
+      const rel = last && Date.now() - last.at < 30 * 60e3 ? last.results.find((r) => r.guid === b.guid) : null;
+      if (!rel) throw new HttpError(404, 'Résultat expiré : relance la recherche');
+      const g = await autoGrab(item, rel, last.want, user.name);
+      send(res, 200, { grab: g });
+      return true;
+    }
+  }
+  m = p.match(/^\/api\/auto\/grabs\/([a-f0-9]+)$/);
+  if (m && req.method === 'DELETE') {
+    const g = auto.grabs.find((x) => x.id === m[1]);
+    if (!g) throw new HttpError(404, 'Téléchargement introuvable');
+    if (['sent', 'downloading'].includes(g.state)) {
+      if (g.client === 'alldebrid') {
+        const job = downloads.find((d) => d.id === g.jobId);
+        if (job) job.cancelled = true;
+      }
+      await autoCleanup(g, null);
+      g.state = 'failed';
+      g.error = 'annulé';
+      autoBlock(g.release);
+    } else auto.grabs = auto.grabs.filter((x) => x !== g);
+    autoSave();
+    send(res, 200, { ok: true });
+    return true;
+  }
+  if (req.method === 'GET' && p === '/api/auto/blocklist') {
+    send(res, 200, { blocked: auto.blocked.slice(0, 200).map((b) => (typeof b === 'string' ? { key: b, title: null } : b)) });
+    return true;
+  }
+  if (req.method === 'POST' && p === '/api/auto/blocklist/remove') {
+    const b = await readBody(req);
+    auto.blocked = auto.blocked.filter((x) => blockKey(x) !== b.key);
+    autoSave();
+    send(res, 200, { ok: true });
+    return true;
+  }
+  if (req.method === 'POST' && p === '/api/auto/unblock') {
+    auto.blocked = [];
+    autoSave();
+    send(res, 200, { ok: true });
+    return true;
+  }
+  throw new HttpError(404, 'Route Lumio Auto inconnue');
+}
+const autoLastResults = new Map();
+
 // ——— Profils de la famille (façon « Qui regarde ? ») ———
 // Un profil = un compte Jellyfin à part (reprise, vus, « À voir » séparés), créé par l'admin depuis l'appli.
 // Le mot de passe de chaque profil est inventé et gardé ici : l'appli ne le voit jamais, elle reçoit juste une session.
@@ -3670,7 +5234,7 @@ function posterOf(item) {
 /** Crée une demande (POST /api/requests), avec les mêmes règles que Seerr. */
 async function createRequest(user, b) {
   const type = b.type === 'tv' ? 'tv' : 'movie';
-  if (!arrConfig(kindOf(type))) throw new HttpError(503, `${label(kindOf(type))} n'est pas configuré sur le serveur Lumio`);
+  if (!autoOn() && !arrConfig(kindOf(type))) throw new HttpError(503, `${label(kindOf(type))} n'est pas configuré sur le serveur Lumio`);
   const ids = await resolveIds(type, b);
   const tmdbId = ids.tmdbId;
   b = {
@@ -3694,7 +5258,7 @@ async function createRequest(user, b) {
     if (existing.length) throw new HttpError(409, 'Ce film a déjà été demandé.');
     if (quota.movie.remaining === 0) throw new HttpError(429, `Quota atteint : ${quota.movie.limit} film(s) tous les ${quota.movie.days} jours.`);
   } else {
-    if (!Number(b.tvdbId)) throw new HttpError(400, 'Pas d’identifiant TVDB : Sonarr ne peut pas ajouter cette série.');
+    if (!Number(b.tvdbId) && !autoOn()) throw new HttpError(400, 'Pas d’identifiant TVDB : Sonarr ne peut pas ajouter cette série.');
     const wanted = (Array.isArray(b.seasons) ? b.seasons : []).map(Number).filter((n) => n > 0);
     if (!wanted.length) throw new HttpError(400, 'Choisis au moins une saison.');
     const st = mediaStatus(lib, 'tv', tmdbId, b.tvdbId, wanted);
@@ -3959,6 +5523,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
     // Book (livres, BD, mangas, audio)
     if (await bookRoutes(req, res, p, q, user)) return;
     if (await profileRoutes(req, res, p, q, user)) return;
+    if (await autoRoutes(req, res, p, q, user)) return;
 
     // ——— Moi : droits et quotas ———
     if (req.method === 'GET' && p === '/api/me') {
