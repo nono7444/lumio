@@ -3557,7 +3557,8 @@ async function idxQuery(ix, { q = '', cats = [] }) {
   const gap = prev.length ? 3000 - (Date.now() - prev[prev.length - 1]) : 0;
   if (gap > 0) await sleep(gap);
   idxCalls.get(ix.id).push(Date.now());
-  const ctrl = AbortSignal.timeout(20000);
+  // Prowlarr interroge tous ses indexeurs avant de répondre : on lui laisse plus de temps
+  const ctrl = AbortSignal.timeout(ix.type === 'prowlarr' ? 90000 : 30000);
   try {
     let items;
     if (ix.type === 'prowlarr') {
@@ -3597,7 +3598,7 @@ async function idxQuery(ix, { q = '', cats = [] }) {
     idxStatus.set(ix.id, { ok: true, at: new Date().toISOString(), count: items.length });
     return { items };
   } catch (e) {
-    const message = e && e.name === 'TimeoutError' ? 'pas de réponse' : String((e && e.message) || e);
+    const message = e && e.name === 'TimeoutError' ? `pas de réponse en ${ix.type === 'prowlarr' ? 90 : 30} s` : String((e && e.cause && e.cause.code) || (e && e.message) || e);
     idxStatus.set(ix.id, { ok: false, at: new Date().toISOString(), message });
     return { error: message, items: [] };
   }
