@@ -5,6 +5,7 @@ import { Platform } from 'react-native';
 import { FloatingTabBar } from '@/components/tab-bar';
 import { C } from '@/constants/theme';
 import { fetchIsAdmin } from '@/lib/jellyfin';
+import { IS_BETA } from '@/lib/secour';
 import { useSettings } from '@/lib/settings';
 
 // « Qui regarde ? » proposé une fois par ouverture de l'appli (si des profils existent)
@@ -64,6 +65,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="calendar" options={{ title: 'Calendrier' }} />
       <Tabs.Screen name="chat" options={{ title: 'Chat', href: settings.jellyfin ? undefined : null }} />
       <Tabs.Screen name="activity" options={{ title: 'Demandes' }} />
+      <Tabs.Screen name="auto" options={{ title: 'Auto', href: IS_BETA && settings.jellyfin?.isAdmin ? undefined : null }} />
       <Tabs.Screen name="watchlist" options={{ title: 'À voir', href: Platform.isTV ? null : undefined }} />
       <Tabs.Screen name="settings" options={{ title: 'Profil' }} />
     </Tabs>

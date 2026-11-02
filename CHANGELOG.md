@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Bêta : nouvel onglet admin « Auto » (Lumio Auto, remplace Radarr / Sonarr). Onglet Demandes : chaque titre avec son état (à choisir, recherche, téléchargement, pas encore sorti), qui l’a demandé, l’historique, et le détail de la dernière recherche site par site et requête par requête (adresse appelée, erreurs expliquées). Si rien ne convient automatiquement, la recherche interactive s’ouvre : versions triables, qualité / langues / sources, raisons des refus, téléchargement en un appui. Onglet Indexeurs : ajout rapide de C411 (recherche par identifiant TMDB + saison / épisode, 15 requêtes par minute). Liste noire consultable. Il faut le serveur Lumio 3.65.0.
+
 ## 1.0.126 — 2 novembre 2026
 
 - Profils de la famille : quand tu te connectes avec le compte admin, un écran « Qui regarde ? » te propose ton profil, celui des enfants, de ta femme… Chaque profil a sa propre reprise, ses « vus » et sa liste « À voir ». Un profil enfant peut être limité à certaines bibliothèques et à un âge maximum, et chaque profil peut avoir un code à 4 chiffres. Tu changes de profil dans Profil → Changer de profil. Il faut le serveur Lumio 3.64.0.
