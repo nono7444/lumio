@@ -4334,6 +4334,29 @@ async function autoCompleteRequests() {
   if (changed) saveRequests();
 }
 
+// Compte rendu d'une recherche (affiché dans l'appli et dans le journal)
+const wantLabel = (w) => (w.kind === 'movie' ? 'film' : w.kind === 'season' ? `saison ${w.season} complète` : `S${autoPad(w.season)}E${autoPad(w.episode)}`);
+function autoReport(item, want, res) {
+  const kept = res.results.filter((r) => !r.rejected);
+  const reasons = {};
+  for (const r of res.results) if (r.rejected) reasons[r.rejected.replace(/[\d.,]+ Go \(max[^)]*\)/, 'trop lourd')] = (reasons[r.rejected.replace(/[\d.,]+ Go \(max[^)]*\)/, 'trop lourd')] || 0) + 1;
+  const top = Object.entries(reasons).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, n]) => `${n} ${k}`);
+  item.lastReport = {
+    at: new Date().toISOString(),
+    want: wantLabel(want),
+    total: res.results.length,
+    kept: kept.length,
+    best: kept[0] ? kept[0].title : null,
+    sites: res.status.map((x) => ({ name: x.name, count: x.count, error: x.error || null, skipped: Boolean(x.skipped) })),
+    reasons: top,
+  };
+  const sites = res.status.map((x) => `${x.name} ${x.error ? `erreur (${x.error})` : x.skipped ? 'limite atteinte' : x.count}`).join(', ');
+  autoLog(
+    `${item.title} · ${wantLabel(want)} : ${res.results.length} trouvé(s) [${sites || 'aucun indexeur'}]${kept.length ? ` → ${kept[0].title}` : res.results.length ? ` → rien de bon (${top.join(', ')})` : ''}`,
+    kept.length ? 'info' : 'warn'
+  );
+}
+
 // ——— Recherche automatique de ce qui manque ———
 let autoSearching = false;
 async function autoSearchTick(force = false) {
@@ -4365,13 +4388,18 @@ async function autoSearchTick(force = false) {
       for (const want of wanted.slice(0, 4)) {
         if (active() >= pf.maxActive) break;
         searches++;
-        const { results } = await autoSearch(item, want);
+        item.searching = wantLabel(want);
+        const res1 = await autoSearch(item, want);
+        autoReport(item, want, res1);
+        const results = res1.results;
         let best = results.find((r) => !r.rejected);
         if (!best && want.kind === 'season') {
           // Pas de pack : on passe aux épisodes de cette saison
           for (const e of want.episodes.slice(0, 3)) {
             const w2 = { kind: 'episode', season: want.season, episode: e };
+            item.searching = wantLabel(w2);
             const r2 = await autoSearch(item, w2);
+            autoReport(item, w2, r2);
             searches++;
             const b2 = r2.results.find((r) => !r.rejected);
             if (b2) {
@@ -4384,6 +4412,7 @@ async function autoSearchTick(force = false) {
         if (best) await autoGrab(item, best, want).then(() => (grabbed = true)).catch(() => {});
         if (grabbed && want.kind === 'movie') break;
       }
+      item.searching = null;
       item.fails = grabbed ? 0 : (item.fails || 0) + 1;
       item.note = grabbed ? 'téléchargement lancé' : 'aucune version qui correspond au profil pour l’instant';
       // Pas trouvé : on réessaie de moins en moins souvent (1 h, 3 h, 6 h, puis 12 h)
@@ -4395,6 +4424,7 @@ async function autoSearchTick(force = false) {
   } catch (e) {
     autoLog(`recherche : ${e.message}`, 'error');
   } finally {
+    for (const i of auto.items) i.searching = null;
     autoSearching = false;
   }
 }
@@ -4519,6 +4549,8 @@ function publicItem(item) {
     nextSearch: item.nextSearch ? new Date(item.nextSearch).toISOString() : null,
     lastSearch: item.lastSearch || null,
     active: gs.filter((g) => ['sent', 'downloading', 'importing'].includes(g.state)).length,
+    searching: item.searching || null,
+    lastReport: item.lastReport || null,
   };
 }
 
