@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.125 — 2 novembre 2026
+
 - Lecture toujours en qualité d'origine : le choix 1080p / 720p / 480p est retiré (la conversion par le serveur prenait trop de processeur).
 
 ## 1.0.124 — 1 novembre 2026
