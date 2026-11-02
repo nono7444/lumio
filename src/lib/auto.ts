@@ -49,6 +49,16 @@ export type AutoItem = {
   nextSearch: string | null;
   lastSearch: string | null;
   active: number;
+  searching: string | null;
+  lastReport: {
+    at: string;
+    want: string;
+    total: number;
+    kept: number;
+    best: string | null;
+    sites: { name: string; count: number; error: string | null; skipped: boolean }[];
+    reasons: string[];
+  } | null;
 };
 export type AutoGrab = {
   id: string;

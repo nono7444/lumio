@@ -132,6 +132,14 @@ function Suivi({ st, reload, onItem }: { st: AutoState; reload: () => void; onIt
   const recent = st.grabs.filter((g) => !['sent', 'downloading', 'importing'].includes(g.state)).slice(0, 12);
   return (
     <>
+      {st.items.some((i) => i.searching) ? (
+        <View style={[styles.card, { borderWidth: 1, borderColor: C.accent }]}>
+          <ActivityIndicator color={C.accent} />
+          <Text style={[styles.title, { flex: 1 }]} numberOfLines={2}>
+            Recherche en cours : {st.items.filter((i) => i.searching).map((i) => `${i.title} · ${i.searching}`).join(', ')}
+          </Text>
+        </View>
+      ) : null}
       <Text style={styles.h2}>En cours</Text>
       {active.length ? active.map((g) => <GrabRow key={g.id} g={g} reload={reload} />) : <Text style={styles.dim}>Aucun téléchargement en cours.</Text>}
 
@@ -163,10 +171,18 @@ function Suivi({ st, reload, onItem }: { st: AutoState; reload: () => void; onIt
               {i.paused ? 'En pause · ' : ''}
               {i.type === 'tv' ? `Saisons ${i.seasons.join(', ') || '—'} · ` : ''}
               {lastPart(i.folderPath)} · {i.note ?? 'en attente'}
-              {i.nextSearch && !i.active ? ` · prochaine recherche ${inMin(i.nextSearch)}` : ''}
+              {i.nextSearch && !i.active && !i.searching ? ` · prochaine recherche ${inMin(i.nextSearch)}` : ''}
             </Text>
+            {i.searching ? <Text style={[styles.dim, { color: C.accent }]}>Recherche : {i.searching}…</Text> : null}
+            {!i.searching && i.lastReport ? (
+              <Text style={[styles.dim, { color: i.lastReport.kept ? C.success : C.warning }]} numberOfLines={3}>
+                {ago(i.lastReport.at)} · {i.lastReport.want} : {i.lastReport.total} trouvé(s)
+                {i.lastReport.sites.length ? ` (${i.lastReport.sites.map((x) => `${x.name} ${x.error ? 'erreur' : x.skipped ? 'limite' : x.count}`).join(', ')})` : ' (aucun indexeur actif)'}
+                {i.lastReport.kept ? ` → ${i.lastReport.best}` : i.lastReport.total ? ` → écartés : ${i.lastReport.reasons.join(', ')}` : ''}
+              </Text>
+            ) : null}
           </View>
-          {i.active ? <ActivityIndicator color={C.accent} /> : <Ionicons name="chevron-forward" size={16} color={C.textDim} />}
+          {i.active || i.searching ? <ActivityIndicator color={C.accent} /> : <Ionicons name="chevron-forward" size={16} color={C.textDim} />}
         </Pressable>
       ))}
 
@@ -175,9 +191,9 @@ function Suivi({ st, reload, onItem }: { st: AutoState; reload: () => void; onIt
         <GrabRow key={g.id} g={g} reload={reload} />
       ))}
 
-      <Section title="Journal" id="auto-journal">
+      <Section title="Journal" id="auto-journal" defaultOpen>
         {st.log.slice(0, 40).map((l, k) => (
-          <Text key={k} style={[styles.log, l.level === 'error' && { color: C.danger }]}>
+          <Text key={k} style={[styles.log, l.level === 'error' && { color: C.danger }, l.level === 'warn' && { color: C.warning }]}>
             {new Date(l.at).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {l.msg}
           </Text>
         ))}
