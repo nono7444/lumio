@@ -68,7 +68,8 @@ export default function Player() {
     // TV (Shield…) : le lecteur Android natif décode l'image en matériel ; mpv y donnait le son sans l'image
     Platform.isTV ? 'native' : (settings.player ?? 'mpv')
   );
-  const [quality, setQuality] = useState(settings.quality || 'original');
+  // Toujours la qualité d'origine : la conversion par le serveur prenait trop de processeur
+  const [quality, setQuality] = useState('original');
   const [qualityOpen, setQualityOpen] = useState(false);
   const [source, setSource] = useState<Source | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -326,11 +327,6 @@ export default function Player() {
   ];
   const castBtn = (
     <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-      {p.kind === 'jellyfin' ? (
-        <Pressable onPress={() => setQualityOpen(true)} hitSlop={8} style={styles.qualityBtn}>
-          <Text style={styles.qualityText}>{qualityLabel}</Text>
-        </Pressable>
-      ) : null}
       {Platform.isTV ? null : <CastIcon />}
     </View>
   );

@@ -285,12 +285,6 @@ export default function SettingsScreen() {
             onChange={(v) => update({ player: v as 'mpv' | 'native' })}
           />
           )}
-          <Picker
-            label="Qualité par défaut (Jellyfin)"
-            options={QUALITIES.map((q) => ({ value: q.id, label: q.label }))}
-            value={settings.quality || 'original'}
-            onChange={(v) => update({ quality: String(v) })}
-          />
           <Toggle label="Enchaîner l'épisode suivant" value={settings.autoNext} onChange={(v) => update({ autoNext: v })} />
           {Platform.isTV ? null : <Toggle label="Vibrations au toucher" value={settings.haptics === true} onChange={(v) => update({ haptics: v })} />}
         </Section>
