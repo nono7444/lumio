@@ -6,7 +6,6 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
-- Bêta : Lumio Auto (Profil → Demandes → Lumio Auto) remplace Radarr et Sonarr. Tu y ajoutes tes indexeurs (Torznab ou Prowlarr). Il surveille les nouveautés par RSS et cherche ce qui manque, avec un profil français en 1080p et H.265. Il envoie à rdt-client ou à AllDebrid, puis range et renomme les fichiers pour Jellyfin.
 
 ## 1.0.125 — 2 novembre 2026
 
