@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.71.0';
+const VERSION = '3.72.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3565,7 +3565,7 @@ const AUTO_PROFILE = {
   h265: 'preferred', // 'required' | 'preferred' | 'any'
   h265Wait: 48, // sortie récente : on attend une version H.265 pendant ce nombre d'heures avant de prendre du H.264
   upgradeDays: 30, // version H.264 rangée : on cherche encore du H.265 (plus léger) pendant ce nombre de jours, puis on remplace
-  languages: ['multi', 'vff', 'truefrench', 'vf2', 'french', 'vfq'], // ordre de préférence
+  languages: ['multi', 'vff', 'truefrench', 'vf2', 'french'], // ordre de préférence (VFQ = doublage québécois : refusé sauf si on l'ajoute)
   maxMovieGb: 8,
   maxEpisodeGb: 2.5,
   minSeeders: 1,
@@ -3579,6 +3579,12 @@ const autoProfile = () => {
   if (c.profile && !c.profileV2) {
     c.profileV2 = true;
     if (c.profile.h265 === 'required') c.profile.h265 = 'preferred';
+    saveConfig();
+  }
+  // Plus de VFQ par défaut (doublage québécois, même dans un MULTI)
+  if (c.profile && !c.profileV3) {
+    c.profileV3 = true;
+    if (Array.isArray(c.profile.languages)) c.profile.languages = c.profile.languages.filter((l) => l !== 'vfq');
     saveConfig();
   }
   return { ...AUTO_PROFILE, ...(c.profile || {}) };
@@ -3972,6 +3978,8 @@ function autoScore(rel, item, want) {
   if (p.vostfr) no('VOSTFR seulement');
   else if (!p.langs.length) no('pas de version française indiquée');
   else if (!p.langs.some((l) => pf.languages.includes(l))) no(`langue non acceptée (${p.langs.join(', ').toUpperCase()})`);
+  // MULTI.VFQ : la piste française est québécoise ; refusée sauf si VFQ est dans les langues (ou VFF / TRUEFRENCH / VF2 aussi présents)
+  else if (p.langs.includes('vfq') && !pf.languages.includes('vfq') && !p.langs.some((l) => ['vff', 'truefrench', 'vf2'].includes(l))) no('VFQ (doublage québécois)');
   if (p.resolution && p.resolution > pf.resolution) no(`${p.resolution}p (trop lourd)`);
   else if (p.resolution !== pf.resolution && !(pf.allowLower && p.resolution >= 720)) no(p.resolution ? `${p.resolution}p (${pf.resolution}p demandé)` : 'résolution inconnue');
   if ((pf.h265 === 'required' || want.h265Only) && p.codec !== 'h265')
