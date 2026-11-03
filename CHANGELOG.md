@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.127 — 3 novembre 2026
+
 - Lumio Auto remplace Radarr, Sonarr et Prowlarr (nouvel onglet admin « Auto », jamais sur la TV). Il cherche chaque demande validée sur tes sites (C411, TR4KER…) par identifiant TMDB / IMDb, prend la version la plus légère en français 1080p (H.265 de préférence, attente puis remplacement automatique du H.264), et la range dans la bonne bibliothèque. Il faut le serveur Lumio 3.71.0.
 - Onglet Auto clarifié en quatre rubriques : Titres (à choisir, en cours, suivis ; fiche avec historique, recherches site par site et recherche interactive façon Radarr), Transferts (file d’attente avec vitesse et temps restant, « En partage » avec le ratio, historique), Sites (C411, Torznab, Prowlarr ; client au choix par site) et Réglages (qualité, qBittorrent et partage, AllDebrid, dossiers, liste noire, journal).
 - Téléchargement avec qBittorrent derrière le VPN (ProtonVPN via Gluetun) puis partage jusqu’au ratio ou à la durée choisis, rangement par lien dur (aucune place en plus), port du VPN recopié tout seul. AllDebrid reste disponible.
