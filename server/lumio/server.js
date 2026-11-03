@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.69.0';
+const VERSION = '3.70.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4228,6 +4228,45 @@ async function rdtFetch(p2, init = {}, retry = true) {
 }
 const rdtCategory = () => (autoCfg().rdt && autoCfg().rdt.category) || 'lumio';
 
+// qBittorrent (derrière le VPN Gluetun) : même API ; il partage (seed) après le téléchargement
+let qbitCookie = null;
+async function qbitFetch(p2, init = {}, retry = true) {
+  const c = autoCfg().qbit || {};
+  if (!c.url) throw new Error('adresse de qBittorrent manquante');
+  const base = String(c.url).replace(/\/+$/, '');
+  if (!qbitCookie) {
+    const r = await fetch(`${base}/api/v2/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Referer: base },
+      body: new URLSearchParams({ username: c.user || '', password: c.pass || '' }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const txt = await r.text();
+    if (!r.ok || /fail/i.test(txt)) throw new Error(r.status === 403 ? 'qBittorrent a bloqué l’adresse après trop d’essais : attends quelques minutes' : 'qBittorrent refuse l’identifiant ou le mot de passe');
+    qbitCookie = (r.headers.get('set-cookie') || '').split(';')[0] || 'SID=';
+  }
+  const r = await fetch(`${base}${p2}`, { ...init, headers: { ...(init.headers || {}), Cookie: qbitCookie, Referer: base }, signal: AbortSignal.timeout(30000) });
+  if (r.status === 403 && retry) {
+    qbitCookie = null;
+    return qbitFetch(p2, init, false);
+  }
+  if (!r.ok) throw new Error(`qBittorrent : HTTP ${r.status}`);
+  return r;
+}
+const qbitCategory = () => (autoCfg().qbit && autoCfg().qbit.category) || 'lumio';
+const CLIENT_LABEL = { rdt: 'rdt-client', qbit: 'qBittorrent', alldebrid: 'AllDebrid' };
+const tcFetch = (kind, p2, init) => (kind === 'qbit' ? qbitFetch(p2, init) : rdtFetch(p2, init));
+const tcCategory = (kind) => (kind === 'qbit' ? qbitCategory() : rdtCategory());
+/** Client d'une version : celui choisi pour son indexeur, sinon celui par défaut. */
+function autoClientFor(rel) {
+  const c = autoCfg();
+  const ix = autoIndexers().find((x) => x.id === rel.indexerId || x.name === rel.indexer);
+  const ok = (k) => ['rdt', 'qbit', 'alldebrid'].includes(k);
+  return ix && ok(ix.client) ? ix.client : ok(c.client) ? c.client : 'rdt';
+}
+// Objectif de partage (seed) : ratio ou durée, le premier atteint
+const autoSeed = () => ({ ratio: 1, days: 7, ...((autoCfg().seed) || {}) });
+
 // Empreinte d'un .torrent (SHA-1 du dictionnaire « info »), pour suivre le téléchargement
 function torrentHash(buf) {
   let i = 0;
@@ -4298,16 +4337,23 @@ async function fetchTorrent(rel) {
 /** Envoie la release au client choisi ; renvoie les infos de suivi. */
 async function autoSend(rel, item, grab) {
   const t = await fetchTorrent(rel);
-  const client = autoCfg().client === 'alldebrid' ? 'alldebrid' : 'rdt';
-  if (client === 'rdt') {
+  const client = autoClientFor(rel);
+  if (client === 'rdt' || client === 'qbit') {
     const fd = new FormData();
     if (t.buf) fd.append('torrents', new Blob([t.buf], { type: 'application/x-bittorrent' }), `${cleanName(rel.title)}.torrent`);
     else fd.append('urls', t.magnet);
-    fd.append('category', rdtCategory());
-    const r = await rdtFetch('/api/v2/torrents/add', { method: 'POST', body: fd });
+    fd.append('category', tcCategory(client));
+    if (client === 'qbit') {
+      // Un dossier de téléchargement par disque (/downloads/<disque>) : le fichier arrive sur le disque de sa
+      // bibliothèque, et le lien dur marche (sinon c'est une copie le temps du partage)
+      const dest = autoResolveFolder(item.type === 'movie' ? 'radarr' : 'sonarr', item.folderPath);
+      const qc = autoCfg().qbit || {};
+      if (dest && qc.perDisk !== false) fd.append('savepath', `${String(qc.remotePath || '/downloads').replace(/\/+$/, '')}/${dest.root}`);
+    }
+    const r = await tcFetch(client, '/api/v2/torrents/add', { method: 'POST', body: fd });
     const txt = await r.text();
-    if (/fail/i.test(txt)) throw new Error('rdt-client a refusé le torrent');
-    grab.client = 'rdt';
+    if (/fail/i.test(txt)) throw new Error(`${CLIENT_LABEL[client]} a refusé le torrent`);
+    grab.client = client;
     grab.hash = (t.buf ? torrentHash(t.buf) : magnetHash(t.magnet)) || rel.hash || null;
     return;
   }
@@ -4365,9 +4411,9 @@ async function autoGrab(item, rel, want, by = 'auto') {
   auto.grabs.unshift(grab);
   if (auto.grabs.length > 200) auto.grabs.length = 200;
   item.needsChoice = false;
-  autoEvent(item, 'sent', `${want.upgrade ? 'Version H.265 plus légère trouvée, elle remplacera l’ancienne. ' : ''}Envoyé à ${grab.client === 'rdt' ? 'rdt-client' : 'AllDebrid'} : ${rel.title}`, { indexer: rel.indexer, size: rel.size, by });
+  autoEvent(item, 'sent', `${want.upgrade ? 'Version H.265 plus légère trouvée, elle remplacera l’ancienne. ' : ''}Envoyé à ${CLIENT_LABEL[grab.client] || grab.client} : ${rel.title}`, { indexer: rel.indexer, size: rel.size, by });
   autoSave();
-  autoLog(`${item.title} : ${rel.title} envoyé à ${grab.client === 'rdt' ? 'rdt-client' : 'AllDebrid'} (${rel.indexer})`);
+  autoLog(`${item.title} : ${rel.title} envoyé à ${CLIENT_LABEL[grab.client] || grab.client} (${rel.indexer})`);
   notify({ title: '⬇️ Lumio Auto', message: `${item.title} · ${rel.title}`, tags: ['arrow_down'], click: 'lumio://activity' });
   return grab;
 }
@@ -4406,11 +4452,20 @@ function listFiles(dir, out = []) {
   return out;
 }
 /** Chemin rdt-client → chemin vu par Lumio (« /data/downloads/lumio/X » → « /media/jellyfin3/downloads/lumio/X »). */
-function rdtLocalPath(remote, name) {
-  const c = autoCfg().rdt || {};
+function rdtLocalPath(remote, name, kind = 'rdt') {
+  const c = autoCfg()[kind] || {};
   const tries = [];
   if (remote) {
-    const from = String(c.remotePath || '/data/downloads').replace(/\/+$/, '');
+    const from = String(c.remotePath || (kind === 'qbit' ? '/downloads' : '/data/downloads')).replace(/\/+$/, '');
+    // qBittorrent : /downloads/<disque>/X → <disque>/<dossier>/X
+    if (kind === 'qbit' && remote.startsWith(from + '/')) {
+      const [disk, ...rest] = remote.slice(from.length + 1).split('/');
+      if (disks().some((d) => d.name === disk)) {
+        try {
+          tries.push(safePath(disk, path.join(c.localFolder || 'downloads/qbit', ...rest)).full);
+        } catch {}
+      }
+    }
     if (c.localRoot && remote.startsWith(from)) {
       try {
         tries.push(safePath(c.localRoot, path.join(c.localFolder || '', remote.slice(from.length))).full);
@@ -4422,7 +4477,7 @@ function rdtLocalPath(remote, name) {
   if (c.localRoot && name) {
     try {
       const base = safePath(c.localRoot, c.localFolder || '').full;
-      tries.push(path.join(base, rdtCategory(), name), path.join(base, name));
+      tries.push(path.join(base, tcCategory(kind), name), path.join(base, name));
     } catch {}
   }
   return tries.find((p2) => fs.existsSync(p2)) || null;
@@ -4431,6 +4486,16 @@ function rdtLocalPath(remote, name) {
 const autoPad = (n) => String(n).padStart(2, '0');
 const safeFile = (n) => String(n).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/\.+$/, '');
 
+/** qBittorrent : lien dur (le même fichier à deux endroits, sans place en plus) pour continuer à partager ; copie si impossible. */
+async function linkFile(src, dest) {
+  await fs.promises.mkdir(path.dirname(dest), { recursive: true });
+  if (fs.existsSync(dest)) await fs.promises.unlink(dest).catch(() => {});
+  try {
+    await fs.promises.link(src, dest);
+  } catch {
+    await fs.promises.copyFile(src, dest);
+  }
+}
 async function moveFile(src, dest) {
   await fs.promises.mkdir(path.dirname(dest), { recursive: true });
   if (fs.existsSync(dest)) await fs.promises.unlink(dest).catch(() => {});
@@ -4461,6 +4526,8 @@ function seasonDir(base, n) {
 }
 
 async function autoImport(grab, srcPath) {
+  // qBittorrent : le fichier reste en place pour le partage, la bibliothèque reçoit un lien dur
+  const place = grab.client === 'qbit' ? linkFile : moveFile;
   const item = auto.items.find((i) => i.id === grab.itemId);
   if (!item) throw new Error('titre retiré de Lumio Auto');
   const files = listFiles(srcPath);
@@ -4477,8 +4544,8 @@ async function autoImport(grab, srcPath) {
     try {
       for (const f of fs.readdirSync(dir)) if (VIDEO_EXT.test(f) && f !== `${base}${path.extname(main)}`) fs.unlinkSync(path.join(dir, f));
     } catch {}
-    await moveFile(main, path.join(dir, `${base}${path.extname(main)}`));
-    for (const s of files.filter((f) => SUB_EXT.test(f))) await moveFile(s, path.join(dir, `${base}.${path.basename(s).split('.').slice(-2).join('.')}`)).catch(() => {});
+    await place(main, path.join(dir, `${base}${path.extname(main)}`));
+    for (const s of files.filter((f) => SUB_EXT.test(f))) await place(s, path.join(dir, `${base}.${path.basename(s).split('.').slice(-2).join('.')}`)).catch(() => {});
     done.push('movie');
   } else {
     const base = await seriesDir(item);
@@ -4512,9 +4579,9 @@ async function autoImport(grab, srcPath) {
       try {
         for (const f of fs.readdirSync(dir)) if (VIDEO_EXT.test(f) && f.startsWith(`${name}.`) && f !== `${name}${path.extname(v)}`) fs.unlinkSync(path.join(dir, f));
       } catch {}
-      await moveFile(v, path.join(dir, `${name}${path.extname(v)}`));
+      await place(v, path.join(dir, `${name}${path.extname(v)}`));
       const stem = path.basename(v, path.extname(v));
-      for (const s of files.filter((f) => SUB_EXT.test(f) && path.basename(f).startsWith(stem))) await moveFile(s, path.join(dir, `${name}${path.basename(s).slice(stem.length)}`)).catch(() => {});
+      for (const s of files.filter((f) => SUB_EXT.test(f) && path.basename(f).startsWith(stem))) await place(s, path.join(dir, `${name}${path.basename(s).slice(stem.length)}`)).catch(() => {});
       for (let e = ep; e <= epEnd; e++) done.push(`${season}:${e}`);
     }
     if (!done.length) throw new Error('aucun épisode reconnu dans le téléchargement');
@@ -4533,7 +4600,8 @@ async function autoImport(grab, srcPath) {
 
 async function autoCleanup(grab, srcPath) {
   try {
-    if (grab.client === 'rdt' && grab.hash) await rdtFetch('/api/v2/torrents/delete', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ hashes: grab.hash, deleteFiles: 'true' }) });
+    if ((grab.client === 'rdt' || grab.client === 'qbit') && grab.hash)
+      await tcFetch(grab.client, '/api/v2/torrents/delete', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ hashes: grab.hash, deleteFiles: 'true' }) });
   } catch {}
   try {
     if (grab.client === 'alldebrid' && srcPath && srcPath.includes(`${path.sep}.lumio-auto${path.sep}`)) await fs.promises.rm(srcPath, { recursive: true, force: true });
@@ -4554,6 +4622,12 @@ const RDT_STATES = {
   moving: 'déplacement',
   error: 'erreur',
   missingFiles: 'fichiers manquants',
+  uploading: 'terminé',
+  stalledUP: 'terminé',
+  pausedUP: 'terminé',
+  stoppedUP: 'terminé',
+  queuedUP: 'terminé',
+  forcedUP: 'terminé',
 };
 let autoTicking = false;
 async function autoProgressTick() {
@@ -4561,24 +4635,26 @@ async function autoProgressTick() {
   autoTicking = true;
   try {
     const active = auto.grabs.filter((g) => ['sent', 'downloading'].includes(g.state));
-    let rdtList = null;
-    if (active.some((g) => g.client === 'rdt')) {
-      try {
-        rdtList = await (await rdtFetch(`/api/v2/torrents/info?category=${encodeURIComponent(rdtCategory())}`)).json();
-      } catch (e) {
-        autoLog(`rdt-client injoignable (${e.message})`, 'error');
+    const lists = {};
+    for (const kind of ['rdt', 'qbit'])
+      if (active.some((g) => g.client === kind)) {
+        try {
+          lists[kind] = await (await tcFetch(kind, `/api/v2/torrents/info?category=${encodeURIComponent(tcCategory(kind))}`)).json();
+        } catch (e) {
+          autoLog(`${CLIENT_LABEL[kind]} injoignable (${e.message})`, 'error');
+        }
       }
-    }
     for (const g of active) {
       let src = null;
       let finished = false;
       let failed = null;
       if (g.paused) continue;
-      if (g.client === 'rdt') {
+      if (g.client === 'rdt' || g.client === 'qbit') {
+        const rdtList = lists[g.client];
         if (!rdtList) continue;
         const t = rdtList.find((x) => (g.hash && x.hash && x.hash.toLowerCase() === g.hash) || x.name === g.release.title);
         if (!t) {
-          if (Date.now() - Date.parse(g.startedAt) > 15 * 60e3) failed = 'disparu de rdt-client';
+          if (Date.now() - Date.parse(g.startedAt) > 15 * 60e3) failed = `disparu de ${CLIENT_LABEL[g.client]}`;
         } else {
           g.hash = g.hash || (t.hash || '').toLowerCase();
           g.progress = Math.round((Number(t.progress) || 0) * 100);
@@ -4590,12 +4666,12 @@ async function autoProgressTick() {
           if (/^(paused|stopped)DL$/i.test(t.state || '')) g.lastMoveAt = Date.now();
           g.statusText = RDT_STATES[t.state] || (Number(t.progress) >= 1 ? 'terminé, en attente du rangement' : 'téléchargement');
           g.state = 'downloading';
-          if (/error|missing/i.test(t.state || '')) failed = `rdt-client : ${t.state}`;
-          else if (Number(t.progress) >= 1 && !/^(downloading|metaDL|queuedDL|stalledDL|checkingDL|allocating|pausedDL|forcedDL)$/i.test(t.state || '')) {
-            src = rdtLocalPath(t.content_path || (t.save_path && path.join(t.save_path, t.name)), t.name);
+          if (/error|missing/i.test(t.state || '')) failed = `${CLIENT_LABEL[g.client]} : ${t.state}`;
+          else if (Number(t.progress) >= 1 && !/^(downloading|metaDL|forcedMetaDL|queuedDL|stalledDL|checkingDL|allocating|pausedDL|stoppedDL|forcedDL|moving)$/i.test(t.state || '')) {
+            src = rdtLocalPath(t.content_path || (t.save_path && path.join(t.save_path, t.name)), t.name, g.client);
             if (src) finished = true;
             else if (!g.missingSince) g.missingSince = Date.now();
-            else if (Date.now() - g.missingSince > 30 * 60e3) failed = 'fichiers introuvables (vérifie les chemins rdt-client dans les réglages)';
+            else if (Date.now() - g.missingSince > 30 * 60e3) failed = `fichiers introuvables (vérifie les chemins ${CLIENT_LABEL[g.client]} dans les réglages)`;
           }
         }
       } else {
@@ -4640,7 +4716,10 @@ async function autoProgressTick() {
           g.state = 'done';
           g.progress = 100;
           g.doneAt = new Date().toISOString();
-          await autoCleanup(g, src);
+          if (g.client === 'qbit') {
+            g.seeding = true;
+            g.seedSince = Date.now();
+          } else await autoCleanup(g, src);
           autoLog(`${g.title} : importé (${done.includes('movie') ? 'film' : done.length + ' épisode(s)'})`);
           autoEvent(auto.items.find((i) => i.id === g.itemId), 'imported', `Rangé dans la bibliothèque (${done.includes('movie') ? 'film' : done.length + ' épisode(s)'})`);
           notify({ title: '✅ Lumio Auto · importé', message: g.title, tags: ['white_check_mark'], click: 'lumio://activity' });
@@ -4859,6 +4938,46 @@ async function autoRssTick() {
 }
 
 setInterval(() => autoProgressTick().catch(() => {}), 10_000);
+
+// ——— Partage (seed) qBittorrent : jusqu'au ratio ou à la durée voulus, puis le torrent est retiré ———
+// (le fichier de la bibliothèque est un lien dur : il reste quand le torrent et sa copie sont supprimés)
+let autoSeedBusy = false;
+async function autoSeedTick() {
+  if (!autoOn() || autoSeedBusy) return;
+  const seeding = auto.grabs.filter((g) => g.seeding && g.client === 'qbit' && g.hash);
+  if (!seeding.length) return;
+  autoSeedBusy = true;
+  try {
+    const list = await (await qbitFetch(`/api/v2/torrents/info?hashes=${seeding.map((g) => g.hash).join('|')}`)).json();
+    const goal = autoSeed();
+    for (const g of seeding) {
+      const t = list.find((x) => (x.hash || '').toLowerCase() === g.hash);
+      if (!t) {
+        g.seeding = false;
+        g.seedEnd = 'retiré de qBittorrent';
+        continue;
+      }
+      g.ratio = Math.round((Number(t.ratio) || 0) * 100) / 100;
+      g.uploaded = Number(t.uploaded) || 0;
+      g.seedTime = Number(t.seeding_time) || Math.round((Date.now() - (g.seedSince || Date.now())) / 1000);
+      g.upSpeed = Number(t.upspeed) || 0;
+      const byRatio = goal.ratio > 0 && g.ratio >= goal.ratio;
+      const byTime = goal.days > 0 && g.seedTime >= goal.days * 86400;
+      if (byRatio || byTime) {
+        await qbitFetch('/api/v2/torrents/delete', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ hashes: g.hash, deleteFiles: 'true' }) }).catch(() => {});
+        g.seeding = false;
+        g.seedEnd = byRatio ? `ratio ${g.ratio} atteint` : `${goal.days} j de partage`;
+        autoLog(`${g.title} : partage terminé (${g.seedEnd}), torrent retiré`);
+      }
+    }
+    autoSave();
+  } catch (e) {
+    autoLog(`partage : qBittorrent injoignable (${e.message})`, 'warn');
+  } finally {
+    autoSeedBusy = false;
+  }
+}
+setInterval(() => autoSeedTick().catch(() => {}), 2 * 60_000);
 setInterval(() => autoSearchTick().catch(() => {}), 5 * 60_000);
 let autoRssLast = 0;
 setInterval(() => {
@@ -4925,8 +5044,8 @@ function autoQueue() {
         size,
         sizeleft: Math.max(0, size - (g.downloaded || Math.round((size * (g.progress || 0)) / 100))),
         timeleft: fmt(g.eta),
-        downloadClient: `Lumio Auto · ${g.client === 'alldebrid' ? 'AllDebrid' : 'rdt-client'}`,
-        errorMessage: /bloqué|erreur|manquants/.test(g.statusText || '') ? `rdt-client : ${g.statusText}` : undefined,
+        downloadClient: `Lumio Auto · ${CLIENT_LABEL[g.client] || g.client}`,
+        errorMessage: /bloqué|erreur|manquants/.test(g.statusText || '') ? `${CLIENT_LABEL[g.client] || g.client} : ${g.statusText}` : undefined,
         movie: item.type === 'movie' ? { title: item.title, tmdbId: item.tmdbId, year: item.year } : undefined,
         series: item.type === 'tv' ? { title: item.title, tvdbId: item.tvdbId, tmdbId: item.tmdbId } : undefined,
         episode: sn ? { seasonNumber: sn, episodeNumber: ep } : undefined,
@@ -5077,7 +5196,9 @@ async function autoRoutes(req, res, p, q, user) {
   if (req.method === 'GET' && p === '/api/auto/state') {
     send(res, 200, {
       enabled: autoOn(),
-      client: c.client === 'alldebrid' ? 'alldebrid' : 'rdt',
+      client: ['alldebrid', 'qbit'].includes(c.client) ? c.client : 'rdt',
+      qbit: { url: (c.qbit || {}).url || '', user: (c.qbit || {}).user || '', hasPass: Boolean((c.qbit || {}).pass), category: qbitCategory(), remotePath: (c.qbit || {}).remotePath || '/downloads', localRoot: (c.qbit || {}).localRoot || '', localFolder: (c.qbit || {}).localFolder || 'downloads/qbit' },
+      seed: autoSeed(),
       rdt: { url: (c.rdt || {}).url || '', user: (c.rdt || {}).user || '', hasPass: Boolean((c.rdt || {}).pass), category: rdtCategory(), remotePath: (c.rdt || {}).remotePath || '/data/downloads', localRoot: (c.rdt || {}).localRoot || '', localFolder: (c.rdt || {}).localFolder || 'downloads' },
       alldebrid: Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey),
       profile: autoProfile(),
@@ -5098,7 +5219,17 @@ async function autoRoutes(req, res, p, q, user) {
       if (b.enabled) setTimeout(() => autoAdoptAll().catch(() => {}), 1000);
       autoLog(b.enabled ? 'activé : les demandes passent par Lumio Auto' : 'désactivé : les demandes repassent par Radarr / Sonarr');
     }
-    if (b.client === 'rdt' || b.client === 'alldebrid') c.client = b.client;
+    if (['rdt', 'alldebrid', 'qbit'].includes(b.client)) c.client = b.client;
+    if (b.qbit && typeof b.qbit === 'object') {
+      c.qbit = c.qbit || {};
+      for (const k of ['url', 'user', 'category', 'remotePath', 'localRoot', 'localFolder']) if (typeof b.qbit[k] === 'string') c.qbit[k] = b.qbit[k].trim();
+      if (typeof b.qbit.pass === 'string' && b.qbit.pass) c.qbit.pass = b.qbit.pass; // jamais renvoyé à l'appli
+      qbitCookie = null;
+    }
+    if (b.seed && typeof b.seed === 'object') {
+      c.seed = { ...autoSeed() };
+      for (const k of ['ratio', 'days']) if (Number(b.seed[k]) >= 0) c.seed[k] = Number(b.seed[k]);
+    }
     if (b.rdt && typeof b.rdt === 'object') {
       c.rdt = c.rdt || {};
       for (const k of ['url', 'user', 'category', 'remotePath', 'localRoot', 'localFolder']) if (typeof b.rdt[k] === 'string') c.rdt[k] = b.rdt[k].trim();
@@ -5143,6 +5274,7 @@ async function autoRoutes(req, res, p, q, user) {
     if (Number(b.maxPerHour) > 0) ix.maxPerHour = Math.min(500, Number(b.maxPerHour));
     for (const k of ['catMovie', 'catTv', 'catAnime']) if (typeof b[k] === 'string' && b[k].trim()) ix[k] = b[k].replace(/[^\d,]/g, '');
     if (ix.type === 'prowlarr') ix.rss = false;
+    if (typeof b.client === 'string') ix.client = ['rdt', 'qbit', 'alldebrid'].includes(b.client) ? b.client : '';
     ix.caps = null;
     c.indexers = list;
     saveConfig();
@@ -5171,7 +5303,25 @@ async function autoRoutes(req, res, p, q, user) {
     }
   }
   if (req.method === 'POST' && p === '/api/auto/test-client') {
-    if (c.client === 'alldebrid') {
+    const tb = await readBody(req).catch(() => ({}));
+    const kind = ['rdt', 'qbit', 'alldebrid'].includes(tb.client) ? tb.client : c.client === 'alldebrid' ? 'alldebrid' : c.client === 'qbit' ? 'qbit' : 'rdt';
+    if (kind === 'qbit') {
+      qbitCookie = null;
+      try {
+        const ver = await (await qbitFetch('/api/v2/app/version')).text();
+        const pref = await (await qbitFetch('/api/v2/app/preferences')).json().catch(() => ({}));
+        const list = await (await qbitFetch('/api/v2/torrents/info')).json();
+        const iface = pref.current_network_interface;
+        send(res, 200, {
+          ok: true,
+          message: `qBittorrent ${ver} répond (${list.length} torrent(s)) · port ${pref.listen_port || '?'}${iface ? ` · interface ${iface}` : ''}.${(c.qbit && c.qbit.localRoot) ? '' : ' Choisis le disque des téléchargements vu par Lumio.'}`,
+        });
+      } catch (e) {
+        send(res, 200, { ok: false, message: netError(e) });
+      }
+      return true;
+    }
+    if (kind === 'alldebrid') {
       send(res, 200, process.env.ALLDEBRID_KEY || config.alldebridKey ? { ok: true, message: 'Clé AllDebrid présente sur le serveur.' } : { ok: false, message: 'Clé AllDebrid non configurée.' });
       return true;
     }
@@ -5310,6 +5460,8 @@ async function autoRoutes(req, res, p, q, user) {
       if (item && opt('search', true)) item.nextSearch = Date.now() + 10e3;
       else if (item) item.nextSearch = Date.now() + 6 * 3600e3;
     } else {
+      // Version en partage : retirée de qBittorrent aussi (la bibliothèque garde son fichier)
+      if (g.seeding && opt('client', true)) await autoCleanup(g, null);
       if (opt('blocklist', false)) autoBlock(g.release, `retiré par ${user.name}`);
       if (item && opt('search', false)) item.nextSearch = Date.now() + 10e3;
       auto.grabs = auto.grabs.filter((x) => x !== g);
@@ -5333,7 +5485,10 @@ async function autoRoutes(req, res, p, q, user) {
         g.state = 'done';
         g.progress = 100;
         g.doneAt = new Date().toISOString();
-        await autoCleanup(g, g.importSrc);
+        if (g.client === 'qbit') {
+          g.seeding = true;
+          g.seedSince = Date.now();
+        } else await autoCleanup(g, g.importSrc);
         delete g.importSrc;
         autoEvent(auto.items.find((i) => i.id === g.itemId), 'imported', `Rangé à la main par ${user.name} (${done.includes('movie') ? 'film' : done.length + ' épisode(s)'})`);
         autoCompleteRequests();
@@ -5348,20 +5503,20 @@ async function autoRoutes(req, res, p, q, user) {
       return true;
     }
     if (!['sent', 'downloading'].includes(g.state)) throw new HttpError(400, 'Ce téléchargement n’est plus en cours');
-    if (g.client !== 'rdt' || !g.hash) throw new HttpError(400, 'Pause possible seulement avec rdt-client');
+    if (!['rdt', 'qbit'].includes(g.client) || !g.hash) throw new HttpError(400, 'Pause possible seulement avec rdt-client ou qBittorrent');
     const hashes = new URLSearchParams({ hashes: g.hash });
     const call = async (a, b) => {
       try {
-        await rdtFetch(`/api/v2/torrents/${a}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: hashes });
+        await tcFetch(g.client, `/api/v2/torrents/${a}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: hashes });
       } catch {
-        await rdtFetch(`/api/v2/torrents/${b}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: hashes });
+        await tcFetch(g.client, `/api/v2/torrents/${b}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: hashes });
       }
     };
     try {
       if (action === 'pause') await call('pause', 'stop');
       else await call('resume', 'start');
     } catch (e) {
-      throw new HttpError(502, `rdt-client n’accepte pas la ${action === 'pause' ? 'pause' : 'reprise'} : ${e.message}`);
+      throw new HttpError(502, `${CLIENT_LABEL[g.client]} n’accepte pas la ${action === 'pause' ? 'pause' : 'reprise'} : ${e.message}`);
     }
     g.paused = action === 'pause';
     g.statusText = g.paused ? 'en pause' : 'reprise…';

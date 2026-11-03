@@ -33,6 +33,7 @@ export type AutoIndexer = {
   status: { ok: boolean; at: string; message?: string; count?: number; url?: string } | null;
   callsLastHour: number;
   caps?: { tv: string[] | null; movie: string[] | null } | null;
+  client?: '' | 'rdt' | 'qbit' | 'alldebrid';
 };
 export type AutoTry = { query: string; count: number; error: string | null; skipped: boolean; url: string | null };
 export type AutoEvent = { at: string; type: 'added' | 'found' | 'none' | 'sent' | 'imported' | 'failed'; msg: string; indexer?: string; size?: number; by?: string };
@@ -86,7 +87,13 @@ export type AutoGrab = {
   clientState?: string | null;
   paused?: boolean;
   importSrc?: string;
-  client?: 'rdt' | 'alldebrid';
+  client?: 'rdt' | 'alldebrid' | 'qbit';
+  seeding?: boolean;
+  ratio?: number;
+  uploaded?: number;
+  seedTime?: number;
+  upSpeed?: number;
+  seedEnd?: string;
   error?: string;
   startedAt: string;
   doneAt?: string;
@@ -95,9 +102,11 @@ export type AutoGrab = {
 export type AutoFolder = { path: string; root: string; folder: string; name: string };
 export type AutoState = {
   enabled: boolean;
-  client: 'rdt' | 'alldebrid';
+  client: 'rdt' | 'alldebrid' | 'qbit';
   adoptable?: number;
   rdt: { url: string; user: string; hasPass: boolean; category: string; remotePath: string; localRoot: string; localFolder: string };
+  qbit?: { url: string; user: string; hasPass: boolean; category: string; remotePath: string; localRoot: string; localFolder: string };
+  seed?: { ratio: number; days: number };
   alldebrid: boolean;
   profile: AutoProfile;
   indexers: AutoIndexer[];
@@ -131,12 +140,13 @@ const json = (b: unknown) => ({ body: JSON.stringify(b) });
 
 export const autoApi = {
   state: (s: Settings) => serverCall<AutoState>(s, '/api/auto/state'),
-  save: (s: Settings, b: Partial<{ enabled: boolean; client: string; rdt: Record<string, string>; profile: Partial<AutoProfile>; folders: { movie?: string | null; tv?: string | null } }>) =>
+  save: (s: Settings, b: Partial<{ enabled: boolean; client: string; rdt: Record<string, string>; qbit: Record<string, string | undefined>; seed: { ratio: number; days: number }; profile: Partial<AutoProfile>; folders: { movie?: string | null; tv?: string | null } }>) =>
     serverCall(s, '/api/auto/settings', { method: 'PUT', ...json(b) }),
   saveIndexer: (s: Settings, b: Partial<AutoIndexer> & { key?: string }) => serverCall<{ indexer: AutoIndexer }>(s, '/api/auto/indexers', { method: 'POST', ...json(b) }),
   removeIndexer: (s: Settings, id: string) => serverCall(s, `/api/auto/indexers/${id}`, { method: 'DELETE' }),
   testIndexer: (s: Settings, id: string) => serverCall<{ ok: boolean; message: string; sample?: string[]; url?: string; caps?: string }>(s, `/api/auto/indexers/${id}/test`, { method: 'POST' }),
-  testClient: (s: Settings) => serverCall<{ ok: boolean; message: string }>(s, '/api/auto/test-client', { method: 'POST' }),
+  testClient: (s: Settings, client?: 'rdt' | 'qbit' | 'alldebrid') =>
+    serverCall<{ ok: boolean; message: string }>(s, '/api/auto/test-client', { method: 'POST', body: JSON.stringify({ client }) }),
   addItem: (s: Settings, b: { type: 'movie' | 'tv'; tmdbId: number; title?: string; seasons?: number[]; folderPath?: string }) =>
     serverCall<{ item: AutoItem }>(s, '/api/auto/items', { method: 'POST', ...json(b) }),
   updateItem: (s: Settings, id: string, b: Partial<{ seasons: number[]; future: boolean; folderPath: string; anime: boolean }>) =>

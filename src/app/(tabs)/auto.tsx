@@ -14,6 +14,7 @@ import { autoApi, gb, type AutoEvent, type AutoGrab, type AutoIndexer, type Auto
 import { useSettings } from '@/lib/settings';
 
 type Tab = 'demandes' | 'telechargements' | 'indexeurs' | 'reglages';
+const CLIENT_LABEL: Record<string, string> = { rdt: 'rdt-client', qbit: 'qBittorrent', alldebrid: 'AllDebrid' };
 const RUNNING: AutoGrab['state'][] = ['sent', 'downloading', 'importing'];
 const STATE_LABEL: Record<AutoGrab['state'], string> = { sent: 'envoyé', downloading: 'téléchargement', importing: 'rangement', done: 'terminé', failed: 'échec' };
 const STATE_COLOR: Record<AutoGrab['state'], string> = { sent: C.warning, downloading: C.accent, importing: C.accent, done: C.success, failed: C.danger };
@@ -580,6 +581,17 @@ function IndexerEditor({ ix, onClose, onSaved }: { ix: Partial<AutoIndexer> & { 
         <Toggle label="Recherche des titres qui manquent" value={f.search !== false} onChange={(v) => set('search', v)} />
         {type !== 'prowlarr' ? <Toggle label="Veille RSS (nouvelles sorties)" value={f.rss !== false} onChange={(v) => set('rss', v)} /> : null}
         <Picker
+          label="Télécharger avec"
+          options={[
+            { value: '', label: 'Client par défaut' },
+            { value: 'qbit', label: 'qBittorrent', hint: 'trackers privés : partage' },
+            { value: 'rdt', label: 'rdt-client' },
+            { value: 'alldebrid', label: 'AllDebrid direct' },
+          ]}
+          value={f.client ?? ''}
+          onChange={(v) => set('client', v)}
+        />
+        <Picker
           label="Requêtes maximum par heure"
           options={[15, 30, 60, 120, 300].map((n) => ({ value: n, label: String(n) }))}
           value={f.maxPerHour ?? 15}
@@ -672,6 +684,7 @@ const grabStatus = (g: AutoGrab) =>
 function Telechargements({ st, reload, onItem }: { st: AutoState; reload: () => void; onItem: (id: string) => void }) {
   const [filter, setFilter] = useState<'all' | 'done' | 'failed'>('all');
   const queue = st.grabs.filter((g) => RUNNING.includes(g.state));
+  const seeding = st.grabs.filter((g) => g.seeding);
   const history = st.grabs.filter((g) => !RUNNING.includes(g.state) && (filter === 'all' || g.state === filter));
   const speed = queue.reduce((n, g) => n + (g.paused ? 0 : g.speed || 0), 0);
   const left = queue.reduce((n, g) => n + Math.max(0, (g.size || g.release.size || 0) - (g.downloaded || 0)), 0);
@@ -685,10 +698,42 @@ function Telechargements({ st, reload, onItem }: { st: AutoState; reload: () => 
           </Text>
         ) : null}
       </View>
-      {!queue.length ? <Text style={styles.help}>Rien en cours. Les versions envoyées à {st.client === 'alldebrid' ? 'AllDebrid' : 'rdt-client'} apparaissent ici, mises à jour toutes les 10 secondes.</Text> : null}
+      {!queue.length ? <Text style={styles.help}>Rien en cours. Les versions envoyées à {CLIENT_LABEL[st.client] ?? st.client} apparaissent ici, mises à jour toutes les 10 secondes.</Text> : null}
       {queue.map((g) => (
         <GrabRow key={g.id} g={g} reload={reload} onItem={onItem} />
       ))}
+
+      {seeding.length ? (
+        <>
+          <View style={[styles.rowBetween, { marginTop: 8 }]}>
+            <Text style={styles.h2}>En partage ({seeding.length})</Text>
+            <Text style={styles.small}>↑ {fmtSpeed(seeding.reduce((n, g) => n + (g.upSpeed || 0), 0))}</Text>
+          </View>
+          <Text style={styles.help}>
+            qBittorrent continue de partager jusqu’au ratio {st.seed?.ratio || '—'} ou {st.seed?.days || '—'} jours, puis retire le torrent. Le film reste dans la bibliothèque.
+          </Text>
+          {seeding.map((g) => {
+            const goal = st.seed ?? { ratio: 1, days: 7 };
+            const pct = Math.min(100, Math.max(goal.ratio ? ((g.ratio ?? 0) / goal.ratio) * 100 : 0, goal.days ? ((g.seedTime ?? 0) / (goal.days * 86400)) * 100 : 0));
+            return (
+              <View key={g.id} style={styles.card}>
+                <Ionicons name="arrow-up-circle" size={22} color={C.success} />
+                <View style={{ flex: 1, gap: 3 }}>
+                  <Text style={styles.title} numberOfLines={1}>
+                    {g.title} · {epLabel(g)}
+                  </Text>
+                  <Text style={styles.small}>
+                    ratio {g.ratio ?? 0} · {gb(g.uploaded ?? 0)} envoyés · {fmtEta(g.seedTime)} de partage{g.upSpeed ? ` · ↑ ${fmtSpeed(g.upSpeed)}` : ''}
+                  </Text>
+                  <View style={styles.bar}>
+                    <View style={[styles.barFill, { width: `${pct || 2}%`, backgroundColor: C.success }]} />
+                  </View>
+                </View>
+              </View>
+            );
+          })}
+        </>
+      ) : null}
 
       <View style={[styles.rowBetween, { marginTop: 8 }]}>
         <Text style={styles.h2}>Historique</Text>
@@ -776,7 +821,10 @@ function GrabSheet({ g, onClose, reload, onItem }: { g: AutoGrab; onClose: () =>
     ['Contenu', epLabel(g)],
     ['Indexeur', g.release.indexer],
     ['Sources', g.release.seeders != null ? String(g.release.seeders) : '—'],
-    ['Client', g.client === 'alldebrid' ? 'AllDebrid (direct)' : `rdt-client${g.clientState ? ` · ${g.clientState}` : ''}`],
+    ['Client', g.client === 'alldebrid' ? 'AllDebrid (direct)' : `${CLIENT_LABEL[g.client ?? 'rdt']}${g.clientState ? ` · ${g.clientState}` : ''}`],
+    ...(g.seeding || g.ratio != null
+      ? ([['Partage', g.seeding ? `en cours · ratio ${g.ratio ?? 0} · ${gb(g.uploaded ?? 0)} envoyés` : `terminé${g.seedEnd ? ` (${g.seedEnd})` : ''}`]] as [string, string][])
+      : []),
     ['Lancé', `${new Date(g.startedAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}${g.by && g.by !== 'auto' ? ` par ${g.by === 'rss' ? 'la veille RSS' : g.by}` : ' automatiquement'}`],
     ...(g.doneAt ? ([['Terminé', new Date(g.doneAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })]] as [string, string][]) : []),
   ];
@@ -854,7 +902,7 @@ function GrabSheet({ g, onClose, reload, onItem }: { g: AutoGrab; onClose: () =>
         ) : (
           <View style={[styles.siteBox, { gap: 2 }]}>
             <Text style={[styles.title, { marginBottom: 4 }]}>{running ? 'Retirer de la file' : 'Retirer de l’historique'}</Text>
-            {running ? <Toggle label={`Supprimer aussi dans ${g.client === 'alldebrid' ? 'AllDebrid' : 'rdt-client'} (et les fichiers)`} value={rm.client} onChange={(v) => setRm((o) => ({ ...o, client: v }))} /> : null}
+            {running || g.seeding ? <Toggle label={running ? `Supprimer aussi dans ${CLIENT_LABEL[g.client ?? 'rdt']} (et les fichiers)` : 'Arrêter le partage (la bibliothèque garde son fichier)'} value={rm.client} onChange={(v) => setRm((o) => ({ ...o, client: v }))} /> : null}
             <Toggle label="Mettre cette version en liste noire" value={rm.blocklist} onChange={(v) => setRm((o) => ({ ...o, blocklist: v }))} />
             <Toggle label="Chercher une autre version tout de suite" value={rm.search} onChange={(v) => setRm((o) => ({ ...o, search: v }))} />
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
@@ -870,7 +918,6 @@ function GrabSheet({ g, onClose, reload, onItem }: { g: AutoGrab; onClose: () =>
 
 function Reglages({ st, save }: { st: AutoState; save: (b: any, msg?: string) => void }) {
   const { settings } = useSettings();
-  const [rdt, setRdt] = useState({ ...st.rdt, pass: '' });
   const [pf, setPf] = useState(st.profile);
   const setP = (k: keyof typeof pf, v: any) => setPf((o) => ({ ...o, [k]: v }));
   return (
@@ -932,48 +979,40 @@ function Reglages({ st, save }: { st: AutoState; save: (b: any, msg?: string) =>
 
       <Section title="Téléchargement" defaultOpen id="auto-client">
         <Picker
-          label="Envoyer à"
+          label="Client par défaut"
           options={[
-            { value: 'rdt', label: 'rdt-client', hint: 'comme Radarr / Sonarr' },
+            { value: 'qbit', label: 'qBittorrent', hint: 'derrière le VPN, partage ensuite' },
+            { value: 'rdt', label: 'rdt-client', hint: 'AllDebrid, sans partage' },
             { value: 'alldebrid', label: 'AllDebrid direct', hint: st.alldebrid ? 'clé présente' : 'clé manquante' },
           ]}
           value={st.client}
           onChange={(v) => save({ client: v })}
         />
-        {st.client === 'rdt' ? (
-          <>
-            <Field label="Adresse de rdt-client" value={rdt.url} onChangeText={(v) => setRdt((o) => ({ ...o, url: v }))} placeholder="http://rdtclient:6500" keyboardType="url" />
-            <Field label="Identifiant rdt-client" value={rdt.user} onChangeText={(v) => setRdt((o) => ({ ...o, user: v }))} />
-            <Field label={`Mot de passe${st.rdt.hasPass ? ' · enregistré ✓' : ''}`} value={rdt.pass} onChangeText={(v) => setRdt((o) => ({ ...o, pass: v }))} secureTextEntry placeholder={st.rdt.hasPass ? 'Coller pour remplacer' : ''} />
-            <Field label="Catégorie" value={rdt.category} onChangeText={(v) => setRdt((o) => ({ ...o, category: v }))} placeholder="lumio" hint="rdt-client range les fichiers de Lumio Auto dans ce sous-dossier." />
-            <Field
-              label="Dossier des téléchargements vu par rdt-client"
-              value={rdt.remotePath}
-              onChangeText={(v) => setRdt((o) => ({ ...o, remotePath: v }))}
-              placeholder="/data/downloads"
-              hint="Le même que dans le « Remote Path Mapping » de Radarr."
-            />
-            <Picker label="Le même dossier, vu par Lumio : disque" options={st.disks.map((d) => ({ value: d, label: d }))} value={rdt.localRoot} onChange={(v) => setRdt((o) => ({ ...o, localRoot: v }))} />
-            <Field label="… et dossier sur ce disque" value={rdt.localFolder} onChangeText={(v) => setRdt((o) => ({ ...o, localFolder: v }))} placeholder="downloads" />
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              <Button title="Enregistrer" icon="checkmark" onPress={() => save({ rdt: { ...rdt, pass: rdt.pass || undefined } }, 'rdt-client enregistré')} style={{ flex: 1 }} />
-              <Button
-                title="Tester"
-                icon="pulse"
-                variant="secondary"
-                style={{ flex: 1 }}
-                onPress={() =>
-                  autoApi
-                    .testClient(settings)
-                    .then((r) => Alert.alert('rdt-client', r.message))
-                    .catch((e) => Alert.alert('rdt-client', e.message))
-                }
-              />
-            </View>
-          </>
-        ) : (
-          <Text style={styles.help}>Les torrents sont envoyés à AllDebrid avec la clé du serveur, téléchargés dans un dossier caché du disque, puis rangés dans la bibliothèque.</Text>
-        )}
+        <Text style={styles.help}>Chaque indexeur peut avoir son propre client (onglet Indexeurs) : par exemple C411 et TR4KER sur qBittorrent, le reste sur AllDebrid.</Text>
+      </Section>
+
+      <Section title="qBittorrent" defaultOpen={st.client === 'qbit'} id="auto-qbit">
+        <ClientForm kind="qbit" st={st} save={save} />
+        <Text style={[styles.label, { marginTop: 12 }]}>Partage (seed) : retirer le torrent après</Text>
+        <Picker
+          label="Ratio atteint"
+          options={[0, 0.5, 1, 1.5, 2, 3].map((n) => ({ value: n, label: n ? String(n) : 'Ignorer' }))}
+          value={st.seed?.ratio ?? 1}
+          onChange={(v) => save({ seed: { ratio: v, days: st.seed?.days ?? 7 } }, 'Partage enregistré')}
+        />
+        <Picker
+          label="Ou durée de partage"
+          options={[0, 3, 7, 14, 30].map((n) => ({ value: n, label: n ? `${n} jours` : 'Ignorer' }))}
+          value={st.seed?.days ?? 7}
+          onChange={(v) => save({ seed: { ratio: st.seed?.ratio ?? 1, days: v } }, 'Partage enregistré')}
+        />
+        <Text style={styles.help}>
+          Le premier atteint arrête le partage. Le film est rangé par lien dur : il apparaît dans la bibliothèque sans prendre de place en plus, et reste quand le torrent est retiré. Les téléchargements doivent être sur le même disque que la bibliothèque. Vérifie les règles de ratio de tes trackers.
+        </Text>
+      </Section>
+
+      <Section title="rdt-client (AllDebrid)" defaultOpen={st.client === 'rdt'} id="auto-rdt">
+        <ClientForm kind="rdt" st={st} save={save} />
       </Section>
 
       <Section title="Dossiers par défaut" id="auto-folders">
@@ -988,6 +1027,46 @@ function Reglages({ st, save }: { st: AutoState; save: (b: any, msg?: string) =>
   );
 }
 
+
+/** Réglages d'un client torrent (même API pour qBittorrent et rdt-client). */
+function ClientForm({ kind, st, save }: { kind: 'rdt' | 'qbit'; st: AutoState; save: (b: any, msg?: string) => void }) {
+  const { settings } = useSettings();
+  const cur = (kind === 'qbit' ? st.qbit : st.rdt) ?? { url: '', user: '', hasPass: false, category: 'lumio', remotePath: '', localRoot: '', localFolder: '' };
+  const [f, setF] = useState({ ...cur, pass: '' });
+  const name = kind === 'qbit' ? 'qBittorrent' : 'rdt-client';
+  const set = (k: keyof typeof f, v: string) => setF((o) => ({ ...o, [k]: v }));
+  return (
+    <>
+      <Field label={`Adresse de ${name}`} value={f.url} onChangeText={(v) => set('url', v)} placeholder={kind === 'qbit' ? 'http://gluetun:8080' : 'http://rdtclient:6500'} keyboardType="url" hint={kind === 'qbit' ? 'qBittorrent passe par le conteneur du VPN : c’est son nom qu’on appelle.' : undefined} />
+      <Field label="Identifiant" value={f.user} onChangeText={(v) => set('user', v)} />
+      <Field label={`Mot de passe${cur.hasPass ? ' · enregistré ✓' : ''}`} value={f.pass} onChangeText={(v) => set('pass', v)} secureTextEntry placeholder={cur.hasPass ? 'Coller pour remplacer' : ''} />
+      <Field label="Catégorie" value={f.category} onChangeText={(v) => set('category', v)} placeholder="lumio" />
+      <Field
+        label={`Dossier des téléchargements vu par ${name}`}
+        value={f.remotePath}
+        onChangeText={(v) => set('remotePath', v)}
+        placeholder={kind === 'qbit' ? '/downloads' : '/data/downloads'}
+      />
+      <Picker label="Le même dossier, vu par Lumio : disque" options={st.disks.map((d) => ({ value: d, label: d }))} value={f.localRoot} onChange={(v) => set('localRoot', v)} />
+      <Field label="… et dossier sur ce disque" value={f.localFolder} onChangeText={(v) => set('localFolder', v)} placeholder={kind === 'qbit' ? 'downloads/qbit' : 'downloads'} />
+      <View style={{ flexDirection: 'row', gap: 10 }}>
+        <Button title="Enregistrer" icon="checkmark" onPress={() => save({ [kind]: { ...f, pass: f.pass || undefined, hasPass: undefined } }, `${name} enregistré`)} style={{ flex: 1 }} />
+        <Button
+          title="Tester"
+          icon="pulse"
+          variant="secondary"
+          style={{ flex: 1 }}
+          onPress={() =>
+            autoApi
+              .testClient(settings, kind)
+              .then((r) => Alert.alert(name, `${r.ok ? '✅' : '❌'} ${r.message}`))
+              .catch((e) => Alert.alert(name, e.message))
+          }
+        />
+      </View>
+    </>
+  );
+}
 
 const styles = StyleSheet.create({
   tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 4 },

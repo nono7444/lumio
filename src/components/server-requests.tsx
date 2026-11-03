@@ -1,5 +1,4 @@
 // Page « Demandes » façon Seerr : filtres, cartes avec affiche, demandeur, statuts, actions admin.
-import { ArrWantedBlock, DiskDownloadsBlock } from '@/components/requests-extra';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useFocusEffect } from 'expo-router';
@@ -14,10 +13,8 @@ import { Button, SegChip, tap } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { openMedia } from '@/lib/navigation';
 import {
-  downloadLabel,
-  mediaStatusLabel,
+  partialText,
   RequestStatus,
-  requestStatusLabel,
   requestsApi,
   timeAgo,
   type Req,
@@ -37,70 +34,48 @@ const FILTERS: { id: RequestFilter; label: string }[] = [
 
 const PAGE = 20;
 
-function Badge({ label, color }: { label: string; color: string }) {
-  return (
-    <View style={[styles.badge, { backgroundColor: `${color}26`, borderColor: `${color}66` }]}>
-      <Text style={[styles.badgeText, { color }]}>{label}</Text>
-    </View>
-  );
-}
-
-/** Saisons d'une demande : repliées sur une ligne (− / + pour les afficher toutes). */
-function SeasonChips({ r }: { r: Req }) {
-  const seasons = r.seasons ?? [];
-  const [open, setOpen] = useState(seasons.length <= 4);
-  const avail = seasons.filter((n) => r.seasonStatuses.find((x) => x.seasonNumber === n)?.status === 5).length;
-  const toggle = (
-    <Pressable onPress={() => setOpen((o) => !o)} hitSlop={8} style={styles.seasonToggle} accessibilityLabel={open ? 'Réduire' : 'Voir les saisons'}>
-      <Ionicons name={open ? 'remove' : 'add'} size={14} color={C.text} />
-    </Pressable>
-  );
-  if (!open)
-    return (
-      <View style={[styles.seasons, { alignItems: 'center' }]}>
-        <Text style={styles.meta}>
-          {seasons.length} saison{seasons.length > 1 ? 's' : ''} (S{Math.min(...seasons)}–S{Math.max(...seasons)}){avail ? ` · ${avail} dispo` : ''}
-        </Text>
-        {toggle}
-      </View>
-    );
-  return (
-    <View style={[styles.seasons, { alignItems: 'center' }]}>
-      {seasons.map((n) => {
-        const ss = r.seasonStatuses.find((x) => x.seasonNumber === n);
-        const l = ss ? mediaStatusLabel(ss.status) : null;
-        return (
-          <View key={n} style={[styles.season, l && { borderColor: l.color }]}>
-            <Text style={[styles.seasonText, l && { color: l.color }]}>S{n}</Text>
-          </View>
-        );
-      })}
-      {seasons.length > 4 ? toggle : null}
-    </View>
-  );
+/** Statut en une ligne : un point de couleur + un texte court. */
+function statusOf(r: Req): { text: string; color: string; progress?: number } {
+  if (r.status === RequestStatus.PENDING) return { text: 'En attente de validation', color: '#FF9F0A' };
+  if (r.status === RequestStatus.DECLINED) return { text: r.reason ? `Refusée · ${r.reason}` : 'Refusée', color: '#FF453A' };
+  if (r.status === RequestStatus.FAILED) return { text: r.error ? `Échec · ${r.error}` : 'Échec', color: '#FF453A' };
+  if (r.status === RequestStatus.COMPLETED || r.mediaStatus === 5) return { text: 'Disponible', color: '#30D158' };
+  const d = r.download;
+  if (d?.progress != null) return { text: `Téléchargement ${d.progress} %`, color: '#3D8BFF', progress: d.progress };
+  if (d?.state === 'partial') return { text: `Partiel · ${partialText(d)}`, color: '#FF9F0A' };
+  if (d?.state === 'importing') return { text: 'Rangement…', color: '#64D2FF' };
+  if (d?.state === 'warning') return { text: 'À vérifier', color: '#FF9F0A' };
+  if (d?.title) return { text: d.title.replace(/^(Lumio Auto|Lumio Secour) · /, '').replace(/^./, (c) => c.toUpperCase()), color: /choisir/.test(d.title) ? '#FF9F0A' : C.textDim };
+  return { text: 'Recherche…', color: C.textDim };
 }
 
 function RequestCard({ r, admin, meId, onChanged }: { r: Req; admin: boolean; meId?: string; onChanged: () => void }) {
   const { settings } = useSettings();
   const [busy, setBusy] = useState<string | null>(null);
-  const st = requestStatusLabel(r.status);
-  const media = r.status === RequestStatus.APPROVED ? mediaStatusLabel(r.mediaStatus) : null;
   const mine = r.requestedBy.id === meId;
+  const st = statusOf(r);
 
-  async function act(kind: 'approve' | 'retry' | 'decline' | 'delete', reason?: string, arr?: 'keep' | 'files') {
+  async function act(kind: 'approve' | 'retry' | 'decline' | 'delete' | 'search' | 'secour', reason?: string, arr?: 'keep' | 'files') {
     setBusy(kind);
     try {
       let msg: string | undefined;
       if (kind === 'approve') await requestsApi.approve(settings, r.id);
       else if (kind === 'retry') await requestsApi.retry(settings, r.id);
       else if (kind === 'decline') await requestsApi.decline(settings, r.id, reason);
-      else msg = (await requestsApi.remove(settings, r.id, arr))?.message;
+      else if (kind === 'search') msg = (await requestsApi.search(settings, r.id)).message;
+      else if (kind === 'secour') {
+        await secourAdminApi.viaRequest(settings, r.id);
+        msg = `« ${r.title} » part avec Lumio Secour`;
+      } else msg = (await requestsApi.remove(settings, r.id, arr))?.message;
       toast(
-        kind === 'approve' || kind === 'retry'
-          ? `« ${r.title} » approuvé : téléchargement lancé.`
-          : kind === 'decline'
-            ? `Demande de ${r.requestedBy.name} refusée.`
-            : (msg ?? 'Demande supprimée.')
+        msg ??
+          (kind === 'approve' || kind === 'retry'
+            ? `« ${r.title} » validé.`
+            : kind === 'decline'
+              ? `Demande de ${r.requestedBy.name} refusée.`
+              : 'Demande supprimée.'),
+        'info',
+        kind === 'search' ? 8000 : undefined
       );
       onChanged();
     } catch (e: any) {
@@ -111,127 +86,67 @@ function RequestCard({ r, admin, meId, onChanged }: { r: Req; admin: boolean; me
   }
 
   const decline = () =>
-    Alert.prompt
-      ? Alert.prompt('Refuser la demande', 'Raison (facultatif)', (reason) => act('decline', reason || undefined))
-      : act('decline');
+    Alert.prompt ? Alert.prompt('Refuser la demande', 'Raison (facultatif)', (reason) => act('decline', reason || undefined)) : act('decline');
 
-  // Demande déjà partie vers Radarr / Sonarr : l'admin choisit ce qu'il advient du film ou de la série
   const sent = r.status === RequestStatus.APPROVED || r.status === RequestStatus.COMPLETED || r.status === RequestStatus.FAILED;
-  const app = r.download?.via === 'auto' ? 'Lumio Auto' : r.type === 'movie' ? 'Radarr' : 'Sonarr';
-  const remove = () =>
-    admin && sent
-      ? Alert.alert('Supprimer cette demande ?', `${r.title}${r.seasons?.length ? ` (saison${r.seasons.length > 1 ? 's' : ''} ${r.seasons.join(', ')})` : ''}`, [
-          { text: `Arrêter le suivi (garder les fichiers)`, onPress: () => act('delete', undefined, 'keep') },
-          { text: 'Tout supprimer, fichiers compris', style: 'destructive', onPress: () => act('delete', undefined, 'files') },
-          { text: 'Retirer de la liste seulement', onPress: () => act('delete') },
-          { text: 'Annuler', style: 'cancel' },
-        ])
-      : Alert.alert(mine && !admin ? 'Annuler ta demande ?' : 'Supprimer cette demande ?', r.title, [
-          { text: 'Non', style: 'cancel' },
-          { text: 'Oui', style: 'destructive', onPress: () => act('delete') },
-        ]);
+  const canSearch = r.status === RequestStatus.APPROVED && st.progress == null && r.mediaStatus !== 5 && (admin || mine);
+
+  // Toutes les actions dans un seul menu (« … »)
+  const menu = () => {
+    tap();
+    const opts: { text: string; style?: 'cancel' | 'destructive' | 'default'; onPress?: () => void }[] = [];
+    if (canSearch) opts.push({ text: 'Relancer la recherche', onPress: () => act('search') });
+    if (admin && r.status === RequestStatus.FAILED) opts.push({ text: 'Réessayer', onPress: () => act('retry') });
+    if (admin && (canSearch || r.status === RequestStatus.FAILED)) opts.push({ text: 'Télécharger avec Lumio Secour', onPress: () => act('secour') });
+    if (admin && sent) {
+      opts.push({ text: 'Arrêter le suivi (garder les fichiers)', onPress: () => act('delete', undefined, 'keep') });
+      opts.push({ text: 'Tout supprimer, fichiers compris', style: 'destructive', onPress: () => act('delete', undefined, 'files') });
+      opts.push({ text: 'Retirer de la liste', onPress: () => act('delete') });
+    } else if (admin || (mine && r.status === RequestStatus.PENDING)) {
+      opts.push({ text: mine && !admin ? 'Annuler ma demande' : 'Supprimer', style: 'destructive', onPress: () => act('delete') });
+    }
+    opts.push({ text: 'Fermer', style: 'cancel' });
+    Alert.alert(r.title, undefined, opts);
+  };
+  const hasMenu = canSearch || admin || (mine && r.status === RequestStatus.PENDING);
+  const seasons = r.type === 'tv' && r.seasons?.length ? (r.seasons.length > 3 ? `S${Math.min(...r.seasons)}–S${Math.max(...r.seasons)}` : r.seasons.map((n) => `S${n}`).join(' ')) : null;
 
   return (
-    <Pressable onPress={() => openMedia(r.type, r.tmdbId)} style={({ pressed }) => [styles.card, { opacity: pressed ? 0.85 : 1 }]}>
-      {r.backdrop ? <Image source={r.backdrop} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={2} /> : null}
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(18,18,20,0.86)' }]} />
-      <View style={styles.cardBody}>
-        <View style={styles.poster}>{r.poster ? <Image source={r.poster} style={StyleSheet.absoluteFill} contentFit="cover" /> : null}</View>
-        <View style={{ flex: 1, gap: 5 }}>
-          <Text style={styles.kind}>
-            {r.type === 'movie' ? 'Film' : 'Série'}
-            {r.year ? ` · ${r.year}` : ''}
+    <Pressable onPress={() => openMedia(r.type, r.tmdbId)} onLongPress={hasMenu ? menu : undefined} style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}>
+      <View style={styles.poster}>{r.poster ? <Image source={r.poster} style={StyleSheet.absoluteFill} contentFit="cover" /> : null}</View>
+      <View style={{ flex: 1, gap: 3 }}>
+        <Text style={styles.title} numberOfLines={1}>
+          {r.title}
+        </Text>
+        <Text style={styles.meta} numberOfLines={1}>
+          {[r.type === 'movie' ? 'Film' : 'Série', r.year, seasons, mine ? 'toi' : r.requestedBy.name, timeAgo(r.createdAt)].filter(Boolean).join(' · ')}
+        </Text>
+        <View style={styles.statusRow}>
+          <View style={[styles.dot, { backgroundColor: st.color }]} />
+          <Text style={[styles.status, { color: st.color === C.textDim ? C.textDim : st.color }]} numberOfLines={1}>
+            {busy ? '…' : st.text}
           </Text>
-          <Text style={styles.title} numberOfLines={2}>
-            {r.title}
-          </Text>
-          {r.type === 'tv' && r.seasons?.length ? <SeasonChips r={r} /> : null}
-          <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
-            <Badge label={st.label} color={st.color} />
-            {media ? <Badge label={media.label} color={media.color} /> : null}
+        </View>
+        {st.progress != null ? (
+          <View style={styles.bar}>
+            <View style={[styles.barFill, { width: `${Math.max(2, st.progress)}%` }]} />
           </View>
-          <Text style={styles.meta}>
-            Demandé par <Text style={styles.metaStrong}>{mine ? 'toi' : r.requestedBy.name}</Text> {timeAgo(r.createdAt)}
-          </Text>
-          {r.modifiedBy && r.modifiedBy.id !== r.requestedBy.id ? (
-            <Text style={styles.meta}>
-              {r.status === RequestStatus.DECLINED ? 'Refusé' : 'Validé'} par <Text style={styles.metaStrong}>{r.modifiedBy.name}</Text>
-              {r.modifiedAt ? ` ${timeAgo(r.modifiedAt)}` : ''}
-            </Text>
-          ) : null}
-          {downloadLabel(r) ? (
-            <Text style={[styles.meta, { color: downloadLabel(r)!.color, fontWeight: '700' }]} numberOfLines={3}>
-              {downloadLabel(r)!.text}
-            </Text>
-          ) : null}
-          {r.reason ? <Text style={[styles.meta, { color: C.danger }]}>Raison : {r.reason}</Text> : null}
-          {r.error ? <Text style={[styles.meta, { color: C.danger }]}>{r.error}</Text> : null}
-        </View>
+        ) : null}
       </View>
-
-      {/* Recherche en attente : relancer pour voir s'il y a enfin une version dispo ; « DL » (admin) : Lumio Secour télécharge à la place */}
-      {(r.status === RequestStatus.APPROVED && (!r.download || ['searching', 'partial', 'warning'].includes(r.download.state)) && r.download?.via !== 'secour' && (admin || mine)) ||
-      (admin && r.status === RequestStatus.FAILED) ? (
-        <View style={styles.actions}>
-          {r.status === RequestStatus.APPROVED && r.download?.state !== 'warning' ? <RecheckButton r={r} onDone={onChanged} style={styles.actBtn} /> : null}
-          {admin ? <SecourRelayButton r={r} onDone={onChanged} /> : null}
+      {admin && r.status === RequestStatus.PENDING ? (
+        <View style={{ flexDirection: 'row', gap: 6 }}>
+          <Pressable onPress={decline} hitSlop={6} style={[styles.round, { backgroundColor: 'rgba(255,69,58,0.16)' }]} accessibilityLabel="Refuser">
+            <Ionicons name="close" size={18} color="#FF453A" />
+          </Pressable>
+          <Pressable onPress={() => act('approve')} hitSlop={6} style={[styles.round, { backgroundColor: 'rgba(48,209,88,0.18)' }]} accessibilityLabel="Valider">
+            {busy === 'approve' ? <ActivityIndicator size="small" color="#30D158" /> : <Ionicons name="checkmark" size={18} color="#30D158" />}
+          </Pressable>
         </View>
+      ) : hasMenu ? (
+        <Pressable onPress={menu} hitSlop={10} style={styles.more} accessibilityLabel="Actions">
+          <Ionicons name="ellipsis-horizontal" size={18} color={C.textDim} />
+        </Pressable>
       ) : null}
-
-      {/* Actions, comme sur Seerr */}
-      {(admin || (mine && r.status === RequestStatus.PENDING)) && (
-        <View style={styles.actions}>
-          {admin && r.status === RequestStatus.PENDING ? (
-            <>
-              <Button title="Approuver" icon="checkmark" onPress={() => act('approve')} loading={busy === 'approve'} style={styles.actBtn} />
-              <Button title="Refuser" icon="close" variant="danger" onPress={decline} loading={busy === 'decline'} style={styles.actBtn} />
-            </>
-          ) : null}
-          {admin && r.status === RequestStatus.FAILED ? (
-            <Button title="Réessayer" icon="refresh" onPress={() => act('retry')} loading={busy === 'retry'} style={styles.actBtn} />
-          ) : null}
-          {admin || r.status === RequestStatus.PENDING ? (
-            <Button
-              title={!admin ? 'Annuler' : ''}
-              icon="trash-outline"
-              variant="secondary"
-              onPress={remove}
-              loading={busy === 'delete'}
-              style={admin ? { width: 48, paddingHorizontal: 0 } : styles.actBtn}
-            />
-          ) : null}
-        </View>
-      )}
-    </Pressable>
-  );
-}
-
-/** « DL » sur une demande bloquée (admin) : Lumio Secour la télécharge à la place de Radarr / Sonarr. */
-function SecourRelayButton({ r, onDone }: { r: Req; onDone: () => void }) {
-  const { settings } = useSettings();
-  const [busy, setBusy] = useState(false);
-  const go = () =>
-    Alert.alert('Lumio Secour', `Télécharger « ${r.title} » avec Lumio Secour (liens directs AllDebrid) ?`, [
-      { text: 'Annuler', style: 'cancel' },
-      {
-        text: 'Télécharger',
-        onPress: async () => {
-          setBusy(true);
-          try {
-            await secourAdminApi.viaRequest(settings, r.id);
-            toast(`« ${r.title} » part avec Lumio Secour`);
-            onDone();
-          } catch (e: any) {
-            toast(e?.message ?? String(e), 'error');
-          } finally {
-            setBusy(false);
-          }
-        },
-      },
-    ]);
-  return (
-    <Pressable onPress={go} disabled={busy} style={styles.ls} accessibilityLabel="Télécharger avec Lumio Secour">
-      {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.lsText}>DL</Text>}
     </Pressable>
   );
 }
@@ -349,7 +264,8 @@ export function ServerRequests({ header }: { header: React.ReactNode }) {
       data={rows}
       keyExtractor={(r) => r.id}
       renderItem={({ item }) => <RequestCard r={item} admin={admin} meId={settings.jellyfin?.userId} onChanged={() => load()} />}
-      contentContainerStyle={{ paddingTop: insets.top, paddingHorizontal: 16, paddingBottom: TAB_SPACE, gap: 12 }}
+      contentContainerStyle={{ paddingTop: insets.top, paddingHorizontal: 16, paddingBottom: TAB_SPACE }}
+      ItemSeparatorComponent={() => <View style={styles.sep} />}
       refreshControl={Platform.isTV ? undefined : <RefreshControl refreshing={false} onRefresh={() => load()} tintColor={C.text} />}
       onEndReached={more}
       onEndReachedThreshold={0.4}
@@ -370,9 +286,6 @@ export function ServerRequests({ header }: { header: React.ReactNode }) {
               />
             ))}
           </ScrollView>
-          {/* Téléchargements sur les disques + en attente dans Radarr / Sonarr (repliables) */}
-          <DiskDownloadsBlock />
-          <ArrWantedBlock />
           {!admin ? <Text style={[styles.meta, { marginHorizontal: 16, marginBottom: 8 }]}>Tes demandes</Text> : null}
           {error ? <Text style={[styles.meta, { color: C.danger, marginHorizontal: 16 }]}>{error}</Text> : null}
         </View>
@@ -392,21 +305,16 @@ export function ServerRequests({ header }: { header: React.ReactNode }) {
 }
 
 const styles = StyleSheet.create({
-  ls: { width: 48, height: 40, borderRadius: 12, backgroundColor: '#30D158', alignItems: 'center', justifyContent: 'center' },
-  lsText: { color: '#fff', fontSize: 15, fontWeight: '900', letterSpacing: 0.5 },
-  seasonToggle: { width: 24, height: 22, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
-  card: { borderRadius: R.lg, overflow: 'hidden', backgroundColor: C.surface },
-  cardBody: { flexDirection: 'row', gap: 14, padding: 14 },
-  poster: { width: 74, height: 111, borderRadius: 10, overflow: 'hidden', backgroundColor: C.surfaceHigh },
-  kind: { color: C.textDim, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 },
-  title: { color: C.text, fontSize: 17, fontWeight: '800', letterSpacing: -0.2 },
-  seasons: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
-  season: { borderWidth: 1, borderColor: C.border, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 1 },
-  seasonText: { color: C.textDim, fontSize: 11, fontWeight: '700' },
-  badge: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 2 },
-  badgeText: { fontSize: 11, fontWeight: '800' },
-  meta: { color: C.textDim, fontSize: 12, lineHeight: 17 },
-  metaStrong: { color: C.text, fontWeight: '700' },
-  actions: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingBottom: 14 },
-  actBtn: { flex: 1, paddingVertical: 10 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
+  sep: { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.08)', marginLeft: 56 },
+  poster: { width: 44, height: 66, borderRadius: 8, overflow: 'hidden', backgroundColor: C.surfaceHigh },
+  title: { color: C.text, fontSize: 15, fontWeight: '700', letterSpacing: -0.2 },
+  meta: { color: C.textDim, fontSize: 12, lineHeight: 16 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  dot: { width: 7, height: 7, borderRadius: 4 },
+  status: { fontSize: 12, fontWeight: '600', flexShrink: 1 },
+  bar: { height: 2, borderRadius: 1, backgroundColor: 'rgba(255,255,255,0.1)', overflow: 'hidden', marginTop: 3 },
+  barFill: { height: 2, backgroundColor: '#3D8BFF' },
+  round: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+  more: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
 });

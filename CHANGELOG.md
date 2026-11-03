@@ -6,6 +6,10 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Bêta : Lumio Auto télécharge avec qBittorrent (derrière ProtonVPN via Gluetun) et partage ensuite : rangement par lien dur (aucune place en plus), torrent retiré au ratio ou à la durée choisis, section « En partage » dans Auto → Téléchargements. Client au choix par indexeur (qBittorrent, rdt-client ou AllDebrid). Il faut le serveur Lumio 3.70.0.
+- Bêta : onglet Demandes minimaliste : juste les demandes, une ligne par titre (affiche, statut en couleur, actions dans « … »), plus de partie Téléchargements.
+- Bêta : Profil plus rangé : « Compte et serveur » (Jellyfin, Serveur Lumio, Serveur, Stockage, Idées & signalements) et « Application » (Accueil, TMDB, Lecture, version).
+- Bêta : vignette dédiée pour les Collections dans la Bibliothèque.
 - Bêta : quand Lumio Auto est actif, Radarr et Sonarr ne sont plus utilisés du tout. Saisons des séries d’après TMDB, Stockage d’après les dossiers des disques (suppression d’un titre directement), état des services sans Radarr / Sonarr, et plus aucune mention de Radarr / Sonarr dans les demandes. Il faut le serveur Lumio 3.69.0.
 - Bêta : Lumio Auto prend la version la plus légère. Pour une sortie récente, il attend d’abord une version H.265 (48 h par défaut), puis prend du H.264 et le remplace tout seul si une version H.265 apparaît (pendant 30 jours). Quand Lumio Auto est actif, l’onglet Demandes ne parle plus de Radarr / Sonarr : file de téléchargement Lumio Auto, « Relancer la recherche » sur les indexeurs, demandes validées avant l’activation reprises automatiquement. Il faut le serveur Lumio 3.68.0.
 - Bêta : onglet Auto → les demandes validées avant l’activation de Lumio Auto (encore chez Radarr / Sonarr) sont signalées, avec un bouton pour les reprendre dans Lumio Auto. Il faut le serveur Lumio 3.67.0.

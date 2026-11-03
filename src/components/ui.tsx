@@ -298,7 +298,7 @@ export function Field({ label, hint, ...props }: TextInputProps & { label: strin
  * Sections repliables (écran Profil) : chaque section est fermée par défaut, « + » pour l'ouvrir, « − » pour la refermer.
  * `version` change quand on appuie sur « Tout ouvrir » / « Tout fermer ».
  */
-export const SectionCollapse = createContext<{ enabled: boolean; all: boolean | null; version: number }>({ enabled: false, all: null, version: 0 });
+export const SectionCollapse = createContext<{ enabled: boolean; all: boolean | null; version: number; nested?: boolean }>({ enabled: false, all: null, version: 0 });
 const openSections = new Map<string, boolean>();
 
 export function Section({ title, children, defaultOpen = false, id }: { title: string; children: ReactNode; defaultOpen?: boolean; id?: string }) {
@@ -312,6 +312,14 @@ export function Section({ title, children, defaultOpen = false, id }: { title: s
     openSections.set(key, ctx.all);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx.version]);
+  // Rubrique rangée dans un groupe : simple sous-titre, sans boîte ni repli
+  if (ctx.nested)
+    return (
+      <View style={styles.subSection}>
+        <Text style={styles.subTitle}>{title}</Text>
+        {children}
+      </View>
+    );
   if (!ctx.enabled)
     return (
       <View style={{ marginBottom: 22 }}>
@@ -341,6 +349,18 @@ export function Section({ title, children, defaultOpen = false, id }: { title: s
       </Pressable>
       {open ? <View style={[styles.section, { marginTop: 8 }]}>{children}</View> : null}
     </View>
+  );
+}
+
+/** Groupe de rubriques (ex. « Application » : Accueil, TMDB, Lecture…) : une seule rubrique repliable, sous-titres dedans. */
+export function SectionGroup({ title, children, id }: { title: string; children: ReactNode; id?: string }) {
+  const ctx = useContext(SectionCollapse);
+  return (
+    <Section title={title} id={id}>
+      <SectionCollapse.Provider value={{ ...ctx, nested: true }}>
+        <View style={{ gap: 4 }}>{children}</View>
+      </SectionCollapse.Provider>
+    </Section>
   );
 }
 
@@ -398,6 +418,8 @@ export function Fade({ height, top }: { height: number; top?: boolean }) {
 }
 
 const styles = StyleSheet.create({
+  subSection: { paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.08)' },
+  subTitle: { color: C.textDim, fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 },
   starsWrap: { position: 'absolute', left: 6, top: 6, alignItems: 'flex-start' },
   stars: {
     flexDirection: 'row',

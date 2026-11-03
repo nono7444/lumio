@@ -241,7 +241,6 @@ export default function Activity() {
   const { settings } = useSettings();
   const [nonce, setNonce] = useState(0);
   const serverReq = useServerRequests(nonce);
-  const [tab, setTab] = useState<'downloads' | 'requests'>('requests');
   const insets = useSafeAreaInsets();
 
   // Serveur injoignable : on réessaie tout seul à chaque retour sur l'onglet
@@ -257,17 +256,8 @@ export default function Activity() {
 
   // ——— Serveur Lumio : page Demandes + file de téléchargement ———
   if (serverReq) {
-    const header = (
-      <View>
-        <ScreenTitle title="Demandes" />
-        <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 12 }}>
-          <SegChip label="Demandes" on={tab === 'requests'} onPress={() => setTab('requests')} />
-          <SegChip label="Téléchargements" on={tab === 'downloads'} onPress={() => setTab('downloads')} />
-        </View>
-      </View>
-    );
-    if (tab === 'downloads') return <Downloads header={header} viaServer />;
-    return <ServerRequests header={header} />;
+    // Juste les demandes : le suivi des téléchargements est dans l'onglet Auto (admin)
+    return <ServerRequests header={<ScreenTitle title="Demandes" />} />;
   }
 
   // Vérification du serveur en cours, ou serveur injoignable / pas configuré

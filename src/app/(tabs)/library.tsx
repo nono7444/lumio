@@ -123,8 +123,6 @@ function LibraryCard({ lib, width, onChooseCover }: { lib: Lib; width: number; o
 /** Carte « Collections » (sagas rangées par Lumio). */
 function CollectionsCard({ data, width }: { data: { building: boolean; collections: { poster: string | null }[] }; width: number }) {
   const height = Math.round(width * 0.62);
-  const pw = Math.round(height * 0.62);
-  const posters = data.collections.map((c) => c.poster).filter((p): p is string => Boolean(p)).slice(0, 3);
   return (
     <Pressable
       onPress={() => {
@@ -132,27 +130,8 @@ function CollectionsCard({ data, width }: { data: { building: boolean; collectio
         router.push('/collections');
       }}
       style={({ pressed }) => [styles.card, { width, height, transform: [{ scale: pressed ? 0.98 : 1 }] }]}>
-      <LinearGradient colors={TINT.boxsets} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
-      <View style={[StyleSheet.absoluteFill, { alignItems: 'flex-end', justifyContent: 'center', paddingRight: 18 }]}>
-        {posters.map((p, i, arr) => (
-          <Image
-            key={p}
-            source={p}
-            contentFit="cover"
-            style={[
-              styles.poster,
-              {
-                width: pw,
-                height: Math.round(pw * 1.5),
-                position: 'absolute',
-                right: 18 + (arr.length - 1 - i) * pw * 0.42,
-                transform: [{ rotate: `${(i - (arr.length - 1) / 2) * 7}deg` }, { scale: i === arr.length - 1 ? 1 : 0.9 }],
-                zIndex: i,
-              },
-            ]}
-          />
-        ))}
-      </View>
+      {/* Vignette des Collections Lumio (sagas en cartes de verre I, II, III) */}
+      <Image source={require('@/assets/images/backgrounds/collections.jpg')} style={StyleSheet.absoluteFill} contentFit="cover" />
       <LinearGradient colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.85)']} start={{ x: 0, y: 0.25 }} end={{ x: 0, y: 1 }} style={StyleSheet.absoluteFill} />
       <View style={styles.cardText}>
         <View style={styles.iconWrap}>

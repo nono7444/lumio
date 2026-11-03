@@ -7,7 +7,7 @@ import { FocusPressable as Pressable } from '@/components/tv';
 import { Picker, Toggle } from '@/components/arr-section';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Button, Field, ScreenTitle, Section, SectionCollapse } from '@/components/ui';
+import { Button, Field, ScreenTitle, Section, SectionCollapse, SectionGroup } from '@/components/ui';
 import { ADDONS_ENABLED } from '@/constants/features';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { AppVersionSection } from '@/components/app-version';
@@ -201,6 +201,8 @@ export default function SettingsScreen() {
         {appUpdate ? <AppVersionSection /> : null}
         {Platform.isTV ? null : <NowPlayingEntry />}
         {Platform.isTV ? null : settings.jellyfin?.isAdmin && settings.chatUrl ? <UptimeSection /> : isManager(settings) ? <ServerStatusSection /> : <SimpleServerDot />}
+        {/* TV : profil épuré (serveur, demandes, idées, clés et options téléphone masqués) */}
+        <SectionGroup title="Compte et serveur" id="grp-serveur">
         <Section title="Jellyfin">
           {settings.jellyfin ? (
             <View style={{ gap: 12 }}>
@@ -238,22 +240,10 @@ export default function SettingsScreen() {
           )}
         </Section>
 
-        {/* TV : profil épuré (serveur, demandes, idées, clés et options téléphone masqués) */}
         {Platform.isTV || settings.jellyfin?.isAdmin === false ? null : <ChatSection />}
 
-        {serverReq && !Platform.isTV ? <NotifySubscribeSection /> : null}
-        {serverReq && settings.jellyfin?.isAdmin !== false && !Platform.isTV ? <AnnouncementEditor /> : null}
-
-        <StorageSection />
         <ServerActionsSection />
-
-        {serverReq && settings.jellyfin?.isAdmin !== false && !Platform.isTV ? (
-          <Section title="Demandes">
-            <Text style={styles.help}>Notifications push des demandes, validation automatique ou par toi, quotas de films et de saisons.</Text>
-            <Button title="Utilisateurs, droits et notifications" icon="people-outline" variant="secondary" onPress={() => router.push('/users')} />
-          </Section>
-        ) : null}
-
+        <StorageSection />
 
         {serverReq && !Platform.isTV ? (
           <Section title="Idées & signalements">
@@ -261,6 +251,19 @@ export default function SettingsScreen() {
               Propose une idée ou signale un bug. L’admin la reçoit en notification et peut la faire développer par Claude.
             </Text>
             <Button title="Idées & signalements" icon="bulb-outline" variant="secondary" onPress={() => router.push('/ideas')} />
+          </Section>
+        ) : null}
+
+
+        </SectionGroup>
+
+        {serverReq && !Platform.isTV ? <NotifySubscribeSection /> : null}
+        {serverReq && settings.jellyfin?.isAdmin !== false && !Platform.isTV ? <AnnouncementEditor /> : null}
+
+        {serverReq && settings.jellyfin?.isAdmin !== false && !Platform.isTV ? (
+          <Section title="Demandes">
+            <Text style={styles.help}>Notifications push des demandes, validation automatique ou par toi, quotas de films et de saisons.</Text>
+            <Button title="Utilisateurs, droits et notifications" icon="people-outline" variant="secondary" onPress={() => router.push('/users')} />
           </Section>
         ) : null}
 
@@ -277,22 +280,6 @@ export default function SettingsScreen() {
             />
           </Section>
         ) : null}
-
-        <Section title="Lecture">
-          {Platform.isTV ? null : (
-          <Picker
-            label="Lecteur vidéo"
-            options={[
-              { value: 'mpv', label: 'mpv (recommandé)', hint: 'lit tout, MKV inclus' },
-              { value: 'native', label: 'Natif', hint: 'AirPlay' },
-            ]}
-            value={settings.player}
-            onChange={(v) => update({ player: v as 'mpv' | 'native' })}
-          />
-          )}
-          <Toggle label="Enchaîner l'épisode suivant" value={settings.autoNext} onChange={(v) => update({ autoNext: v })} />
-          {Platform.isTV ? null : <Toggle label="Vibrations au toucher" value={settings.haptics === true} onChange={(v) => update({ haptics: v })} />}
-        </Section>
 
         {settings.chatUrl && settings.jellyfin && !Platform.isTV ? (
           <Section title="Récompenses">
@@ -344,32 +331,6 @@ export default function SettingsScreen() {
           )}
         </Section>
 
-        {/* Clé TMDB : réglage d'admin (les autres la reçoivent du serveur Lumio) */}
-        {Platform.isTV || settings.jellyfin?.isAdmin === false ? null : (
-        <Section title="TMDB">
-          <Field
-            label="Clé API"
-            value={tmdb}
-            onChangeText={setTmdb}
-            placeholder="Clé v3 ou jeton de lecture v4"
-            secureTextEntry
-            hint="Gratuite sur themoviedb.org → Paramètres → API. Sert à la recherche, aux fiches et à relier les catalogues Stremio."
-          />
-          <Button title="Enregistrer et tester" icon="flash-outline" onPress={saveTmdb} loading={testing} disabled={!tmdb.trim()} />
-        </Section>
-        )}
-
-        <Section title="Accueil">
-          <View style={styles.catRow}>
-            <Text style={styles.catName}>Ligne « Tendances » TMDB</Text>
-            <Switch
-              value={settings.showTrending}
-              trackColor={{ true: C.success, false: C.border }}
-              onValueChange={(v) => update({ showTrending: v })}
-            />
-          </View>
-        </Section>
-
         {ADDONS_ENABLED && !Platform.isTV ? (
         <Section title="Addons Stremio">
           <Text style={styles.help}>
@@ -406,7 +367,51 @@ export default function SettingsScreen() {
         </Section>
         ) : null}
 
+        <SectionGroup title="Application" id="grp-appli">
+        <Section title="Accueil">
+          <View style={styles.catRow}>
+            <Text style={styles.catName}>Ligne « Tendances » TMDB</Text>
+            <Switch
+              value={settings.showTrending}
+              trackColor={{ true: C.success, false: C.border }}
+              onValueChange={(v) => update({ showTrending: v })}
+            />
+          </View>
+        </Section>
+
+        {/* Clé TMDB : réglage d'admin (les autres la reçoivent du serveur Lumio) */}
+        {Platform.isTV || settings.jellyfin?.isAdmin === false ? null : (
+        <Section title="TMDB">
+          <Field
+            label="Clé API"
+            value={tmdb}
+            onChangeText={setTmdb}
+            placeholder="Clé v3 ou jeton de lecture v4"
+            secureTextEntry
+            hint="Gratuite sur themoviedb.org → Paramètres → API. Sert à la recherche, aux fiches et à relier les catalogues Stremio."
+          />
+          <Button title="Enregistrer et tester" icon="flash-outline" onPress={saveTmdb} loading={testing} disabled={!tmdb.trim()} />
+        </Section>
+        )}
+
+        <Section title="Lecture">
+          {Platform.isTV ? null : (
+          <Picker
+            label="Lecteur vidéo"
+            options={[
+              { value: 'mpv', label: 'mpv (recommandé)', hint: 'lit tout, MKV inclus' },
+              { value: 'native', label: 'Natif', hint: 'AirPlay' },
+            ]}
+            value={settings.player}
+            onChange={(v) => update({ player: v as 'mpv' | 'native' })}
+          />
+          )}
+          <Toggle label="Enchaîner l'épisode suivant" value={settings.autoNext} onChange={(v) => update({ autoNext: v })} />
+          {Platform.isTV ? null : <Toggle label="Vibrations au toucher" value={settings.haptics === true} onChange={(v) => update({ haptics: v })} />}
+        </Section>
+
         {!appUpdate ? <AppVersionSection /> : null}
+        </SectionGroup>
       </ScrollView>
       </SectionCollapse.Provider>
     </KeyboardAvoidingView>
