@@ -100,12 +100,29 @@ export default function AutoTab() {
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
       <ScreenTitle title="Auto" />
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={styles.tabs}>
-        <SegChip label={toChoose ? `Demandes · ${toChoose} à choisir` : 'Demandes'} on={tab === 'demandes'} onPress={() => setTab('demandes')} icon="pulse" />
-        <SegChip label={running ? `Téléchargements · ${running}` : 'Téléchargements'} on={tab === 'telechargements'} onPress={() => setTab('telechargements')} icon="cloud-download-outline" />
-        <SegChip label="Indexeurs" on={tab === 'indexeurs'} onPress={() => setTab('indexeurs')} icon="globe-outline" />
-        <SegChip label="Réglages" on={tab === 'reglages'} onPress={() => setTab('reglages')} icon="options" />
-      </ScrollView>
+      {/* Quatre rubriques, comme un sélecteur iOS : Titres, Transferts, Sites, Réglages */}
+      <View style={styles.seg}>
+        {(
+          [
+            { id: 'demandes', label: 'Titres', icon: 'film-outline', badge: toChoose, badgeColor: C.warning },
+            { id: 'telechargements', label: 'Transferts', icon: 'swap-vertical', badge: running, badgeColor: C.accent },
+            { id: 'indexeurs', label: 'Sites', icon: 'globe-outline', badge: 0, badgeColor: C.accent },
+            { id: 'reglages', label: 'Réglages', icon: 'options-outline', badge: 0, badgeColor: C.accent },
+          ] as { id: Tab; label: string; icon: keyof typeof Ionicons.glyphMap; badge: number; badgeColor: string }[]
+        ).map((t) => (
+          <Pressable key={t.id} onPress={() => setTab(t.id)} style={[styles.segItem, tab === t.id && styles.segOn]} accessibilityRole="tab" accessibilityState={{ selected: tab === t.id }}>
+            <Ionicons name={t.icon} size={16} color={tab === t.id ? '#000' : C.textDim} />
+            <Text style={[styles.segTxt, tab === t.id && { color: '#000' }]} numberOfLines={1}>
+              {t.label}
+            </Text>
+            {t.badge ? (
+              <View style={[styles.segBadge, { backgroundColor: t.badgeColor }]}>
+                <Text style={styles.segBadgeTxt}>{t.badge}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+        ))}
+      </View>
       {!st ? (
         <View style={styles.center}>
           {error ? (
@@ -116,13 +133,22 @@ export default function AutoTab() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: TAB_SPACE + insets.bottom + 20 }} refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
-          <View style={[styles.banner, { borderColor: st.enabled ? C.success : C.border }]}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.bannerTitle}>{st.enabled ? 'Lumio Auto actif' : 'Lumio Auto désactivé'}</Text>
-              <Text style={styles.dim}>
+          <View style={[styles.banner, { borderColor: st.enabled ? 'rgba(48,209,88,0.5)' : C.border }]}>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={styles.bannerTitle}>{st.enabled ? 'Lumio Auto actif' : 'Lumio Auto en pause'}</Text>
+              <Text style={styles.dim} numberOfLines={2}>
                 {st.enabled
-                  ? 'Les demandes validées passent par ici. Radarr et Sonarr peuvent être mis en pause.'
-                  : `Les demandes passent encore par Radarr / Sonarr.${st.indexers.length ? '' : ' Ajoute d’abord un indexeur.'}`}
+                  ? [
+                      running ? `${running} en cours` : 'rien en cours',
+                      st.grabs.filter((g) => g.seeding).length ? `${st.grabs.filter((g) => g.seeding).length} en partage` : null,
+                      toChoose ? `${toChoose} à choisir` : null,
+                      st.vpnPort?.port ? `VPN ✓ port ${st.vpnPort.port}` : st.qbit?.url ? 'VPN : port non ouvert' : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')
+                  : st.indexers.length
+                    ? 'Les demandes validées attendent : active-le pour qu’elles soient cherchées et téléchargées.'
+                    : 'Ajoute d’abord un site (onglet Sites).'}
               </Text>
             </View>
             <Switch
@@ -153,6 +179,7 @@ function Demandes({ st, reload, onItem }: { st: AutoState; reload: () => void; o
   // À choisir d'abord, puis ce qui bouge, puis le reste (le plus récent en haut)
   const rank = (i: AutoItem) => (i.needsChoice ? 0 : i.searching || i.active ? 1 : 2);
   const items = [...st.items].sort((a, b) => rank(a) - rank(b));
+  const GROUP = ['À choisir', 'En cours', 'Suivis'];
   return (
     <>
       {st.enabled && st.adoptable ? (
@@ -184,7 +211,7 @@ function Demandes({ st, reload, onItem }: { st: AutoState; reload: () => void; o
       ))}
 
       <View style={styles.rowBetween}>
-        <Text style={styles.h2}>Titres suivis ({st.items.length})</Text>
+        <Text style={styles.h2}>{st.items.length} titre{st.items.length > 1 ? 's' : ''}</Text>
         <Pressable
           onPress={() =>
             autoApi
@@ -199,11 +226,14 @@ function Demandes({ st, reload, onItem }: { st: AutoState; reload: () => void; o
         </Pressable>
       </View>
       {!st.items.length ? <Text style={styles.help}>Les demandes validées apparaissent ici dès que Lumio Auto est actif.</Text> : null}
-      {items.map((i) => {
+      {items.map((i, k) => {
         const s = itemStatus(i, st.grabs);
         const r = i.lastReport;
+        const head = k === 0 || rank(items[k - 1]) !== rank(i) ? GROUP[rank(i)] : null;
         return (
-          <Pressable key={i.id} onPress={() => onItem(i)} style={[styles.card, i.needsChoice && { borderWidth: 1, borderColor: C.warning }]}>
+          <View key={i.id} style={{ gap: 8 }}>
+          {head ? <Text style={[styles.groupHead, rank(i) === 0 && { color: C.warning }]}>{head}</Text> : null}
+          <Pressable onPress={() => onItem(i)} style={[styles.card, i.needsChoice && { borderWidth: 1, borderColor: C.warning }]}>
             <Ionicons name={i.type === 'movie' ? 'film-outline' : i.anime ? 'sparkles-outline' : 'tv-outline'} size={20} color={C.accent} />
             <View style={{ flex: 1, gap: 3 }}>
               <Text style={styles.title} numberOfLines={1}>
@@ -233,9 +263,16 @@ function Demandes({ st, reload, onItem }: { st: AutoState; reload: () => void; o
             </View>
             <Ionicons name="chevron-forward" size={16} color={C.textDim} />
           </Pressable>
+          </View>
         );
       })}
+    </>
+  );
+}
 
+function Journal({ st }: { st: AutoState }) {
+  return (
+    <>
       <Section title="Journal" id="auto-journal">
         {st.log.slice(0, 50).map((l, k) => (
           <Text key={k} style={[styles.log, l.level === 'error' && { color: C.danger }, l.level === 'warn' && { color: C.warning }]}>
@@ -922,7 +959,7 @@ function Reglages({ st, save }: { st: AutoState; save: (b: any, msg?: string) =>
   const setP = (k: keyof typeof pf, v: any) => setPf((o) => ({ ...o, [k]: v }));
   return (
     <>
-      <Section title="Profil de qualité" defaultOpen id="auto-profil">
+      <Section title="Qualité" defaultOpen id="auto-profil">
         <Picker label="Résolution" options={[720, 1080, 2160].map((n) => ({ value: n, label: `${n}p` }))} value={pf.resolution} onChange={(v) => setP('resolution', v)} />
         <Picker
           label="Codec"
@@ -977,7 +1014,7 @@ function Reglages({ st, save }: { st: AutoState; save: (b: any, msg?: string) =>
         <Button title="Enregistrer le profil" icon="checkmark" onPress={() => save({ profile: pf }, 'Profil enregistré')} />
       </Section>
 
-      <Section title="Téléchargement" defaultOpen id="auto-client">
+      <Section title="Client de téléchargement" id="auto-client">
         <Picker
           label="Client par défaut"
           options={[
@@ -991,7 +1028,7 @@ function Reglages({ st, save }: { st: AutoState; save: (b: any, msg?: string) =>
         <Text style={styles.help}>Chaque indexeur peut avoir son propre client (onglet Indexeurs) : par exemple C411 et TR4KER sur qBittorrent, le reste sur AllDebrid.</Text>
       </Section>
 
-      <Section title="qBittorrent" defaultOpen={st.client === 'qbit'} id="auto-qbit">
+      <Section title="qBittorrent et partage" id="auto-qbit">
         <ClientForm kind="qbit" st={st} save={save} />
         <Text style={[styles.label, { marginTop: 12 }]}>Partage (seed) : retirer le torrent après</Text>
         <Picker
@@ -1011,7 +1048,7 @@ function Reglages({ st, save }: { st: AutoState; save: (b: any, msg?: string) =>
         </Text>
       </Section>
 
-      <Section title="rdt-client (AllDebrid)" defaultOpen={st.client === 'rdt'} id="auto-rdt">
+      <Section title="AllDebrid (rdt-client)" id="auto-rdt">
         <ClientForm kind="rdt" st={st} save={save} />
       </Section>
 
@@ -1023,6 +1060,7 @@ function Reglages({ st, save }: { st: AutoState; save: (b: any, msg?: string) =>
 
       <Blocklist />
       <Button title="Vider toute la liste noire" icon="refresh" variant="secondary" onPress={() => autoApi.unblock(settings).then(() => toast('Liste noire vidée'))} />
+      <Journal st={st} />
     </>
   );
 }
@@ -1070,9 +1108,16 @@ function ClientForm({ kind, st, save }: { kind: 'rdt' | 'qbit'; st: AutoState; s
 
 const styles = StyleSheet.create({
   tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 4 },
+  seg: { flexDirection: 'row', marginHorizontal: 16, marginBottom: 6, padding: 3, borderRadius: 14, backgroundColor: C.surface },
+  segItem: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 8, borderRadius: 11 },
+  segOn: { backgroundColor: '#fff' },
+  segTxt: { color: C.textDim, fontSize: 12.5, fontWeight: '700' },
+  segBadge: { minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
+  segBadgeTxt: { color: '#000', fontSize: 10, fontWeight: '900' },
+  groupHead: { color: C.textDim, fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 6 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30 },
   banner: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderRadius: 22, borderWidth: 1.5, backgroundColor: C.surface },
-  bannerTitle: { color: C.text, fontSize: 18, fontWeight: '800', marginBottom: 2 },
+  bannerTitle: { color: C.text, fontSize: 17, fontWeight: '800' },
   h1: { color: C.text, fontSize: 22, fontWeight: '800', flex: 1 },
   h2: { color: C.text, fontSize: 17, fontWeight: '800', marginTop: 6 },
   help: { color: C.textDim, fontSize: 13, lineHeight: 19 },

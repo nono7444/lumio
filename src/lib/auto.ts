@@ -107,6 +107,7 @@ export type AutoState = {
   rdt: { url: string; user: string; hasPass: boolean; category: string; remotePath: string; localRoot: string; localFolder: string };
   qbit?: { url: string; user: string; hasPass: boolean; category: string; remotePath: string; localRoot: string; localFolder: string };
   seed?: { ratio: number; days: number };
+  vpnPort?: { port: number | null; at: string | null; error: string | null; fixed: string | null };
   alldebrid: boolean;
   profile: AutoProfile;
   indexers: AutoIndexer[];
