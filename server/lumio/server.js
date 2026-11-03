@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.65.0';
+const VERSION = '3.66.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4414,6 +4414,21 @@ async function autoCleanup(grab, srcPath) {
   } catch {}
 }
 
+// États qBittorrent renvoyés par rdt-client, en clair
+const RDT_STATES = {
+  metaDL: 'récupération des infos',
+  queuedDL: 'en file d’attente',
+  stalledDL: 'bloqué : pas de source',
+  pausedDL: 'en pause',
+  stoppedDL: 'en pause',
+  checkingDL: 'vérification',
+  allocating: 'préparation',
+  downloading: 'téléchargement',
+  forcedDL: 'téléchargement (forcé)',
+  moving: 'déplacement',
+  error: 'erreur',
+  missingFiles: 'fichiers manquants',
+};
 let autoTicking = false;
 async function autoProgressTick() {
   if (!autoOn() || autoTicking) return;
@@ -4432,6 +4447,7 @@ async function autoProgressTick() {
       let src = null;
       let finished = false;
       let failed = null;
+      if (g.paused) continue;
       if (g.client === 'rdt') {
         if (!rdtList) continue;
         const t = rdtList.find((x) => (g.hash && x.hash && x.hash.toLowerCase() === g.hash) || x.name === g.release.title);
@@ -4441,6 +4457,12 @@ async function autoProgressTick() {
           g.hash = g.hash || (t.hash || '').toLowerCase();
           g.progress = Math.round((Number(t.progress) || 0) * 100);
           g.speed = Number(t.dlspeed) || 0;
+          g.size = Number(t.size || t.total_size) || g.release.size || 0;
+          g.downloaded = Number(t.downloaded || t.completed) || Math.round((g.size || 0) * (Number(t.progress) || 0));
+          g.eta = Number(t.eta) > 0 && Number(t.eta) < 8640000 ? Number(t.eta) : g.speed > 0 && g.size ? Math.round((g.size - g.downloaded) / g.speed) : null;
+          g.clientState = t.state || null;
+          if (/^(paused|stopped)DL$/i.test(t.state || '')) g.lastMoveAt = Date.now();
+          g.statusText = RDT_STATES[t.state] || (Number(t.progress) >= 1 ? 'terminé, en attente du rangement' : 'téléchargement');
           g.state = 'downloading';
           if (/error|missing/i.test(t.state || '')) failed = `rdt-client : ${t.state}`;
           else if (Number(t.progress) >= 1 && !/^(downloading|metaDL|queuedDL|stalledDL|checkingDL|allocating|pausedDL|forcedDL)$/i.test(t.state || '')) {
@@ -4457,6 +4479,11 @@ async function autoProgressTick() {
           g.state = 'downloading';
           g.progress = job.size ? Math.round((job.done / job.size) * 100) : 0;
           g.speed = job.speed || 0;
+          g.size = job.size || g.release.size || 0;
+          g.downloaded = job.done || 0;
+          g.eta = g.speed > 0 && job.size ? Math.round((job.size - job.done) / g.speed) : null;
+          g.clientState = job.status;
+          g.statusText = { queued: 'en file d’attente', debrid: 'débridage AllDebrid', downloading: 'téléchargement' }[job.status] || job.status;
           if (job.status === 'done') {
             finished = true;
             src = safePath(job.root, job.folder).full;
@@ -4495,6 +4522,7 @@ async function autoProgressTick() {
         } catch (e) {
           g.state = 'failed';
           g.error = `import : ${e.message}`;
+          g.importSrc = src;
           autoLog(`${g.title} : import impossible (${e.message})`, 'error');
           autoEvent(auto.items.find((i) => i.id === g.itemId), 'failed', `Rangement impossible : ${e.message}`);
         }
@@ -4680,7 +4708,7 @@ async function autoRssTick() {
   }
 }
 
-setInterval(() => autoProgressTick().catch(() => {}), 30_000);
+setInterval(() => autoProgressTick().catch(() => {}), 10_000);
 setInterval(() => autoSearchTick().catch(() => {}), 5 * 60_000);
 let autoRssLast = 0;
 setInterval(() => {
@@ -4988,18 +5016,85 @@ async function autoRoutes(req, res, p, q, user) {
   }
   m = p.match(/^\/api\/auto\/grabs\/([a-f0-9]+)$/);
   if (m && req.method === 'DELETE') {
+    // Comme « Retirer de la file » dans Radarr : retirer du client, liste noire, chercher une autre version (au choix)
     const g = auto.grabs.find((x) => x.id === m[1]);
     if (!g) throw new HttpError(404, 'Téléchargement introuvable');
-    if (['sent', 'downloading'].includes(g.state)) {
-      if (g.client === 'alldebrid') {
-        const job = downloads.find((d) => d.id === g.jobId);
-        if (job) job.cancelled = true;
+    const q = new URL(req.url, 'http://x').searchParams;
+    const opt = (k, d) => (q.has(k) ? q.get(k) === '1' : d);
+    const running = ['sent', 'downloading'].includes(g.state);
+    const item = auto.items.find((i) => i.id === g.itemId);
+    if (running) {
+      if (opt('client', true)) {
+        if (g.client === 'alldebrid') {
+          const job = downloads.find((d) => d.id === g.jobId);
+          if (job) job.cancelled = true;
+        }
+        await autoCleanup(g, null);
       }
-      await autoCleanup(g, null);
       g.state = 'failed';
       g.error = 'annulé';
-      autoBlock(g.release);
-    } else auto.grabs = auto.grabs.filter((x) => x !== g);
+      g.doneAt = new Date().toISOString();
+      if (opt('blocklist', true)) autoBlock(g.release, `annulé par ${user.name}`);
+      autoEvent(item, 'failed', `Téléchargement annulé par ${user.name}${opt('blocklist', true) ? ' (version en liste noire)' : ''}`);
+      if (item && opt('search', true)) item.nextSearch = Date.now() + 10e3;
+      else if (item) item.nextSearch = Date.now() + 6 * 3600e3;
+    } else {
+      if (opt('blocklist', false)) autoBlock(g.release, `retiré par ${user.name}`);
+      if (item && opt('search', false)) item.nextSearch = Date.now() + 10e3;
+      auto.grabs = auto.grabs.filter((x) => x !== g);
+    }
+    autoSave();
+    send(res, 200, { ok: true });
+    return true;
+  }
+  m = p.match(/^\/api\/auto\/grabs\/([a-f0-9]+)\/(pause|resume|retry-import)$/);
+  if (m && req.method === 'POST') {
+    const g = auto.grabs.find((x) => x.id === m[1]);
+    if (!g) throw new HttpError(404, 'Téléchargement introuvable');
+    const action = m[2];
+    if (action === 'retry-import') {
+      if (g.state !== 'failed' || !g.importSrc || !fs.existsSync(g.importSrc)) throw new HttpError(400, 'Les fichiers téléchargés ne sont plus là : relance une recherche.');
+      g.state = 'importing';
+      g.error = undefined;
+      autoSave();
+      try {
+        const done = await autoImport(g, g.importSrc);
+        g.state = 'done';
+        g.progress = 100;
+        g.doneAt = new Date().toISOString();
+        await autoCleanup(g, g.importSrc);
+        delete g.importSrc;
+        autoEvent(auto.items.find((i) => i.id === g.itemId), 'imported', `Rangé à la main par ${user.name} (${done.includes('movie') ? 'film' : done.length + ' épisode(s)'})`);
+        autoCompleteRequests();
+      } catch (e) {
+        g.state = 'failed';
+        g.error = `import : ${e.message}`;
+        autoSave();
+        throw new HttpError(400, `Rangement impossible : ${e.message}`);
+      }
+      autoSave();
+      send(res, 200, { ok: true, message: 'Rangé dans la bibliothèque' });
+      return true;
+    }
+    if (!['sent', 'downloading'].includes(g.state)) throw new HttpError(400, 'Ce téléchargement n’est plus en cours');
+    if (g.client !== 'rdt' || !g.hash) throw new HttpError(400, 'Pause possible seulement avec rdt-client');
+    const hashes = new URLSearchParams({ hashes: g.hash });
+    const call = async (a, b) => {
+      try {
+        await rdtFetch(`/api/v2/torrents/${a}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: hashes });
+      } catch {
+        await rdtFetch(`/api/v2/torrents/${b}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: hashes });
+      }
+    };
+    try {
+      if (action === 'pause') await call('pause', 'stop');
+      else await call('resume', 'start');
+    } catch (e) {
+      throw new HttpError(502, `rdt-client n’accepte pas la ${action === 'pause' ? 'pause' : 'reprise'} : ${e.message}`);
+    }
+    g.paused = action === 'pause';
+    g.statusText = g.paused ? 'en pause' : 'reprise…';
+    g.lastMoveAt = Date.now();
     autoSave();
     send(res, 200, { ok: true });
     return true;
