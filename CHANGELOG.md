@@ -6,6 +6,7 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Bêta : onglet Auto → « Téléchargements », comme l’onglet Activité de Radarr / Sonarr. La file d’attente affiche l’avancement, la vitesse, le temps restant et l’état réel de rdt-client (bloqué sans source, en file, en pause…), avec la vitesse totale et ce qui reste à télécharger. L’historique se filtre (rangés / échecs). Chaque téléchargement a sa fiche : pause / reprise, réessayer le rangement, voir le titre, et retirer avec les mêmes choix que Radarr (supprimer dans rdt-client, liste noire, chercher une autre version). Il faut le serveur Lumio 3.66.0.
 - Bêta : nouvel onglet admin « Auto » (Lumio Auto, remplace Radarr / Sonarr). Onglet Demandes : chaque titre avec son état (à choisir, recherche, téléchargement, pas encore sorti), qui l’a demandé, l’historique, et le détail de la dernière recherche site par site et requête par requête (adresse appelée, erreurs expliquées). Si rien ne convient automatiquement, la recherche interactive s’ouvre : versions triables, qualité / langues / sources, raisons des refus, téléchargement en un appui. Onglet Indexeurs : ajout rapide de C411 (recherche par identifiant TMDB + saison / épisode, 15 requêtes par minute). Liste noire consultable. Il faut le serveur Lumio 3.65.0.
 
 ## 1.0.126 — 2 novembre 2026
