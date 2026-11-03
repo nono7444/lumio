@@ -117,11 +117,11 @@ function RequestCard({ r, admin, meId, onChanged }: { r: Req; admin: boolean; me
 
   // Demande déjà partie vers Radarr / Sonarr : l'admin choisit ce qu'il advient du film ou de la série
   const sent = r.status === RequestStatus.APPROVED || r.status === RequestStatus.COMPLETED || r.status === RequestStatus.FAILED;
-  const app = r.type === 'movie' ? 'Radarr' : 'Sonarr';
+  const app = r.download?.via === 'auto' ? 'Lumio Auto' : r.type === 'movie' ? 'Radarr' : 'Sonarr';
   const remove = () =>
     admin && sent
       ? Alert.alert('Supprimer cette demande ?', `${r.title}${r.seasons?.length ? ` (saison${r.seasons.length > 1 ? 's' : ''} ${r.seasons.join(', ')})` : ''}`, [
-          { text: `Arrêter et retirer de ${app} (garder les fichiers)`, onPress: () => act('delete', undefined, 'keep') },
+          { text: `Arrêter le suivi (garder les fichiers)`, onPress: () => act('delete', undefined, 'keep') },
           { text: 'Tout supprimer, fichiers compris', style: 'destructive', onPress: () => act('delete', undefined, 'files') },
           { text: 'Retirer de la liste seulement', onPress: () => act('delete') },
           { text: 'Annuler', style: 'cancel' },
@@ -210,9 +210,8 @@ function RequestCard({ r, admin, meId, onChanged }: { r: Req; admin: boolean; me
 function SecourRelayButton({ r, onDone }: { r: Req; onDone: () => void }) {
   const { settings } = useSettings();
   const [busy, setBusy] = useState(false);
-  const app = r.type === 'movie' ? 'Radarr' : 'Sonarr';
   const go = () =>
-    Alert.alert('Lumio Secour', `Télécharger « ${r.title} » avec Lumio Secour à la place de ${app} ?`, [
+    Alert.alert('Lumio Secour', `Télécharger « ${r.title} » avec Lumio Secour (liens directs AllDebrid) ?`, [
       { text: 'Annuler', style: 'cancel' },
       {
         text: 'Télécharger',

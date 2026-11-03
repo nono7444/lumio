@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.68.0';
+const VERSION = '3.69.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -85,7 +85,10 @@ class HttpError extends Error {
 }
 
 // ——— Config Radarr / Sonarr : envoyée depuis l'appli par un admin, ou variables d'environnement ———
+// Lumio Auto actif : Radarr et Sonarr ne sont plus utilisés du tout (même s'ils sont encore configurés)
+const arrOff = () => Boolean(config.auto && config.auto.enabled === true);
 function arrConfig(kind) {
+  if (arrOff()) return null;
   const c = { ...(config[kind] || {}) };
   const env = kind.toUpperCase();
   if (process.env[`${env}_URL`]) c.url = process.env[`${env}_URL`];
@@ -837,7 +840,59 @@ async function watchedSets(token) {
   }
   return out;
 }
+/** Sans Radarr / Sonarr : les titres des dossiers de la bibliothèque, avec leur taille sur le disque. */
+let diskTitlesCache = null;
+function dirSize(dir) {
+  let n = 0;
+  let entries = [];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const e of entries) {
+    const f = path.join(dir, e.name);
+    try {
+      if (e.isDirectory()) n += dirSize(f);
+      else if (e.isFile()) n += fs.statSync(f).size;
+    } catch {}
+  }
+  return n;
+}
+function diskTitles() {
+  if (diskTitlesCache && Date.now() - diskTitlesCache.at < 10 * 60e3) return diskTitlesCache.items;
+  const items = [];
+  const seen = new Set();
+  for (const [kind, type] of [['radarr', 'movie'], ['sonarr', 'tv']])
+    for (const f of autoFolderChoices(kind)) {
+      if (seen.has(f.path)) continue;
+      seen.add(f.path);
+      let names = [];
+      try {
+        names = fs.readdirSync(f.path, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => e.name);
+      } catch {}
+      for (const n of names) {
+        const full = path.join(f.path, n);
+        const size = dirSize(full);
+        if (!size) continue;
+        const m = n.match(/\[tmdbid-(\d+)\]/);
+        const y = n.match(/\((\d{4})\)/);
+        let added = null;
+        try {
+          added = fs.statSync(full).birthtime.toISOString();
+        } catch {}
+        items.push({ kind: 'disk', id: Buffer.from(full).toString('base64url'), type, tmdbId: m ? Number(m[1]) : null, title: n.replace(/\s*\[[^\]]*\]/g, '').replace(/\s*\(\d{4}\)/, '').trim(), year: y ? Number(y[1]) : null, size, added, watched: false, lastPlayed: null, poster: null, folder: f.folder });
+      }
+    }
+  diskTitlesCache = { at: Date.now(), items };
+  return items;
+}
 async function storageReport(token) {
+  if (arrOff()) {
+    const disks = await diskSpace().catch(() => []);
+    const biggest = [...diskTitles()].sort((a, b) => b.size - a.size).slice(0, 25);
+    return { disks, candidates: [], biggest, totalCandidates: 0 };
+  }
   const [disks, movies, series, watched] = await Promise.all([
     diskSpace(),
     arrConfig('radarr') ? arr('radarr', '/movie').catch(() => []) : [],
@@ -1363,6 +1418,14 @@ setInterval(() => {
 
 /** Saisons d'une série dans la numérotation de Sonarr (TheTVDB), avec le nombre d'épisodes. */
 async function arrSeasons(tvdbId) {
+  if (arrOff() && tvdbId) {
+    // Sans Sonarr : saisons d'après TMDB (identifiant TVDB → série TMDB)
+    const f = await tmdbGet(`/find/${tvdbId}`, { external_source: 'tvdb_id' }).catch(() => null);
+    const id = f && f.tv_results && f.tv_results[0] && f.tv_results[0].id;
+    const tv = id ? await tmdbGet(`/tv/${id}`).catch(() => null) : null;
+    if (!tv) return null;
+    return (tv.seasons || []).filter((x) => x.season_number > 0).map((x) => ({ seasonNumber: x.season_number, episodes: x.episode_count || null })).sort((a, b) => a.seasonNumber - b.seasonNumber);
+  }
   if (!tvdbId || !arrConfig('sonarr')) return null;
   const existing = (await arr('sonarr', `/series?tvdbId=${tvdbId}`).catch(() => []))[0];
   const src = existing || ((await arr('sonarr', `/series/lookup?term=${encodeURIComponent(`tvdb:${tvdbId}`)}`).catch(() => [])) || [])[0];
@@ -1934,6 +1997,7 @@ async function status() {
   out.jellyfin = { ok: jf.ok, ms: jf.ms, error: jf.error, version: jf.body && jf.body.Version, name: jf.body && jf.body.ServerName };
   await Promise.all(
     ['radarr', 'sonarr'].map(async (kind) => {
+      if (arrOff()) return;
       const c = arrConfig(kind);
       if (!c) return (out[kind] = { ok: false, configured: false, error: 'non configuré' });
       const st = await probe(`${c.url}/api/v3/system/status`, { 'X-Api-Key': c.apiKey });
@@ -5661,9 +5725,10 @@ const server = http.createServer(async (req, res) => {
       ok: true,
       version: VERSION,
       messages: messages.length,
-      features: ['chat', 'requests', 'status', 'ideas', 'ratings', 'files', 'watchlist', 'books', ...(tmdbKey() ? ['tmdb'] : [])],
-      radarr: Boolean(arrConfig('radarr')),
-      sonarr: Boolean(arrConfig('sonarr')),
+      features: ['chat', 'requests', 'status', 'ideas', 'ratings', 'files', 'watchlist', 'books', ...(tmdbKey() ? ['tmdb'] : []), ...(arrOff() ? ['auto'] : [])],
+      // Lumio Auto actif : il fait le travail de Radarr / Sonarr (l'appli ne demande plus leur config)
+      radarr: arrOff() || Boolean(arrConfig('radarr')),
+      sonarr: arrOff() || Boolean(arrConfig('sonarr')),
     });
 
   // État public pour le widget iOS : en ligne / hors ligne et compteurs seulement (aucun titre, aucune clé)
@@ -6244,6 +6309,35 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
     if (req.method === 'GET' && p === '/api/admin/storage') {
       requireAdmin(user);
       return send(res, 200, await storageReport(user.token));
+    }
+    const delDisk = p.match(/^\/api\/admin\/storage\/disk\/([\w-]+)$/);
+    if (req.method === 'DELETE' && delDisk) {
+      requireAdmin(user);
+      const it = diskTitles().find((x) => x.id === delDisk[1]);
+      if (!it) throw new HttpError(404, 'Introuvable (liste trop ancienne, recharge)');
+      const full = Buffer.from(it.id, 'base64url').toString();
+      const roots = [...autoFolderChoices('radarr'), ...autoFolderChoices('sonarr')].map((f) => path.resolve(f.path));
+      if (!roots.some((r0) => path.resolve(full).startsWith(r0 + path.sep)) || roots.includes(path.resolve(full))) throw new HttpError(400, 'Dossier refusé');
+      await fs.promises.rm(full, { recursive: true, force: true });
+      if (it.tmdbId) {
+        const key = autoItemKey(it.type, it.tmdbId);
+        delete auto.have[key];
+        delete auto.haveCodec[key];
+        auto.items = auto.items.filter((x) => !(x.type === it.type && x.tmdbId === it.tmdbId));
+        autoSave();
+        for (const r of requests)
+          if (r.type === it.type && r.tmdbId === it.tmdbId && (r.status === RequestStatus.APPROVED || r.status === RequestStatus.COMPLETED)) {
+            r.status = RequestStatus.COMPLETED;
+            r.deletedAt = new Date().toISOString();
+          }
+        saveRequests();
+      }
+      diskTitlesCache = null;
+      fetch(`${JELLYFIN_URL}/Library/Refresh`, { method: 'POST', headers: jfHeaders(user.token) }).catch(() => {});
+      library = null;
+      diskCache = null;
+      console.log(`Stockage : « ${it.title} » supprimé par ${user.name} (${(it.size / 1e9).toFixed(1)} Go)`);
+      return send(res, 200, { ok: true, message: `« ${it.title} » supprimé.` });
     }
     const delM = p.match(/^\/api\/admin\/storage\/(radarr|sonarr)\/(\d+)$/);
     if (req.method === 'DELETE' && delM) {

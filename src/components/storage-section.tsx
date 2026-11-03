@@ -65,7 +65,7 @@ export function StorageSection() {
     if (!chosen.length) return;
     Alert.alert(
       `Supprimer ${chosen.length} titre${chosen.length > 1 ? 's' : ''} ?`,
-      `${formatBytes(chosenSize)} libérés. Les fichiers sont effacés du disque et retirés de Radarr / Sonarr et de Jellyfin. On pourra les redemander.`,
+      `${formatBytes(chosenSize)} libérés. Les fichiers sont effacés du disque et de Jellyfin. On pourra les redemander.`,
       [
         { text: 'Annuler', style: 'cancel' },
         {

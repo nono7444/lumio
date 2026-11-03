@@ -176,7 +176,7 @@ export default function Users() {
               <View style={styles.line}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.name}>Validation automatique</Text>
-                  <Text style={styles.dim}>Les demandes partent directement dans Radarr / Sonarr, sans ton accord.</Text>
+                  <Text style={styles.dim}>Les demandes partent directement en téléchargement, sans ton accord.</Text>
                 </View>
                 <Switch
                   value={global.defaultAutoApprove}
