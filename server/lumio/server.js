@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.70.0';
+const VERSION = '3.71.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4978,6 +4978,62 @@ async function autoSeedTick() {
   }
 }
 setInterval(() => autoSeedTick().catch(() => {}), 2 * 60_000);
+
+// ——— Port du VPN : Gluetun ouvre un port chez ProtonVPN (il change à chaque connexion) ; on le recopie dans qBittorrent ———
+// (la commande de Gluetun échoue quand qBittorrent redémarre en même temps, et le port retombait à 0)
+let vpnPort = { port: null, at: null, error: null, fixed: null };
+const gluetunBase = () => {
+  const q = autoCfg().qbit || {};
+  if (q.gluetun) return String(q.gluetun).replace(/\/+$/, '');
+  try {
+    const u = new URL(q.url);
+    return `${u.protocol}//${u.hostname}:8000`;
+  } catch {
+    return null;
+  }
+};
+async function vpnPortTick() {
+  const q = autoCfg().qbit || {};
+  if (!autoOn() || !q.url) return;
+  const base = gluetunBase();
+  if (!base) return;
+  let port = null;
+  for (const p2 of ['/v1/portforward', '/v1/openvpn/portforwarded']) {
+    try {
+      const r = await fetch(`${base}${p2}`, { signal: AbortSignal.timeout(5000) });
+      if (!r.ok) continue;
+      const j = await r.json();
+      port = Number(j.port || (Array.isArray(j.ports) && j.ports[0])) || null;
+      if (port) break;
+    } catch (e) {
+      vpnPort.error = `Gluetun injoignable (${netError(e)})`;
+    }
+  }
+  vpnPort.at = new Date().toISOString();
+  if (!port) {
+    vpnPort.port = null;
+    if (!vpnPort.error) vpnPort.error = 'aucun port ouvert par le VPN pour le moment';
+    return;
+  }
+  vpnPort.port = port;
+  vpnPort.error = null;
+  try {
+    const pref = await (await qbitFetch('/api/v2/app/preferences')).json();
+    if (Number(pref.listen_port) !== port || (pref.current_network_interface && pref.current_network_interface !== 'tun0')) {
+      await qbitFetch('/api/v2/app/setPreferences', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ json: JSON.stringify({ listen_port: port, current_network_interface: 'tun0', random_port: false, upnp: false }) }),
+      });
+      vpnPort.fixed = new Date().toISOString();
+      autoLog(`qBittorrent : port du VPN remis à ${port} (il était à ${pref.listen_port})`);
+    }
+  } catch (e) {
+    vpnPort.error = `qBittorrent : ${e.message}`;
+  }
+}
+setTimeout(() => vpnPortTick().catch(() => {}), 30_000);
+setInterval(() => vpnPortTick().catch(() => {}), 2 * 60_000);
 setInterval(() => autoSearchTick().catch(() => {}), 5 * 60_000);
 let autoRssLast = 0;
 setInterval(() => {
@@ -5199,6 +5255,7 @@ async function autoRoutes(req, res, p, q, user) {
       client: ['alldebrid', 'qbit'].includes(c.client) ? c.client : 'rdt',
       qbit: { url: (c.qbit || {}).url || '', user: (c.qbit || {}).user || '', hasPass: Boolean((c.qbit || {}).pass), category: qbitCategory(), remotePath: (c.qbit || {}).remotePath || '/downloads', localRoot: (c.qbit || {}).localRoot || '', localFolder: (c.qbit || {}).localFolder || 'downloads/qbit' },
       seed: autoSeed(),
+      vpnPort,
       rdt: { url: (c.rdt || {}).url || '', user: (c.rdt || {}).user || '', hasPass: Boolean((c.rdt || {}).pass), category: rdtCategory(), remotePath: (c.rdt || {}).remotePath || '/data/downloads', localRoot: (c.rdt || {}).localRoot || '', localFolder: (c.rdt || {}).localFolder || 'downloads' },
       alldebrid: Boolean(process.env.ALLDEBRID_KEY || config.alldebridKey),
       profile: autoProfile(),
@@ -5309,12 +5366,13 @@ async function autoRoutes(req, res, p, q, user) {
       qbitCookie = null;
       try {
         const ver = await (await qbitFetch('/api/v2/app/version')).text();
+        await vpnPortTick().catch(() => {});
         const pref = await (await qbitFetch('/api/v2/app/preferences')).json().catch(() => ({}));
         const list = await (await qbitFetch('/api/v2/torrents/info')).json();
         const iface = pref.current_network_interface;
         send(res, 200, {
           ok: true,
-          message: `qBittorrent ${ver} répond (${list.length} torrent(s)) · port ${pref.listen_port || '?'}${iface ? ` · interface ${iface}` : ''}.${(c.qbit && c.qbit.localRoot) ? '' : ' Choisis le disque des téléchargements vu par Lumio.'}`,
+          message: `qBittorrent ${ver} répond (${list.length} torrent(s)) · port ${pref.listen_port || '?'}${iface ? ` · interface ${iface}` : ''}.\nVPN : ${vpnPort.port ? `port ouvert ${vpnPort.port}${Number(pref.listen_port) === vpnPort.port ? ' ✓' : ' (recopié dans qBittorrent)'}` : vpnPort.error || 'port inconnu'}.`,
         });
       } catch (e) {
         send(res, 200, { ok: false, message: netError(e) });
