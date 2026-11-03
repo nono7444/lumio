@@ -154,6 +154,30 @@ function Demandes({ st, reload, onItem }: { st: AutoState; reload: () => void; o
   const items = [...st.items].sort((a, b) => rank(a) - rank(b));
   return (
     <>
+      {st.enabled && st.adoptable ? (
+        <View style={[styles.siteBox, { borderWidth: 1, borderColor: C.warning, gap: 8 }]}>
+          <Text style={styles.title}>{st.adoptable} demande(s) encore chez Radarr / Sonarr</Text>
+          <Text style={styles.small}>Elles ont été validées avant l’activation de Lumio Auto. Reprends-les pour qu’elles soient cherchées sur C411 et suivies ici.</Text>
+          <Button
+            title="Les reprendre dans Lumio Auto"
+            icon="download-outline"
+            small
+            onPress={() =>
+              Alert.alert('Reprendre les demandes ?', 'Lumio Auto va les chercher peu à peu. Laisse Radarr et Sonarr en pause pour éviter les doublons.', [
+                { text: 'Annuler', style: 'cancel' },
+                {
+                  text: 'Reprendre',
+                  onPress: () =>
+                    autoApi
+                      .adopt(settings)
+                      .then((r) => (Alert.alert('Lumio Auto', r.errors.length ? `${r.message}\n\n${r.errors.slice(0, 8).join('\n')}` : r.message), reload()))
+                      .catch((e) => Alert.alert('Lumio Auto', e.message)),
+                },
+              ])
+            }
+          />
+        </View>
+      ) : null}
       {active.map((g) => (
         <GrabRow key={g.id} g={g} reload={reload} compact />
       ))}

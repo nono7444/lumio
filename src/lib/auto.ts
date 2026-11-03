@@ -94,6 +94,7 @@ export type AutoFolder = { path: string; root: string; folder: string; name: str
 export type AutoState = {
   enabled: boolean;
   client: 'rdt' | 'alldebrid';
+  adoptable?: number;
   rdt: { url: string; user: string; hasPass: boolean; category: string; remotePath: string; localRoot: string; localFolder: string };
   alldebrid: boolean;
   profile: AutoProfile;
@@ -149,6 +150,7 @@ export const autoApi = {
     ),
   grab: (s: Settings, id: string, guid: string) => serverCall(s, `/api/auto/items/${id}/grab`, { method: 'POST', ...json({ guid }) }),
   cancelGrab: (s: Settings, id: string) => serverCall(s, `/api/auto/grabs/${id}`, { method: 'DELETE' }),
+  adopt: (s: Settings) => serverCall<{ ok: number; errors: string[]; message: string }>(s, '/api/auto/adopt', { method: 'POST' }),
   removeGrab: (s: Settings, id: string, o: { client: boolean; blocklist: boolean; search: boolean }) =>
     serverCall(s, `/api/auto/grabs/${id}?client=${o.client ? 1 : 0}&blocklist=${o.blocklist ? 1 : 0}&search=${o.search ? 1 : 0}`, { method: 'DELETE' }),
   pauseGrab: (s: Settings, id: string) => serverCall(s, `/api/auto/grabs/${id}/pause`, { method: 'POST' }),

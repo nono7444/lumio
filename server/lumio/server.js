@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.66.0';
+const VERSION = '3.67.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4750,6 +4750,8 @@ async function autoAdd({ type, tmdbId, tvdbId, title, seasons, folderPath, futur
 }
 
 /** Demande validée → Lumio Auto (à la place de Radarr / Sonarr quand il est activé). */
+/** Demandes validées avant l'activation de Lumio Auto, encore chez Radarr / Sonarr. */
+const autoAdoptable = () => requests.filter((r) => r.status === RequestStatus.APPROVED && r.via !== 'auto' && !(r.via === 'secour' && r.secour && ['queued', 'running'].includes(r.secour.state)));
 async function autoFromRequest(r) {
   await autoAdd({ type: r.type, tmdbId: r.tmdbId, tvdbId: r.tvdbId, title: r.title, seasons: r.seasons, folderPath: r.rootFolderPath, requestId: r.id });
   r.via = 'auto';
@@ -4818,6 +4820,7 @@ async function autoRoutes(req, res, p, q, user) {
       disks: disks().map((d) => d.name),
       items: auto.items.map(publicItem),
       grabs: auto.grabs.slice(0, 60),
+      adoptable: autoAdoptable().length,
       log: auto.log.slice(0, 80),
     });
     return true;
@@ -5097,6 +5100,23 @@ async function autoRoutes(req, res, p, q, user) {
     g.lastMoveAt = Date.now();
     autoSave();
     send(res, 200, { ok: true });
+    return true;
+  }
+  if (req.method === 'POST' && p === '/api/auto/adopt') {
+    if (!autoOn()) throw new HttpError(400, 'Active d’abord Lumio Auto');
+    let ok = 0;
+    const errors = [];
+    for (const r of autoAdoptable()) {
+      try {
+        await autoFromRequest(r);
+        ok++;
+      } catch (e) {
+        errors.push(`${r.title} : ${e.message}`);
+      }
+    }
+    saveRequests();
+    autoLog(`${ok} demande(s) reprise(s) de Radarr / Sonarr par ${user.name}`);
+    send(res, 200, { ok, errors, message: `${ok} demande(s) reprise(s) : Lumio Auto les cherche peu à peu (C411 limite le nombre de recherches).${errors.length ? ` ${errors.length} erreur(s).` : ''}` });
     return true;
   }
   if (req.method === 'GET' && p === '/api/auto/blocklist') {
