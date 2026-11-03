@@ -37,7 +37,7 @@ export type Req = {
     state: 'searching' | 'downloading' | 'importing' | 'warning' | 'partial';
     progress?: number | null;
     /** Groupe de secours : Radarr / Sonarr hors service, Lumio Secour télécharge à leur place */
-    via?: 'secour';
+    via?: 'secour' | 'auto';
     title?: string;
     message?: string;
     release?: string;
@@ -260,19 +260,20 @@ export function partialText(d: NonNullable<Req['download']>) {
 export function downloadLabel(r: Req): { text: string; color: string } | null {
   const d = r.download;
   if (!d) return null;
-  const app = r.type === 'movie' ? 'Radarr' : 'Sonarr';
+  if (d.via === 'auto')
+    return { text: `⚡ ${d.title ?? 'Lumio Auto'}${d.progress != null ? ` · ${d.progress} %` : ''}`, color: d.state === 'searching' ? '#FF9F0A' : '#3D8BFF' };
   if (d.via === 'secour')
     return { text: `🛟 ${d.title ?? 'Lumio Secour'}${d.progress != null ? ` · ${d.progress} %` : ''}${d.count && d.count > 1 ? ` · ${d.count} épisodes restants` : ''}`, color: '#30D158' };
   switch (d.state) {
     case 'warning':
-      return { text: `⚠️ À vérifier dans ${app} : ${d.message ?? 'intervention manuelle nécessaire'}`, color: '#FF9F0A' };
+      return { text: `⚠️ À vérifier : ${d.message ?? 'intervention manuelle nécessaire'}`, color: '#FF9F0A' };
     case 'importing':
-      return { text: `Import dans ${app}…`, color: '#64D2FF' };
+      return { text: 'Rangement dans la bibliothèque…', color: '#64D2FF' };
     case 'downloading':
       return { text: `Téléchargement${d.progress != null ? ` ${d.progress} %` : '…'}${d.count && d.count > 1 ? ` · ${d.count} épisodes` : ''}`, color: '#3D8BFF' };
     case 'partial':
       return { text: `◐ Partiel · ${partialText(d)}`, color: '#FF9F0A' };
     default:
-      return { text: `${app} cherche une release…`, color: '#8E8E93' };
+      return { text: 'Recherche d’une version…', color: '#8E8E93' };
   }
 }

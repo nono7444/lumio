@@ -94,7 +94,7 @@ export function EpisodePicker({
     if (!current || current.IndexNumber == null || !seriesId) return;
     const v = await prompt({
       title: `Changer le numéro de « ${current.Name} »`,
-      message: 'Nouveau numéro de saison. Les fichiers sont renommés (par Sonarr s’il gère la série), puis Jellyfin se met à jour. Le même numéro range seulement les fichiers dans leur dossier « Season ».',
+      message: 'Nouveau numéro de saison. Les fichiers sont renommés, puis Jellyfin se met à jour. Le même numéro range seulement les fichiers dans leur dossier « Season ».',
       value: String(Math.max(1, current.IndexNumber - 1)),
       ok: 'Changer',
     });

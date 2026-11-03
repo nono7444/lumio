@@ -64,6 +64,8 @@ export default function TabsLayout() {
       <Tabs.Screen name="calendar" options={{ title: 'Calendrier' }} />
       <Tabs.Screen name="chat" options={{ title: 'Chat', href: settings.jellyfin ? undefined : null }} />
       <Tabs.Screen name="activity" options={{ title: 'Demandes' }} />
+      {/* Lumio Auto : admin seulement, jamais sur la TV */}
+      <Tabs.Screen name="auto" options={{ title: 'Auto', href: settings.jellyfin?.isAdmin && !Platform.isTV ? undefined : null }} />
       <Tabs.Screen name="watchlist" options={{ title: 'À voir', href: Platform.isTV ? null : undefined }} />
       <Tabs.Screen name="settings" options={{ title: 'Profil' }} />
     </Tabs>

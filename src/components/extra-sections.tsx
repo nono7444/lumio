@@ -46,7 +46,7 @@ export function ChatSection() {
     <Section title="Serveur Lumio">
       <Text style={{ color: C.textDim, fontSize: 13, lineHeight: 19, marginBottom: 12 }}>
         {manager
-          ? 'Chat famille et demandes façon Seerr : tes clés Radarr et Sonarr restent sur ce serveur, jamais sur les téléphones de la famille.'
+          ? 'Chat famille, demandes et téléchargements (Lumio Auto) : toutes les clés restent sur ce serveur, jamais sur les téléphones de la famille.'
           : 'Chat famille et demandes de films et séries.'}
       </Text>
       <Field label="Adresse du serveur" value={url} onChangeText={setUrl} placeholder="https://lumio.mondomaine.fr" keyboardType="url" />

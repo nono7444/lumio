@@ -517,8 +517,8 @@ function AdminItemActions({ item, reload }: { item: JfItem; reload: () => void }
     Alert.alert(
       `Supprimer « ${item.Name} » ?`,
       isSeries
-        ? 'La série, toutes ses saisons et leurs fichiers seront supprimés du disque. Pense à la retirer aussi de Sonarr pour qu’elle ne revienne pas.'
-        : 'Le film et son fichier seront supprimés du disque. Pense à le retirer aussi de Radarr pour qu’il ne revienne pas.',
+        ? 'La série, toutes ses saisons et leurs fichiers seront supprimés du disque. Lumio Auto ne la retéléchargera pas tout seul.'
+        : 'Le film et son fichier seront supprimés du disque. Lumio Auto ne le retéléchargera pas tout seul.',
       [
         { text: 'Annuler', style: 'cancel' },
         {

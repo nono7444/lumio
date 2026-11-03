@@ -244,6 +244,13 @@ function ProgressButton({ r, label, progress, color, spinner }: { r?: Req; label
       tint = C.success;
       spin = d.progress == null;
       icon = 'medkit';
+    } else if (d.via === 'auto') {
+      // Lumio Auto : recherche sur les indexeurs, puis téléchargement
+      pct = d.progress ?? 0;
+      spin = d.progress == null;
+      text = d.progress != null ? `Téléchargement ${d.progress} %` : 'Lumio Auto · recherche…';
+      note = d.title?.replace(/^Lumio Auto · /, '') ?? null;
+      icon = 'flash';
     } else if (d.state === 'downloading') {
       pct = d.progress ?? 0;
       text = `Téléchargement ${d.progress != null ? `${d.progress} %` : '…'}`;

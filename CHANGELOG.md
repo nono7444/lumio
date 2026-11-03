@@ -6,6 +6,13 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Lumio Auto remplace Radarr, Sonarr et Prowlarr (nouvel onglet admin « Auto », jamais sur la TV). Il cherche chaque demande validée sur tes sites (C411, TR4KER…) par identifiant TMDB / IMDb, prend la version la plus légère en français 1080p (H.265 de préférence, attente puis remplacement automatique du H.264), et la range dans la bonne bibliothèque. Il faut le serveur Lumio 3.71.0.
+- Onglet Auto clarifié en quatre rubriques : Titres (à choisir, en cours, suivis ; fiche avec historique, recherches site par site et recherche interactive façon Radarr), Transferts (file d’attente avec vitesse et temps restant, « En partage » avec le ratio, historique), Sites (C411, Torznab, Prowlarr ; client au choix par site) et Réglages (qualité, qBittorrent et partage, AllDebrid, dossiers, liste noire, journal).
+- Téléchargement avec qBittorrent derrière le VPN (ProtonVPN via Gluetun) puis partage jusqu’au ratio ou à la durée choisis, rangement par lien dur (aucune place en plus), port du VPN recopié tout seul. AllDebrid reste disponible.
+- Onglet Demandes minimaliste : juste les demandes, une ligne par titre (affiche, statut en couleur, ✓ / ✕ pour valider, autres actions dans « … »). Plus aucune mention de Radarr / Sonarr.
+- Profil plus rangé : « Compte et serveur » (Jellyfin, Serveur Lumio, Serveur, Stockage, Idées & signalements) et « Application » (Accueil, TMDB, Lecture, version). Stockage d’après les dossiers des disques, saisons des séries d’après TMDB.
+- Vignette dédiée pour les Collections dans la Bibliothèque.
+
 ## 1.0.126 — 2 novembre 2026
 
 - Profils de la famille : quand tu te connectes avec le compte admin, un écran « Qui regarde ? » te propose ton profil, celui des enfants, de ta femme… Chaque profil a sa propre reprise, ses « vus » et sa liste « À voir ». Un profil enfant peut être limité à certaines bibliothèques et à un âge maximum, et chaque profil peut avoir un code à 4 chiffres. Tu changes de profil dans Profil → Changer de profil. Il faut le serveur Lumio 3.64.0.
