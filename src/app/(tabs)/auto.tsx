@@ -880,13 +880,32 @@ function Reglages({ st, save }: { st: AutoState; save: (b: any, msg?: string) =>
         <Picker
           label="Codec"
           options={[
-            { value: 'required', label: 'H.265 obligatoire', hint: 'fichiers légers' },
-            { value: 'preferred', label: 'H.265 de préférence' },
+            { value: 'preferred', label: 'H.265 de préférence', hint: 'conseillé : léger, sans blocage' },
+            { value: 'required', label: 'H.265 obligatoire', hint: 'sinon tu choisis à la main' },
             { value: 'any', label: 'Peu importe' },
           ]}
           value={pf.h265}
           onChange={(v) => setP('h265', v)}
         />
+        {pf.h265 === 'preferred' ? (
+          <>
+            <Picker
+              label="Sortie récente : attendre une version H.265"
+              options={[0, 24, 48, 72].map((n) => ({ value: n, label: n ? `${n} h` : 'Non' }))}
+              value={pf.h265Wait ?? 48}
+              onChange={(v) => setP('h265Wait', v)}
+            />
+            <Picker
+              label="Remplacer le H.264 par du H.265 s’il arrive"
+              options={[0, 7, 30, 90].map((n) => ({ value: n, label: n ? `pendant ${n} j` : 'Non' }))}
+              value={pf.upgradeDays ?? 30}
+              onChange={(v) => setP('upgradeDays', v)}
+            />
+            <Text style={styles.help}>
+              Lumio prend toujours la version la plus légère. Pour un film ou un épisode qui vient de sortir, il attend d’abord une version H.265. Sinon il prend du H.264, puis le remplace tout seul si une version H.265 apparaît.
+            </Text>
+          </>
+        ) : null}
         <Text style={styles.label}>Langues acceptées (dans l’ordre de préférence)</Text>
         <View style={styles.chips}>
           {LANGS.map((l) => {

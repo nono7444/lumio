@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.67.0';
+const VERSION = '3.68.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1539,6 +1539,7 @@ setInterval(() => fastImportTick().catch(() => {}), 20_000);
 
 /** Relance la recherche d'une demande approuvée et dit si une version est partie en téléchargement. */
 async function recheckRequest(r) {
+  if (autoOn() || r.via === 'auto') return autoRecheck(r);
   const kind = r.type === 'movie' ? 'radarr' : 'sonarr';
   let command;
   let match;
@@ -1874,6 +1875,7 @@ setTimeout(() => buildCollections().catch(() => {}), 60_000);
 
 // ——— File de téléchargement ———
 async function queue() {
+  if (autoOn()) return autoQueue();
   const out = [];
   const errors = [];
   await Promise.all(
@@ -3472,6 +3474,8 @@ const AUTO_FILE = path.join(DATA_DIR, 'auto.json');
 const auto = readJson(AUTO_FILE, {});
 for (const k of ['items', 'grabs', 'blocked', 'log']) if (!Array.isArray(auto[k])) auto[k] = [];
 if (!auto.have || typeof auto.have !== 'object') auto.have = {};
+// Codec de ce que Lumio Auto a rangé ({ 'tv:1399': { '2:1': { c: 'h264', at } } }) : pour remplacer plus tard par du H.265
+if (!auto.haveCodec || typeof auto.haveCodec !== 'object') auto.haveCodec = {};
 let autoSaveTimer = null;
 const autoSave = () => {
   clearTimeout(autoSaveTimer);
@@ -3494,7 +3498,9 @@ const autoId = () => crypto.randomBytes(5).toString('hex');
 const AUTO_PROFILE = {
   resolution: 1080, // 2160 | 1080 | 720
   allowLower: false, // accepter 720p si rien en 1080p
-  h265: 'required', // 'required' | 'preferred' | 'any'
+  h265: 'preferred', // 'required' | 'preferred' | 'any'
+  h265Wait: 48, // sortie récente : on attend une version H.265 pendant ce nombre d'heures avant de prendre du H.264
+  upgradeDays: 30, // version H.264 rangée : on cherche encore du H.265 (plus léger) pendant ce nombre de jours, puis on remplace
   languages: ['multi', 'vff', 'truefrench', 'vf2', 'french', 'vfq'], // ordre de préférence
   maxMovieGb: 8,
   maxEpisodeGb: 2.5,
@@ -3503,7 +3509,51 @@ const AUTO_PROFILE = {
   searchEveryMin: 60,
   rssEveryMin: 20,
 };
-const autoProfile = () => ({ ...AUTO_PROFILE, ...(autoCfg().profile || {}) });
+const autoProfile = () => {
+  const c = autoCfg();
+  // Ancien profil « H.265 obligatoire » : bloquait tout quand le site n'avait que du H.264 → H.265 de préférence + attente + remplacement
+  if (c.profile && !c.profileV2) {
+    c.profileV2 = true;
+    if (c.profile.h265 === 'required') c.profile.h265 = 'preferred';
+    saveConfig();
+  }
+  return { ...AUTO_PROFILE, ...(c.profile || {}) };
+};
+/** Date de sortie de ce qu'on cherche (film : sortie vidéo ; épisode / saison : diffusion). */
+function autoWantAir(item, want) {
+  const m = item.meta || {};
+  if (item.type === 'movie') return m.availableFrom ? Date.parse(m.availableFrom) : null;
+  const eps = (m.seasons && m.seasons[want.season]) || [];
+  const airs = (want.kind === 'episode' ? eps.filter((e) => e.e === want.episode) : eps).map((e) => Date.parse(e.air)).filter(Boolean);
+  return airs.length ? Math.max(...airs) : null;
+}
+/** Sortie récente : on n'accepte que du H.265 pendant quelques heures (les encodages légers arrivent souvent après). */
+function autoWaitH265(item, want, pf = autoProfile()) {
+  if (pf.h265 !== 'preferred' || !(pf.h265Wait > 0)) return null;
+  const air = autoWantAir(item, want);
+  if (!air || Date.now() - air > 30 * 86400e3) return null;
+  const until = Math.max(air, Date.parse(item.addedAt || 0) || 0) + pf.h265Wait * 3600e3;
+  return until > Date.now() ? until : null;
+}
+/** Ce que Lumio Auto a rangé en H.264 récemment : à remplacer par du H.265 s'il apparaît. */
+function autoUpgradeWants(item, pf = autoProfile()) {
+  if (pf.h265 === 'any' || !(pf.upgradeDays > 0)) return [];
+  const hc = auto.haveCodec[autoItemKey(item.type, item.tmdbId)] || {};
+  const old = Object.entries(hc).filter(([, v]) => v && v.c !== 'h265' && Date.now() - v.at < pf.upgradeDays * 86400e3).map(([k]) => k);
+  if (!old.length) return [];
+  if (item.type === 'movie') return old.includes('movie') ? [{ kind: 'movie', h265Only: true, upgrade: true }] : [];
+  const bySeason = {};
+  for (const k of old) {
+    const [sn, e] = k.split(':').map(Number);
+    (bySeason[sn] = bySeason[sn] || []).push(e);
+  }
+  return Object.entries(bySeason).map(([sn, eps]) => {
+    const all = ((item.meta && item.meta.seasons && item.meta.seasons[sn]) || []).map((x) => x.e);
+    return eps.length === 1 && all.length > 1
+      ? { kind: 'episode', season: Number(sn), episode: eps[0], h265Only: true, upgrade: true }
+      : { kind: 'season', season: Number(sn), count: all.length || eps.length, episodes: all.length ? all : eps.sort((a, b) => a - b), h265Only: true, upgrade: true };
+  });
+}
 
 // ——— Réseau : DNS 1.1.1.1 pour les sites ———
 // Les trackers (c411.org…) sont bloqués ou détournés par certains DNS (box, FAI) : on demande leur adresse
@@ -3860,7 +3910,8 @@ function autoScore(rel, item, want) {
   else if (!p.langs.some((l) => pf.languages.includes(l))) no(`langue non acceptée (${p.langs.join(', ').toUpperCase()})`);
   if (p.resolution && p.resolution > pf.resolution) no(`${p.resolution}p (trop lourd)`);
   else if (p.resolution !== pf.resolution && !(pf.allowLower && p.resolution >= 720)) no(p.resolution ? `${p.resolution}p (${pf.resolution}p demandé)` : 'résolution inconnue');
-  if (pf.h265 === 'required' && p.codec !== 'h265') no(p.codec ? `${p.codec.toUpperCase()} (H.265 demandé)` : 'codec inconnu (H.265 demandé)');
+  if ((pf.h265 === 'required' || want.h265Only) && p.codec !== 'h265')
+    no(p.codec ? `${p.codec.toUpperCase()} (${want.upgrade ? 'déjà là, on attend du H.265' : want.h265Only ? 'sortie récente : on attend du H.265' : 'H.265 demandé'})` : 'codec inconnu (H.265 demandé)');
   const gb = (rel.size || 0) / 1e9;
   const per = want.kind === 'season' ? Math.max(1, want.count || 1) : 1;
   const max = item.type === 'movie' ? pf.maxMovieGb : pf.maxEpisodeGb * per;
@@ -3877,6 +3928,7 @@ function autoScore(rel, item, want) {
   if (idMatch) out.score += 5;
   if (rel.freeleech) out.score += 3;
   if (gb > 0 && gb < 0.25 * per) out.score -= 15; // suspect, trop petit
+  else if (gb > 0 && max > 0) out.score -= Math.min(15, (gb / max) * 15); // à qualité égale : le fichier le plus léger
   if (/\b(repack|proper)\b/i.test(rel.title)) out.score += 2;
   return out;
 }
@@ -4249,7 +4301,7 @@ async function autoGrab(item, rel, want, by = 'auto') {
   auto.grabs.unshift(grab);
   if (auto.grabs.length > 200) auto.grabs.length = 200;
   item.needsChoice = false;
-  autoEvent(item, 'sent', `Envoyé à ${grab.client === 'rdt' ? 'rdt-client' : 'AllDebrid'} : ${rel.title}`, { indexer: rel.indexer, size: rel.size, by });
+  autoEvent(item, 'sent', `${want.upgrade ? 'Version H.265 plus légère trouvée, elle remplacera l’ancienne. ' : ''}Envoyé à ${grab.client === 'rdt' ? 'rdt-client' : 'AllDebrid'} : ${rel.title}`, { indexer: rel.indexer, size: rel.size, by });
   autoSave();
   autoLog(`${item.title} : ${rel.title} envoyé à ${grab.client === 'rdt' ? 'rdt-client' : 'AllDebrid'} (${rel.indexer})`);
   notify({ title: '⬇️ Lumio Auto', message: `${item.title} · ${rel.title}`, tags: ['arrow_down'], click: 'lumio://activity' });
@@ -4357,6 +4409,10 @@ async function autoImport(grab, srcPath) {
     const main = videos.sort((a, b) => fs.statSync(b).size - fs.statSync(a).size)[0];
     const base = safeFile(`${item.title}${item.year ? ` (${item.year})` : ''}`);
     const dir = path.join(dest.path, `${base} [tmdbid-${item.tmdbId}]`);
+    // Remplacement (version plus légère) : l'ancien fichier vidéo part
+    try {
+      for (const f of fs.readdirSync(dir)) if (VIDEO_EXT.test(f) && f !== `${base}${path.extname(main)}`) fs.unlinkSync(path.join(dir, f));
+    } catch {}
     await moveFile(main, path.join(dir, `${base}${path.extname(main)}`));
     for (const s of files.filter((f) => SUB_EXT.test(f))) await moveFile(s, path.join(dir, `${base}.${path.basename(s).split('.').slice(-2).join('.')}`)).catch(() => {});
     done.push('movie');
@@ -4389,6 +4445,9 @@ async function autoImport(grab, srcPath) {
       const tag = `S${autoPad(season)}E${autoPad(ep)}${epEnd > ep ? `-E${autoPad(epEnd)}` : ''}`;
       const name = safeFile(`${item.title} - ${tag}`);
       const dir = seasonDir(base, season);
+      try {
+        for (const f of fs.readdirSync(dir)) if (VIDEO_EXT.test(f) && f.startsWith(`${name}.`) && f !== `${name}${path.extname(v)}`) fs.unlinkSync(path.join(dir, f));
+      } catch {}
       await moveFile(v, path.join(dir, `${name}${path.extname(v)}`));
       const stem = path.basename(v, path.extname(v));
       for (const s of files.filter((f) => SUB_EXT.test(f) && path.basename(f).startsWith(stem))) await moveFile(s, path.join(dir, `${name}${path.basename(s).slice(stem.length)}`)).catch(() => {});
@@ -4398,6 +4457,9 @@ async function autoImport(grab, srcPath) {
   }
   const key = autoItemKey(item.type, item.tmdbId);
   auto.have[key] = [...new Set([...(auto.have[key] || []), ...done])];
+  const codec = autoParse(grab.release.title).codec || null;
+  const hc = (auto.haveCodec[key] = auto.haveCodec[key] || {});
+  for (const d of done) hc[d] = { c: codec, at: Date.now() };
   autoSave();
   const token = process.env.JELLYFIN_API_KEY || jfIndexToken;
   if (token) fetch(`${JELLYFIN_URL}/Library/Refresh`, { method: 'POST', headers: jfHeaders(token) }).catch(() => {});
@@ -4613,13 +4675,26 @@ async function autoSearchTick(force = false) {
         item.note = `TMDB : ${e.message}`;
         continue;
       }
-      const wanted = await autoWanted(item);
+      let wanted = await autoWanted(item);
+      let upgrading = false;
       if (!wanted.length) {
-        item.note = item.type === 'movie' && !(item.meta && item.meta.available) ? `pas encore sorti${item.meta && item.meta.availableFrom ? ` (prévu le ${item.meta.availableFrom})` : ''}` : 'rien ne manque';
-        item.nextSearch = Date.now() + 6 * 3600e3;
-        continue;
+        const up = autoUpgradeWants(item, pf);
+        if (up.length && (force || (item.nextUpgrade || 0) <= Date.now())) {
+          wanted = up;
+          upgrading = true;
+          item.nextUpgrade = Date.now() + 24 * 3600e3;
+        } else {
+          item.note = item.type === 'movie' && !(item.meta && item.meta.available) ? `pas encore sorti${item.meta && item.meta.availableFrom ? ` (prévu le ${item.meta.availableFrom})` : ''}` : up.length ? 'complet · une version H.265 plus légère est guettée' : 'rien ne manque';
+          item.nextSearch = Date.now() + 6 * 3600e3;
+          continue;
+        }
       }
       let grabbed = false;
+      let waitUntil = 0;
+      for (const w of wanted) {
+        const u = autoWaitH265(item, w, pf);
+        if (u) (w.h265Only = true), (waitUntil = Math.max(waitUntil, u));
+      }
       // Une saison complète manquante : le pack d'abord, sinon les épisodes un par un
       for (const want of wanted.slice(0, 4)) {
         if (active() >= pf.maxActive) break;
@@ -4629,10 +4704,10 @@ async function autoSearchTick(force = false) {
         autoReport(item, want, res1);
         const results = res1.results;
         let best = results.find((r) => !r.rejected);
-        if (!best && want.kind === 'season') {
+        if (!best && want.kind === 'season' && !want.upgrade) {
           // Pas de pack : on passe aux épisodes de cette saison
           for (const e of want.episodes.slice(0, 3)) {
-            const w2 = { kind: 'episode', season: want.season, episode: e };
+            const w2 = { kind: 'episode', season: want.season, episode: e, h265Only: want.h265Only };
             item.searching = wantLabel(w2);
             const r2 = await autoSearch(item, w2);
             autoReport(item, w2, r2);
@@ -4649,6 +4724,17 @@ async function autoSearchTick(force = false) {
         if (grabbed && want.kind === 'movie') break;
       }
       item.searching = null;
+      // Rien de mieux pour l'instant : pas de choix à faire, on guette
+      if (!grabbed && (upgrading || waitUntil)) {
+        item.needsChoice = false;
+        item.note = upgrading
+          ? 'complet · une version H.265 plus légère est guettée'
+          : `en attente d’une version H.265 (sinon H.264 à partir du ${new Date(waitUntil).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: process.env.TZ || 'Europe/Paris' })})`;
+        item.nextSearch = upgrading ? Date.now() + 6 * 3600e3 : Math.min(Date.now() + 2 * 3600e3, waitUntil + 60e3);
+        item.lastSearch = new Date().toISOString();
+        autoSave();
+        continue;
+      }
       item.fails = grabbed ? 0 : (item.fails || 0) + 1;
       item.needsChoice = !grabbed;
       item.note = grabbed ? 'téléchargement lancé' : 'rien d’automatique : choisis une version (recherche interactive)';
@@ -4757,12 +4843,128 @@ async function autoFromRequest(r) {
   r.via = 'auto';
 }
 
+/** File de téléchargement (onglet Demandes → Téléchargements) quand Lumio Auto remplace Radarr / Sonarr. */
+function autoQueue() {
+  const fmt = (sec) => (sec > 0 ? `${String(Math.floor(sec / 3600)).padStart(2, '0')}:${String(Math.floor((sec % 3600) / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}` : undefined);
+  const records = auto.grabs
+    .filter((g) => ['sent', 'downloading', 'importing'].includes(g.state))
+    .map((g, i) => {
+      const item = auto.items.find((x) => x.id === g.itemId) || {};
+      const size = g.size || g.release.size || 0;
+      const [sn, ep] = g.episodes.length === 1 && g.episodes[0] !== 'movie' ? g.episodes[0].split(':').map(Number) : [];
+      return {
+        id: i + 1,
+        source: item.type === 'movie' ? 'radarr' : 'sonarr',
+        title: g.release.title,
+        status: g.paused ? 'paused' : g.state === 'sent' ? 'queued' : g.state === 'importing' ? 'importing' : 'downloading',
+        trackedDownloadState: g.paused ? 'paused' : g.state === 'importing' ? 'importing' : g.state === 'sent' ? 'queued' : 'downloading',
+        size,
+        sizeleft: Math.max(0, size - (g.downloaded || Math.round((size * (g.progress || 0)) / 100))),
+        timeleft: fmt(g.eta),
+        downloadClient: `Lumio Auto · ${g.client === 'alldebrid' ? 'AllDebrid' : 'rdt-client'}`,
+        errorMessage: /bloqué|erreur|manquants/.test(g.statusText || '') ? `rdt-client : ${g.statusText}` : undefined,
+        movie: item.type === 'movie' ? { title: item.title, tmdbId: item.tmdbId, year: item.year } : undefined,
+        series: item.type === 'tv' ? { title: item.title, tvdbId: item.tvdbId, tmdbId: item.tmdbId } : undefined,
+        episode: sn ? { seasonNumber: sn, episodeNumber: ep } : undefined,
+      };
+    });
+  return { records, errors: [] };
+}
+/** « Relancer la recherche » d'une demande : Lumio Auto cherche tout de suite sur les indexeurs. */
+async function autoRecheck(r) {
+  if (r.via !== 'auto') {
+    await autoFromRequest(r);
+    saveRequests();
+  }
+  const item = findItem(r.type === 'movie' ? 'movie' : 'tv', r.tmdbId);
+  if (!item) return { found: false, message: 'Titre introuvable dans Lumio Auto.' };
+  if (auto.grabs.some((g) => g.itemId === item.id && ['sent', 'downloading', 'importing'].includes(g.state))) return { found: true, message: 'Déjà en téléchargement.' };
+  item.paused = false;
+  item.fails = 0;
+  item.nextSearch = 0;
+  item.nextUpgrade = 0;
+  await autoSearchTick().catch(() => {});
+  if (auto.grabs.some((g) => g.itemId === item.id && ['sent', 'downloading', 'importing'].includes(g.state))) return { found: true, message: 'Version trouvée, le téléchargement démarre.' };
+  if (item.needsChoice) return { found: false, message: 'Aucune version ne correspond au profil : choisis-en une dans l’onglet Auto (recherche interactive).' };
+  return { found: false, message: `Lumio Auto : ${item.note || 'toujours rien pour le moment'}.` };
+}
+/** Demande supprimée : Lumio Auto arrête de la suivre (et annule ses téléchargements en cours). */
+async function autoForgetRequest(r, deleteFiles = false) {
+  const item = findItem(r.type === 'movie' ? 'movie' : 'tv', r.tmdbId);
+  if (!item) return null;
+  item.requestIds = (item.requestIds || []).filter((x) => x !== r.id);
+  if (item.requestIds.length) {
+    autoSave();
+    return 'Le titre reste suivi pour une autre demande.';
+  }
+  for (const g of auto.grabs.filter((x) => x.itemId === item.id && ['sent', 'downloading'].includes(x.state))) {
+    if (g.client === 'alldebrid') {
+      const job = downloads.find((d) => d.id === g.jobId);
+      if (job) job.cancelled = true;
+    }
+    await autoCleanup(g, null);
+    g.state = 'failed';
+    g.error = 'demande supprimée';
+  }
+  auto.items = auto.items.filter((x) => x !== item);
+  autoLog(`${item.title} : demande supprimée, plus suivi`);
+  let msg = 'Lumio Auto ne le suit plus, fichiers gardés.';
+  if (deleteFiles) {
+    // Le dossier du titre seulement (jamais la racine de la bibliothèque)
+    try {
+      const kind = item.type === 'movie' ? 'radarr' : 'sonarr';
+      const dest = autoResolveFolder(kind, item.folderPath);
+      const dir =
+        item.type === 'movie'
+          ? dest && path.join(dest.path, `${safeFile(`${item.title}${item.year ? ` (${item.year})` : ''}`)} [tmdbid-${item.tmdbId}]`)
+          : await seriesDir(item);
+      const roots = [...autoFolderChoices('radarr'), ...autoFolderChoices('sonarr')].map((f) => path.resolve(f.path));
+      if (dir && fs.existsSync(dir) && !roots.includes(path.resolve(dir)) && roots.some((r0) => path.resolve(dir).startsWith(r0 + path.sep))) {
+        await fs.promises.rm(dir, { recursive: true, force: true });
+        msg = 'Lumio Auto ne le suit plus, fichiers supprimés.';
+        library = null;
+      } else msg = 'Lumio Auto ne le suit plus (aucun dossier à supprimer trouvé).';
+    } catch (e) {
+      msg = `Lumio Auto ne le suit plus, mais les fichiers n’ont pas pu être supprimés (${e.message}).`;
+    }
+  }
+  delete auto.have[autoItemKey(item.type, item.tmdbId)];
+  delete auto.haveCodec[autoItemKey(item.type, item.tmdbId)];
+  autoSave();
+  return msg;
+}
+/** Lumio Auto actif : les demandes validées avant son activation passent chez lui (plus de lien avec Radarr / Sonarr). */
+async function autoAdoptAll() {
+  if (!autoOn()) return 0;
+  let n = 0;
+  for (const r of autoAdoptable()) {
+    try {
+      await autoFromRequest(r);
+      n++;
+    } catch (e) {
+      autoLog(`${r.title} : reprise impossible (${e.message})`, 'warn');
+    }
+  }
+  if (n) {
+    saveRequests();
+    autoLog(`${n} demande(s) reprise(s) de Radarr / Sonarr`);
+  }
+  return n;
+}
+setTimeout(() => autoAdoptAll().catch(() => {}), 20_000);
+
 /** Progression d'une demande passée par Lumio Auto (même forme que la file Radarr / Sonarr). */
 function autoDownloadOf(r) {
   const item = findItem(r.type === 'movie' ? 'movie' : 'tv', r.tmdbId);
   if (!item) return undefined;
   const gs = auto.grabs.filter((g) => g.itemId === item.id && ['sent', 'downloading', 'importing'].includes(g.state));
-  if (!gs.length) return { state: 'downloading', via: 'auto', progress: null, title: `Lumio Auto · ${item.note || 'recherche en cours'}` };
+  if (!gs.length)
+    return {
+      state: 'searching',
+      via: 'auto',
+      progress: null,
+      title: item.needsChoice ? 'Lumio Auto · à toi de choisir une version (onglet Auto)' : `Lumio Auto · ${item.searching ? `recherche ${item.searching}` : item.note || 'recherche en cours'}`,
+    };
   const g = gs[0];
   return {
     state: 'downloading',
@@ -4829,6 +5031,7 @@ async function autoRoutes(req, res, p, q, user) {
     const b = await readBody(req);
     if (typeof b.enabled === 'boolean') {
       c.enabled = b.enabled;
+      if (b.enabled) setTimeout(() => autoAdoptAll().catch(() => {}), 1000);
       autoLog(b.enabled ? 'activé : les demandes passent par Lumio Auto' : 'désactivé : les demandes repassent par Radarr / Sonarr');
     }
     if (b.client === 'rdt' || b.client === 'alldebrid') c.client = b.client;
@@ -4845,6 +5048,7 @@ async function autoRoutes(req, res, p, q, user) {
         if (k === 'languages' && Array.isArray(v)) pf[k] = v.map(String).filter(Boolean);
         else if (k === 'h265' && ['required', 'preferred', 'any'].includes(v)) pf[k] = v;
         else if (k === 'allowLower') pf[k] = Boolean(v);
+        else if (['h265Wait', 'upgradeDays'].includes(k) && Number(v) >= 0) pf[k] = Number(v);
         else if (typeof AUTO_PROFILE[k] === 'number' && Number(v) > 0) pf[k] = Number(v);
       }
       c.profile = pf;
@@ -5917,7 +6121,8 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         // Admin : ?arr=keep (arrêter + retirer de Radarr / Sonarr, garder les fichiers) ou ?arr=files (tout supprimer)
         const mode = q.get('arr');
         let arrMsg = null;
-        if (user.admin && (mode === 'keep' || mode === 'files')) arrMsg = await removeFromArr(r, mode === 'files');
+        if (user.admin && (mode === 'keep' || mode === 'files') && r.via === 'auto') arrMsg = await autoForgetRequest(r, mode === 'files');
+        else if (user.admin && (mode === 'keep' || mode === 'files')) arrMsg = await removeFromArr(r, mode === 'files');
         requests = requests.filter((x) => x.id !== r.id);
         saveRequests();
         library = null;
@@ -6076,6 +6281,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
 
     // ——— En attente dans Radarr / Sonarr (onglet Demandes) ———
     if (req.method === 'GET' && p === '/api/arr/wanted') {
+      if (autoOn()) return send(res, 200, { items: [] });
       return send(res, 200, { items: await arrWanted() });
     }
 

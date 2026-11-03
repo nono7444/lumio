@@ -7,6 +7,8 @@ export type AutoProfile = {
   resolution: number;
   allowLower: boolean;
   h265: 'required' | 'preferred' | 'any';
+  h265Wait?: number;
+  upgradeDays?: number;
   languages: string[];
   maxMovieGb: number;
   maxEpisodeGb: number;
