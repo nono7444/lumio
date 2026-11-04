@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.75.0';
+const VERSION = '3.76.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -86,7 +86,8 @@ class HttpError extends Error {
 
 // ——— Config Radarr / Sonarr : envoyée depuis l'appli par un admin, ou variables d'environnement ———
 // Lumio Auto actif : Radarr et Sonarr ne sont plus utilisés du tout (même s'ils sont encore configurés)
-const arrOff = () => Boolean(config.auto && config.auto.enabled === true);
+// (et pour de bon une fois Lumio Auto activé : Radarr / Sonarr ont été retirés du serveur)
+const arrOff = () => Boolean(config.auto && (config.auto.enabled === true || config.auto.arrRemoved === true));
 function arrConfig(kind) {
   if (arrOff()) return null;
   const c = { ...(config[kind] || {}) };
@@ -2362,7 +2363,7 @@ async function uploadTorrentFile(name, buf) {
   if (!j || j.status !== 'success') throw new HttpError(502, `AllDebrid : ${(j && j.error && (j.error.message || j.error.code)) || `HTTP ${r.status}`}`);
   const f = j.data && j.data.files && j.data.files[0];
   if (!f || f.error) throw new HttpError(502, `AllDebrid : ${(f && f.error && f.error.message) || 'fichier .torrent refusé'}`);
-  return { id: f.id, name: f.name || name.replace(/\.torrent$/i, '') };
+  return { id: f.id, name: f.name || name.replace(/\.torrent$/i, ''), ready: Boolean(f.ready) };
 }
 
 /** Magnet (ou .torrent déjà envoyé : « adid:<id> ») → attend qu'AllDebrid l'ait récupéré → fichiers avec leurs liens. */
@@ -2629,11 +2630,12 @@ function secourAutoView() {
 
 /** Envoie à Radarr / Sonarr ; s'ils sont hors service, bascule sur le groupe de secours. */
 async function sendOrSecour(r) {
-  // Lumio Auto (bêta) actif : il remplace Radarr / Sonarr
+  // Lumio Auto actif : il remplace Radarr / Sonarr
   if (autoOn()) {
     await autoFromRequest(r);
     return;
   }
+
   // Simulation (admin) : Radarr / Sonarr considérés en panne, tout passe par Lumio Secour
   if (config.secourForce && secourAutoOn()) {
     startSecour(r, 'simulation : Radarr / Sonarr considérés en panne');
@@ -3561,6 +3563,10 @@ if (!auto.have || typeof auto.have !== 'object') auto.have = {};
 if (!auto.haveCodec || typeof auto.haveCodec !== 'object') auto.haveCodec = {};
 // Séries retirées à la main du suivi (on ne les reprend pas avec les séries en cours de la bibliothèque)
 if (!Array.isArray(auto.unfollowed)) auto.unfollowed = [];
+if (config.auto && config.auto.enabled === true && !config.auto.arrRemoved) {
+  config.auto.arrRemoved = true;
+  saveConfig();
+}
 // 3.74 : les séries reprises de la bibliothèque (sans demande) ne rattrapent plus les anciens épisodes
 for (const it of auto.items)
   if (it.type === 'tv' && !it.since && !(it.requestIds || []).length && (it.events || []).some((e) => /bibliothèque/.test(e.msg || '')))
@@ -3585,7 +3591,10 @@ const autoCfg = () => {
   if (!config.auto || typeof config.auto !== 'object') config.auto = {};
   return config.auto;
 };
-const autoOn = () => autoCfg().enabled === true;
+// Lumio Auto tourne dès qu'il a été activé une fois (Radarr / Sonarr retirés) :
+// interrupteur allumé = torrents (qBittorrent…) ; éteint = mode AllDebrid, seulement les versions déjà en cache
+const autoOn = () => autoCfg().enabled === true || autoCfg().arrRemoved === true;
+const autoDebridOnly = () => autoCfg().enabled !== true && autoCfg().arrRemoved === true;
 function autoLog(msg, level = 'info') {
   auto.log.unshift({ at: new Date().toISOString(), level, msg: String(msg).slice(0, 400) });
   if (auto.log.length > 300) auto.log.length = 300;
@@ -4028,7 +4037,8 @@ function autoScore(rel, item, want) {
   // Trackers privés : volume maximum par jour (sauf freeleech, qui ne compte pas dans le ratio)
   const ixq = autoIndexers().find((x) => x.id === rel.indexerId);
   const cap = ixq ? Number(ixq.maxGbPerDay ?? (ixq.type === 'c411' ? 15 : 0)) : 0;
-  if (cap > 0 && !rel.freeleech) {
+  if (autoDebridOnly() && item.notCached && Date.now() - (item.notCached[rel.guid] || 0) < 24 * 3600e3) no('pas en cache AllDebrid (réessai demain)');
+  if (cap > 0 && !rel.freeleech && !autoDebridOnly()) {
     const used = autoDlToday(ixq.id) / 1e9;
     if (used + gb > cap) no(`quota du jour atteint sur ${ixq.name} (${used.toFixed(1)} / ${cap} Go)`);
   }
@@ -4389,7 +4399,7 @@ async function fetchTorrent(rel) {
 /** Envoie la release au client choisi ; renvoie les infos de suivi. */
 async function autoSend(rel, item, grab) {
   const t = await fetchTorrent(rel);
-  const client = autoClientFor(rel);
+  const client = autoDebridOnly() ? 'alldebrid' : autoClientFor(rel);
   if (client === 'rdt' || client === 'qbit') {
     const fd = new FormData();
     if (t.buf) fd.append('torrents', new Blob([t.buf], { type: 'application/x-bittorrent' }), `${cleanName(rel.title)}.torrent`);
@@ -4413,10 +4423,20 @@ async function autoSend(rel, item, grab) {
   const dest = autoResolveFolder(item.type === 'movie' ? 'radarr' : 'sonarr', item.folderPath);
   if (!dest) throw new Error('aucun dossier de destination');
   let link;
-  if (t.buf) {
-    const up = await uploadTorrentFile(`${cleanName(rel.title)}.torrent`, t.buf);
-    link = `adid:${up.id}`;
-  } else link = t.magnet;
+  let up;
+  if (t.buf) up = await uploadTorrentFile(`${cleanName(rel.title)}.torrent`, t.buf);
+  else {
+    const u = await ad('/v4/magnet/upload', { magnets: [t.magnet] });
+    const m = u.magnets && u.magnets[0];
+    if (!m || m.error) throw new Error(`AllDebrid : ${(m && m.error && m.error.message) || 'magnet refusé'}`);
+    up = { id: m.id, ready: Boolean(m.ready) };
+  }
+  // Mode AllDebrid (interrupteur éteint) : seulement ce qu'AllDebrid a déjà en cache (instantané, rien côté tracker)
+  if (autoDebridOnly() && !up.ready) {
+    await ad('/v4/magnet/delete', { id: up.id }).catch(() => {});
+    throw Object.assign(new Error('pas en cache AllDebrid'), { notCached: true });
+  }
+  link = `adid:${up.id}`;
   const job = {
     id: crypto.randomBytes(5).toString('hex'),
     link,
@@ -4439,6 +4459,19 @@ async function autoSend(rel, item, grab) {
   grab.jobId = job.id;
 }
 
+/** Envoie la meilleure version ; en mode AllDebrid, essaie les suivantes tant qu'elles ne sont pas en cache. */
+async function autoTryGrab(item, results, want) {
+  const ok = results.filter((r) => !r.rejected).slice(0, autoDebridOnly() ? 6 : 1);
+  for (const r of ok) {
+    try {
+      await autoGrab(item, r, want);
+      return true;
+    } catch (e) {
+      if (!e.notCached) return false;
+    }
+  }
+  return false;
+}
 const autoDlToday = (ixId) => ((auto.dlStats[ixId] || {})[new Date().toISOString().slice(0, 10)] || 0);
 async function autoGrab(item, rel, want, by = 'auto') {
   const grab = {
@@ -4456,13 +4489,18 @@ async function autoGrab(item, rel, want, by = 'auto') {
   try {
     await autoSend(rel, item, grab);
   } catch (e) {
+    if (e.notCached) {
+      item.notCached = item.notCached || {};
+      item.notCached[rel.guid] = Date.now();
+      throw e;
+    }
     autoBlock(rel, `envoi impossible : ${e.message}`);
     autoEvent(item, 'failed', `Envoi impossible : ${e.message}`);
     autoLog(`${item.title} : envoi impossible (${e.message})`, 'error');
     throw e;
   }
   auto.grabs.unshift(grab);
-  if (!rel.freeleech && rel.indexerId) {
+  if (!rel.freeleech && rel.indexerId && grab.client !== 'alldebrid') {
     const day = new Date().toISOString().slice(0, 10);
     const st0 = (auto.dlStats[rel.indexerId] = auto.dlStats[rel.indexerId] || {});
     st0[day] = (st0[day] || 0) + (rel.size || 0);
@@ -4690,7 +4728,7 @@ const RDT_STATES = {
 };
 let autoTicking = false;
 async function autoProgressTick() {
-  if (!autoOn() || autoTicking) return;
+  if (autoTicking) return; // tourne même en pause : on finit et range ce qui est déjà lancé
   autoTicking = true;
   try {
     const active = auto.grabs.filter((g) => ['sent', 'downloading'].includes(g.state));
@@ -4894,6 +4932,7 @@ async function autoSearchTick(force = false) {
       let grabbed = false;
       let waitUntil = 0;
       let quotaWait = false;
+      let notCachedAll = false;
       for (const w of wanted) {
         const u = autoWaitH265(item, w, pf);
         if (u) (w.h265Only = true), (waitUntil = Math.max(waitUntil, u));
@@ -4917,19 +4956,31 @@ async function autoSearchTick(force = false) {
             const r2 = await autoSearch(item, w2);
             autoReport(item, w2, r2);
             searches++;
-            const b2 = r2.results.find((r) => !r.rejected);
-            if (b2) {
-              await autoGrab(item, b2, w2).then(() => (grabbed = true)).catch(() => {});
-              break;
+            if (r2.results.some((r) => !r.rejected)) {
+              grabbed = await autoTryGrab(item, r2.results, w2);
+              if (grabbed) break;
+              if (autoDebridOnly()) notCachedAll = true;
             }
           }
           continue;
         }
-        if (best) await autoGrab(item, best, want).then(() => (grabbed = true)).catch(() => {});
+        if (best) {
+          const ok = await autoTryGrab(item, results, want);
+          if (ok) grabbed = true;
+          else if (autoDebridOnly()) notCachedAll = true;
+        }
         if (grabbed && want.kind === 'movie') break;
       }
       item.searching = null;
       // Rien de mieux pour l'instant : pas de choix à faire, on guette
+      if (!grabbed && notCachedAll) {
+        item.needsChoice = false;
+        item.note = 'mode AllDebrid : aucune version en cache pour l’instant (réessai plus tard, ou rallume Lumio Auto)';
+        item.nextSearch = Date.now() + 6 * 3600e3;
+        item.lastSearch = new Date().toISOString();
+        autoSave();
+        continue;
+      }
       if (!grabbed && quotaWait && !upgrading) {
         const tomorrow = new Date();
         tomorrow.setUTCHours(24, 10, 0, 0);
@@ -5015,7 +5066,7 @@ setInterval(() => autoProgressTick().catch(() => {}), 10_000);
 // (le fichier de la bibliothèque est un lien dur : il reste quand le torrent et sa copie sont supprimés)
 let autoSeedBusy = false;
 async function autoSeedTick() {
-  if (!autoOn() || autoSeedBusy) return;
+  if (autoSeedBusy) return;
   const seeding = auto.grabs.filter((g) => g.seeding && g.client === 'qbit' && g.hash);
   if (!seeding.length) return;
   autoSeedBusy = true;
@@ -5068,7 +5119,7 @@ const gluetunBase = () => {
 };
 async function vpnPortTick() {
   const q = autoCfg().qbit || {};
-  if (!autoOn() || !q.url) return;
+  if (!q.url) return;
   const base = gluetunBase();
   if (!base) return;
   let port = null;
@@ -5394,6 +5445,8 @@ async function autoRoutes(req, res, p, q, user) {
     const b = await readBody(req);
     if (typeof b.enabled === 'boolean') {
       c.enabled = b.enabled;
+      if (b.enabled) c.arrRemoved = true;
+
       if (b.enabled) setTimeout(() => autoAdoptAll().then(() => autoFollowLibrary()).catch(() => {}), 1000);
       autoLog(b.enabled ? 'activé : les demandes passent par Lumio Auto' : 'désactivé : les demandes repassent par Radarr / Sonarr');
     }

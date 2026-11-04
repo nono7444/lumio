@@ -136,7 +136,7 @@ export default function AutoTab() {
         <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: TAB_SPACE + insets.bottom + 20 }} refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
           <View style={[styles.banner, { borderColor: st.enabled ? 'rgba(48,209,88,0.5)' : C.border }]}>
             <View style={{ flex: 1, gap: 4 }}>
-              <Text style={styles.bannerTitle}>{st.enabled ? 'Lumio Auto actif' : 'Lumio Auto en pause'}</Text>
+              <Text style={styles.bannerTitle}>{st.enabled ? 'Lumio Auto actif' : 'Mode AllDebrid'}</Text>
               <Text style={styles.dim} numberOfLines={2}>
                 {st.enabled
                   ? [
@@ -148,7 +148,7 @@ export default function AutoTab() {
                       .filter(Boolean)
                       .join(' · ')
                   : st.indexers.length
-                    ? 'Les demandes validées attendent : active-le pour qu’elles soient cherchées et téléchargées.'
+                    ? 'Lumio Auto cherche toujours sur tes sites, mais ne prend que les versions déjà en cache chez AllDebrid (rien côté tracker, ratio intact). Ce qui est déjà lancé finit de se télécharger et reste en partage. Rallume pour revenir aux torrents.'
                     : 'Ajoute d’abord un site (onglet Sites).'}
               </Text>
             </View>
