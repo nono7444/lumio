@@ -34,6 +34,8 @@ export type AutoIndexer = {
   callsLastHour: number;
   caps?: { tv: string[] | null; movie: string[] | null } | null;
   client?: '' | 'rdt' | 'qbit' | 'alldebrid';
+  maxGbPerDay?: number;
+  todayGb?: number;
 };
 export type AutoTry = { query: string; count: number; error: string | null; skipped: boolean; url: string | null };
 export type AutoEvent = { at: string; type: 'added' | 'found' | 'none' | 'sent' | 'imported' | 'failed'; msg: string; indexer?: string; size?: number; by?: string };

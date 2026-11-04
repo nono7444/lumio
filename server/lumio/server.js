@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.73.0';
+const VERSION = '3.74.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3542,6 +3542,12 @@ if (!auto.have || typeof auto.have !== 'object') auto.have = {};
 if (!auto.haveCodec || typeof auto.haveCodec !== 'object') auto.haveCodec = {};
 // Séries retirées à la main du suivi (on ne les reprend pas avec les séries en cours de la bibliothèque)
 if (!Array.isArray(auto.unfollowed)) auto.unfollowed = [];
+// 3.74 : les séries reprises de la bibliothèque (sans demande) ne rattrapent plus les anciens épisodes
+for (const it of auto.items)
+  if (it.type === 'tv' && !it.since && !(it.requestIds || []).length && (it.events || []).some((e) => /bibliothèque/.test(e.msg || '')))
+    it.since = new Date(Date.parse(it.addedAt || Date.now()) - 2 * 86400e3).toISOString().slice(0, 10);
+// Volume téléchargé par indexeur et par jour ({ ixId: { '2026-11-04': octets } }) : quota des trackers privés
+if (!auto.dlStats || typeof auto.dlStats !== 'object') auto.dlStats = {};
 let autoSaveTimer = null;
 const autoSave = () => {
   clearTimeout(autoSaveTimer);
@@ -3991,6 +3997,13 @@ function autoScore(rel, item, want) {
   const max = item.type === 'movie' ? pf.maxMovieGb : pf.maxEpisodeGb * per;
   if (gb > max) no(`${gb.toFixed(1)} Go (max ${max.toFixed(1)} Go)`);
   if (rel.seeders != null && rel.seeders < pf.minSeeders) no(`${rel.seeders} source (minimum ${pf.minSeeders})`);
+  // Trackers privés : volume maximum par jour (sauf freeleech, qui ne compte pas dans le ratio)
+  const ixq = autoIndexers().find((x) => x.id === rel.indexerId);
+  const cap = ixq ? Number(ixq.maxGbPerDay ?? (ixq.type === 'c411' ? 15 : 0)) : 0;
+  if (cap > 0 && !rel.freeleech) {
+    const used = autoDlToday(ixq.id) / 1e9;
+    if (used + gb > cap) no(`quota du jour atteint sur ${ixq.name} (${used.toFixed(1)} / ${cap} Go)`);
+  }
   out.rejected = out.reasons[0] || null;
   // Note : langue d'abord, puis codec, source, sources actives, taille raisonnable
   const li = p.langs.length ? Math.min(...p.langs.map((l) => (pf.languages.indexOf(l) >= 0 ? pf.languages.indexOf(l) : 9))) : 9;
@@ -4000,7 +4013,7 @@ function autoScore(rel, item, want) {
   if (p.resolution === pf.resolution) out.score += 20;
   out.score += Math.min(rel.seeders || 0, 50) / 5;
   if (idMatch) out.score += 5;
-  if (rel.freeleech) out.score += 3;
+  if (rel.freeleech) out.score += 40; // ne compte pas dans le ratio : toujours préféré
   if (gb > 0 && gb < 0.25 * per) out.score -= 15; // suspect, trop petit
   else if (gb > 0 && max > 0) out.score -= Math.min(15, (gb / max) * 15); // à qualité égale : le fichier le plus léger
   if (/\b(repack|proper)\b/i.test(rel.title)) out.score += 2;
@@ -4139,7 +4152,8 @@ async function autoWanted(item) {
   const seasonNums = Object.keys((item.meta && item.meta.seasons) || {}).map(Number).sort((a, b) => a - b);
   for (const n of seasonNums) {
     const eps = item.meta.seasons[n] || [];
-    const aired = eps.filter((e) => e.air && e.air <= today);
+    // Série reprise de la bibliothèque : seulement les épisodes diffusés à partir du jour où on la suit (pas de rattrapage)
+    const aired = eps.filter((e) => e.air && e.air <= today && (!item.since || e.air >= item.since));
     const missing = aired.filter((e) => !have.has(`${n}:${e.e}`) && !busy.has(`${n}:${e.e}`));
     const firstAbs = absolute;
     absolute += eps.length;
@@ -4397,6 +4411,7 @@ async function autoSend(rel, item, grab) {
   grab.jobId = job.id;
 }
 
+const autoDlToday = (ixId) => ((auto.dlStats[ixId] || {})[new Date().toISOString().slice(0, 10)] || 0);
 async function autoGrab(item, rel, want, by = 'auto') {
   const grab = {
     id: autoId(),
@@ -4419,6 +4434,12 @@ async function autoGrab(item, rel, want, by = 'auto') {
     throw e;
   }
   auto.grabs.unshift(grab);
+  if (!rel.freeleech && rel.indexerId) {
+    const day = new Date().toISOString().slice(0, 10);
+    const st0 = (auto.dlStats[rel.indexerId] = auto.dlStats[rel.indexerId] || {});
+    st0[day] = (st0[day] || 0) + (rel.size || 0);
+    for (const d of Object.keys(st0)) if (d < new Date(Date.now() - 14 * 86400e3).toISOString().slice(0, 10)) delete st0[d];
+  }
   if (auto.grabs.length > 200) auto.grabs.length = 200;
   item.needsChoice = false;
   autoEvent(item, 'sent', `${want.upgrade ? 'Version H.265 plus légère trouvée, elle remplacera l’ancienne. ' : ''}Envoyé à ${CLIENT_LABEL[grab.client] || grab.client} : ${rel.title}`, { indexer: rel.indexer, size: rel.size, by });
@@ -4844,6 +4865,7 @@ async function autoSearchTick(force = false) {
       }
       let grabbed = false;
       let waitUntil = 0;
+      let quotaWait = false;
       for (const w of wanted) {
         const u = autoWaitH265(item, w, pf);
         if (u) (w.h265Only = true), (waitUntil = Math.max(waitUntil, u));
@@ -4857,6 +4879,8 @@ async function autoSearchTick(force = false) {
         autoReport(item, want, res1);
         const results = res1.results;
         let best = results.find((r) => !r.rejected);
+        // Une bonne version existe, mais le quota du jour du tracker est atteint : on attend demain (pas de choix à faire)
+        if (!best && results.some((r) => r.reasons.length && r.reasons.every((x) => x.startsWith('quota du jour')))) quotaWait = true;
         if (!best && want.kind === 'season' && !want.upgrade) {
           // Pas de pack : on passe aux épisodes de cette saison
           for (const e of want.episodes.slice(0, 3)) {
@@ -4878,6 +4902,16 @@ async function autoSearchTick(force = false) {
       }
       item.searching = null;
       // Rien de mieux pour l'instant : pas de choix à faire, on guette
+      if (!grabbed && quotaWait && !upgrading) {
+        const tomorrow = new Date();
+        tomorrow.setUTCHours(24, 10, 0, 0);
+        item.needsChoice = false;
+        item.note = 'quota du jour du tracker atteint (ratio protégé) : reprise demain';
+        item.nextSearch = tomorrow.getTime();
+        item.lastSearch = new Date().toISOString();
+        autoSave();
+        continue;
+      }
       if (!grabbed && (upgrading || waitUntil)) {
         item.needsChoice = false;
         item.note = upgrading
@@ -4971,12 +5005,14 @@ async function autoSeedTick() {
       g.uploaded = Number(t.uploaded) || 0;
       g.seedTime = Number(t.seeding_time) || Math.round((Date.now() - (g.seedSince || Date.now())) / 1000);
       g.upSpeed = Number(t.upspeed) || 0;
-      const byRatio = goal.ratio > 0 && g.ratio >= goal.ratio;
-      const byTime = goal.days > 0 && g.seedTime >= goal.days * 86400;
-      if (byRatio || byTime) {
+      // On garde le partage tant que le ratio n'est pas atteint ET la durée minimum passée ; au plus 60 jours
+      const byRatio = !(goal.ratio > 0) || g.ratio >= goal.ratio;
+      const byTime = !(goal.days > 0) || g.seedTime >= goal.days * 86400;
+      const tooLong = g.seedTime >= 60 * 86400;
+      if ((byRatio && byTime) || tooLong) {
         await qbitFetch('/api/v2/torrents/delete', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ hashes: g.hash, deleteFiles: 'true' }) }).catch(() => {});
         g.seeding = false;
-        g.seedEnd = byRatio ? `ratio ${g.ratio} atteint` : `${goal.days} j de partage`;
+        g.seedEnd = tooLong && !byRatio ? `60 j de partage (ratio ${g.ratio})` : `ratio ${g.ratio} et ${goal.days} j atteints`;
         autoLog(`${g.title} : partage terminé (${g.seedEnd}), torrent retiré`);
       }
     }
@@ -5228,6 +5264,7 @@ async function autoFollowLibrary() {
       try {
         await autoAdd({ type: 'tv', tmdbId, tvdbId: (tv.external_ids && tv.external_ids.tvdb_id) || null, title: tv.name, seasons, folderPath: folder, future: true });
         const it = findItem('tv', tmdbId);
+        if (it) it.since = new Date(Date.now() - 2 * 86400e3).toISOString().slice(0, 10);
         if (it) autoEvent(it, 'added', `Série en cours dans la bibliothèque : suivie automatiquement (saison${seasons.length > 1 ? 's' : ''} ${seasons.join(', ')})`);
         added.push(tv.name);
       } catch (e) {
@@ -5268,7 +5305,7 @@ function autoDownloadOf(r) {
   };
 }
 
-const publicIndexer = (ix) => ({ ...ix, key: undefined, hasKey: Boolean(ix.key), status: idxStatus.get(ix.id) || null, callsLastHour: (idxCalls.get(ix.id) || []).filter((t) => Date.now() - t < 3600e3).length });
+const publicIndexer = (ix) => ({ ...ix, todayGb: Math.round(autoDlToday(ix.id) / 1e8) / 10, key: undefined, hasKey: Boolean(ix.key), status: idxStatus.get(ix.id) || null, callsLastHour: (idxCalls.get(ix.id) || []).filter((t) => Date.now() - t < 3600e3).length });
 function publicItem(item) {
   const gs = auto.grabs.filter((g) => g.itemId === item.id);
   return {
@@ -5383,6 +5420,7 @@ async function autoRoutes(req, res, p, q, user) {
     if (typeof b.key === 'string' && b.key) ix.key = b.key.trim();
     for (const k of ['enabled', 'rss', 'search']) if (typeof b[k] === 'boolean') ix[k] = b[k];
     if (Number(b.maxPerHour) > 0) ix.maxPerHour = Math.min(500, Number(b.maxPerHour));
+    if (b.maxGbPerDay != null && Number(b.maxGbPerDay) >= 0) ix.maxGbPerDay = Number(b.maxGbPerDay);
     for (const k of ['catMovie', 'catTv', 'catAnime']) if (typeof b[k] === 'string' && b[k].trim()) ix[k] = b[k].replace(/[^\d,]/g, '');
     if (ix.type === 'prowlarr') ix.rss = false;
     if (typeof b.client === 'string') ix.client = ['rdt', 'qbit', 'alldebrid'].includes(b.client) ? b.client : '';

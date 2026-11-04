@@ -542,6 +542,7 @@ function IndexerRow({ ix, onEdit, reload }: { ix: AutoIndexer; onEdit: () => voi
         <Text style={styles.small} numberOfLines={2}>
           {ix.type === 'prowlarr' ? 'Prowlarr' : ix.type === 'c411' ? 'C411 (Torznab)' : 'Torznab'} · {ix.rss ? 'veille RSS · ' : ''}
           {ix.callsLastHour}/{ix.maxPerHour} requêtes cette heure
+          {ix.maxGbPerDay || (ix.type === 'c411' && ix.maxGbPerDay == null) ? ` · ${ix.todayGb ?? 0} / ${ix.maxGbPerDay ?? 15} Go aujourd’hui` : ''}
           {ix.caps ? ` · par ID : ${[ix.caps.movie?.includes('tmdbid') ? 'films' : null, ix.caps.tv?.includes('tmdbid') || ix.caps.tv?.includes('imdbid') ? 'séries' : null].filter(Boolean).join(', ') || 'non'}` : ''}
         </Text>
         {ix.status ? (
@@ -617,6 +618,12 @@ function IndexerEditor({ ix, onClose, onSaved }: { ix: Partial<AutoIndexer> & { 
         <Toggle label="Activé" value={f.enabled !== false} onChange={(v) => set('enabled', v)} />
         <Toggle label="Recherche des titres qui manquent" value={f.search !== false} onChange={(v) => set('search', v)} />
         {type !== 'prowlarr' ? <Toggle label="Veille RSS (nouvelles sorties)" value={f.rss !== false} onChange={(v) => set('rss', v)} /> : null}
+        <Picker
+          label="Volume maximum par jour (protège le ratio)"
+          options={[0, 5, 10, 15, 25, 50].map((n) => ({ value: n, label: n ? `${n} Go` : 'Sans limite', hint: n === 15 ? 'conseillé pour C411' : undefined }))}
+          value={f.maxGbPerDay ?? (type === 'c411' ? 15 : 0)}
+          onChange={(v) => set('maxGbPerDay', v)}
+        />
         <Picker
           label="Télécharger avec"
           options={[
@@ -747,7 +754,7 @@ function Telechargements({ st, reload, onItem }: { st: AutoState; reload: () => 
             <Text style={styles.small}>↑ {fmtSpeed(seeding.reduce((n, g) => n + (g.upSpeed || 0), 0))}</Text>
           </View>
           <Text style={styles.help}>
-            qBittorrent continue de partager jusqu’au ratio {st.seed?.ratio || '—'} ou {st.seed?.days || '—'} jours, puis retire le torrent. Le film reste dans la bibliothèque.
+            qBittorrent partage jusqu’au ratio {st.seed?.ratio || '—'} et au moins {st.seed?.days || '—'} jours, puis retire le torrent. Le film reste dans la bibliothèque.
           </Text>
           {seeding.map((g) => {
             const goal = st.seed ?? { ratio: 1, days: 7 };
@@ -1032,19 +1039,19 @@ function Reglages({ st, save }: { st: AutoState; save: (b: any, msg?: string) =>
         <ClientForm kind="qbit" st={st} save={save} />
         <Text style={[styles.label, { marginTop: 12 }]}>Partage (seed) : retirer le torrent après</Text>
         <Picker
-          label="Ratio atteint"
+          label="Ratio à atteindre"
           options={[0, 0.5, 1, 1.5, 2, 3].map((n) => ({ value: n, label: n ? String(n) : 'Ignorer' }))}
           value={st.seed?.ratio ?? 1}
           onChange={(v) => save({ seed: { ratio: v, days: st.seed?.days ?? 7 } }, 'Partage enregistré')}
         />
         <Picker
-          label="Ou durée de partage"
+          label="Et partager au moins"
           options={[0, 3, 7, 14, 30].map((n) => ({ value: n, label: n ? `${n} jours` : 'Ignorer' }))}
           value={st.seed?.days ?? 7}
           onChange={(v) => save({ seed: { ratio: st.seed?.ratio ?? 1, days: v } }, 'Partage enregistré')}
         />
         <Text style={styles.help}>
-          Le premier atteint arrête le partage. Le film est rangé par lien dur : il apparaît dans la bibliothèque sans prendre de place en plus, et reste quand le torrent est retiré. Les téléchargements doivent être sur le même disque que la bibliothèque. Vérifie les règles de ratio de tes trackers.
+          Le torrent n’est retiré que quand les deux sont atteints (au plus 60 jours) : ton ratio ne peut que monter. Le film est rangé par lien dur : il apparaît dans la bibliothèque sans prendre de place en plus, et reste quand le torrent est retiré. Les téléchargements doivent être sur le même disque que la bibliothèque. Vérifie les règles de ratio de tes trackers.
         </Text>
       </Section>
 

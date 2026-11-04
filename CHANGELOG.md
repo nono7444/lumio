@@ -6,6 +6,7 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Ratio protégé : les séries en cours reprises de la bibliothèque ne téléchargent plus que les nouveaux épisodes (plus de rattrapage d’un coup), volume maximum par jour et par site (15 Go par défaut sur C411, freeleech non compté et toujours préféré), et partage gardé jusqu’au ratio ET à la durée minimum (au plus 60 jours). Il faut le serveur Lumio 3.74.0.
 ## 1.0.127 — 3 novembre 2026
 
 - Lumio Auto remplace Radarr, Sonarr et Prowlarr (nouvel onglet admin « Auto », jamais sur la TV). Il cherche chaque demande validée sur tes sites (C411, TR4KER…) par identifiant TMDB / IMDb, prend la version la plus légère en français 1080p (H.265 de préférence, attente puis remplacement automatique du H.264), et la range dans la bonne bibliothèque. Il faut le serveur Lumio 3.71.0.
