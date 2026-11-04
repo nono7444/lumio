@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.129 — 4 novembre 2026
+
 - Interrupteur de Lumio Auto éteint = mode AllDebrid : il cherche toujours sur tes sites (C411…) mais ne prend que les versions déjà en cache chez AllDebrid (instantané, ratio intact) ; ce qui est déjà lancé finit de se télécharger, se range et reste en partage. Rallumé = retour aux torrents par qBittorrent. Il faut le serveur Lumio 3.76.0.
 - Onglet Auto → « qBit » : tous les torrents de qBittorrent (téléchargement, partage, ratio, sources), vitesses et port du VPN en direct, et actions (pause, reprise, vérifier, relancer les trackers, retirer ou supprimer avec les fichiers, vitesse réduite). Services surveillés : qBittorrent et le VPN à la place de Radarr / Sonarr. Séries : seulement la saison en cours, une nouvelle saison se demande. Il faut le serveur Lumio 3.75.0.
 
