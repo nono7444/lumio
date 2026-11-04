@@ -6,6 +6,7 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- « Derniers ajouts » : seulement les films et les séries de l’année en cours et des suivantes (plus d’anciennes séries qui reçoivent une nouvelle saison, plus de repli sur l’année d’avant).
 ## 1.0.133 — 4 novembre 2026
 
 - Onglet Auto → qBit → « Réglages du partage » : bouton « Partager un maximum » (tous les torrents partagent en même temps), file d’attente et nombre de torrents actifs, vitesses d’envoi et de réception, envois en même temps, et objectif de partage de Lumio (ratio et durée minimum). Il faut le serveur Lumio 3.79.0.

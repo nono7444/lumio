@@ -383,9 +383,9 @@ export const jf = {
   },
 
   /**
-   * Derniers ajouts, mais seulement les sorties récentes (année en cours et suivantes) :
-   * films sortis cette année, séries avec des épisodes diffusés cette année (nouvelle saison d'une ancienne série incluse).
-   * Ordre : du plus récemment ajouté sur le serveur au plus ancien. S'il y en a trop peu (début d'année), on inclut l'an dernier.
+   * Derniers ajouts, mais seulement les sorties de l'année en cours et des suivantes :
+   * films sortis cette année, séries commencées cette année (pas les nouvelles saisons d'anciennes séries).
+   * Ordre : du plus récemment ajouté sur le serveur au plus ancien.
    */
   recentReleases: async (
     s: Settings,
@@ -421,12 +421,14 @@ export const jf = {
                   added.set(e.SeriesId, e.DateCreated ?? '');
                   order.push(e.SeriesId);
                 }
-              const ids = order.slice(0, opts.parentId ? limit * 2 : limit);
+              const ids = order.slice(0, limit * 4);
               if (!ids.length) return [];
-              const r = await get<{ Items: JfItem[] }>(`/Users/${j.userId}/Items?Ids=${ids.join(',')}&Fields=${FIELDS}`);
+              const r = await get<{ Items: JfItem[] }>(`/Users/${j.userId}/Items?Ids=${ids.join(',')}&Fields=${FIELDS},PremiereDate`);
+              // Seulement les séries de l'année en cours et des suivantes
+              const startYear = (x: JfItem & { PremiereDate?: string }) => x.ProductionYear ?? (x.PremiereDate ? Number(x.PremiereDate.slice(0, 4)) : 0);
               const list = ids
                 .map((id) => r.Items.find((x) => x.Id === id))
-                .filter((x): x is JfItem => Boolean(x))
+                .filter((x): x is JfItem => Boolean(x) && startYear(x as JfItem) >= year)
                 .map((x) => ({ ...x, DateCreated: added.get(x.Id) }));
               return (await keepIn(s, opts.parentId, list)).slice(0, limit);
             })()
@@ -436,9 +438,7 @@ export const jf = {
         .sort((a, b) => (b.DateCreated ?? '').localeCompare(a.DateCreated ?? ''))
         .slice(0, limit) as JfItem[];
     };
-    const year = new Date().getFullYear();
-    const items = await run(year);
-    return items.length >= 6 ? items : run(year - 1);
+    return run(new Date().getFullYear());
   },
 
   item: (s: Settings, id: string) => {
