@@ -134,32 +134,47 @@ export default function AutoTab() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: TAB_SPACE + insets.bottom + 20 }} refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
-          <View style={[styles.banner, { borderColor: st.enabled ? 'rgba(48,209,88,0.5)' : C.border }]}>
-            <View style={{ flex: 1, gap: 4 }}>
-              <Text style={styles.bannerTitle}>{st.enabled ? 'Lumio Auto actif' : 'Mode AllDebrid'}</Text>
-              <Text style={styles.dim} numberOfLines={2}>
-                {st.enabled
-                  ? [
-                      running ? `${running} en cours` : 'rien en cours',
-                      st.grabs.filter((g) => g.seeding).length ? `${st.grabs.filter((g) => g.seeding).length} en partage` : null,
-                      toChoose ? `${toChoose} à choisir` : null,
-                      st.vpnPort?.port ? `VPN ✓ port ${st.vpnPort.port}` : st.qbit?.url ? 'VPN : port non ouvert' : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')
-                  : st.indexers.length
-                    ? 'Lumio Auto cherche toujours sur tes sites, mais ne prend que les versions déjà en cache chez AllDebrid (rien côté tracker, ratio intact). Ce qui est déjà lancé finit de se télécharger et reste en partage. Rallume pour revenir aux torrents.'
-                    : 'Ajoute d’abord un site (onglet Sites).'}
-              </Text>
+          {/* Deux interrupteurs : Lumio Auto (cherche et télécharge tout seul) et AllDebrid (cache AllDebrid au lieu des torrents) */}
+          <View style={[styles.banner, { borderColor: st.enabled ? 'rgba(48,209,88,0.5)' : C.border, flexDirection: 'column', alignItems: 'stretch', gap: 12 }]}>
+            <View style={styles.switchRow}>
+              <Ionicons name="flash" size={20} color={st.enabled ? C.success : C.textDim} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.bannerTitle}>Lumio Auto</Text>
+                <Text style={styles.small}>{st.enabled ? 'Cherche et télécharge les demandes tout seul' : 'En pause : les nouvelles demandes attendent'}</Text>
+              </View>
+              <Switch
+                value={st.enabled}
+                onValueChange={(v) => {
+                  if (v && !st.indexers.length) return Alert.alert('Lumio Auto', 'Ajoute d’abord un site (onglet Sites).');
+                  save({ enabled: v }, v ? 'Lumio Auto activé' : 'Lumio Auto en pause');
+                }}
+                trackColor={{ true: C.success, false: C.border }}
+              />
             </View>
-            <Switch
-              value={st.enabled}
-              onValueChange={(v) => {
-                if (v && !st.indexers.length) return Alert.alert('Lumio Auto', 'Ajoute d’abord un indexeur (onglet Indexeurs).');
-                save({ enabled: v }, v ? 'Lumio Auto activé' : 'Lumio Auto désactivé');
-              }}
-              trackColor={{ true: C.success, false: C.border }}
-            />
+            <View style={styles.switchRow}>
+              <Ionicons name="cloud-download" size={20} color={st.debridOnly ? C.accent : C.textDim} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.bannerTitle}>AllDebrid</Text>
+                <Text style={styles.small}>
+                  {st.debridOnly ? 'Seulement les versions déjà en cache AllDebrid : instantané, ratio intact' : 'Éteint : torrents par qBittorrent (derrière le VPN), puis partage'}
+                </Text>
+              </View>
+              <Switch
+                value={!!st.debridOnly}
+                onValueChange={(v) => save({ debridOnly: v }, v ? 'AllDebrid activé' : 'Torrents (qBittorrent)')}
+                trackColor={{ true: C.accent, false: C.border }}
+              />
+            </View>
+            <Text style={styles.dim} numberOfLines={2}>
+              {[
+                running ? `${running} en cours` : 'rien en cours',
+                st.grabs.filter((g) => g.seeding).length ? `${st.grabs.filter((g) => g.seeding).length} en partage` : null,
+                toChoose ? `${toChoose} à choisir` : null,
+                st.vpnPort?.port ? `VPN ✓ port ${st.vpnPort.port}` : st.qbit?.url ? 'VPN : port non ouvert' : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </Text>
           </View>
 
           {tab === 'demandes' ? <Demandes st={st} reload={load} onItem={(i) => setItemOpen(i.id)} /> : null}
@@ -756,7 +771,7 @@ function Telechargements({ st, reload, onItem }: { st: AutoState; reload: () => 
             <Text style={styles.small}>↑ {fmtSpeed(seeding.reduce((n, g) => n + (g.upSpeed || 0), 0))}</Text>
           </View>
           <Text style={styles.help}>
-            qBittorrent partage jusqu’au ratio {st.seed?.ratio || '—'} et au moins {st.seed?.days || '—'} jours, puis retire le torrent. Le film reste dans la bibliothèque.
+            qBittorrent partage jusqu’au ratio {st.seed?.ratio || 1}{st.seed?.days ? ` et au moins ${st.seed.days} jours` : ''}, puis retire le torrent. Le film reste dans la bibliothèque.
           </Text>
           {seeding.map((g) => {
             const goal = st.seed ?? { ratio: 1, days: 7 };
@@ -1304,7 +1319,8 @@ const styles = StyleSheet.create({
   groupHead: { color: C.textDim, fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 6 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30 },
   banner: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderRadius: 22, borderWidth: 1.5, backgroundColor: C.surface },
-  bannerTitle: { color: C.text, fontSize: 17, fontWeight: '800' },
+  bannerTitle: { color: C.text, fontSize: 16, fontWeight: '800' },
+  switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   h1: { color: C.text, fontSize: 22, fontWeight: '800', flex: 1 },
   h2: { color: C.text, fontSize: 17, fontWeight: '800', marginTop: 6 },
   help: { color: C.textDim, fontSize: 13, lineHeight: 19 },

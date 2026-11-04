@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Onglet Auto : deux interrupteurs. « Lumio Auto » met en pause ou relance la recherche automatique (ce qui est lancé continue et reste en partage) ; « AllDebrid » choisit entre les versions déjà en cache AllDebrid (instantané, ratio intact) et les torrents par qBittorrent. Il faut le serveur Lumio 3.78.0.
+
 ## 1.0.131 — 4 novembre 2026
 
 - Widget « État des serveurs » : qBittorrent et le VPN à la place de Radarr / Sonarr (qui ne reviennent plus, même Lumio Auto éteint). Il faut le serveur Lumio 3.77.0.

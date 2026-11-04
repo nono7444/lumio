@@ -130,6 +130,7 @@ export type AutoGrab = {
 export type AutoFolder = { path: string; root: string; folder: string; name: string };
 export type AutoState = {
   enabled: boolean;
+  debridOnly?: boolean;
   client: 'rdt' | 'alldebrid' | 'qbit';
   adoptable?: number;
   rdt: { url: string; user: string; hasPass: boolean; category: string; remotePath: string; localRoot: string; localFolder: string };
@@ -169,7 +170,7 @@ const json = (b: unknown) => ({ body: JSON.stringify(b) });
 
 export const autoApi = {
   state: (s: Settings) => serverCall<AutoState>(s, '/api/auto/state'),
-  save: (s: Settings, b: Partial<{ enabled: boolean; client: string; rdt: Record<string, string>; qbit: Record<string, string | undefined>; seed: { ratio: number; days: number }; profile: Partial<AutoProfile>; folders: { movie?: string | null; tv?: string | null } }>) =>
+  save: (s: Settings, b: Partial<{ enabled: boolean; debridOnly: boolean; client: string; rdt: Record<string, string>; qbit: Record<string, string | undefined>; seed: { ratio: number; days: number }; profile: Partial<AutoProfile>; folders: { movie?: string | null; tv?: string | null } }>) =>
     serverCall(s, '/api/auto/settings', { method: 'PUT', ...json(b) }),
   saveIndexer: (s: Settings, b: Partial<AutoIndexer> & { key?: string }) => serverCall<{ indexer: AutoIndexer }>(s, '/api/auto/indexers', { method: 'POST', ...json(b) }),
   removeIndexer: (s: Settings, id: string) => serverCall(s, `/api/auto/indexers/${id}`, { method: 'DELETE' }),
