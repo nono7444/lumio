@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.74.0';
+const VERSION = '3.75.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1995,6 +1995,20 @@ async function status() {
   const out = { lumio: { ok: true, version: VERSION, pending: requests.filter((r) => r.status === RequestStatus.PENDING).length } };
   const jf = await probe(`${JELLYFIN_URL}/System/Info/Public`);
   out.jellyfin = { ok: jf.ok, ms: jf.ms, error: jf.error, version: jf.body && jf.body.Version, name: jf.body && jf.body.ServerName };
+  // Lumio Auto avec qBittorrent : qBittorrent et le VPN (port ouvert) sont surveillés
+  const qc = (config.auto && config.auto.qbit) || {};
+  if (config.auto && config.auto.enabled && qc.url) {
+    const t0 = Date.now();
+    try {
+      const ver = await (await qbitFetch('/api/v2/app/version')).text();
+      out.qbit = { ok: true, configured: true, ms: Date.now() - t0, version: ver.replace(/^v/, '') };
+    } catch (e) {
+      out.qbit = { ok: false, configured: true, ms: Date.now() - t0, error: e.message };
+    }
+    out.vpn = vpnPort.port
+      ? { ok: true, configured: true, ms: 0, version: `port ${vpnPort.port}` }
+      : { ok: false, configured: true, ms: 0, error: vpnPort.error || 'aucun port ouvert' };
+  }
   await Promise.all(
     ['radarr', 'sonarr'].map(async (kind) => {
       if (arrOff()) return;
@@ -2025,7 +2039,12 @@ async function recordUptime() {
   try {
     const st = await status();
     const t = Date.now();
-    for (const key of ['lumio', 'jellyfin', 'radarr', 'sonarr']) {
+    // Radarr / Sonarr retirés : on oublie leur historique
+    if (arrOff() && (uptime.radarr || uptime.sonarr)) {
+      delete uptime.radarr;
+      delete uptime.sonarr;
+    }
+    for (const key of ['lumio', 'jellyfin', 'radarr', 'sonarr', 'qbit', 'vpn']) {
       const e = st[key];
       if (!e || e.configured === false) continue;
       const list = (uptime[key] = uptime[key] || []);
@@ -2139,7 +2158,7 @@ setInterval(sampleSystem, 2000);
 let publicStatusCache = null;
 let watchStatsCache = null;
 
-const UPTIME_NAMES = { lumio: 'Serveur Lumio', jellyfin: 'Jellyfin', radarr: 'Radarr', sonarr: 'Sonarr' };
+const UPTIME_NAMES = { lumio: 'Serveur Lumio', jellyfin: 'Jellyfin', radarr: 'Radarr', sonarr: 'Sonarr', qbit: 'qBittorrent', vpn: 'VPN (ProtonVPN)' };
 /** 24 barres d'une heure (1 = tout allait bien, 0,5 = coupure, 0 = hors ligne, -1 = pas de mesure) et % de disponibilité. */
 function uptimeSummary(k) {
   const since = Date.now() - 24 * 3600_000;
@@ -3546,6 +3565,15 @@ if (!Array.isArray(auto.unfollowed)) auto.unfollowed = [];
 for (const it of auto.items)
   if (it.type === 'tv' && !it.since && !(it.requestIds || []).length && (it.events || []).some((e) => /bibliothèque/.test(e.msg || '')))
     it.since = new Date(Date.parse(it.addedAt || Date.now()) - 2 * 86400e3).toISOString().slice(0, 10);
+// 3.75 : plus aucune nouvelle saison lancée toute seule ; séries reprises de la bibliothèque : saison en cours seulement
+if (!auto.v375) {
+  auto.v375 = true;
+  for (const it of auto.items) {
+    if (it.type !== 'tv') continue;
+    it.future = false;
+    if (it.since && !(it.requestIds || []).length && it.seasons.length > 1) it.seasons = [Math.min(...it.seasons)];
+  }
+}
 // Volume téléchargé par indexeur et par jour ({ ixId: { '2026-11-04': octets } }) : quota des trackers privés
 if (!auto.dlStats || typeof auto.dlStats !== 'object') auto.dlStats = {};
 let autoSaveTimer = null;
@@ -4100,7 +4128,7 @@ async function autoMeta(item, force = false) {
   const seasons = {};
   const all = (s.seasons || []).filter((x) => x.season_number > 0);
   // Saisons suivies : celles demandées, et les nouvelles saisons si « suivre la suite »
-  if (item.future !== false) {
+  if (item.future === true) {
     const maxKnown = Math.max(0, ...(item.seasonsKnown || []));
     for (const x of all) if (x.season_number > maxKnown && item.seasonsKnown && !item.seasons.includes(x.season_number)) item.seasons.push(x.season_number);
   }
@@ -5095,7 +5123,8 @@ async function autoAdd({ type, tmdbId, tvdbId, title, seasons, folderPath, futur
   if (!tmdbId) throw new HttpError(400, 'Identifiant TMDB manquant');
   let item = findItem(type, tmdbId);
   if (!item) {
-    item = { id: autoId(), type, tmdbId, tvdbId: tvdbId || null, title: title || `#${tmdbId}`, seasons: [], future: future !== false, requestIds: [], addedAt: new Date().toISOString(), nextSearch: 0 };
+    // Les nouvelles saisons ne partent jamais toutes seules : on les demande (sauf « suivre la suite » activé sur la fiche)
+    item = { id: autoId(), type, tmdbId, tvdbId: tvdbId || null, title: title || `#${tmdbId}`, seasons: [], future: future === true, requestIds: [], addedAt: new Date().toISOString(), nextSearch: 0 };
     auto.items.unshift(item);
   }
   if (folderPath) item.folderPath = folderPath;
@@ -5258,14 +5287,15 @@ async function autoFollowLibrary() {
       const have = [...(idx.series.get(tmdbId) || [])];
       const last = have.length ? Math.max(...have) : null;
       const tmdbSeasons = (tv.seasons || []).map((x) => x.season_number).filter((n) => n > 0);
-      const seasons = last ? [last, ...tmdbSeasons.filter((n) => n > last)] : tmdbSeasons.slice(-1);
+      // Seulement la saison en cours (la dernière présente) ; une autre saison se demande
+      const seasons = last ? [last] : tmdbSeasons.slice(-1);
       if (!seasons.length) continue;
       const folder = jf.path ? path.dirname(jf.path) : null;
       try {
-        await autoAdd({ type: 'tv', tmdbId, tvdbId: (tv.external_ids && tv.external_ids.tvdb_id) || null, title: tv.name, seasons, folderPath: folder, future: true });
+        await autoAdd({ type: 'tv', tmdbId, tvdbId: (tv.external_ids && tv.external_ids.tvdb_id) || null, title: tv.name, seasons, folderPath: folder, future: false });
         const it = findItem('tv', tmdbId);
         if (it) it.since = new Date(Date.now() - 2 * 86400e3).toISOString().slice(0, 10);
-        if (it) autoEvent(it, 'added', `Série en cours dans la bibliothèque : suivie automatiquement (saison${seasons.length > 1 ? 's' : ''} ${seasons.join(', ')})`);
+        if (it) autoEvent(it, 'added', `Série en cours dans la bibliothèque : nouveaux épisodes de la saison ${seasons.join(', ')} suivis`);
         added.push(tv.name);
       } catch (e) {
         autoLog(`${tv.name} : suivi impossible (${e.message})`, 'warn');
@@ -5316,7 +5346,7 @@ function publicItem(item) {
     year: item.year,
     anime: Boolean(item.anime),
     seasons: item.seasons,
-    future: item.future !== false,
+    future: item.future === true,
     folderPath: item.folderPath,
     paused: Boolean(item.paused),
     note: item.note || null,
@@ -5674,6 +5704,85 @@ async function autoRoutes(req, res, p, q, user) {
     g.statusText = g.paused ? 'en pause' : 'reprise…';
     g.lastMoveAt = Date.now();
     autoSave();
+    send(res, 200, { ok: true });
+    return true;
+  }
+  // ——— qBittorrent depuis l'appli (admin) : liste des torrents, vitesses, actions ———
+  if (req.method === 'GET' && p === '/api/auto/qbit') {
+    try {
+      const [list, info, alt] = await Promise.all([
+        qbitFetch('/api/v2/torrents/info?sort=added_on&reverse=true').then((r) => r.json()),
+        qbitFetch('/api/v2/transfer/info').then((r) => r.json()),
+        qbitFetch('/api/v2/transfer/speedLimitsMode').then((r) => r.text()).catch(() => '0'),
+      ]);
+      const ours = new Map(auto.grabs.filter((g) => g.hash).map((g) => [g.hash, g]));
+      send(res, 200, {
+        ok: true,
+        transfer: { dl: info.dl_info_speed || 0, up: info.up_info_speed || 0, dlLimit: info.dl_rate_limit || 0, upLimit: info.up_rate_limit || 0, alt: String(alt).trim() === '1', status: info.connection_status || null },
+        vpnPort: vpnPort.port,
+        torrents: list.slice(0, 300).map((t) => ({
+          hash: t.hash,
+          name: t.name,
+          state: t.state,
+          progress: Math.round((Number(t.progress) || 0) * 1000) / 10,
+          size: t.size || t.total_size || 0,
+          dl: t.dlspeed || 0,
+          up: t.upspeed || 0,
+          ratio: Math.round((Number(t.ratio) || 0) * 100) / 100,
+          uploaded: t.uploaded || 0,
+          eta: t.eta > 0 && t.eta < 8640000 ? t.eta : null,
+          seeds: t.num_seeds,
+          peers: t.num_leechs,
+          category: t.category || '',
+          addedOn: t.added_on ? new Date(t.added_on * 1000).toISOString() : null,
+          seedTime: t.seeding_time || 0,
+          tracker: (() => {
+            try {
+              return t.tracker ? new URL(t.tracker).hostname.replace(/^(www|tracker)\./, '') : '';
+            } catch {
+              return '';
+            }
+          })(),
+          lumio: ours.has((t.hash || '').toLowerCase()) ? ours.get(t.hash.toLowerCase()).title : null,
+        })),
+      });
+    } catch (e) {
+      send(res, 200, { ok: false, error: e.message, torrents: [] });
+    }
+    return true;
+  }
+  if (req.method === 'POST' && p === '/api/auto/qbit/action') {
+    const b = await readBody(req);
+    const hashes = (Array.isArray(b.hashes) ? b.hashes : []).filter((h) => /^[a-f0-9]{40}$/i.test(h));
+    const form = (o) => ({ method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(o) });
+    const both = async (a1, a2, o) => {
+      try {
+        await qbitFetch(`/api/v2/torrents/${a1}`, form(o));
+      } catch {
+        await qbitFetch(`/api/v2/torrents/${a2}`, form(o));
+      }
+    };
+    const h = hashes.join('|');
+    if (b.action === 'alt') await qbitFetch('/api/v2/transfer/toggleSpeedLimitsMode', form({}));
+    else if (!hashes.length) throw new HttpError(400, 'Aucun torrent choisi');
+    else if (b.action === 'pause') await both('stop', 'pause', { hashes: h });
+    else if (b.action === 'resume') await both('start', 'resume', { hashes: h });
+    else if (b.action === 'recheck') await qbitFetch('/api/v2/torrents/recheck', form({ hashes: h }));
+    else if (b.action === 'reannounce') await qbitFetch('/api/v2/torrents/reannounce', form({ hashes: h }));
+    else if (b.action === 'delete' || b.action === 'deleteFiles') {
+      await qbitFetch('/api/v2/torrents/delete', form({ hashes: h, deleteFiles: b.action === 'deleteFiles' ? 'true' : 'false' }));
+      // Torrents suivis par Lumio : plus en partage (la bibliothèque garde ses fichiers : liens durs)
+      for (const g of auto.grabs) if (g.hash && hashes.map((x) => x.toLowerCase()).includes(g.hash)) {
+        if (['sent', 'downloading'].includes(g.state)) {
+          g.state = 'failed';
+          g.error = `supprimé de qBittorrent par ${user.name}`;
+        }
+        g.seeding = false;
+        g.seedEnd = g.seedEnd || 'retiré à la main';
+      }
+      autoSave();
+    } else throw new HttpError(400, 'Action inconnue');
+    autoLog(`qBittorrent : ${b.action} (${hashes.length || 'vitesse'}) par ${user.name}`);
     send(res, 200, { ok: true });
     return true;
   }
