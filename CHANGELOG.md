@@ -6,6 +6,7 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- qBit → Réglages du partage, trois interrupteurs simples : « Envoi à fond la nuit (1 h – 8 h) », « Partage intelligent » (un torrent encore demandé reste en partage, un torrent que plus personne ne demande depuis 14 jours est retiré) et « Résumé chaque soir (21 h) » en notification (envoyé, reçu, partages, quota). Règle C411 respectée : jamais de retrait avant 72 h de partage ou un ratio de 1 sur le torrent, et alerte « Hit & Run » si on veut en supprimer un trop tôt. Nombre de personnes qui téléchargent chaque torrent. Il faut le serveur Lumio 3.80.0.
 - « Derniers ajouts » : seulement les films et les séries de l’année en cours et des suivantes (plus d’anciennes séries qui reçoivent une nouvelle saison, plus de repli sur l’année d’avant).
 ## 1.0.133 — 4 novembre 2026
 

@@ -53,10 +53,15 @@ export type QbitTorrent = {
   category: string;
   addedOn: string | null;
   seedTime: number;
+  hrLeftH?: number;
+  swarmLeechers?: number | null;
+  swarmSeeders?: number | null;
   tracker: string;
   lumio: string | null;
 };
+export type AutoSeed = { ratio: number; days: number; smart?: boolean; summary?: boolean };
 export type QbitPrefs = {
+  scheduler_enabled: boolean;
   queueing_enabled: boolean;
   max_active_torrents: number;
   max_active_uploads: number;
@@ -137,6 +142,9 @@ export type AutoGrab = {
   seedTime?: number;
   upSpeed?: number;
   seedEnd?: string;
+  seedNote?: string | null;
+  leechers?: number;
+  seeders?: number;
   error?: string;
   startedAt: string;
   doneAt?: string;
@@ -150,7 +158,7 @@ export type AutoState = {
   adoptable?: number;
   rdt: { url: string; user: string; hasPass: boolean; category: string; remotePath: string; localRoot: string; localFolder: string };
   qbit?: { url: string; user: string; hasPass: boolean; category: string; remotePath: string; localRoot: string; localFolder: string };
-  seed?: { ratio: number; days: number };
+  seed?: AutoSeed;
   vpnPort?: { port: number | null; at: string | null; error: string | null; fixed: string | null };
   alldebrid: boolean;
   profile: AutoProfile;
@@ -185,7 +193,7 @@ const json = (b: unknown) => ({ body: JSON.stringify(b) });
 
 export const autoApi = {
   state: (s: Settings) => serverCall<AutoState>(s, '/api/auto/state'),
-  save: (s: Settings, b: Partial<{ enabled: boolean; debridOnly: boolean; client: string; rdt: Record<string, string>; qbit: Record<string, string | undefined>; seed: { ratio: number; days: number }; profile: Partial<AutoProfile>; folders: { movie?: string | null; tv?: string | null } }>) =>
+  save: (s: Settings, b: Partial<{ enabled: boolean; debridOnly: boolean; client: string; rdt: Record<string, string>; qbit: Record<string, string | undefined>; seed: Partial<AutoSeed>; profile: Partial<AutoProfile>; folders: { movie?: string | null; tv?: string | null } }>) =>
     serverCall(s, '/api/auto/settings', { method: 'PUT', ...json(b) }),
   saveIndexer: (s: Settings, b: Partial<AutoIndexer> & { key?: string }) => serverCall<{ indexer: AutoIndexer }>(s, '/api/auto/indexers', { method: 'POST', ...json(b) }),
   removeIndexer: (s: Settings, id: string) => serverCall(s, `/api/auto/indexers/${id}`, { method: 'DELETE' }),
@@ -208,13 +216,13 @@ export const autoApi = {
   grab: (s: Settings, id: string, guid: string) => serverCall(s, `/api/auto/items/${id}/grab`, { method: 'POST', ...json({ guid }) }),
   cancelGrab: (s: Settings, id: string) => serverCall(s, `/api/auto/grabs/${id}`, { method: 'DELETE' }),
   qbit: (s: Settings) => serverCall<QbitState>(s, '/api/auto/qbit'),
-  qbitAction: (s: Settings, action: 'pause' | 'resume' | 'recheck' | 'reannounce' | 'delete' | 'deleteFiles' | 'alt', hashes: string[] = []) =>
-    serverCall(s, '/api/auto/qbit/action', { method: 'POST', body: JSON.stringify({ action, hashes }) }),
-  qbitPrefs: (s: Settings, b?: Partial<QbitPrefs>) =>
-    serverCall<{ prefs: QbitPrefs; seed: { ratio: number; days: number } }>(s, '/api/auto/qbit/prefs', b ? { method: 'POST', body: JSON.stringify(b) } : undefined),
+  qbitAction: (s: Settings, action: 'pause' | 'resume' | 'recheck' | 'reannounce' | 'delete' | 'deleteFiles' | 'alt', hashes: string[] = [], force = false) =>
+    serverCall(s, '/api/auto/qbit/action', { method: 'POST', body: JSON.stringify({ action, hashes, force }) }),
+  qbitPrefs: (s: Settings, b?: Partial<QbitPrefs> & { night?: boolean }) =>
+    serverCall<{ prefs: QbitPrefs; seed: AutoSeed }>(s, '/api/auto/qbit/prefs', b ? { method: 'POST', body: JSON.stringify(b) } : undefined),
   adopt: (s: Settings) => serverCall<{ ok: number; errors: string[]; message: string }>(s, '/api/auto/adopt', { method: 'POST' }),
-  removeGrab: (s: Settings, id: string, o: { client: boolean; blocklist: boolean; search: boolean }) =>
-    serverCall(s, `/api/auto/grabs/${id}?client=${o.client ? 1 : 0}&blocklist=${o.blocklist ? 1 : 0}&search=${o.search ? 1 : 0}`, { method: 'DELETE' }),
+  removeGrab: (s: Settings, id: string, o: { client: boolean; blocklist: boolean; search: boolean; force?: boolean }) =>
+    serverCall(s, `/api/auto/grabs/${id}?client=${o.client ? 1 : 0}&blocklist=${o.blocklist ? 1 : 0}&search=${o.search ? 1 : 0}${o.force ? '&force=1' : ''}`, { method: 'DELETE' }),
   pauseGrab: (s: Settings, id: string) => serverCall(s, `/api/auto/grabs/${id}/pause`, { method: 'POST' }),
   resumeGrab: (s: Settings, id: string) => serverCall(s, `/api/auto/grabs/${id}/resume`, { method: 'POST' }),
   retryImport: (s: Settings, id: string) => serverCall<{ ok: boolean; message: string }>(s, `/api/auto/grabs/${id}/retry-import`, { method: 'POST' }),

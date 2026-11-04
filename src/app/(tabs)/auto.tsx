@@ -10,7 +10,7 @@ import { Picker, Toggle } from '@/components/arr-section';
 import { toast } from '@/components/toast';
 import { Button, Field, ScreenTitle, Section, SegChip } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
-import { autoApi, gb, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
+import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
 import { useSettings } from '@/lib/settings';
 
 type Tab = 'demandes' | 'telechargements' | 'qbit' | 'indexeurs' | 'reglages';
@@ -785,6 +785,8 @@ function Telechargements({ st, reload, onItem }: { st: AutoState; reload: () => 
                   </Text>
                   <Text style={styles.small}>
                     ratio {g.ratio ?? 0} · {gb(g.uploaded ?? 0)} envoyés · {fmtEta(g.seedTime)} de partage{g.upSpeed ? ` · ↑ ${fmtSpeed(g.upSpeed)}` : ''}
+                    {g.leechers ? ` · ${g.leechers} téléchargent` : ''}
+                    {g.seedNote ? `\n${g.seedNote}` : ''}
                   </Text>
                   <View style={styles.bar}>
                     <View style={[styles.barFill, { width: `${pct || 2}%`, backgroundColor: C.success }]} />
@@ -968,7 +970,27 @@ function GrabSheet({ g, onClose, reload, onItem }: { g: AutoGrab; onClose: () =>
             <Toggle label="Chercher une autre version tout de suite" value={rm.search} onChange={(v) => setRm((o) => ({ ...o, search: v }))} />
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
               <Button title="Annuler" variant="secondary" small onPress={() => setAskRemove(false)} style={{ flex: 1 }} />
-              <Button title="Retirer" icon="trash-outline" variant="danger" small loading={busy === 'rm'} onPress={() => act('rm', () => autoApi.removeGrab(settings, g.id, rm), 'Retiré', true)} style={{ flex: 1 }} />
+              <Button
+                title="Retirer"
+                icon="trash-outline"
+                variant="danger"
+                small
+                loading={busy === 'rm'}
+                onPress={() =>
+                  autoApi
+                    .removeGrab(settings, g.id, rm)
+                    .then(() => (toast('Retiré'), reload(), onClose()))
+                    .catch((e) =>
+                      /^Règle C411/.test(e?.message ?? '')
+                        ? Alert.alert('Attention : Hit & Run', e.message, [
+                            { text: 'Garder en partage', style: 'cancel' },
+                            { text: 'Retirer quand même', style: 'destructive', onPress: () => autoApi.removeGrab(settings, g.id, { ...rm, force: true }).then(() => (toast('Retiré'), reload(), onClose())) },
+                          ])
+                        : Alert.alert('Téléchargement', e?.message ?? String(e))
+                    )
+                }
+                style={{ flex: 1 }}
+              />
             </View>
           </View>
         )}
@@ -1130,11 +1152,18 @@ function QbitTab() {
     const t = setInterval(load, 3000);
     return () => clearInterval(t);
   }, [load]);
-  const act = (action: Parameters<typeof autoApi.qbitAction>[1], hashes: string[] = [], msg?: string) =>
+  const act = (action: Parameters<typeof autoApi.qbitAction>[1], hashes: string[] = [], msg?: string, force = false) =>
     autoApi
-      .qbitAction(settings, action, hashes)
+      .qbitAction(settings, action, hashes, force)
       .then(() => (msg ? toast(msg) : null, load()))
-      .catch((e) => Alert.alert('qBittorrent', e?.message ?? String(e)));
+      .catch((e) =>
+        /^Règle C411/.test(e?.message ?? '')
+          ? Alert.alert('Attention : Hit & Run', e.message, [
+              { text: 'Garder en partage', style: 'cancel' },
+              { text: 'Supprimer quand même', style: 'destructive', onPress: () => act(action, hashes, msg, true) },
+            ])
+          : Alert.alert('qBittorrent', e?.message ?? String(e))
+      );
 
   if (!d) return <ActivityIndicator color="#fff" style={{ marginTop: 30 }} />;
   if (!d.ok)
@@ -1202,6 +1231,13 @@ function QbitTab() {
                 {qbGroup(x.state) === 'dl' ? ` · ${x.progress}% · ↓ ${fmtSpeed(x.dl)} · ${fmtEta(x.eta)}` : ` · ratio ${x.ratio}${x.up ? ` · ↑ ${fmtSpeed(x.up)}` : ''}`} · {gb(x.size)}
                 {x.tracker ? ` · ${x.tracker}` : ''}
               </Text>
+              {x.hrLeftH || x.swarmLeechers ? (
+                <Text style={styles.small} numberOfLines={1}>
+                  {x.hrLeftH ? <Text style={{ color: C.warning, fontWeight: '700' }}>🔒 encore {x.hrLeftH} h (règle C411)</Text> : null}
+                  {x.hrLeftH && x.swarmLeechers ? ' · ' : ''}
+                  {x.swarmLeechers ? `${x.swarmLeechers} téléchargent · ${x.swarmSeeders ?? '?'} partagent` : ''}
+                </Text>
+              ) : null}
               {x.progress < 100 ? (
                 <View style={styles.bar}>
                   <View style={[styles.barFill, { width: `${Math.max(2, x.progress)}%`, backgroundColor: stt.color }]} />
@@ -1268,7 +1304,7 @@ function QbitTab() {
 function QbitPrefsSection() {
   const { settings } = useSettings();
   const [p, setP] = useState<QbitPrefs | null>(null);
-  const [seed, setSeed] = useState<{ ratio: number; days: number } | null>(null);
+  const [seed, setSeed] = useState<AutoSeed | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const load = useCallback(() => {
     autoApi
@@ -1277,12 +1313,12 @@ function QbitPrefsSection() {
       .catch((e) => setErr(e?.message ?? String(e)));
   }, [settings]);
   useEffect(load, [load]);
-  const put = (b: Partial<QbitPrefs>, msg = 'Enregistré dans qBittorrent') =>
+  const put = (b: Partial<QbitPrefs> & { night?: boolean }, msg = 'Enregistré dans qBittorrent') =>
     autoApi
       .qbitPrefs(settings, b)
       .then((r) => (setP(r.prefs), toast(msg)))
       .catch((e) => Alert.alert('qBittorrent', e?.message ?? String(e)));
-  const saveSeed = (s2: { ratio: number; days: number }) =>
+  const saveSeed = (s2: AutoSeed) =>
     autoApi
       .save(settings, { seed: s2 })
       .then(() => (setSeed(s2), toast('Objectif de partage enregistré')))
@@ -1297,6 +1333,17 @@ function QbitPrefsSection() {
         <ActivityIndicator color="#fff" />
       ) : (
         <View style={{ gap: 4 }}>
+          {/* Trois réglages simples, le reste en dessous */}
+          <Toggle label="Envoi à fond la nuit (1 h – 8 h)" value={p.scheduler_enabled} onChange={(v) => put({ night: v }, v ? 'Envoi sans limite la nuit, de 1 h à 8 h' : 'Même vitesse jour et nuit')} />
+          {seed ? (
+            <>
+              <Toggle label="Partage intelligent" value={seed.smart !== false} onChange={(v) => saveSeed({ ...seed, smart: v })} />
+              <Toggle label="Résumé chaque soir (21 h)" value={seed.summary !== false} onChange={(v) => saveSeed({ ...seed, summary: v })} />
+            </>
+          ) : null}
+          <Text style={styles.help}>
+            Règle C411 toujours respectée : un torrent n’est jamais retiré avant 72 h de partage ou un ratio de 1 sur ce torrent (sinon c’est un Hit & Run). Partage intelligent : un torrent encore demandé (3 personnes ou plus) reste en partage même objectif atteint ; un torrent que plus personne ne demande depuis 14 jours est retiré une fois la durée minimum passée. Le résumé du soir arrive en notification : envoyé, reçu, partages et quota.
+          </Text>
           <Button
             title="Partager un maximum"
             icon="rocket-outline"
@@ -1329,13 +1376,13 @@ function QbitPrefsSection() {
                 label="Ratio à atteindre"
                 options={[0.5, 1, 1.5, 2, 3, 5].map((n) => ({ value: n, label: String(n) }))}
                 value={seed.ratio || 1}
-                onChange={(v) => saveSeed({ ratio: v, days: seed.days })}
+                onChange={(v) => saveSeed({ ...seed, ratio: v })}
               />
               <Picker
                 label="Et partager au moins"
-                options={[0, 3, 7, 14, 30, 60].map((n) => ({ value: n, label: n ? `${n} jours` : 'Pas de minimum' }))}
+                options={[0, 3, 7, 14, 30, 60].map((n) => ({ value: n, label: n ? `${n} jours` : '72 h (minimum C411)' }))}
                 value={seed.days ?? 7}
-                onChange={(v) => saveSeed({ ratio: seed.ratio, days: v })}
+                onChange={(v) => saveSeed({ ...seed, days: v })}
               />
               <Text style={styles.help}>Plus le ratio et la durée sont élevés, plus les torrents restent en partage longtemps (au plus 60 jours).</Text>
             </>

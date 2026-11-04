@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.79.0';
+const VERSION = '3.80.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4332,8 +4332,13 @@ function autoClientFor(rel) {
   const ok = (k) => ['rdt', 'qbit', 'alldebrid'].includes(k);
   return ix && ok(ix.client) ? ix.client : ok(c.client) ? c.client : 'rdt';
 }
+// Règle des trackers privés (C411 : « 72 h de partage OU ratio 1 sur le torrent », sinon c'est un Hit & Run) :
+// Lumio ne retire jamais un torrent avant, et prévient si on veut le supprimer à la main.
+const HR_SEED_S = 72 * 3600;
+const hrSafe = (seedTime, ratio) => (Number(seedTime) || 0) >= HR_SEED_S || (Number(ratio) || 0) >= 1;
+const hrLeft = (seedTime) => Math.max(0, Math.ceil((HR_SEED_S - (Number(seedTime) || 0)) / 3600));
 // Objectif de partage (seed) : ratio ou durée, le premier atteint
-const autoSeed = () => ({ ratio: 1, days: 7, ...((autoCfg().seed) || {}) });
+const autoSeed = () => ({ ratio: 1, days: 7, smart: true, summary: true, ...((autoCfg().seed) || {}) });
 
 // Empreinte d'un .torrent (SHA-1 du dictionnaire « info »), pour suivre le téléchargement
 function torrentHash(buf) {
@@ -5090,15 +5095,31 @@ async function autoSeedTick() {
       g.uploaded = Number(t.uploaded) || 0;
       g.seedTime = Number(t.seeding_time) || Math.round((Date.now() - (g.seedSince || Date.now())) / 1000);
       g.upSpeed = Number(t.upspeed) || 0;
+      g.leechers = Number(t.num_incomplete) || 0; // gens qui téléchargent ce torrent sur le site
+      g.seeders = Number(t.num_complete) || 0;
+      if (g.uploaded > (g.lastUploaded || 0)) (g.lastUploaded = g.uploaded), (g.lastUpAt = Date.now());
+      if (!g.lastUpAt) g.lastUpAt = g.seedSince || Date.now();
       // On garde le partage tant que le ratio n'est pas atteint ET la durée minimum passée ; au plus 60 jours
       const byRatio = !(goal.ratio > 0) || g.ratio >= goal.ratio;
       const byTime = !(goal.days > 0) || g.seedTime >= goal.days * 86400;
       const tooLong = g.seedTime >= 60 * 86400;
-      if ((byRatio && byTime) || tooLong) {
+      let why = null;
+      if (tooLong) why = `60 j de partage (ratio ${g.ratio})`;
+      else if (byRatio && byTime) {
+        // Partage intelligent : encore demandé (3 personnes ou plus le téléchargent) → on le garde
+        if (goal.smart && g.leechers >= 3) g.seedNote = `gardé : ${g.leechers} personnes le téléchargent`;
+        else why = `ratio ${g.ratio} et ${goal.days} j atteints`;
+      } else if (goal.smart && byTime && Date.now() - g.lastUpAt > 14 * 86400e3) {
+        // Partage intelligent : durée minimum passée et plus personne ne le demande depuis 14 jours → place libérée
+        why = `plus demandé depuis 14 j (ratio ${g.ratio})`;
+      } else g.seedNote = null;
+      if (why && !hrSafe(g.seedTime, g.ratio)) why = null; // règle C411 : 72 h ou ratio 1 avant tout retrait
+      if (why) {
         await qbitFetch('/api/v2/torrents/delete', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ hashes: g.hash, deleteFiles: 'true' }) }).catch(() => {});
         g.seeding = false;
-        g.seedEnd = tooLong && !byRatio ? `60 j de partage (ratio ${g.ratio})` : `ratio ${g.ratio} et ${goal.days} j atteints`;
-        autoLog(`${g.title} : partage terminé (${g.seedEnd}), torrent retiré`);
+        g.seedEnd = why;
+        g.seedNote = null;
+        autoLog(`${g.title} : partage terminé (${why}), torrent retiré`);
       }
     }
     autoSave();
@@ -5109,6 +5130,48 @@ async function autoSeedTick() {
   }
 }
 setInterval(() => autoSeedTick().catch(() => {}), 2 * 60_000);
+
+// ——— Résumé du soir (21 h) : envoyé / reçu dans la journée, partages, quota des sites ———
+const parisNow = () => {
+  const d = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
+  return { day: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, hour: d.getHours() };
+};
+async function autoSummaryTick() {
+  const q = autoCfg().qbit || {};
+  if (!q.url || !autoOn()) return;
+  let st;
+  try {
+    st = (await (await qbitFetch('/api/v2/sync/maindata?rid=0')).json()).server_state || {};
+  } catch {
+    return;
+  }
+  const ul = Number(st.alltime_ul) || 0;
+  const dl = Number(st.alltime_dl) || 0;
+  const { day, hour } = parisNow();
+  // Point de départ de la journée (premier passage après minuit)
+  if (!auto.daySnap || auto.daySnap.day !== day) {
+    auto.daySnap = { day, ul, dl };
+    autoSave();
+    return;
+  }
+  if (hour < 21 || auto.lastSummary === day || autoSeed().summary === false) return;
+  auto.lastSummary = day;
+  autoSave();
+  const go = (b) => `${(Math.max(0, b) / 1e9).toFixed(1)} Go`;
+  const seeding = auto.grabs.filter((g) => g.seeding).length;
+  const quotas = autoIndexers()
+    .filter((ix) => Number(ix.maxGbPerDay ?? (ix.type === 'c411' ? 15 : 0)) > 0)
+    .map((ix) => `${ix.name} ${(autoDlToday(ix.id) / 1e9).toFixed(1)}/${ix.maxGbPerDay ?? 15} Go`);
+  const total = Number(st.global_ratio) || null;
+  notify({
+    title: '📊 Lumio · ta journée',
+    message: `↑ ${go(ul - auto.daySnap.ul)} envoyés · ↓ ${go(dl - auto.daySnap.dl)} reçus\n${seeding} en partage${total ? ` · ratio qBittorrent ${total}` : ''}${quotas.length ? `\nQuota : ${quotas.join(' · ')}` : ''}`,
+    tags: ['bar_chart'],
+    click: 'lumio://auto',
+  });
+}
+setTimeout(() => autoSummaryTick().catch(() => {}), 60_000);
+setInterval(() => autoSummaryTick().catch(() => {}), 10 * 60_000);
 
 // ——— Port du VPN : Gluetun ouvre un port chez ProtonVPN (il change à chaque connexion) ; on le recopie dans qBittorrent ———
 // (la commande de Gluetun échoue quand qBittorrent redémarre en même temps, et le port retombait à 0)
@@ -5472,6 +5535,7 @@ async function autoRoutes(req, res, p, q, user) {
     if (b.seed && typeof b.seed === 'object') {
       c.seed = { ...autoSeed() };
       for (const k of ['ratio', 'days']) if (Number(b.seed[k]) >= 0) c.seed[k] = Number(b.seed[k]);
+      for (const k of ['smart', 'summary']) if (typeof b.seed[k] === 'boolean') c.seed[k] = b.seed[k];
     }
     if (b.rdt && typeof b.rdt === 'object') {
       c.rdt = c.rdt || {};
@@ -5707,8 +5771,12 @@ async function autoRoutes(req, res, p, q, user) {
       if (item && opt('search', true)) item.nextSearch = Date.now() + 10e3;
       else if (item) item.nextSearch = Date.now() + 6 * 3600e3;
     } else {
-      // Version en partage : retirée de qBittorrent aussi (la bibliothèque garde son fichier)
-      if (g.seeding && opt('client', true)) await autoCleanup(g, null);
+      // Version en partage : retirée de qBittorrent aussi (la bibliothèque garde son fichier), sauf règle C411
+      if (g.seeding && opt('client', true)) {
+        if (!opt('force', false) && !hrSafe(g.seedTime, g.ratio))
+          throw new HttpError(409, `Règle C411 : encore ${hrLeft(g.seedTime)} h de partage (ou un ratio de 1) avant de pouvoir le retirer sans Hit & Run.`);
+        await autoCleanup(g, null);
+      }
       if (opt('blocklist', false)) autoBlock(g.release, `retiré par ${user.name}`);
       if (item && opt('search', false)) item.nextSearch = Date.now() + 10e3;
       auto.grabs = auto.grabs.filter((x) => x !== g);
@@ -5801,6 +5869,9 @@ async function autoRoutes(req, res, p, q, user) {
           category: t.category || '',
           addedOn: t.added_on ? new Date(t.added_on * 1000).toISOString() : null,
           seedTime: t.seeding_time || 0,
+          hrLeftH: Number(t.progress) >= 1 && !hrSafe(t.seeding_time, t.ratio) ? hrLeft(t.seeding_time) : 0,
+          swarmLeechers: t.num_incomplete ?? null,
+          swarmSeeders: t.num_complete ?? null,
           tracker: (() => {
             try {
               return t.tracker ? new URL(t.tracker).hostname.replace(/^(www|tracker)\./, '') : '';
@@ -5817,7 +5888,7 @@ async function autoRoutes(req, res, p, q, user) {
     return true;
   }
   // Réglages de partage de qBittorrent (file d'attente, nombre de torrents actifs, vitesses, emplacements d'envoi)
-  const QB_PREFS = ['queueing_enabled', 'max_active_torrents', 'max_active_uploads', 'max_active_downloads', 'dont_count_slow_torrents', 'up_limit', 'dl_limit', 'max_uploads', 'max_uploads_per_torrent', 'max_connec', 'max_connec_per_torrent', 'alt_up_limit', 'alt_dl_limit'];
+  const QB_PREFS = ['scheduler_enabled', 'schedule_from_hour', 'schedule_from_min', 'schedule_to_hour', 'schedule_to_min', 'scheduler_days', 'queueing_enabled', 'max_active_torrents', 'max_active_uploads', 'max_active_downloads', 'dont_count_slow_torrents', 'up_limit', 'dl_limit', 'max_uploads', 'max_uploads_per_torrent', 'max_connec', 'max_connec_per_torrent', 'alt_up_limit', 'alt_dl_limit'];
   if (p === '/api/auto/qbit/prefs') {
     if (req.method === 'POST') {
       const b = await readBody(req);
@@ -5827,6 +5898,9 @@ async function autoRoutes(req, res, p, q, user) {
         if (typeof b[k] === 'boolean') out[k] = b[k];
         else if (Number.isFinite(Number(b[k]))) out[k] = Math.max(-1, Math.round(Number(b[k])));
       }
+      // « Envoi à fond la nuit » : de 1 h à 8 h, qBittorrent passe sur ses vitesses « alternatives », sans limite
+      if (b.night === true) Object.assign(out, { scheduler_enabled: true, schedule_from_hour: 1, schedule_from_min: 0, schedule_to_hour: 8, schedule_to_min: 0, scheduler_days: 0, alt_up_limit: 0, alt_dl_limit: 0 });
+      if (b.night === false) out.scheduler_enabled = false;
       if (!Object.keys(out).length) throw new HttpError(400, 'Rien à changer');
       await qbitFetch('/api/v2/app/setPreferences', {
         method: 'POST',
@@ -5860,6 +5934,15 @@ async function autoRoutes(req, res, p, q, user) {
     else if (b.action === 'recheck') await qbitFetch('/api/v2/torrents/recheck', form({ hashes: h }));
     else if (b.action === 'reannounce') await qbitFetch('/api/v2/torrents/reannounce', form({ hashes: h }));
     else if (b.action === 'delete' || b.action === 'deleteFiles') {
+      if (!b.force) {
+        const info = await (await qbitFetch(`/api/v2/torrents/info?hashes=${h}`)).json().catch(() => []);
+        const risky = info.filter((t) => Number(t.progress) >= 1 && !hrSafe(t.seeding_time, t.ratio));
+        if (risky.length)
+          throw new HttpError(
+            409,
+            `Règle C411 : ${risky.length > 1 ? `${risky.length} torrents n’ont` : '« ' + risky[0].name.slice(0, 60) + ' » n’a'} pas encore 72 h de partage ni un ratio de 1 (encore ${hrLeft(Math.min(...risky.map((t) => t.seeding_time || 0)))} h). Le supprimer maintenant compte comme un Hit & Run.`
+          );
+      }
       await qbitFetch('/api/v2/torrents/delete', form({ hashes: h, deleteFiles: b.action === 'deleteFiles' ? 'true' : 'false' }));
       // Torrents suivis par Lumio : plus en partage (la bibliothèque garde ses fichiers : liens durs)
       for (const g of auto.grabs) if (g.hash && hashes.map((x) => x.toLowerCase()).includes(g.hash)) {
