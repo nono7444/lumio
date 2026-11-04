@@ -56,6 +56,21 @@ export type QbitTorrent = {
   tracker: string;
   lumio: string | null;
 };
+export type QbitPrefs = {
+  queueing_enabled: boolean;
+  max_active_torrents: number;
+  max_active_uploads: number;
+  max_active_downloads: number;
+  dont_count_slow_torrents: boolean;
+  up_limit: number;
+  dl_limit: number;
+  max_uploads: number;
+  max_uploads_per_torrent: number;
+  max_connec: number;
+  max_connec_per_torrent: number;
+  alt_up_limit: number;
+  alt_dl_limit: number;
+};
 export type QbitState = {
   ok: boolean;
   error?: string;
@@ -195,6 +210,8 @@ export const autoApi = {
   qbit: (s: Settings) => serverCall<QbitState>(s, '/api/auto/qbit'),
   qbitAction: (s: Settings, action: 'pause' | 'resume' | 'recheck' | 'reannounce' | 'delete' | 'deleteFiles' | 'alt', hashes: string[] = []) =>
     serverCall(s, '/api/auto/qbit/action', { method: 'POST', body: JSON.stringify({ action, hashes }) }),
+  qbitPrefs: (s: Settings, b?: Partial<QbitPrefs>) =>
+    serverCall<{ prefs: QbitPrefs; seed: { ratio: number; days: number } }>(s, '/api/auto/qbit/prefs', b ? { method: 'POST', body: JSON.stringify(b) } : undefined),
   adopt: (s: Settings) => serverCall<{ ok: number; errors: string[]; message: string }>(s, '/api/auto/adopt', { method: 'POST' }),
   removeGrab: (s: Settings, id: string, o: { client: boolean; blocklist: boolean; search: boolean }) =>
     serverCall(s, `/api/auto/grabs/${id}?client=${o.client ? 1 : 0}&blocklist=${o.blocklist ? 1 : 0}&search=${o.search ? 1 : 0}`, { method: 'DELETE' }),

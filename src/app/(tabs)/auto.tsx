@@ -10,7 +10,7 @@ import { Picker, Toggle } from '@/components/arr-section';
 import { toast } from '@/components/toast';
 import { Button, Field, ScreenTitle, Section, SegChip } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
-import { autoApi, gb, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
+import { autoApi, gb, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
 import { useSettings } from '@/lib/settings';
 
 type Tab = 'demandes' | 'telechargements' | 'qbit' | 'indexeurs' | 'reglages';
@@ -1181,6 +1181,7 @@ function QbitTab() {
           <Button title="Tout mettre en pause" icon="pause" variant="secondary" small onPress={() => act('pause', d.torrents.filter((x) => qbGroup(x.state) === 'dl').map((x) => x.hash), 'Téléchargements en pause')} style={{ flex: 1 }} />
         ) : null}
       </View>
+      <QbitPrefsSection />
       <View style={styles.metaRow}>
         <SegChip label={`Tout (${d.torrents.length})`} on={filter === 'all'} onPress={() => setFilter('all')} />
         <SegChip label={`Téléchargement (${nDl})`} on={filter === 'dl'} onPress={() => setFilter('dl')} />
@@ -1260,6 +1261,88 @@ function QbitTab() {
         </Modal>
       ) : null}
     </>
+  );
+}
+
+/** Réglages de partage de qBittorrent, modifiables depuis l'appli. */
+function QbitPrefsSection() {
+  const { settings } = useSettings();
+  const [p, setP] = useState<QbitPrefs | null>(null);
+  const [seed, setSeed] = useState<{ ratio: number; days: number } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const load = useCallback(() => {
+    autoApi
+      .qbitPrefs(settings)
+      .then((r) => (setP(r.prefs), setSeed(r.seed), setErr(null)))
+      .catch((e) => setErr(e?.message ?? String(e)));
+  }, [settings]);
+  useEffect(load, [load]);
+  const put = (b: Partial<QbitPrefs>, msg = 'Enregistré dans qBittorrent') =>
+    autoApi
+      .qbitPrefs(settings, b)
+      .then((r) => (setP(r.prefs), toast(msg)))
+      .catch((e) => Alert.alert('qBittorrent', e?.message ?? String(e)));
+  const saveSeed = (s2: { ratio: number; days: number }) =>
+    autoApi
+      .save(settings, { seed: s2 })
+      .then(() => (setSeed(s2), toast('Objectif de partage enregistré')))
+      .catch((e) => Alert.alert('Partage', e?.message ?? String(e)));
+  const speeds = [0, 1, 2, 5, 10, 20, 50].map((n) => ({ value: n * 1024 * 1024, label: n ? `${n} Mo/s` : 'Sans limite' }));
+  const nearest = (v: number, list: { value: number }[]) => (list.find((o) => o.value === v) ? v : list.reduce((a, b) => (Math.abs(b.value - v) < Math.abs(a.value - v) ? b : a)).value);
+  const count = (vals: number[]) => vals.map((n) => ({ value: n, label: n < 0 ? 'Sans limite' : String(n) }));
+  return (
+    <Section title="Réglages du partage" id="auto-qbprefs">
+      {err ? <Text style={[styles.small, { color: C.danger }]}>{err}</Text> : null}
+      {!p ? (
+        <ActivityIndicator color="#fff" />
+      ) : (
+        <View style={{ gap: 4 }}>
+          <Button
+            title="Partager un maximum"
+            icon="rocket-outline"
+            small
+            onPress={() =>
+              put(
+                { queueing_enabled: false, max_uploads: -1, max_uploads_per_torrent: -1, max_connec: 500, max_connec_per_torrent: 100, dont_count_slow_torrents: true },
+                'Tous les torrents partagent en même temps'
+              )
+            }
+          />
+          <Text style={styles.help}>Coupe la file d’attente : tous les torrents finis partagent en même temps. La limite d’envoi ci-dessous reste respectée.</Text>
+          <Toggle label="File d’attente (seulement quelques torrents actifs à la fois)" value={p.queueing_enabled} onChange={(v) => put({ queueing_enabled: v })} />
+          {p.queueing_enabled ? (
+            <>
+              <Picker label="Torrents actifs au total" options={count([5, 10, 20, 50, 100, -1])} value={nearest(p.max_active_torrents, count([5, 10, 20, 50, 100, -1]))} onChange={(v) => put({ max_active_torrents: v })} />
+              <Picker label="… dont en partage" options={count([3, 5, 10, 20, 50, 100, -1])} value={nearest(p.max_active_uploads, count([3, 5, 10, 20, 50, 100, -1]))} onChange={(v) => put({ max_active_uploads: v })} />
+              <Picker label="… dont en téléchargement" options={count([1, 2, 3, 5, 10])} value={nearest(p.max_active_downloads, count([1, 2, 3, 5, 10]))} onChange={(v) => put({ max_active_downloads: v })} />
+              <Toggle label="Ne pas compter les torrents sans activité" value={p.dont_count_slow_torrents} onChange={(v) => put({ dont_count_slow_torrents: v })} />
+            </>
+          ) : null}
+          <Picker label="Vitesse d’envoi maximum" options={speeds} value={nearest(p.up_limit, speeds)} onChange={(v) => put({ up_limit: v })} />
+          <Picker label="Vitesse de réception maximum" options={speeds} value={nearest(p.dl_limit, speeds)} onChange={(v) => put({ dl_limit: v })} />
+          <Picker label="Envois en même temps (au total)" options={count([20, 50, 100, -1])} value={nearest(p.max_uploads, count([20, 50, 100, -1]))} onChange={(v) => put({ max_uploads: v })} />
+          <Picker label="Envois en même temps (par torrent)" options={count([4, 8, 16, -1])} value={nearest(p.max_uploads_per_torrent, count([4, 8, 16, -1]))} onChange={(v) => put({ max_uploads_per_torrent: v })} />
+          {seed ? (
+            <>
+              <Text style={[styles.label, { marginTop: 10 }]}>Quand Lumio retire un torrent (le film reste dans la bibliothèque)</Text>
+              <Picker
+                label="Ratio à atteindre"
+                options={[0.5, 1, 1.5, 2, 3, 5].map((n) => ({ value: n, label: String(n) }))}
+                value={seed.ratio || 1}
+                onChange={(v) => saveSeed({ ratio: v, days: seed.days })}
+              />
+              <Picker
+                label="Et partager au moins"
+                options={[0, 3, 7, 14, 30, 60].map((n) => ({ value: n, label: n ? `${n} jours` : 'Pas de minimum' }))}
+                value={seed.days ?? 7}
+                onChange={(v) => saveSeed({ ratio: seed.ratio, days: v })}
+              />
+              <Text style={styles.help}>Plus le ratio et la durée sont élevés, plus les torrents restent en partage longtemps (au plus 60 jours).</Text>
+            </>
+          ) : null}
+        </View>
+      )}
+    </Section>
   );
 }
 
