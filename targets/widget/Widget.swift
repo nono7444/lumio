@@ -72,7 +72,7 @@ struct Provider: TimelineProvider {
     let s = ServiceState(ok: true, queue: nil, ms: 42, uptime: 99.8, bars: sampleBars)
     return StatusEntry(
       date: Date(),
-      status: PublicStatus(lumio: s, jellyfin: s, sonarr: nil, qbit: s, vpn: s, pending: 1, machine: Machine(cpu: 12, temp: 48)),
+      status: PublicStatus(lumio: s, jellyfin: s, radarr: nil, sonarr: nil, qbit: s, vpn: s, pending: 1, machine: Machine(cpu: 12, temp: 48)),
       reachable: true
     )
   }
