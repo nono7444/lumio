@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.72.0';
+const VERSION = '3.73.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3540,6 +3540,8 @@ for (const k of ['items', 'grabs', 'blocked', 'log']) if (!Array.isArray(auto[k]
 if (!auto.have || typeof auto.have !== 'object') auto.have = {};
 // Codec de ce que Lumio Auto a rangé ({ 'tv:1399': { '2:1': { c: 'h264', at } } }) : pour remplacer plus tard par du H.265
 if (!auto.haveCodec || typeof auto.haveCodec !== 'object') auto.haveCodec = {};
+// Séries retirées à la main du suivi (on ne les reprend pas avec les séries en cours de la bibliothèque)
+if (!Array.isArray(auto.unfollowed)) auto.unfollowed = [];
 let autoSaveTimer = null;
 const autoSave = () => {
   clearTimeout(autoSaveTimer);
@@ -5200,6 +5202,50 @@ async function autoAdoptAll() {
 }
 setTimeout(() => autoAdoptAll().catch(() => {}), 20_000);
 
+/**
+ * Comme Sonarr : les séries encore en cours de diffusion déjà dans Jellyfin sont suivies (nouveaux épisodes chaque semaine),
+ * même sans demande dans Lumio. On suit la dernière saison présente et les suivantes ; les épisodes déjà diffusés
+ * qui manquent dans ces saisons sont téléchargés aussi.
+ */
+let autoFollowBusy = false;
+async function autoFollowLibrary() {
+  if (!autoOn() || autoFollowBusy || !tmdbKey()) return { added: [] };
+  autoFollowBusy = true;
+  const added = [];
+  try {
+    const idx = await loadJfIndex();
+    if (!idx) return { added, error: 'Jellyfin pas encore joignable (un admin doit ouvrir Lumio une fois)' };
+    for (const [tmdbId, jf] of idx.seriesJf) {
+      if (findItem('tv', tmdbId) || auto.unfollowed.includes(tmdbId)) continue;
+      const tv = await tmdbGet(`/tv/${tmdbId}`).catch(() => null);
+      if (!tv || !['Returning Series', 'In Production', 'Planned'].includes(tv.status)) continue;
+      const have = [...(idx.series.get(tmdbId) || [])];
+      const last = have.length ? Math.max(...have) : null;
+      const tmdbSeasons = (tv.seasons || []).map((x) => x.season_number).filter((n) => n > 0);
+      const seasons = last ? [last, ...tmdbSeasons.filter((n) => n > last)] : tmdbSeasons.slice(-1);
+      if (!seasons.length) continue;
+      const folder = jf.path ? path.dirname(jf.path) : null;
+      try {
+        await autoAdd({ type: 'tv', tmdbId, tvdbId: (tv.external_ids && tv.external_ids.tvdb_id) || null, title: tv.name, seasons, folderPath: folder, future: true });
+        const it = findItem('tv', tmdbId);
+        if (it) autoEvent(it, 'added', `Série en cours dans la bibliothèque : suivie automatiquement (saison${seasons.length > 1 ? 's' : ''} ${seasons.join(', ')})`);
+        added.push(tv.name);
+      } catch (e) {
+        autoLog(`${tv.name} : suivi impossible (${e.message})`, 'warn');
+      }
+    }
+    if (added.length) {
+      autoLog(`${added.length} série(s) en cours de la bibliothèque maintenant suivie(s) : ${added.slice(0, 12).join(', ')}${added.length > 12 ? '…' : ''}`);
+      notify({ title: '📺 Lumio Auto', message: `${added.length} série(s) en cours suivie(s) : nouveaux épisodes téléchargés chaque semaine`, tags: ['tv'], click: 'lumio://auto' });
+    }
+    return { added };
+  } finally {
+    autoFollowBusy = false;
+  }
+}
+setTimeout(() => autoFollowLibrary().catch((e) => autoLog(`séries en cours : ${e.message}`, 'warn')), 90_000);
+setInterval(() => autoFollowLibrary().catch(() => {}), 12 * 3600e3);
+
 /** Progression d'une demande passée par Lumio Auto (même forme que la file Radarr / Sonarr). */
 function autoDownloadOf(r) {
   const item = findItem(r.type === 'movie' ? 'movie' : 'tv', r.tmdbId);
@@ -5281,7 +5327,7 @@ async function autoRoutes(req, res, p, q, user) {
     const b = await readBody(req);
     if (typeof b.enabled === 'boolean') {
       c.enabled = b.enabled;
-      if (b.enabled) setTimeout(() => autoAdoptAll().catch(() => {}), 1000);
+      if (b.enabled) setTimeout(() => autoAdoptAll().then(() => autoFollowLibrary()).catch(() => {}), 1000);
       autoLog(b.enabled ? 'activé : les demandes passent par Lumio Auto' : 'désactivé : les demandes repassent par Radarr / Sonarr');
     }
     if (['rdt', 'alldebrid', 'qbit'].includes(b.client)) c.client = b.client;
@@ -5420,6 +5466,8 @@ async function autoRoutes(req, res, p, q, user) {
     if (!item) throw new HttpError(404, 'Titre introuvable');
     if (req.method === 'DELETE' && !m[2]) {
       auto.items = auto.items.filter((i) => i !== item);
+      // Retiré à la main : ne plus le reprendre automatiquement (séries en cours de la bibliothèque)
+      if (item.type === 'tv' && !auto.unfollowed.includes(item.tmdbId)) auto.unfollowed.push(item.tmdbId);
       autoSave();
       send(res, 200, { ok: true });
       return true;
@@ -5589,6 +5637,11 @@ async function autoRoutes(req, res, p, q, user) {
     g.lastMoveAt = Date.now();
     autoSave();
     send(res, 200, { ok: true });
+    return true;
+  }
+  if (req.method === 'POST' && p === '/api/auto/follow-library') {
+    const r = await autoFollowLibrary();
+    send(res, 200, { ...r, message: r.error || (r.added.length ? `${r.added.length} série(s) en cours suivie(s) : ${r.added.join(', ')}` : 'Toutes les séries en cours sont déjà suivies.') });
     return true;
   }
   if (req.method === 'POST' && p === '/api/auto/adopt') {
