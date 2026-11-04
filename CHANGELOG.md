@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.132 — 4 novembre 2026
+
 - Onglet Auto : deux interrupteurs. « Lumio Auto » met en pause ou relance la recherche automatique (ce qui est lancé continue et reste en partage) ; « AllDebrid » choisit entre les versions déjà en cache AllDebrid (instantané, ratio intact) et les torrents par qBittorrent. Il faut le serveur Lumio 3.78.0.
 
 ## 1.0.131 — 4 novembre 2026
