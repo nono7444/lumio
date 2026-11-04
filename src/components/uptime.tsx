@@ -29,8 +29,10 @@ const DESC: Record<string, string> = {
   jellyfin: 'Ta vidéothèque : lecture des films et séries.',
   radarr: 'Récupère les films demandés.',
   sonarr: 'Récupère les séries demandées.',
+  qbit: 'Télécharge et partage les torrents de Lumio Auto.',
+  vpn: 'ProtonVPN : port ouvert pour bien partager.',
 };
-const ICON: Record<string, keyof typeof Ionicons.glyphMap> = { lumio: 'sparkles', jellyfin: 'play-circle', radarr: 'film', sonarr: 'tv' };
+const ICON: Record<string, keyof typeof Ionicons.glyphMap> = { lumio: 'sparkles', jellyfin: 'play-circle', radarr: 'film', sonarr: 'tv', qbit: 'swap-vertical', vpn: 'shield-checkmark' };
 
 const barColor = (v: number) => (v === 1 ? GREEN : v === 0.5 ? '#FFB340' : v === 0 ? '#FF453A' : '#2C2C30');
 const tempColor = (t: number) => (t >= 80 ? '#FF453A' : t >= 65 ? '#FFB340' : GREEN);

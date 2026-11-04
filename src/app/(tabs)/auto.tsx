@@ -10,10 +10,10 @@ import { Picker, Toggle } from '@/components/arr-section';
 import { toast } from '@/components/toast';
 import { Button, Field, ScreenTitle, Section, SegChip } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
-import { autoApi, gb, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
+import { autoApi, gb, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
 import { useSettings } from '@/lib/settings';
 
-type Tab = 'demandes' | 'telechargements' | 'indexeurs' | 'reglages';
+type Tab = 'demandes' | 'telechargements' | 'qbit' | 'indexeurs' | 'reglages';
 const CLIENT_LABEL: Record<string, string> = { rdt: 'rdt-client', qbit: 'qBittorrent', alldebrid: 'AllDebrid' };
 const RUNNING: AutoGrab['state'][] = ['sent', 'downloading', 'importing'];
 const STATE_LABEL: Record<AutoGrab['state'], string> = { sent: 'envoyé', downloading: 'téléchargement', importing: 'rangement', done: 'terminé', failed: 'échec' };
@@ -106,6 +106,7 @@ export default function AutoTab() {
           [
             { id: 'demandes', label: 'Titres', icon: 'film-outline', badge: toChoose, badgeColor: C.warning },
             { id: 'telechargements', label: 'Transferts', icon: 'swap-vertical', badge: running, badgeColor: C.accent },
+            { id: 'qbit', label: 'qBit', icon: 'magnet-outline', badge: 0, badgeColor: C.accent },
             { id: 'indexeurs', label: 'Sites', icon: 'globe-outline', badge: 0, badgeColor: C.accent },
             { id: 'reglages', label: 'Réglages', icon: 'options-outline', badge: 0, badgeColor: C.accent },
           ] as { id: Tab; label: string; icon: keyof typeof Ionicons.glyphMap; badge: number; badgeColor: string }[]
@@ -163,6 +164,7 @@ export default function AutoTab() {
 
           {tab === 'demandes' ? <Demandes st={st} reload={load} onItem={(i) => setItemOpen(i.id)} /> : null}
           {tab === 'telechargements' ? <Telechargements st={st} reload={load} onItem={(id) => setItemOpen(id)} /> : null}
+          {tab === 'qbit' ? <QbitTab /> : null}
           {tab === 'indexeurs' ? <Indexeurs st={st} reload={load} onEdit={setEditIx} /> : null}
           {tab === 'reglages' ? <Reglages st={st} save={save} /> : null}
         </ScrollView>
@@ -1073,6 +1075,179 @@ function Reglages({ st, save }: { st: AutoState; save: (b: any, msg?: string) =>
 }
 
 
+// ——— qBittorrent : tous les torrents, vitesses, actions (comme l'interface web, en plus simple) ———
+const QB_STATE: Record<string, { label: string; color: string }> = {
+  downloading: { label: 'Téléchargement', color: C.accent },
+  forcedDL: { label: 'Téléchargement', color: C.accent },
+  metaDL: { label: 'Infos…', color: C.textDim },
+  forcedMetaDL: { label: 'Infos…', color: C.textDim },
+  stalledDL: { label: 'Bloqué (pas de source)', color: C.warning },
+  queuedDL: { label: 'En file', color: C.textDim },
+  pausedDL: { label: 'En pause', color: C.textDim },
+  stoppedDL: { label: 'En pause', color: C.textDim },
+  checkingDL: { label: 'Vérification', color: C.textDim },
+  checkingUP: { label: 'Vérification', color: C.textDim },
+  uploading: { label: 'Partage', color: C.success },
+  forcedUP: { label: 'Partage', color: C.success },
+  stalledUP: { label: 'Partage (en attente)', color: C.success },
+  queuedUP: { label: 'Partage en file', color: C.textDim },
+  pausedUP: { label: 'Terminé (arrêté)', color: C.textDim },
+  stoppedUP: { label: 'Terminé (arrêté)', color: C.textDim },
+  moving: { label: 'Déplacement', color: C.textDim },
+  error: { label: 'Erreur', color: C.danger },
+  missingFiles: { label: 'Fichiers manquants', color: C.danger },
+};
+const qbGroup = (st: string) => (/DL$|^downloading$|^metaDL$/.test(st) ? 'dl' : /UP$|^uploading$/.test(st) ? 'up' : 'other');
+
+function QbitTab() {
+  const { settings } = useSettings();
+  const [d, setD] = useState<Awaited<ReturnType<typeof autoApi.qbit>> | null>(null);
+  const [filter, setFilter] = useState<'all' | 'dl' | 'up'>('all');
+  const [sel, setSel] = useState<QbitTorrent | null>(null);
+  const load = useCallback(() => {
+    autoApi
+      .qbit(settings)
+      .then(setD)
+      .catch((e) => setD({ ok: false, error: e?.message ?? String(e), torrents: [] }));
+  }, [settings]);
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 3000);
+    return () => clearInterval(t);
+  }, [load]);
+  const act = (action: Parameters<typeof autoApi.qbitAction>[1], hashes: string[] = [], msg?: string) =>
+    autoApi
+      .qbitAction(settings, action, hashes)
+      .then(() => (msg ? toast(msg) : null, load()))
+      .catch((e) => Alert.alert('qBittorrent', e?.message ?? String(e)));
+
+  if (!d) return <ActivityIndicator color="#fff" style={{ marginTop: 30 }} />;
+  if (!d.ok)
+    return (
+      <View style={[styles.siteBox, { gap: 6 }]}>
+        <Text style={[styles.title, { color: C.danger }]}>qBittorrent injoignable</Text>
+        <Text style={styles.small}>{d.error}</Text>
+        <Text style={styles.small}>Vérifie l’adresse et les identifiants dans Réglages → qBittorrent et partage.</Text>
+      </View>
+    );
+  const t = d.transfer!;
+  const list = d.torrents.filter((x) => filter === 'all' || qbGroup(x.state) === filter);
+  const nDl = d.torrents.filter((x) => qbGroup(x.state) === 'dl').length;
+  const nUp = d.torrents.filter((x) => qbGroup(x.state) === 'up').length;
+  return (
+    <>
+      <View style={styles.qbStats}>
+        <View style={styles.qbStat}>
+          <Ionicons name="arrow-down" size={16} color={C.accent} />
+          <Text style={styles.qbStatVal}>{fmtSpeed(t.dl)}</Text>
+          <Text style={styles.small}>{t.dlLimit ? `max ${fmtSpeed(t.dlLimit)}` : 'sans limite'}</Text>
+        </View>
+        <View style={styles.qbStat}>
+          <Ionicons name="arrow-up" size={16} color={C.success} />
+          <Text style={styles.qbStatVal}>{fmtSpeed(t.up)}</Text>
+          <Text style={styles.small}>{t.upLimit ? `max ${fmtSpeed(t.upLimit)}` : 'sans limite'}</Text>
+        </View>
+        <View style={styles.qbStat}>
+          <Ionicons name={d.vpnPort ? 'shield-checkmark' : 'shield-outline'} size={16} color={d.vpnPort ? C.success : C.warning} />
+          <Text style={styles.qbStatVal}>{d.vpnPort ? `port ${d.vpnPort}` : 'port ?'}</Text>
+          <Text style={styles.small}>{t.status === 'connected' ? 'connecté' : t.status === 'firewalled' ? 'derrière un pare-feu' : t.status ?? ''}</Text>
+        </View>
+      </View>
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        <Button
+          title={t.alt ? 'Vitesse réduite : oui' : 'Vitesse réduite : non'}
+          icon="speedometer-outline"
+          variant="secondary"
+          small
+          onPress={() => act('alt', [], t.alt ? 'Vitesse normale' : 'Vitesse réduite (limites alternatives de qBittorrent)')}
+          style={{ flex: 1 }}
+        />
+        {nDl ? (
+          <Button title="Tout mettre en pause" icon="pause" variant="secondary" small onPress={() => act('pause', d.torrents.filter((x) => qbGroup(x.state) === 'dl').map((x) => x.hash), 'Téléchargements en pause')} style={{ flex: 1 }} />
+        ) : null}
+      </View>
+      <View style={styles.metaRow}>
+        <SegChip label={`Tout (${d.torrents.length})`} on={filter === 'all'} onPress={() => setFilter('all')} />
+        <SegChip label={`Téléchargement (${nDl})`} on={filter === 'dl'} onPress={() => setFilter('dl')} />
+        <SegChip label={`Partage (${nUp})`} on={filter === 'up'} onPress={() => setFilter('up')} />
+      </View>
+      {!list.length ? <Text style={styles.dim}>Aucun torrent.</Text> : null}
+      {list.map((x) => {
+        const stt = QB_STATE[x.state] ?? { label: x.state, color: C.textDim };
+        return (
+          <Pressable key={x.hash} onPress={() => setSel(x)} style={styles.card}>
+            <View style={{ flex: 1, gap: 3 }}>
+              <Text style={styles.relTitle} numberOfLines={2}>
+                {x.lumio ? `${x.lumio} · ` : ''}
+                {x.name}
+              </Text>
+              <Text style={styles.small} numberOfLines={1}>
+                <Text style={{ color: stt.color, fontWeight: '700' }}>{stt.label}</Text>
+                {qbGroup(x.state) === 'dl' ? ` · ${x.progress}% · ↓ ${fmtSpeed(x.dl)} · ${fmtEta(x.eta)}` : ` · ratio ${x.ratio}${x.up ? ` · ↑ ${fmtSpeed(x.up)}` : ''}`} · {gb(x.size)}
+                {x.tracker ? ` · ${x.tracker}` : ''}
+              </Text>
+              {x.progress < 100 ? (
+                <View style={styles.bar}>
+                  <View style={[styles.barFill, { width: `${Math.max(2, x.progress)}%`, backgroundColor: stt.color }]} />
+                </View>
+              ) : null}
+            </View>
+            <Ionicons name="ellipsis-horizontal" size={18} color={C.textDim} />
+          </Pressable>
+        );
+      })}
+      {sel ? (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setSel(null)}>
+          <Pressable style={styles.sheetBack} onPress={() => setSel(null)}>
+            <Pressable style={styles.sheet} onPress={() => {}}>
+              <Text style={styles.relTitle} numberOfLines={3}>
+                {sel.name}
+              </Text>
+              <Text style={styles.small}>
+                {(QB_STATE[sel.state] ?? { label: sel.state }).label} · {sel.progress}% · {gb(sel.size)} · ratio {sel.ratio} · {gb(sel.uploaded)} envoyés · {sel.seeds} sources / {sel.peers} pairs
+                {sel.seedTime ? ` · ${fmtEta(sel.seedTime)} de partage` : ''}
+                {sel.category ? ` · catégorie ${sel.category}` : ''}
+              </Text>
+              {(
+                [
+                  /paused|stopped/i.test(sel.state) ? ['resume', 'Reprendre', 'play'] : ['pause', 'Mettre en pause', 'pause'],
+                  ['reannounce', 'Relancer les trackers', 'megaphone-outline'],
+                  ['recheck', 'Vérifier les fichiers', 'checkmark-done-outline'],
+                  ['delete', 'Retirer (garder les fichiers)', 'remove-circle-outline'],
+                  ['deleteFiles', 'Supprimer avec les fichiers téléchargés', 'trash-outline'],
+                ] as [Parameters<typeof autoApi.qbitAction>[1], string, keyof typeof Ionicons.glyphMap][]
+              ).map(([a, label, icon]) => (
+                <Button
+                  key={a}
+                  title={label}
+                  icon={icon}
+                  variant={a === 'deleteFiles' ? 'danger' : 'secondary'}
+                  small
+                  onPress={() => {
+                    const h = sel.hash;
+                    setSel(null);
+                    if (a === 'deleteFiles')
+                      Alert.alert(
+                        'Supprimer avec les fichiers ?',
+                        sel.lumio ? 'Le torrent et sa copie de téléchargement sont supprimés. Le film rangé dans la bibliothèque reste (lien dur).' : 'Le torrent et ses fichiers téléchargés sont supprimés du disque.',
+                        [
+                          { text: 'Annuler', style: 'cancel' },
+                          { text: 'Supprimer', style: 'destructive', onPress: () => act('deleteFiles', [h], 'Supprimé') },
+                        ]
+                      );
+                    else act(a, [h], 'OK');
+                  }}
+                />
+              ))}
+              <Button title="Fermer" variant="secondary" small onPress={() => setSel(null)} />
+            </Pressable>
+          </Pressable>
+        </Modal>
+      ) : null}
+    </>
+  );
+}
+
 /** Réglages d'un client torrent (même API pour qBittorrent et rdt-client). */
 function ClientForm({ kind, st, save }: { kind: 'rdt' | 'qbit'; st: AutoState; save: (b: any, msg?: string) => void }) {
   const { settings } = useSettings();
@@ -1115,11 +1290,16 @@ function ClientForm({ kind, st, save }: { kind: 'rdt' | 'qbit'; st: AutoState; s
 
 const styles = StyleSheet.create({
   tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 4 },
+  qbStats: { flexDirection: 'row', gap: 8 },
+  qbStat: { flex: 1, padding: 12, borderRadius: 16, backgroundColor: C.surface, gap: 2 },
+  qbStatVal: { color: C.text, fontSize: 15, fontWeight: '800' },
+  sheetBack: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: C.surface, padding: 18, paddingBottom: 34, borderTopLeftRadius: 24, borderTopRightRadius: 24, gap: 10 },
   seg: { flexDirection: 'row', marginHorizontal: 16, marginBottom: 6, padding: 3, borderRadius: 14, backgroundColor: C.surface },
-  segItem: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 8, borderRadius: 11 },
+  segItem: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2, paddingVertical: 6, borderRadius: 11 },
   segOn: { backgroundColor: '#fff' },
-  segTxt: { color: C.textDim, fontSize: 12.5, fontWeight: '700' },
-  segBadge: { minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
+  segTxt: { color: C.textDim, fontSize: 11, fontWeight: '700' },
+  segBadge: { position: 'absolute', top: 2, right: 6, minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
   segBadgeTxt: { color: '#000', fontSize: 10, fontWeight: '900' },
   groupHead: { color: C.textDim, fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 6 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30 },

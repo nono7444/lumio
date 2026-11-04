@@ -37,6 +37,32 @@ export type AutoIndexer = {
   maxGbPerDay?: number;
   todayGb?: number;
 };
+export type QbitTorrent = {
+  hash: string;
+  name: string;
+  state: string;
+  progress: number;
+  size: number;
+  dl: number;
+  up: number;
+  ratio: number;
+  uploaded: number;
+  eta: number | null;
+  seeds: number;
+  peers: number;
+  category: string;
+  addedOn: string | null;
+  seedTime: number;
+  tracker: string;
+  lumio: string | null;
+};
+export type QbitState = {
+  ok: boolean;
+  error?: string;
+  vpnPort?: number | null;
+  transfer?: { dl: number; up: number; dlLimit: number; upLimit: number; alt: boolean; status: string | null };
+  torrents: QbitTorrent[];
+};
 export type AutoTry = { query: string; count: number; error: string | null; skipped: boolean; url: string | null };
 export type AutoEvent = { at: string; type: 'added' | 'found' | 'none' | 'sent' | 'imported' | 'failed'; msg: string; indexer?: string; size?: number; by?: string };
 export type AutoItem = {
@@ -165,6 +191,9 @@ export const autoApi = {
     ),
   grab: (s: Settings, id: string, guid: string) => serverCall(s, `/api/auto/items/${id}/grab`, { method: 'POST', ...json({ guid }) }),
   cancelGrab: (s: Settings, id: string) => serverCall(s, `/api/auto/grabs/${id}`, { method: 'DELETE' }),
+  qbit: (s: Settings) => serverCall<QbitState>(s, '/api/auto/qbit'),
+  qbitAction: (s: Settings, action: 'pause' | 'resume' | 'recheck' | 'reannounce' | 'delete' | 'deleteFiles' | 'alt', hashes: string[] = []) =>
+    serverCall(s, '/api/auto/qbit/action', { method: 'POST', body: JSON.stringify({ action, hashes }) }),
   adopt: (s: Settings) => serverCall<{ ok: number; errors: string[]; message: string }>(s, '/api/auto/adopt', { method: 'POST' }),
   removeGrab: (s: Settings, id: string, o: { client: boolean; blocklist: boolean; search: boolean }) =>
     serverCall(s, `/api/auto/grabs/${id}?client=${o.client ? 1 : 0}&blocklist=${o.blocklist ? 1 : 0}&search=${o.search ? 1 : 0}`, { method: 'DELETE' }),

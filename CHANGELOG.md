@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Onglet Auto → « qBit » : tous les torrents de qBittorrent (téléchargement, partage, ratio, sources), vitesses et port du VPN en direct, et actions (pause, reprise, vérifier, relancer les trackers, retirer ou supprimer avec les fichiers, vitesse réduite). Services surveillés : qBittorrent et le VPN à la place de Radarr / Sonarr. Séries : seulement la saison en cours, une nouvelle saison se demande. Il faut le serveur Lumio 3.75.0.
+
 ## 1.0.128 — 4 novembre 2026
 
 - Ratio protégé : les séries en cours reprises de la bibliothèque ne téléchargent plus que les nouveaux épisodes (plus de rattrapage d’un coup), volume maximum par jour et par site (15 Go par défaut sur C411, freeleech non compté et toujours préféré), et partage gardé jusqu’au ratio ET à la durée minimum (au plus 60 jours). Il faut le serveur Lumio 3.74.0.
