@@ -31,6 +31,8 @@ struct PublicStatus: Decodable {
   let jellyfin: ServiceState?
   let radarr: ServiceState?
   let sonarr: ServiceState?
+  let qbit: ServiceState?
+  let vpn: ServiceState?
   let pending: Int?
   let machine: Machine?
 }
@@ -70,7 +72,7 @@ struct Provider: TimelineProvider {
     let s = ServiceState(ok: true, queue: nil, ms: 42, uptime: 99.8, bars: sampleBars)
     return StatusEntry(
       date: Date(),
-      status: PublicStatus(lumio: s, jellyfin: s, radarr: ServiceState(ok: true, queue: 2, ms: 30, uptime: 100, bars: Array(repeating: 1, count: 24)), sonarr: s, pending: 1, machine: Machine(cpu: 12, temp: 48)),
+      status: PublicStatus(lumio: s, jellyfin: s, sonarr: nil, qbit: s, vpn: s, pending: 1, machine: Machine(cpu: 12, temp: 48)),
       reachable: true
     )
   }
@@ -188,8 +190,11 @@ func services(_ e: StatusEntry) -> [Svc] {
   let s = e.status
   var list = [Svc(name: "Lumio", symbol: "sparkles", state: e.reachable ? (s?.lumio ?? ServiceState(ok: true, queue: nil, ms: nil, uptime: nil, bars: nil)) : ServiceState(ok: false, queue: nil, ms: nil, uptime: nil, bars: nil))]
   list.append(Svc(name: "Jellyfin", symbol: "play.circle.fill", state: s?.jellyfin))
-  if s?.radarr != nil || !e.reachable { list.append(Svc(name: "Radarr", symbol: "film.fill", state: s?.radarr)) }
-  if s?.sonarr != nil || !e.reachable { list.append(Svc(name: "Sonarr", symbol: "tv.fill", state: s?.sonarr)) }
+  // Lumio Auto : qBittorrent et le VPN ; Radarr / Sonarr seulement s'ils sont encore utilisés
+  if s?.qbit != nil { list.append(Svc(name: "qBittorrent", symbol: "arrow.up.arrow.down.circle.fill", state: s?.qbit)) }
+  if s?.vpn != nil { list.append(Svc(name: "VPN", symbol: "lock.shield.fill", state: s?.vpn)) }
+  if s?.radarr != nil { list.append(Svc(name: "Radarr", symbol: "film.fill", state: s?.radarr)) }
+  if s?.sonarr != nil { list.append(Svc(name: "Sonarr", symbol: "tv.fill", state: s?.sonarr)) }
   return list
 }
 
@@ -434,7 +439,7 @@ struct LumioWidget: Widget {
       LumioWidgetView(entry: entry)
     }
     .configurationDisplayName("Serveurs Lumio")
-    .description("Disponibilité sur 24 h de Jellyfin, Radarr, Sonarr et Lumio, et la machine en direct.")
+    .description("Disponibilité sur 24 h de Lumio, Jellyfin, qBittorrent et du VPN, et la machine en direct.")
     .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .accessoryInline, .accessoryCircular, .accessoryRectangular])
   }
 }

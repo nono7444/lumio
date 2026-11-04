@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.76.0';
+const VERSION = '3.77.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1998,7 +1998,7 @@ async function status() {
   out.jellyfin = { ok: jf.ok, ms: jf.ms, error: jf.error, version: jf.body && jf.body.Version, name: jf.body && jf.body.ServerName };
   // Lumio Auto avec qBittorrent : qBittorrent et le VPN (port ouvert) sont surveillés
   const qc = (config.auto && config.auto.qbit) || {};
-  if (config.auto && config.auto.enabled && qc.url) {
+  if (config.auto && (config.auto.enabled || config.auto.arrRemoved) && qc.url) {
     const t0 = Date.now();
     try {
       const ver = await (await qbitFetch('/api/v2/app/version')).text();
@@ -3563,7 +3563,8 @@ if (!auto.have || typeof auto.have !== 'object') auto.have = {};
 if (!auto.haveCodec || typeof auto.haveCodec !== 'object') auto.haveCodec = {};
 // Séries retirées à la main du suivi (on ne les reprend pas avec les séries en cours de la bibliothèque)
 if (!Array.isArray(auto.unfollowed)) auto.unfollowed = [];
-if (config.auto && config.auto.enabled === true && !config.auto.arrRemoved) {
+// Radarr / Sonarr retirés dès que Lumio Auto a été configuré (même s'il est éteint = mode AllDebrid)
+if (config.auto && !config.auto.arrRemoved && (config.auto.enabled === true || (Array.isArray(config.auto.indexers) && config.auto.indexers.length))) {
   config.auto.arrRemoved = true;
   saveConfig();
 }
@@ -6214,7 +6215,7 @@ const server = http.createServer(async (req, res) => {
       publicStatusCache = {
         at: Date.now(),
         body: s
-          ? { lumio: { ok: true, version: VERSION, ...uptimeSummary('lumio') }, jellyfin: pick('jellyfin', s.jellyfin), radarr: pick('radarr', s.radarr), sonarr: pick('sonarr', s.sonarr), pending: s.lumio.pending }
+          ? { lumio: { ok: true, version: VERSION, ...uptimeSummary('lumio') }, jellyfin: pick('jellyfin', s.jellyfin), radarr: pick('radarr', s.radarr), sonarr: pick('sonarr', s.sonarr), qbit: pick('qbit', s.qbit), vpn: pick('vpn', s.vpn), pending: s.lumio.pending }
           : { lumio: { ok: true, version: VERSION } },
       };
     }
