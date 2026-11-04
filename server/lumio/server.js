@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.80.0';
+const VERSION = '3.81.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4771,6 +4771,8 @@ async function autoProgressTick() {
           g.downloaded = Number(t.downloaded || t.completed) || Math.round((g.size || 0) * (Number(t.progress) || 0));
           g.eta = Number(t.eta) > 0 && Number(t.eta) < 8640000 ? Number(t.eta) : g.speed > 0 && g.size ? Math.round((g.size - g.downloaded) / g.speed) : null;
           g.clientState = t.state || null;
+          g.seeders = Number(t.num_complete) || 0;
+          g.leechers = Number(t.num_incomplete) || 0;
           if (/^(paused|stopped)DL$/i.test(t.state || '')) g.lastMoveAt = Date.now();
           g.statusText = RDT_STATES[t.state] || (Number(t.progress) >= 1 ? 'terminé, en attente du rangement' : 'téléchargement');
           g.state = 'downloading';
@@ -4890,6 +4892,8 @@ function autoReport(item, want, res) {
     total: res.results.length,
     kept: kept.length,
     best: kept[0] ? kept[0].title : null,
+    // Sources / téléchargeurs de la meilleure version trouvée (pastille des affiches, admin)
+    swarm: (kept[0] || res.results[0]) ? { s: (kept[0] || res.results[0]).seeders ?? null, l: (kept[0] || res.results[0]).leechers ?? null } : null,
     sites: res.status.map((x) => ({ name: x.name, count: x.count, error: x.error || null, skipped: Boolean(x.skipped), tries: x.tries || [] })),
     reasons: top,
   };
@@ -5838,6 +5842,25 @@ async function autoRoutes(req, res, p, q, user) {
     g.lastMoveAt = Date.now();
     autoSave();
     send(res, 200, { ok: true });
+    return true;
+  }
+  // ——— Pastille des affiches (admin) : sources / téléchargeurs par titre ———
+  // Titres en partage ou en téléchargement : chiffres de qBittorrent ; sinon, la dernière recherche de Lumio Auto
+  if (req.method === 'GET' && p === '/api/auto/swarm') {
+    const out = {};
+    for (const it of auto.items) {
+      const sw = it.lastReport && it.lastReport.swarm;
+      if (sw && (sw.s != null || sw.l != null)) out[autoItemKey(it.type, it.tmdbId)] = { s: sw.s, l: sw.l, src: 'recherche' };
+    }
+    for (const g of [...auto.grabs].reverse()) {
+      if (!(g.seeding || ['sent', 'downloading'].includes(g.state)) || g.seeders == null) continue;
+      const it = auto.items.find((x) => x.id === g.itemId);
+      if (!it) continue;
+      const k = autoItemKey(it.type, it.tmdbId);
+      const prev = out[k] && out[k].src === 'qbit' ? out[k] : { s: 0, l: 0 };
+      out[k] = { s: Math.max(prev.s, g.seeders || 0), l: prev.l + (g.leechers || 0), src: 'qbit', seeding: Boolean(g.seeding) || prev.seeding };
+    }
+    send(res, 200, { swarm: out });
     return true;
   }
   // ——— qBittorrent depuis l'appli (admin) : liste des torrents, vitesses, actions ———
