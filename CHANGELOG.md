@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Admin : petite pastille « ↑ sources ↓ téléchargeurs » en bas des affiches (accueil, bibliothèque, recherche), avec un point vert quand le titre est en partage. Chiffres de qBittorrent pour ce qui est en partage, sinon ceux de la dernière recherche de Lumio Auto. Jamais pour la famille ni sur la TV. Il faut le serveur Lumio 3.81.0.
+
 ## 1.0.135 — 4 novembre 2026
 
 - qBit → Réglages du partage, trois interrupteurs simples : « Envoi à fond la nuit (1 h – 8 h) », « Partage intelligent » (un torrent encore demandé reste en partage, un torrent que plus personne ne demande depuis 14 jours est retiré) et « Résumé chaque soir (21 h) » en notification (envoyé, reçu, partages, quota). Règle C411 respectée : jamais de retrait avant 72 h de partage ou un ratio de 1 sur le torrent, et alerte « Hit & Run » si on veut en supprimer un trop tôt. Nombre de personnes qui téléchargent chaque torrent. Il faut le serveur Lumio 3.80.0.

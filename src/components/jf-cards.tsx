@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { FlatList, StyleSheet, Text, View , Platform } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 
-import { FamilyStarBadge, tap } from '@/components/ui';
+import { FamilyStarBadge, SwarmBadge, tap } from '@/components/ui';
 import { setTvFocus, tvInfoFromJf } from '@/lib/tv-focus';
 import { C, POSTER_W, R } from '@/constants/theme';
 import { jfBackdrop, jfPoster, tmdbArtFor, type JfItem } from '@/lib/jellyfin';
@@ -82,7 +82,10 @@ export function JfPosterCard({ item, width = POSTER_W }: { item: JfItem; width?:
             <View style={[styles.barFill, { width: `${pct * 100}%` }]} />
           </View>
         ) : item.Type === 'Movie' || item.Type === 'Series' ? (
-          <FamilyStarBadge type={item.Type === 'Movie' ? 'movie' : 'tv'} tmdbId={item.ProviderIds?.Tmdb ? Number(item.ProviderIds.Tmdb) : undefined} />
+          <>
+            <FamilyStarBadge type={item.Type === 'Movie' ? 'movie' : 'tv'} tmdbId={item.ProviderIds?.Tmdb ? Number(item.ProviderIds.Tmdb) : undefined} />
+            <SwarmBadge type={item.Type === 'Movie' ? 'movie' : 'tv'} tmdbId={item.ProviderIds?.Tmdb ? Number(item.ProviderIds.Tmdb) : undefined} />
+          </>
         ) : null}
       </View>
       <Text style={styles.title} numberOfLines={1}>

@@ -12,6 +12,7 @@ import { FocusPressable as Pressable } from '@/components/tv';
 import { C, POSTER_H, POSTER_W, R } from '@/constants/theme';
 import type { PosterIds } from '@/lib/better-posters';
 import { useFamilyRatingBadge } from '@/lib/ratings';
+import { useSwarm } from '@/lib/swarm';
 import { useSettings } from '@/lib/settings';
 
 // Vibration au toucher : seulement si elle est activée dans Profil (coupée par défaut)
@@ -60,6 +61,20 @@ export function FamilyStarBadge({ type, tmdbId }: { type?: 'movie' | 'tv'; tmdbI
         <Text style={styles.starsText}>{r.avg.toLocaleString('fr-FR', { maximumFractionDigits: 1 })}</Text>
         <Text style={[styles.starsText, { color: verdict(r.avg).color }]}>· {verdict(r.avg).label}</Text>
       </View>
+    </View>
+  );
+}
+
+/** Admin : pastille « ↑ sources · ↓ téléchargeurs » en bas à gauche de l'affiche (jamais pour la famille ni sur la TV). */
+export function SwarmBadge({ type, tmdbId }: { type?: 'movie' | 'tv'; tmdbId?: number }) {
+  const { settings } = useSettings();
+  const w = useSwarm(settings, type, tmdbId);
+  if (!w || (w.s == null && w.l == null)) return null;
+  return (
+    <View style={styles.swarm} pointerEvents="none" accessibilityLabel={`${w.s ?? 0} sources, ${w.l ?? 0} téléchargent`}>
+      {w.seeding ? <View style={styles.swarmDot} /> : null}
+      <Text style={[styles.swarmText, { color: '#4ADE80' }]}>↑{w.s ?? '?'}</Text>
+      <Text style={[styles.swarmText, { color: '#64D2FF' }]}>↓{w.l ?? '?'}</Text>
     </View>
   );
 }
@@ -121,6 +136,7 @@ export function PosterCard({ item, width = POSTER_W }: { item: PosterItem; width
         )}
         {item.badge && <StatusBadge badge={item.badge} />}
         <FamilyStarBadge type={item.ids?.type === 'tv' ? 'tv' : item.ids?.type === 'movie' ? 'movie' : undefined} tmdbId={item.ids?.tmdb} />
+        <SwarmBadge type={item.ids?.type === 'tv' ? 'tv' : item.ids?.type === 'movie' ? 'movie' : undefined} tmdbId={item.ids?.tmdb} />
         {busy && (
           <View style={styles.posterBusy}>
             <ActivityIndicator color="#fff" />
@@ -418,6 +434,9 @@ export function Fade({ height, top }: { height: number; top?: boolean }) {
 }
 
 const styles = StyleSheet.create({
+  swarm: { position: 'absolute', left: 6, bottom: 6, flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.7)' },
+  swarmDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#4ADE80' },
+  swarmText: { fontSize: 10, fontWeight: '800' },
   subSection: { paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.08)' },
   subTitle: { color: C.textDim, fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 },
   starsWrap: { position: 'absolute', left: 6, top: 6, alignItems: 'flex-start' },
