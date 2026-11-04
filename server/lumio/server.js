@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.77.0';
+const VERSION = '3.78.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3594,8 +3594,13 @@ const autoCfg = () => {
 };
 // Lumio Auto tourne dès qu'il a été activé une fois (Radarr / Sonarr retirés) :
 // interrupteur allumé = torrents (qBittorrent…) ; éteint = mode AllDebrid, seulement les versions déjà en cache
+// Deux interrupteurs dans l'appli :
+//  - « Lumio Auto » (enabled) : cherche et télécharge tout seul ; éteint = les demandes attendent dans la liste
+//  - « AllDebrid » (debridOnly) : seulement les versions en cache AllDebrid au lieu des torrents (qBittorrent)
+// Les demandes passent par Lumio Auto dès qu'il a été configuré (Radarr / Sonarr retirés), même en pause.
 const autoOn = () => autoCfg().enabled === true || autoCfg().arrRemoved === true;
-const autoDebridOnly = () => autoCfg().enabled !== true && autoCfg().arrRemoved === true;
+const autoActive = () => autoCfg().enabled === true;
+const autoDebridOnly = () => autoCfg().debridOnly === true;
 function autoLog(msg, level = 'info') {
   auto.log.unshift({ at: new Date().toISOString(), level, msg: String(msg).slice(0, 400) });
   if (auto.log.length > 300) auto.log.length = 300;
@@ -4899,7 +4904,7 @@ function autoReport(item, want, res) {
 // ——— Recherche automatique de ce qui manque ———
 let autoSearching = false;
 async function autoSearchTick(force = false) {
-  if (!autoOn() || autoSearching) return;
+  if (!autoActive() || autoSearching) return;
   autoSearching = true;
   try {
     const pf = autoProfile();
@@ -4976,7 +4981,7 @@ async function autoSearchTick(force = false) {
       // Rien de mieux pour l'instant : pas de choix à faire, on guette
       if (!grabbed && notCachedAll) {
         item.needsChoice = false;
-        item.note = 'mode AllDebrid : aucune version en cache pour l’instant (réessai plus tard, ou rallume Lumio Auto)';
+        item.note = 'mode AllDebrid : aucune version en cache pour l’instant (réessai dans 6 h, ou coupe AllDebrid pour passer en torrent)';
         item.nextSearch = Date.now() + 6 * 3600e3;
         item.lastSearch = new Date().toISOString();
         autoSave();
@@ -5027,7 +5032,7 @@ async function autoSearchTick(force = false) {
 // ——— Veille RSS : les dernières sorties de chaque site, comparées à ce qui manque ———
 let autoRssBusy = false;
 async function autoRssTick() {
-  if (!autoOn() || autoRssBusy || !auto.items.length) return;
+  if (!autoActive() || autoRssBusy || !auto.items.length) return;
   autoRssBusy = true;
   try {
     const pf = autoProfile();
@@ -5424,7 +5429,8 @@ async function autoRoutes(req, res, p, q, user) {
   const c = autoCfg();
   if (req.method === 'GET' && p === '/api/auto/state') {
     send(res, 200, {
-      enabled: autoOn(),
+      enabled: autoActive(),
+      debridOnly: autoDebridOnly(),
       client: ['alldebrid', 'qbit'].includes(c.client) ? c.client : 'rdt',
       qbit: { url: (c.qbit || {}).url || '', user: (c.qbit || {}).user || '', hasPass: Boolean((c.qbit || {}).pass), category: qbitCategory(), remotePath: (c.qbit || {}).remotePath || '/downloads', localRoot: (c.qbit || {}).localRoot || '', localFolder: (c.qbit || {}).localFolder || 'downloads/qbit' },
       seed: autoSeed(),
@@ -5444,12 +5450,17 @@ async function autoRoutes(req, res, p, q, user) {
   }
   if (req.method === 'PUT' && p === '/api/auto/settings') {
     const b = await readBody(req);
+    if (typeof b.debridOnly === 'boolean') {
+      c.debridOnly = b.debridOnly;
+      autoLog(b.debridOnly ? 'AllDebrid activé : seulement les versions en cache AllDebrid' : 'AllDebrid désactivé : torrents par qBittorrent');
+      for (const i of auto.items) if (!i.paused) i.nextSearch = Math.min(i.nextSearch || 0, Date.now() + 60e3);
+    }
     if (typeof b.enabled === 'boolean') {
       c.enabled = b.enabled;
       if (b.enabled) c.arrRemoved = true;
 
       if (b.enabled) setTimeout(() => autoAdoptAll().then(() => autoFollowLibrary()).catch(() => {}), 1000);
-      autoLog(b.enabled ? 'activé : les demandes passent par Lumio Auto' : 'désactivé : les demandes repassent par Radarr / Sonarr');
+      autoLog(b.enabled ? 'activé : les demandes passent par Lumio Auto' : 'en pause : les nouvelles demandes attendent (ce qui est lancé continue et reste en partage)');
     }
     if (['rdt', 'alldebrid', 'qbit'].includes(b.client)) c.client = b.client;
     if (b.qbit && typeof b.qbit === 'object') {
