@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.136 — 4 novembre 2026
+
 - Admin : petite pastille « ↑ sources ↓ téléchargeurs » en bas des affiches (accueil, bibliothèque, recherche), avec un point vert quand le titre est en partage. Chiffres de qBittorrent pour ce qui est en partage, sinon ceux de la dernière recherche de Lumio Auto. Jamais pour la famille ni sur la TV. Il faut le serveur Lumio 3.81.0.
 
 ## 1.0.135 — 4 novembre 2026
