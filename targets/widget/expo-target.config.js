@@ -5,7 +5,8 @@ module.exports = (config) => ({
   name: 'LumioWidget',
   displayName: 'Lumio',
   bundleIdentifier: '.widget',
-  deploymentTarget: '16.4',
+  // iOS 17 : réglage du widget (clé admin) par appui long → Modifier le widget
+  deploymentTarget: '17.0',
   icon: '../../assets/images/icon.png',
   colors: {
     $accent: '#3D8BFF',

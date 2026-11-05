@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Widget (admin) : le partage et « qui regarde quoi » s'affichent même avec FlareStore. Dans Profil → Widget, touche « Copier la clé du widget ». Ensuite, fais un appui long sur le widget → Modifier le widget → Clé admin, et colle la clé. Le widget demande maintenant iOS 17 ou plus récent.
+
 ## 1.0.137 — 5 novembre 2026
 
 - Accueil : la grande image n'affiche plus deux titres. Lumio prend une affiche sans texte et garde un seul titre, le logo, plus lisible.

@@ -4,9 +4,7 @@
 // et d'un tap sur ↻ (iOS 17 et plus).
 import SwiftUI
 import WidgetKit
-#if canImport(AppIntents)
 import AppIntents
-#endif
 
 private let appGroup = "group.lol.wawanono.lumio"
 private let defaultServer = "https://lumio.wawanono.lol"
@@ -80,9 +78,11 @@ private func widgetKey() -> String? {
   return k?.isEmpty == false ? k : nil
 }
 
-private func fetchStatus() async -> (PublicStatus?, Bool) {
-  // Admin : état complet (partage, lectures) avec la clé du widget ; sinon l'état public
-  if let k = widgetKey(), let url = URL(string: serverURL() + "/status/widget?k=" + k) {
+private func fetchStatus(key: String? = nil) async -> (PublicStatus?, Bool) {
+  // Admin : état complet (partage, lectures) avec la clé du widget ; sinon l'état public.
+  // La clé vient des réglages du widget (appui long → Modifier), sinon de l'App Group (souvent absent avec FlareStore).
+  let typed = key?.trimmingCharacters(in: .whitespacesAndNewlines)
+  if let k = (typed?.isEmpty == false ? typed : nil) ?? widgetKey(), let url = URL(string: serverURL() + "/status/widget?k=" + k) {
     var req = URLRequest(url: url)
     req.timeoutInterval = 10
     req.cachePolicy = .reloadIgnoringLocalCacheData
@@ -110,7 +110,16 @@ private func fetchStatus() async -> (PublicStatus?, Bool) {
 
 private let sampleBars: [Double] = Array(repeating: 1, count: 20) + [0.5, 1, 1, 1]
 
-struct Provider: TimelineProvider {
+/// Réglage du widget (appui long → Modifier le widget) : la clé admin, copiée depuis Lumio (Profil → Widget)
+struct LumioConfigIntent: WidgetConfigurationIntent {
+  static let title: LocalizedStringResource = "Lumio"
+  static let description = IntentDescription("Colle la clé du widget (Lumio → Profil → Widget) pour voir le partage et qui regarde quoi.")
+
+  @Parameter(title: "Clé admin")
+  var key: String?
+}
+
+struct Provider: AppIntentTimelineProvider {
   func placeholder(in context: Context) -> StatusEntry {
     let s = ServiceState(ok: true, queue: nil, ms: 42, uptime: 99.8, bars: sampleBars)
     return StatusEntry(
@@ -124,25 +133,17 @@ struct Provider: TimelineProvider {
     )
   }
 
-  func getSnapshot(in context: Context, completion: @escaping (StatusEntry) -> Void) {
-    if context.isPreview {
-      completion(placeholder(in: context))
-      return
-    }
-    Task {
-      let (s, ok) = await fetchStatus()
-      completion(StatusEntry(date: Date(), status: s, reachable: ok))
-    }
+  func snapshot(for configuration: LumioConfigIntent, in context: Context) async -> StatusEntry {
+    if context.isPreview { return placeholder(in: context) }
+    let (s, ok) = await fetchStatus(key: configuration.key)
+    return StatusEntry(date: Date(), status: s, reachable: ok)
   }
 
-  func getTimeline(in context: Context, completion: @escaping (Timeline<StatusEntry>) -> Void) {
-    Task {
-      let (s, ok) = await fetchStatus()
-      let entry = StatusEntry(date: Date(), status: s, reachable: ok)
-      // Toutes les 5 min (iOS peut espacer un peu) ; 1 min si le serveur ne répond pas, pour revenir vite au vert
-      let next = Date().addingTimeInterval(ok ? 5 * 60 : 60)
-      completion(Timeline(entries: [entry], policy: .after(next)))
-    }
+  func timeline(for configuration: LumioConfigIntent, in context: Context) async -> Timeline<StatusEntry> {
+    let (s, ok) = await fetchStatus(key: configuration.key)
+    let entry = StatusEntry(date: Date(), status: s, reachable: ok)
+    // Toutes les 5 min (iOS peut espacer un peu) ; 1 min si le serveur ne répond pas, pour revenir vite au vert
+    return Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(ok ? 5 * 60 : 60)))
   }
 }
 
@@ -606,7 +607,7 @@ struct LumioWidget: Widget {
   let kind = "LumioWidget"
 
   var body: some WidgetConfiguration {
-    StaticConfiguration(kind: kind, provider: Provider()) { entry in
+    AppIntentConfiguration(kind: kind, intent: LumioConfigIntent.self, provider: Provider()) { entry in
       LumioWidgetView(entry: entry)
     }
     .configurationDisplayName("Serveurs Lumio")
