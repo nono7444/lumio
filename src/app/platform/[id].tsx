@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { GlassLogo } from '@/components/platforms-row';
+import { PlatformIcon } from '@/components/platforms-row';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { SegChip, tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
@@ -95,7 +95,12 @@ export default function PlatformScreen() {
           <Ionicons name="chevron-back" size={22} color={C.text} />
         </Pressable>
         {page ? (
-          <GlassLogo logo={page.logo} name={page.name} style={{ width: 150, height: 52 }} logoPad={12} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 }}>
+            <PlatformIcon p={page} size={36} />
+            <Text style={styles.h1} numberOfLines={1}>
+              {page.name}
+            </Text>
+          </View>
         ) : (
           <Text style={styles.h1}>{name ?? ''}</Text>
         )}

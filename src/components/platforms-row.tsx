@@ -1,11 +1,10 @@
 // Accueil : rangée des plateformes (Netflix, Disney+…) ; un appui ouvre la page de la plateforme.
-// Vignettes noires en verre (Liquid Glass d'iOS 26 quand il existe), logos en blanc, comme sur l'Apple TV.
-import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
+// Cartes sombres teintées de la couleur de la marque, avec l'icône officielle en couleur (comme sur l'écran d'accueil du téléphone).
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Platform as RNPlatform, ScrollView, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { ScrollView, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 
 import { FocusPressable as Pressable } from '@/components/tv';
 import { tap } from '@/components/ui';
@@ -13,31 +12,33 @@ import { C } from '@/constants/theme';
 import { platformsApi, type Platform } from '@/lib/platforms';
 import { useSettings } from '@/lib/settings';
 
-const liquid = RNPlatform.OS === 'ios' && isLiquidGlassAvailable();
-
-/** Vignette noire en verre avec le logo de la plateforme en blanc. */
-export function GlassLogo({ logo, name, style, logoPad = 16 }: { logo: string | null; name: string; style?: ViewStyle; logoPad?: number }) {
+/** Icône carrée de la plateforme (ou ses initiales si le serveur est trop ancien). */
+export function PlatformIcon({ p, size = 44 }: { p: Pick<Platform, 'name' | 'icon' | 'color'>; size?: number }) {
+  const r = Math.round(size * 0.26);
   return (
-    <View style={[glass.tile, style]}>
-      {/* Fond noir profond */}
-      <LinearGradient colors={['#1C1C1F', '#050506']} style={StyleSheet.absoluteFill} />
-      {liquid ? <GlassView glassEffectStyle="regular" colorScheme="dark" tintColor="rgba(0,0,0,0.55)" style={StyleSheet.absoluteFill} /> : null}
-      {/* Reflet du verre en haut */}
-      <LinearGradient
-        colors={['rgba(255,255,255,0.20)', 'rgba(255,255,255,0.05)', 'rgba(255,255,255,0)']}
-        locations={[0, 0.45, 1]}
-        style={[StyleSheet.absoluteFill, { bottom: '45%' }]}
-        pointerEvents="none"
-      />
-      <View style={[StyleSheet.absoluteFill, { padding: logoPad, alignItems: 'center', justifyContent: 'center' }]}>
-        {logo ? (
-          <Image source={logo} style={{ width: '100%', height: '100%' }} contentFit="contain" tintColor="#FFFFFF" cachePolicy="memory-disk" />
-        ) : (
-          <Text style={glass.name} numberOfLines={1}>
-            {name}
-          </Text>
-        )}
-      </View>
+    <View style={[pf.icon, { width: size, height: size, borderRadius: r, backgroundColor: p.color ?? '#222' }]}>
+      {p.icon ? (
+        <Image source={p.icon} style={{ width: size, height: size }} contentFit="cover" cachePolicy="memory-disk" />
+      ) : (
+        <Text style={{ color: '#fff', fontWeight: '900', fontSize: size * 0.34 }} numberOfLines={1}>
+          {p.name.replace(/[^A-Za-z0-9+]/g, '').slice(0, 3)}
+        </Text>
+      )}
+    </View>
+  );
+}
+
+/** Carte d'une plateforme : fond sombre teinté de sa couleur, icône, nom. */
+export function PlatformCard({ p, style }: { p: Platform; style?: ViewStyle }) {
+  const tint = p.color ?? '#333';
+  return (
+    <View style={[pf.card, style]}>
+      <LinearGradient colors={[`${tint}66`, `${tint}1A`, '#0C0C0E']} locations={[0, 0.55, 1]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={['rgba(255,255,255,0.10)', 'rgba(255,255,255,0)']} style={[StyleSheet.absoluteFill, { bottom: '55%' }]} pointerEvents="none" />
+      <PlatformIcon p={p} size={42} />
+      <Text style={pf.name} numberOfLines={1}>
+        {p.name}
+      </Text>
     </View>
   );
 }
@@ -54,7 +55,7 @@ export function PlatformsRow() {
   return (
     <View style={{ marginBottom: 22 }}>
       <Text style={styles.title}>Plateformes</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
         {list.map((p) => (
           <Pressable
             key={p.id}
@@ -63,9 +64,9 @@ export function PlatformsRow() {
               tap();
               router.push({ pathname: '/platform/[id]', params: { id: p.id, name: p.name } });
             }}
-            style={({ pressed }) => [pressed && { transform: [{ scale: 0.96 }] }]}
+            style={({ pressed }) => [pressed && { transform: [{ scale: 0.96 }], opacity: 0.9 }]}
             accessibilityLabel={p.name}>
-            <GlassLogo logo={p.logo} name={p.name} style={{ width: 150, height: 84 }} logoPad={22} />
+            <PlatformCard p={p} />
           </Pressable>
         ))}
       </ScrollView>
@@ -73,15 +74,28 @@ export function PlatformsRow() {
   );
 }
 
-const glass = StyleSheet.create({
-  tile: {
-    borderRadius: 16,
+const pf = StyleSheet.create({
+  card: {
+    width: 158,
+    height: 64,
+    borderRadius: 18,
     overflow: 'hidden',
-    backgroundColor: '#0A0A0B',
+    backgroundColor: '#0C0C0E',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 11,
+    gap: 10,
+  },
+  icon: {
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.18)',
   },
-  name: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  name: { color: '#fff', fontSize: 14, fontWeight: '800', letterSpacing: -0.2, flexShrink: 1 },
 });
 
 const styles = StyleSheet.create({

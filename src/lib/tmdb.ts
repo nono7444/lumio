@@ -64,7 +64,8 @@ export type TmdbTv = {
   episode_run_time?: number[];
 };
 
-export type TmdbImages = { logos?: { file_path: string; iso_639_1: string | null; aspect_ratio: number }[] };
+type TmdbImg = { file_path: string; iso_639_1: string | null; aspect_ratio: number };
+export type TmdbImages = { logos?: TmdbImg[]; posters?: TmdbImg[]; backdrops?: TmdbImg[] };
 export type TmdbCredits = {
   cast?: { id: number; name: string; character?: string; profile_path?: string | null }[];
 };
@@ -191,6 +192,16 @@ export const tmdb = {
   logo: (s: Settings, type: MediaType, id: number) =>
     cached(`logo:${type}:${id}`, () =>
       tmdbCall<TmdbImages>(s, `/${type}/${id}/images`, { include_image_language: imgLangs(s) }).then((i) => pickLogo(s, i))
+    ),
+
+  /** Grande image d'accueil : affiche SANS texte (sinon fond sans texte) + logo du titre, pour n'avoir qu'un seul titre. */
+  heroArt: (s: Settings, type: MediaType, id: number) =>
+    cached(`heroart:${type}:${id}`, () =>
+      tmdbCall<TmdbImages>(s, `/${type}/${id}/images`, { include_image_language: imgLangs(s) }).then((i) => ({
+        poster: i.posters?.find((p) => p.iso_639_1 == null)?.file_path ?? null,
+        backdrop: i.backdrops?.find((p) => p.iso_639_1 == null)?.file_path ?? null,
+        logo: pickLogo(s, i),
+      }))
     ),
 
   season: (s: Settings, tvId: number, n: number) =>

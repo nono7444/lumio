@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { AppState, Platform } from 'react-native';
 
-import { serverBase } from './chat';
+import { serverBase, serverCall } from './chat';
 import { useSettings } from './settings';
 
 const APP_GROUP = 'group.lol.wawanono.lumio';
@@ -19,8 +19,18 @@ export function useWidgetSync() {
       if (settings.chatUrl) store.set('serverUrl', serverBase(settings.chatUrl));
       else store.remove('serverUrl');
       ExtensionStorage.reloadWidget();
+      // Admin : clé propre au widget (lecture seule) pour afficher le partage et qui regarde quoi ; jamais pour les autres
+      if (settings.chatUrl && settings.jellyfin?.isAdmin) {
+        serverCall<{ key: string }>(settings, '/api/widget/key')
+          .then((r) => {
+            if (!r?.key) return;
+            store.set('widgetKey', r.key);
+            ExtensionStorage.reloadWidget();
+          })
+          .catch(() => {});
+      } else store.remove('widgetKey');
     } catch {}
-  }, [settings.chatUrl]);
+  }, [settings.chatUrl, settings.jellyfin?.isAdmin, settings.jellyfin?.token]);
 
   // Widget plus réactif : rafraîchi à chaque ouverture et fermeture de Lumio
   useEffect(() => {

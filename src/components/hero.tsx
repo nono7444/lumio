@@ -51,19 +51,31 @@ export function heroFromTmdb(item: TmdbItem, badge: LibraryEntry | null): HeroIt
 
 function Slide({ item, width, height, season }: { item: HeroItem; width: number; height: number; season: Season | null }) {
   const { settings } = useSettings();
-  const [logo, setLogo] = useState<string | null>(item.logoUrl ?? null);
+  // Les affiches ont souvent le titre imprimé dessus : on prend une affiche sans texte (ou un fond sans texte)
+  // et on garde un seul titre, le logo (plus lisible), sinon le nom en texte.
+  const [art, setArt] = useState<{ bg?: string; logo: string | null; textOnBg: boolean } | null>(item.tmdb ? null : { bg: item.posterUrl, logo: item.logoUrl ?? null, textOnBg: true });
 
   useEffect(() => {
-    if (item.logoUrl || !item.tmdb) return;
+    if (!item.tmdb) return;
     let alive = true;
+    const fallback = () => alive && setArt((a) => a ?? { bg: item.posterUrl, logo: item.logoUrl ?? null, textOnBg: true });
+    const t = setTimeout(fallback, 2500);
     tmdb
-      .logo(settings, item.tmdb.type, item.tmdb.id)
-      .then((l) => alive && l && setLogo(tmdbImg(l, 'original') ?? null))
-      .catch(() => {});
+      .heroArt(settings, item.tmdb.type, item.tmdb.id)
+      .then((r) => {
+        if (!alive) return;
+        const clean = r.poster ? tmdbImg(r.poster, 'original') : r.backdrop ? tmdbImg(r.backdrop, 'original') : undefined;
+        setArt({ bg: clean ?? item.posterUrl, logo: item.logoUrl ?? (r.logo ? tmdbImg(r.logo, 'original') ?? null : null), textOnBg: !clean });
+      })
+      .catch(fallback);
     return () => {
       alive = false;
+      clearTimeout(t);
     };
-  }, [settings, item.logoUrl, item.tmdb]);
+  }, [settings, item.logoUrl, item.tmdb, item.posterUrl]);
+  // Affiche avec son titre imprimé et pas d'image propre : on n'ajoute rien par-dessus (un seul titre)
+  const logo = art?.logo ?? null;
+  const showName = art ? !art.textOnBg || !item.posterUrl : false;
 
   return (
     <Pressable
@@ -76,7 +88,7 @@ function Slide({ item, width, height, season }: { item: HeroItem; width: number;
       focusRing={false}
       style={{ width, height }}>
       <Image
-        source={item.posterUrl}
+        source={art?.bg}
         style={StyleSheet.absoluteFill}
         contentFit="cover"
         transition={300}
@@ -88,7 +100,7 @@ function Slide({ item, width, height, season }: { item: HeroItem; width: number;
       <Fade height={height * 0.62} />
 
       <View style={styles.content}>
-        {logo ? (
+        {!showName ? null : logo ? (
           <Image source={logo} style={{ width: Math.min(width * 0.66, 420), height: 90 }} contentFit="contain" contentPosition="bottom" transition={250} />
         ) : (
           <Text style={styles.title} numberOfLines={2}>

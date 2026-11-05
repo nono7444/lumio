@@ -56,6 +56,7 @@ function Root() {
       <Stack.Screen name="rewards" options={{ presentation: 'modal' }} />
       <Stack.Screen name="users" options={{ presentation: 'modal' }} />
       <Stack.Screen name="ideas" options={{ presentation: 'modal' }} />
+      <Stack.Screen name="lumio-auto" options={{ presentation: 'modal' }} />
       <Stack.Screen name="sessions" options={{ presentation: 'modal' }} />
       <Stack.Screen name="downloads" options={{ presentation: 'modal' }} />
       <Stack.Screen name="secour" options={{ presentation: 'modal' }} />

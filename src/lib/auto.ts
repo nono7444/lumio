@@ -223,6 +223,8 @@ export const autoApi = {
   adopt: (s: Settings) => serverCall<{ ok: number; errors: string[]; message: string }>(s, '/api/auto/adopt', { method: 'POST' }),
   removeGrab: (s: Settings, id: string, o: { client: boolean; blocklist: boolean; search: boolean; force?: boolean }) =>
     serverCall(s, `/api/auto/grabs/${id}?client=${o.client ? 1 : 0}&blocklist=${o.blocklist ? 1 : 0}&search=${o.search ? 1 : 0}${o.force ? '&force=1' : ''}`, { method: 'DELETE' }),
+  clearHistory: (s: Settings, filter: 'all' | 'done' | 'failed') =>
+    serverCall<{ ok: boolean; removed: number; message: string }>(s, '/api/auto/grabs/clear-history', { method: 'POST', body: JSON.stringify({ filter }) }),
   pauseGrab: (s: Settings, id: string) => serverCall(s, `/api/auto/grabs/${id}/pause`, { method: 'POST' }),
   resumeGrab: (s: Settings, id: string) => serverCall(s, `/api/auto/grabs/${id}/resume`, { method: 'POST' }),
   retryImport: (s: Settings, id: string) => serverCall<{ ok: boolean; message: string }>(s, `/api/auto/grabs/${id}/retry-import`, { method: 'POST' }),

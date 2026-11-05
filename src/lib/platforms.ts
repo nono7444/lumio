@@ -2,7 +2,8 @@
 import { serverCall } from './chat';
 import type { Settings } from './settings';
 
-export type Platform = { id: string; name: string; logo: string | null };
+/** icon : icône officielle en couleur (carrée) ; color : couleur de la marque */
+export type Platform = { id: string; name: string; logo: string | null; icon?: string | null; color?: string };
 export type PlatformTitle = {
   type: 'movie' | 'tv';
   tmdbId: number;

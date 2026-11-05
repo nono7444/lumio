@@ -6,6 +6,17 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Accueil : la grande image n'affiche plus deux titres. Lumio prend une affiche sans texte et garde un seul titre, le logo, plus lisible.
+- Plateformes : nouvelles vignettes avec l'icône officielle en couleur et la couleur de chaque marque. Canal+ n'apparaît plus comme un gros « − ».
+- Widget (admin) : les torrents en partage, avec la vitesse d'envoi, le total envoyé en Go et l'envoi du jour. Il affiche aussi qui regarde quoi en ce moment.
+- Auto, plus simple :
+  - trois onglets : Titres, Transferts, qBittorrent ;
+  - les sites et les réglages sont dans Profil → Lumio Auto, ou via le bouton « Réglages » en haut ;
+  - l'onglet Titres est revu en listes claires : À choisir, En cours, En attente et Complets ;
+  - chaque bloc se replie d'un appui ;
+  - l'Historique a un bouton « Tout supprimer » : les films restent dans la bibliothèque et le partage continue.
+- Il faut le serveur Lumio 3.82.0.
+
 ## 1.0.136 — 4 novembre 2026
 
 - Admin : petite pastille « ↑ sources ↓ téléchargeurs » en bas des affiches (accueil, bibliothèque, recherche), avec un point vert quand le titre est en partage. Chiffres de qBittorrent pour ce qui est en partage, sinon ceux de la dernière recherche de Lumio Auto. Jamais pour la famille ni sur la TV. Il faut le serveur Lumio 3.81.0.

@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.81.0';
+const VERSION = '3.82.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1649,19 +1649,35 @@ async function recheckRequest(r) {
 // Dernières sorties : créations récentes de la plateforme (TMDB : chaînes pour les séries, sociétés de production pour les films),
 // marquées « sur ton serveur » ou non, pour pouvoir demander ce qu'on a raté.
 const PLATFORMS = [
-  { id: 'netflix', name: 'Netflix', networks: [213], companies: ['Netflix'], studio: /netflix/i },
+  { id: 'netflix', name: 'Netflix', provider: 8, color: '#E50914', networks: [213], companies: ['Netflix'], studio: /netflix/i },
   {
     id: 'disney',
     name: 'Disney+',
+    provider: 337,
+    color: '#113CCF',
     networks: [2739],
     companies: ['Walt Disney Pictures', 'Pixar', 'Marvel Studios', 'Lucasfilm Ltd.', 'Walt Disney Animation Studios'],
     studio: /disney|pixar|marvel studios|lucasfilm/i,
   },
-  { id: 'prime', name: 'Prime Video', networks: [1024], companies: ['Amazon Studios', 'Amazon MGM Studios'], studio: /amazon|prime video/i },
-  { id: 'apple', name: 'Apple TV+', networks: [2552], companies: ['Apple Studios', 'Apple Original Films'], studio: /apple tv|apple studios|apple original/i },
-  { id: 'max', name: 'Max', networks: [49, 3186], companies: ['HBO Films'], studio: /\bhbo\b|^max$/i },
-  { id: 'canal', name: 'Canal+', networks: [285], companies: ['Canal+', 'StudioCanal'], studio: /canal\+|studiocanal/i },
+  { id: 'prime', name: 'Prime Video', provider: 119, color: '#00A8E1', networks: [1024], companies: ['Amazon Studios', 'Amazon MGM Studios'], studio: /amazon|prime video/i },
+  { id: 'apple', name: 'Apple TV+', provider: 350, color: '#8E8E93', networks: [2552], companies: ['Apple Studios', 'Apple Original Films'], studio: /apple tv|apple studios|apple original/i },
+  { id: 'max', name: 'Max', provider: 1899, color: '#002BE7', networks: [49, 3186], companies: ['HBO Films'], studio: /\bhbo\b|^max$/i },
+  { id: 'canal', name: 'Canal+', provider: 381, color: '#1A1A1A', networks: [285], companies: ['Canal+', 'StudioCanal'], studio: /canal\+|studiocanal/i },
 ];
+let providerIcons = null; // provider_id → chemin de l'icône (TMDB, France)
+async function providerIcon(id) {
+  if (!id) return null;
+  if (!providerIcons) {
+    const map = {};
+    for (const kind of ['movie', 'tv']) {
+      const r = await tmdbGet(`/watch/providers/${kind}`, { watch_region: 'FR' }).catch(() => null);
+      for (const x of (r && r.results) || []) if (x.logo_path && !map[x.provider_id]) map[x.provider_id] = x.logo_path;
+    }
+    if (!Object.keys(map).length) return null;
+    providerIcons = map;
+  }
+  return providerIcons[id] ? `https://image.tmdb.org/t/p/w300${providerIcons[id]}` : null;
+}
 const platformMeta = new Map(); // id → { logo, networks (vérifiés), companies (ids), at }
 async function platformInfo(pf) {
   const hit = platformMeta.get(pf.id);
@@ -1685,7 +1701,9 @@ async function platformInfo(pf) {
       if (!logo && c.logo_path) logo = c.logo_path;
     }
   }
-  const v = { logo: logo ? `https://image.tmdb.org/t/p/w300${logo}` : null, networks, companies, at: Date.now() };
+  // Icône officielle en couleur (celle de l'appli, carrée) : plus belle et toujours lisible, contrairement aux logos recolorés
+  const icon = await providerIcon(pf.provider).catch(() => null);
+  const v = { logo: logo ? `https://image.tmdb.org/t/p/w300${logo}` : null, icon, networks, companies, at: Date.now() };
   platformMeta.set(pf.id, v);
   return v;
 }
@@ -1784,7 +1802,7 @@ async function platformPage(pf, token, sort) {
   const mixed = new Map();
   for (const x of [...latestOut, ...libraryOut]) if (!mixed.has(`${x.type}:${x.tmdbId}`)) mixed.set(`${x.type}:${x.tmdbId}`, x);
   const items = order([...mixed.values()]).slice(0, 120);
-  const value = { id: pf.id, name: pf.name, logo: info.logo, items, library: libraryOut, latest: latestOut };
+  const value = { id: pf.id, name: pf.name, logo: info.logo, icon: info.icon || null, color: pf.color, items, library: libraryOut, latest: latestOut };
   platformCache.set(key, { at: Date.now(), value });
   return value;
 }
@@ -5140,6 +5158,74 @@ const parisNow = () => {
   const d = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
   return { day: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, hour: d.getHours() };
 };
+/** État public (widget) : en ligne / hors ligne, compteurs, machine, disques ; aucun titre, aucune clé. */
+async function publicStatusBody() {
+  if (!publicStatusCache || Date.now() - publicStatusCache.at > 30_000) {
+    const s = await status().catch(() => null);
+    const pick = (k, x) =>
+      x && x.configured !== false ? { ok: Boolean(x.ok), queue: typeof x.queue === 'number' ? x.queue : undefined, ms: x.ms || undefined, ...uptimeSummary(k) } : undefined;
+    publicStatusCache = {
+      at: Date.now(),
+      body: s
+        ? { lumio: { ok: true, version: VERSION, ...uptimeSummary('lumio') }, jellyfin: pick('jellyfin', s.jellyfin), radarr: pick('radarr', s.radarr), sonarr: pick('sonarr', s.sonarr), qbit: pick('qbit', s.qbit), vpn: pick('vpn', s.vpn), pending: s.lumio.pending }
+        : { lumio: { ok: true, version: VERSION } },
+    };
+  }
+  // Processeur et chaleur toujours frais (mesurés toutes les 2 s), sans détail sensible
+  const last = sysHistory[sysHistory.length - 1] || {};
+  // Disques : place libre / totale seulement (aucun titre)
+  const disks = (await diskSummary().catch(() => [])).map((d) => ({ label: d.label, free: d.free, total: d.total }));
+  return { ...publicStatusCache.body, machine: { cpu: last.cpu ?? null, temp: last.temp ?? null }, disks, at: new Date().toISOString() };
+}
+
+let widgetExtraCache = null;
+/** Pour le widget de l'admin : torrents en partage (nombre, vitesse, Go envoyés) et lectures en cours sur Jellyfin. */
+async function widgetExtras() {
+  const out = {};
+  const q = autoCfg().qbit || {};
+  if (q.url) {
+    try {
+      const [list, main] = await Promise.all([
+        qbitFetch('/api/v2/torrents/info?filter=completed').then((r) => r.json()),
+        qbitFetch('/api/v2/sync/maindata?rid=0').then((r) => r.json()),
+      ]);
+      const st = (main && main.server_state) || {};
+      const seeding = list.filter((t) => /UP$|^uploading$/.test(t.state) && t.state !== 'pausedUP' && t.state !== 'stoppedUP');
+      const names = new Map(auto.grabs.filter((g) => g.hash).map((g) => [g.hash, g.title]));
+      const ul = Number(st.alltime_ul) || 0;
+      out.seed = {
+        count: seeding.length,
+        active: seeding.filter((t) => t.upspeed > 0).length,
+        up: Number(st.up_info_speed) || seeding.reduce((n, t) => n + (t.upspeed || 0), 0),
+        total: ul,
+        today: auto.daySnap && auto.daySnap.ul <= ul ? ul - auto.daySnap.ul : null,
+        top: seeding
+          .filter((t) => t.upspeed > 0)
+          .sort((a, b) => b.upspeed - a.upspeed)
+          .slice(0, 3)
+          .map((t) => ({ title: names.get(t.hash) || String(t.name).replace(/[._]+/g, ' ').slice(0, 40), up: t.upspeed, ratio: Math.round((Number(t.ratio) || 0) * 100) / 100 })),
+      };
+    } catch {}
+  }
+  const token = jfAdminToken || process.env.JELLYFIN_API_KEY;
+  if (token) {
+    try {
+      const r = await fetch(`${JELLYFIN_URL}/Sessions?ActiveWithinSeconds=120`, { headers: jfHeaders(token) });
+      const list = r.ok ? await r.json() : [];
+      out.watching = list
+        .filter((x) => x.NowPlayingItem && x.UserName)
+        .slice(0, 4)
+        .map((x) => {
+          const it = x.NowPlayingItem;
+          const ep = it.Type === 'Episode' && it.SeriesName ? `${it.SeriesName} · S${it.ParentIndexNumber ?? '?'}E${it.IndexNumber ?? '?'}` : it.Name;
+          const pos = x.PlayState && x.PlayState.PositionTicks;
+          return { user: x.UserName, title: ep, progress: it.RunTimeTicks && pos ? Math.round((pos / it.RunTimeTicks) * 100) : null, paused: Boolean(x.PlayState && x.PlayState.IsPaused), device: x.DeviceName || null };
+        });
+    } catch {}
+  }
+  return out;
+}
+
 async function autoSummaryTick() {
   const q = autoCfg().qbit || {};
   if (!q.url || !autoOn()) return;
@@ -5750,6 +5836,17 @@ async function autoRoutes(req, res, p, q, user) {
       return true;
     }
   }
+  // Vider l'historique : retire les lignes terminées / en échec ; ce qui télécharge ou partage encore n'est jamais touché
+  if (p === '/api/auto/grabs/clear-history' && req.method === 'POST') {
+    const b = await readBody(req).catch(() => ({}));
+    const only = b && (b.filter === 'done' || b.filter === 'failed') ? b.filter : null;
+    const before = auto.grabs.length;
+    auto.grabs = auto.grabs.filter((g) => ['sent', 'downloading', 'importing'].includes(g.state) || g.seeding || (only && g.state !== only));
+    const removed = before - auto.grabs.length;
+    autoSave();
+    send(res, 200, { ok: true, removed, message: removed ? `${removed} ligne(s) retirée(s) de l’historique` : 'Historique déjà vide' });
+    return true;
+  }
   m = p.match(/^\/api\/auto\/grabs\/([a-f0-9]+)$/);
   if (m && req.method === 'DELETE') {
     // Comme « Retirer de la file » dans Radarr : retirer du client, liste noire, chercher une autre version (au choix)
@@ -6349,23 +6446,15 @@ const server = http.createServer(async (req, res) => {
     });
 
   // État public pour le widget iOS : en ligne / hors ligne et compteurs seulement (aucun titre, aucune clé)
-  if (url.pathname === '/status/public') {
-    if (!publicStatusCache || Date.now() - publicStatusCache.at > 30_000) {
-      const s = await status().catch(() => null);
-      const pick = (k, x) =>
-        x && x.configured !== false ? { ok: Boolean(x.ok), queue: typeof x.queue === 'number' ? x.queue : undefined, ms: x.ms || undefined, ...uptimeSummary(k) } : undefined;
-      publicStatusCache = {
-        at: Date.now(),
-        body: s
-          ? { lumio: { ok: true, version: VERSION, ...uptimeSummary('lumio') }, jellyfin: pick('jellyfin', s.jellyfin), radarr: pick('radarr', s.radarr), sonarr: pick('sonarr', s.sonarr), qbit: pick('qbit', s.qbit), vpn: pick('vpn', s.vpn), pending: s.lumio.pending }
-          : { lumio: { ok: true, version: VERSION } },
-      };
-    }
-    // Processeur et chaleur toujours frais (mesurés toutes les 2 s), sans détail sensible
-    const last = sysHistory[sysHistory.length - 1] || {};
-    // Disques : place libre / totale seulement (aucun titre)
-    const disks = (await diskSummary().catch(() => [])).map((d) => ({ label: d.label, free: d.free, total: d.total }));
-    return send(res, 200, { ...publicStatusCache.body, machine: { cpu: last.cpu ?? null, temp: last.temp ?? null }, disks, at: new Date().toISOString() });
+  if (url.pathname === '/status/public') return send(res, 200, await publicStatusBody());
+
+  // Widget de l'admin : l'état public + le partage (seed) et qui regarde quoi. Protégé par la clé du widget.
+  if (url.pathname === '/status/widget') {
+    const k = String(url.searchParams.get('k') || '');
+    const okKey = config.widgetKey && k.length === config.widgetKey.length && crypto.timingSafeEqual(Buffer.from(k), Buffer.from(config.widgetKey));
+    if (!okKey) return send(res, 401, { error: 'clé du widget invalide' });
+    if (!widgetExtraCache || Date.now() - widgetExtraCache.at > 30_000) widgetExtraCache = { at: Date.now(), body: await widgetExtras().catch(() => ({})) };
+    return send(res, 200, { ...(await publicStatusBody()), ...widgetExtraCache.body });
   }
 
   // Raccourci pour installer l'appli Android (téléphone)
@@ -7015,9 +7104,24 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       return send(res, 200, { ...b, me: user.id });
     }
 
+    // ——— Widget iOS de l'admin : clé à part (lecture seule, propre au widget), gardée dans l'App Group du téléphone ———
+    if (req.method === 'GET' && p === '/api/widget/key') {
+      if (!user.admin) throw new HttpError(403, 'Réservé à l’admin');
+      if (!config.widgetKey) {
+        config.widgetKey = crypto.randomBytes(24).toString('hex');
+        writeJson(CONFIG_FILE, config);
+      }
+      return send(res, 200, { key: config.widgetKey });
+    }
+
     // ——— Plateformes (Netflix, Disney+…) : logos, puis titres de la bibliothèque et dernières sorties ———
     if (req.method === 'GET' && p === '/api/platforms') {
-      const list = await Promise.all(PLATFORMS.map(async (pf) => ({ id: pf.id, name: pf.name, logo: (await platformInfo(pf).catch(() => ({}))).logo || null })));
+      const list = await Promise.all(
+        PLATFORMS.map(async (pf) => {
+          const i = await platformInfo(pf).catch(() => ({}));
+          return { id: pf.id, name: pf.name, logo: i.logo || null, icon: i.icon || null, color: pf.color };
+        })
+      );
       return send(res, 200, { platforms: list });
     }
     const pfMatch = p.match(/^\/api\/platforms\/([a-z]+)$/);

@@ -26,6 +26,30 @@ struct Machine: Decodable {
   let temp: Double?
 }
 
+struct SeedTop: Decodable {
+  let title: String
+  let up: Double?
+  let ratio: Double?
+}
+
+/// Admin : torrents en partage (nombre, vitesse d'envoi, total envoyé)
+struct SeedInfo: Decodable {
+  let count: Int?
+  let active: Int?
+  let up: Double?
+  let total: Double?
+  let today: Double?
+  let top: [SeedTop]?
+}
+
+/// Admin : une lecture en cours sur Jellyfin
+struct Watching: Decodable {
+  let user: String
+  let title: String
+  let progress: Int?
+  let paused: Bool?
+}
+
 struct PublicStatus: Decodable {
   let lumio: ServiceState?
   let jellyfin: ServiceState?
@@ -35,6 +59,9 @@ struct PublicStatus: Decodable {
   let vpn: ServiceState?
   let pending: Int?
   let machine: Machine?
+  // Seulement avec la clé du widget de l'admin
+  var seed: SeedInfo? = nil
+  var watching: [Watching]? = nil
 }
 
 struct StatusEntry: TimelineEntry {
@@ -48,7 +75,23 @@ private func serverURL() -> String {
   return (stored?.isEmpty == false ? stored! : defaultServer).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
 }
 
+private func widgetKey() -> String? {
+  let k = UserDefaults(suiteName: appGroup)?.string(forKey: "widgetKey")
+  return k?.isEmpty == false ? k : nil
+}
+
 private func fetchStatus() async -> (PublicStatus?, Bool) {
+  // Admin : état complet (partage, lectures) avec la clé du widget ; sinon l'état public
+  if let k = widgetKey(), let url = URL(string: serverURL() + "/status/widget?k=" + k) {
+    var req = URLRequest(url: url)
+    req.timeoutInterval = 10
+    req.cachePolicy = .reloadIgnoringLocalCacheData
+    if let (data, resp) = try? await URLSession.shared.data(for: req),
+       (resp as? HTTPURLResponse)?.statusCode == 200,
+       let st = try? JSONDecoder().decode(PublicStatus.self, from: data) {
+      return (st, true)
+    }
+  }
   guard let url = URL(string: serverURL() + "/status/public") else { return (nil, false) }
   var req = URLRequest(url: url)
   req.timeoutInterval = 10
@@ -72,7 +115,11 @@ struct Provider: TimelineProvider {
     let s = ServiceState(ok: true, queue: nil, ms: 42, uptime: 99.8, bars: sampleBars)
     return StatusEntry(
       date: Date(),
-      status: PublicStatus(lumio: s, jellyfin: s, radarr: nil, sonarr: nil, qbit: s, vpn: s, pending: 1, machine: Machine(cpu: 12, temp: 48)),
+      status: PublicStatus(
+        lumio: s, jellyfin: s, radarr: nil, sonarr: nil, qbit: s, vpn: s, pending: 1, machine: Machine(cpu: 12, temp: 48),
+        seed: SeedInfo(count: 17, active: 3, up: 2_400_000, total: 128_000_000_000, today: 4_200_000_000, top: [SeedTop(title: "Peter Pan", up: 1_200_000, ratio: 0.8)]),
+        watching: [Watching(user: "Marie", title: "Peter Pan", progress: 42, paused: false)]
+      ),
       reachable: true
     )
   }
@@ -153,6 +200,54 @@ private func uptimeColor(_ u: Double?) -> Color {
 private func pct(_ u: Double?) -> String {
   guard let u = u else { return "—" }
   return u >= 100 ? "100%" : String(format: "%.1f%%", u).replacingOccurrences(of: ".", with: ",")
+}
+
+/// 128 Go, 850 Mo (unités françaises)
+private func bytes(_ b: Double?) -> String {
+  let v = b ?? 0
+  if v >= 1e12 { return String(format: "%.1f To", v / 1e12).replacingOccurrences(of: ".", with: ",") }
+  if v >= 1e9 { return String(format: v >= 1e11 ? "%.0f Go" : "%.1f Go", v / 1e9).replacingOccurrences(of: ".", with: ",") }
+  return String(format: "%.0f Mo", v / 1e6)
+}
+
+private func speed(_ b: Double?) -> String {
+  let v = b ?? 0
+  if v >= 1e6 { return String(format: "%.1f Mo/s", v / 1e6).replacingOccurrences(of: ".", with: ",") }
+  return String(format: "%.0f ko/s", v / 1e3)
+}
+
+private let blue = Color(red: 0.24, green: 0.55, blue: 1.0)
+
+/// « ↑ 2,4 Mo/s · 17 en partage · 128 Go envoyés »
+private struct SeedLine: View {
+  let seed: SeedInfo
+  var size: CGFloat = 11
+  var body: some View {
+    HStack(spacing: 4) {
+      Image(systemName: "arrow.up.circle.fill").foregroundColor(green)
+      Text(speed(seed.up)).monospacedDigit().foregroundColor(.white)
+      Text("· \(seed.count ?? 0) en partage · \(bytes(seed.total))").monospacedDigit().foregroundColor(.white.opacity(0.7))
+    }
+    .font(.system(size: size, weight: .bold))
+    .lineLimit(1)
+    .minimumScaleFactor(0.8)
+  }
+}
+
+/// « ▶︎ Marie · Peter Pan 42 % »
+private struct WatchLine: View {
+  let w: Watching
+  var size: CGFloat = 11
+  var body: some View {
+    HStack(spacing: 4) {
+      Image(systemName: (w.paused ?? false) ? "pause.fill" : "play.fill").font(.system(size: size - 2, weight: .bold)).foregroundColor(blue)
+      Text(w.user).font(.system(size: size, weight: .heavy)).foregroundColor(.white)
+      Text(w.title).font(.system(size: size, weight: .medium)).foregroundColor(.white.opacity(0.75))
+      Spacer(minLength: 2)
+      if let p = w.progress { Text("\(p) %").font(.system(size: size - 1, weight: .bold).monospacedDigit()).foregroundColor(.white.opacity(0.5)) }
+    }
+    .lineLimit(1)
+  }
 }
 
 // ——— Éléments ———
@@ -251,7 +346,8 @@ struct LumioWidgetView: View {
       case .accessoryInline: inline(list, allOk)
       case .accessoryCircular: circular(list, allOk)
       case .accessoryRectangular: rectangular(list, allOk)
-      default: medium(list, allOk)
+      default:
+        if entry.status?.seed != nil || entry.status?.watching != nil { mediumAdmin(list, allOk) } else { medium(list, allOk) }
       }
     }
     .widgetURL(URL(string: "lumio://settings"))
@@ -315,7 +411,47 @@ struct LumioWidgetView: View {
         }
       }
       Spacer(minLength: 0)
+      if let seed = entry.status?.seed {
+        HStack(spacing: 3) {
+          Image(systemName: "arrow.up.circle.fill").foregroundColor(green)
+          Text("\(bytes(seed.total)) · \(seed.count ?? 0)").monospacedDigit().foregroundColor(.white)
+        }
+        .font(.system(size: 11, weight: .bold))
+        .lineLimit(1)
+      }
       MachineLine(m: entry.status?.machine)
+    }
+  }
+
+  // Moyen (admin) : services en une ligne, puis le partage et qui regarde quoi
+  func mediumAdmin(_ list: [Svc], _ allOk: Bool) -> some View {
+    let st = entry.status
+    return VStack(alignment: .leading, spacing: 6) {
+      Header(entry: entry, allOk: allOk)
+      HStack(spacing: 8) {
+        ForEach(list, id: \.name) { s in
+          HStack(spacing: 3) {
+            StatusDot(ok: s.state?.ok ?? false, size: 6)
+            Text(s.name == "qBittorrent" ? "qBit" : s.name).font(.system(size: 11, weight: .semibold)).foregroundColor(.white.opacity(0.85))
+          }
+        }
+        Spacer(minLength: 0)
+      }
+      .lineLimit(1)
+      if let seed = st?.seed { SeedLine(seed: seed) }
+      if let w = st?.watching, !w.isEmpty {
+        ForEach(Array(w.prefix(2).enumerated()), id: \.offset) { _, x in WatchLine(w: x) }
+      } else {
+        Text("Personne ne regarde").font(.system(size: 11, weight: .medium)).foregroundColor(.white.opacity(0.45))
+      }
+      Spacer(minLength: 0)
+      HStack {
+        MachineLine(m: st?.machine)
+        Spacer()
+        if let p = st?.pending, p > 0 {
+          Text("\(p) à valider").font(.system(size: 10, weight: .bold)).foregroundColor(orange)
+        }
+      }
     }
   }
 
@@ -344,14 +480,15 @@ struct LumioWidgetView: View {
 
   // Grand : cartes UptimeRobot complètes + machine
   func large(_ list: [Svc], _ allOk: Bool) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
+    let admin = entry.status?.seed != nil || entry.status?.watching != nil
+    return VStack(alignment: .leading, spacing: admin ? 6 : 8) {
       Header(entry: entry, allOk: allOk)
       HStack(spacing: 8) {
         Gauge2(label: "PROCESSEUR", value: entry.status?.machine?.cpu, unit: "%", warn: 60, bad: 85)
         Gauge2(label: "CHALEUR", value: entry.status?.machine?.temp, unit: "°C", warn: 65, bad: 80)
       }
       ForEach(list, id: \.name) { s in
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: admin ? 3 : 4) {
           HStack(spacing: 6) {
             Image(systemName: s.symbol).font(.system(size: 11, weight: .semibold)).foregroundColor(.white.opacity(0.8)).frame(width: 14)
             Text(s.name).font(.system(size: 13, weight: .bold)).foregroundColor(.white)
@@ -363,13 +500,46 @@ struct LumioWidgetView: View {
             if let ms = s.state?.ms { Text("\(ms) ms").font(.system(size: 10).monospacedDigit()).foregroundColor(.white.opacity(0.45)) }
             Text(pct(s.state?.uptime)).font(.system(size: 11, weight: .bold).monospacedDigit()).foregroundColor(uptimeColor(s.state?.uptime))
           }
-          Bars(bars: s.state?.bars ?? [], height: 15)
+          Bars(bars: s.state?.bars ?? [], height: admin ? 9 : 15)
         }
-        .padding(8)
+        .padding(admin ? 6 : 8)
+        .background(cardBg)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+      }
+      if let seed = entry.status?.seed {
+        VStack(alignment: .leading, spacing: 3) {
+          HStack {
+            SeedLine(seed: seed, size: 12)
+            Spacer(minLength: 2)
+            if let t = seed.today { Text("+\(bytes(t)) aujourd’hui").font(.system(size: 10, weight: .bold).monospacedDigit()).foregroundColor(green) }
+          }
+          ForEach(Array((seed.top ?? []).prefix(2).enumerated()), id: \.offset) { _, t in
+            HStack(spacing: 4) {
+              Text(t.title).font(.system(size: 11, weight: .medium)).foregroundColor(.white.opacity(0.75)).lineLimit(1)
+              Spacer(minLength: 2)
+              Text("↑ \(speed(t.up)) · ratio \(String(format: "%.2f", t.ratio ?? 0))").font(.system(size: 10, weight: .semibold).monospacedDigit()).foregroundColor(.white.opacity(0.5))
+            }
+          }
+        }
+        .padding(6)
+        .background(cardBg)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+      }
+      if admin {
+        VStack(alignment: .leading, spacing: 3) {
+          if let w = entry.status?.watching, !w.isEmpty {
+            ForEach(Array(w.prefix(2).enumerated()), id: \.offset) { _, x in WatchLine(w: x, size: 12) }
+          } else {
+            Text("Personne ne regarde en ce moment").font(.system(size: 11, weight: .medium)).foregroundColor(.white.opacity(0.45))
+          }
+        }
+        .padding(6)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(cardBg)
         .clipShape(RoundedRectangle(cornerRadius: 10))
       }
       Spacer(minLength: 0)
+      if !admin {
       HStack {
         Text("il y a 24 h").font(.system(size: 9)).foregroundColor(.white.opacity(0.4))
         Spacer()
@@ -378,6 +548,7 @@ struct LumioWidgetView: View {
           Spacer()
         }
         Text("maintenant").font(.system(size: 9)).foregroundColor(.white.opacity(0.4))
+      }
       }
     }
   }
@@ -439,7 +610,7 @@ struct LumioWidget: Widget {
       LumioWidgetView(entry: entry)
     }
     .configurationDisplayName("Serveurs Lumio")
-    .description("Disponibilité sur 24 h de Lumio, Jellyfin, qBittorrent et du VPN, et la machine en direct.")
+    .description("Disponibilité de Lumio, Jellyfin, qBittorrent et du VPN, la machine, le partage et qui regarde quoi.")
     .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .accessoryInline, .accessoryCircular, .accessoryRectangular])
   }
 }

@@ -243,6 +243,12 @@ export default function SettingsScreen() {
         {Platform.isTV || settings.jellyfin?.isAdmin === false ? null : <ChatSection />}
 
         <ServerActionsSection />
+        {settings.jellyfin?.isAdmin && settings.chatUrl && !Platform.isTV ? (
+          <Section title="Lumio Auto" id="lumio-auto">
+            <Text style={styles.help}>Les sites (C411, TR4KER…) et les réglages : qualité, qBittorrent, partage, AllDebrid, dossiers.</Text>
+            <Button title="Sites et réglages de Lumio Auto" icon="flash-outline" variant="secondary" onPress={() => router.push('/lumio-auto')} />
+          </Section>
+        ) : null}
         <StorageSection />
 
         {serverReq && !Platform.isTV ? (
