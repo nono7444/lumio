@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.139 — 5 novembre 2026
+
 - Profil : la rubrique « Widget » (copier la clé du widget) est maintenant bien en vue, juste sous l'état des serveurs.
 
 ## 1.0.138 — 5 novembre 2026
