@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.140 — 5 novembre 2026
+
 - Widget : il ne reste plus bloqué en gris. Plus besoin de coller une clé : il affiche directement les torrents en partage (vitesse, nombre, Go envoyés, envoi du jour) et le nombre de lectures en cours. Il faut le serveur Lumio 3.83.0.
 
 ## 1.0.139 — 5 novembre 2026
