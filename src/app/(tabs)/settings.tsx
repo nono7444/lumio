@@ -204,6 +204,8 @@ export default function SettingsScreen() {
         {appUpdate ? <AppVersionSection /> : null}
         {Platform.isTV ? null : <NowPlayingEntry />}
         {Platform.isTV ? null : settings.jellyfin?.isAdmin && settings.chatUrl ? <UptimeSection /> : isManager(settings) ? <ServerStatusSection /> : <SimpleServerDot />}
+        {/* Bien en vue (hors des groupes) : la clé du widget */}
+        {settings.jellyfin?.isAdmin && settings.chatUrl && Platform.OS === 'ios' && !Platform.isTV ? <WidgetKeySection /> : null}
         {/* TV : profil épuré (serveur, demandes, idées, clés et options téléphone masqués) */}
         <SectionGroup title="Compte et serveur" id="grp-serveur">
         <Section title="Jellyfin">
@@ -252,7 +254,6 @@ export default function SettingsScreen() {
             <Button title="Sites et réglages de Lumio Auto" icon="flash-outline" variant="secondary" onPress={() => router.push('/lumio-auto')} />
           </Section>
         ) : null}
-        {settings.jellyfin?.isAdmin && settings.chatUrl && Platform.OS === 'ios' && !Platform.isTV ? <WidgetKeySection /> : null}
         <StorageSection />
 
         {serverReq && !Platform.isTV ? (

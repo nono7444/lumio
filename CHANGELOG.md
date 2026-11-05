@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Profil : la rubrique « Widget » (copier la clé du widget) est maintenant bien en vue, juste sous l'état des serveurs.
+
 ## 1.0.138 — 5 novembre 2026
 
 - Widget (admin) : le partage et « qui regarde quoi » s'affichent même avec FlareStore. Dans Profil → Widget, touche « Copier la clé du widget ». Ensuite, fais un appui long sur le widget → Modifier le widget → Clé admin, et colle la clé. Le widget demande maintenant iOS 17 ou plus récent.
