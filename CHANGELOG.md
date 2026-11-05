@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.137 — 5 novembre 2026
+
 - Accueil : la grande image n'affiche plus deux titres. Lumio prend une affiche sans texte et garde un seul titre, le logo, plus lisible.
 - Plateformes : nouvelles vignettes avec l'icône officielle en couleur et la couleur de chaque marque. Canal+ n'apparaît plus comme un gros « − ».
 - Widget (admin) : les torrents en partage, avec la vitesse d'envoi, le total envoyé en Go et l'envoi du jour. Il affiche aussi qui regarde quoi en ce moment.
