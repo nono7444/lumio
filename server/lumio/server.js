@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.82.0';
+const VERSION = '3.83.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -5179,6 +5179,10 @@ async function publicStatusBody() {
 }
 
 let widgetExtraCache = null;
+async function widgetExtrasCached() {
+  if (!widgetExtraCache || Date.now() - widgetExtraCache.at > 30_000) widgetExtraCache = { at: Date.now(), body: await widgetExtras().catch(() => ({})) };
+  return widgetExtraCache.body;
+}
 /** Pour le widget de l'admin : torrents en partage (nombre, vitesse, Go envoyés) et lectures en cours sur Jellyfin. */
 async function widgetExtras() {
   const out = {};
@@ -6446,15 +6450,20 @@ const server = http.createServer(async (req, res) => {
     });
 
   // État public pour le widget iOS : en ligne / hors ligne et compteurs seulement (aucun titre, aucune clé)
-  if (url.pathname === '/status/public') return send(res, 200, await publicStatusBody());
+  // Public : en plus des services, des compteurs du partage et le nombre de lectures (jamais de titre ni de nom)
+  if (url.pathname === '/status/public') {
+    const x = await widgetExtrasCached();
+    const seed = x.seed ? { count: x.seed.count, active: x.seed.active, up: x.seed.up, total: x.seed.total, today: x.seed.today } : undefined;
+    return send(res, 200, { ...(await publicStatusBody()), seed, watchingCount: x.watching ? x.watching.length : undefined });
+  }
 
   // Widget de l'admin : l'état public + le partage (seed) et qui regarde quoi. Protégé par la clé du widget.
   if (url.pathname === '/status/widget') {
     const k = String(url.searchParams.get('k') || '');
     const okKey = config.widgetKey && k.length === config.widgetKey.length && crypto.timingSafeEqual(Buffer.from(k), Buffer.from(config.widgetKey));
     if (!okKey) return send(res, 401, { error: 'clé du widget invalide' });
-    if (!widgetExtraCache || Date.now() - widgetExtraCache.at > 30_000) widgetExtraCache = { at: Date.now(), body: await widgetExtras().catch(() => ({})) };
-    return send(res, 200, { ...(await publicStatusBody()), ...widgetExtraCache.body });
+    const x = await widgetExtrasCached();
+    return send(res, 200, { ...(await publicStatusBody()), ...x, watchingCount: x.watching ? x.watching.length : undefined });
   }
 
   // Raccourci pour installer l'appli Android (téléphone)

@@ -60,6 +60,8 @@ struct PublicStatus: Decodable {
   // Seulement avec la clé du widget de l'admin
   var seed: SeedInfo? = nil
   var watching: [Watching]? = nil
+  // Public : nombre de lectures en cours (sans nom ni titre)
+  var watchingCount: Int? = nil
 }
 
 struct StatusEntry: TimelineEntry {
@@ -78,11 +80,9 @@ private func widgetKey() -> String? {
   return k?.isEmpty == false ? k : nil
 }
 
-private func fetchStatus(key: String? = nil) async -> (PublicStatus?, Bool) {
-  // Admin : état complet (partage, lectures) avec la clé du widget ; sinon l'état public.
-  // La clé vient des réglages du widget (appui long → Modifier), sinon de l'App Group (souvent absent avec FlareStore).
-  let typed = key?.trimmingCharacters(in: .whitespacesAndNewlines)
-  if let k = (typed?.isEmpty == false ? typed : nil) ?? widgetKey(), let url = URL(string: serverURL() + "/status/widget?k=" + k) {
+private func fetchStatus() async -> (PublicStatus?, Bool) {
+  // Admin : noms et titres en plus avec la clé du widget (App Group) ; sinon l'état public, qui a déjà les compteurs du partage
+  if let k = widgetKey(), let url = URL(string: serverURL() + "/status/widget?k=" + k) {
     var req = URLRequest(url: url)
     req.timeoutInterval = 10
     req.cachePolicy = .reloadIgnoringLocalCacheData
@@ -110,16 +110,7 @@ private func fetchStatus(key: String? = nil) async -> (PublicStatus?, Bool) {
 
 private let sampleBars: [Double] = Array(repeating: 1, count: 20) + [0.5, 1, 1, 1]
 
-/// Réglage du widget (appui long → Modifier le widget) : la clé admin, copiée depuis Lumio (Profil → Widget)
-struct LumioConfigIntent: WidgetConfigurationIntent {
-  static let title: LocalizedStringResource = "Lumio"
-  static let description = IntentDescription("Colle la clé du widget (Lumio → Profil → Widget) pour voir le partage et qui regarde quoi.")
-
-  @Parameter(title: "Clé admin")
-  var key: String?
-}
-
-struct Provider: AppIntentTimelineProvider {
+struct Provider: TimelineProvider {
   func placeholder(in context: Context) -> StatusEntry {
     let s = ServiceState(ok: true, queue: nil, ms: 42, uptime: 99.8, bars: sampleBars)
     return StatusEntry(
@@ -133,17 +124,24 @@ struct Provider: AppIntentTimelineProvider {
     )
   }
 
-  func snapshot(for configuration: LumioConfigIntent, in context: Context) async -> StatusEntry {
-    if context.isPreview { return placeholder(in: context) }
-    let (s, ok) = await fetchStatus(key: configuration.key)
-    return StatusEntry(date: Date(), status: s, reachable: ok)
+  func getSnapshot(in context: Context, completion: @escaping (StatusEntry) -> Void) {
+    if context.isPreview {
+      completion(placeholder(in: context))
+      return
+    }
+    Task {
+      let (s, ok) = await fetchStatus()
+      completion(StatusEntry(date: Date(), status: s, reachable: ok))
+    }
   }
 
-  func timeline(for configuration: LumioConfigIntent, in context: Context) async -> Timeline<StatusEntry> {
-    let (s, ok) = await fetchStatus(key: configuration.key)
-    let entry = StatusEntry(date: Date(), status: s, reachable: ok)
-    // Toutes les 5 min (iOS peut espacer un peu) ; 1 min si le serveur ne répond pas, pour revenir vite au vert
-    return Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(ok ? 5 * 60 : 60)))
+  func getTimeline(in context: Context, completion: @escaping (Timeline<StatusEntry>) -> Void) {
+    Task {
+      let (s, ok) = await fetchStatus()
+      let entry = StatusEntry(date: Date(), status: s, reachable: ok)
+      // Toutes les 5 min (iOS peut espacer un peu) ; 1 min si le serveur ne répond pas, pour revenir vite au vert
+      completion(Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(ok ? 5 * 60 : 60))))
+    }
   }
 }
 
@@ -348,7 +346,7 @@ struct LumioWidgetView: View {
       case .accessoryCircular: circular(list, allOk)
       case .accessoryRectangular: rectangular(list, allOk)
       default:
-        if entry.status?.seed != nil || entry.status?.watching != nil { mediumAdmin(list, allOk) } else { medium(list, allOk) }
+        if entry.status?.seed != nil || entry.status?.watching != nil || entry.status?.watchingCount != nil { mediumAdmin(list, allOk) } else { medium(list, allOk) }
       }
     }
     .widgetURL(URL(string: "lumio://settings"))
@@ -443,7 +441,11 @@ struct LumioWidgetView: View {
       if let w = st?.watching, !w.isEmpty {
         ForEach(Array(w.prefix(2).enumerated()), id: \.offset) { _, x in WatchLine(w: x) }
       } else {
-        Text("Personne ne regarde").font(.system(size: 11, weight: .medium)).foregroundColor(.white.opacity(0.45))
+        let n = entry.status?.watchingCount ?? 0
+        HStack(spacing: 4) {
+          Image(systemName: n > 0 ? "play.fill" : "moon.zzz.fill").font(.system(size: 9, weight: .bold)).foregroundColor(n > 0 ? blue : .white.opacity(0.4))
+          Text(n > 0 ? "\(n) lecture\(n > 1 ? "s" : "") en cours" : "Personne ne regarde").font(.system(size: 11, weight: .semibold)).foregroundColor(.white.opacity(n > 0 ? 0.85 : 0.45))
+        }
       }
       Spacer(minLength: 0)
       HStack {
@@ -481,7 +483,7 @@ struct LumioWidgetView: View {
 
   // Grand : cartes UptimeRobot complètes + machine
   func large(_ list: [Svc], _ allOk: Bool) -> some View {
-    let admin = entry.status?.seed != nil || entry.status?.watching != nil
+    let admin = entry.status?.seed != nil || entry.status?.watching != nil || entry.status?.watchingCount != nil
     return VStack(alignment: .leading, spacing: admin ? 6 : 8) {
       Header(entry: entry, allOk: allOk)
       HStack(spacing: 8) {
@@ -531,7 +533,11 @@ struct LumioWidgetView: View {
           if let w = entry.status?.watching, !w.isEmpty {
             ForEach(Array(w.prefix(2).enumerated()), id: \.offset) { _, x in WatchLine(w: x, size: 12) }
           } else {
-            Text("Personne ne regarde en ce moment").font(.system(size: 11, weight: .medium)).foregroundColor(.white.opacity(0.45))
+            let n = entry.status?.watchingCount ?? 0
+        HStack(spacing: 4) {
+          Image(systemName: n > 0 ? "play.fill" : "moon.zzz.fill").font(.system(size: 9, weight: .bold)).foregroundColor(n > 0 ? blue : .white.opacity(0.4))
+          Text(n > 0 ? "\(n) lecture\(n > 1 ? "s" : "") en cours" : "Personne ne regarde en ce moment").font(.system(size: 11, weight: .semibold)).foregroundColor(.white.opacity(n > 0 ? 0.85 : 0.45))
+        }
           }
         }
         .padding(6)
@@ -607,7 +613,7 @@ struct LumioWidget: Widget {
   let kind = "LumioWidget"
 
   var body: some WidgetConfiguration {
-    AppIntentConfiguration(kind: kind, intent: LumioConfigIntent.self, provider: Provider()) { entry in
+    StaticConfiguration(kind: kind, provider: Provider()) { entry in
       LumioWidgetView(entry: entry)
     }
     .configurationDisplayName("Serveurs Lumio")

@@ -1,4 +1,3 @@
-import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -9,8 +8,6 @@ import { Picker, Toggle } from '@/components/arr-section';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button, Field, ScreenTitle, Section, SectionCollapse, SectionGroup } from '@/components/ui';
-import { toast } from '@/components/toast';
-import { serverCall } from '@/lib/chat';
 import { ADDONS_ENABLED } from '@/constants/features';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { AppVersionSection } from '@/components/app-version';
@@ -204,8 +201,6 @@ export default function SettingsScreen() {
         {appUpdate ? <AppVersionSection /> : null}
         {Platform.isTV ? null : <NowPlayingEntry />}
         {Platform.isTV ? null : settings.jellyfin?.isAdmin && settings.chatUrl ? <UptimeSection /> : isManager(settings) ? <ServerStatusSection /> : <SimpleServerDot />}
-        {/* Bien en vue (hors des groupes) : la clé du widget */}
-        {settings.jellyfin?.isAdmin && settings.chatUrl && Platform.OS === 'ios' && !Platform.isTV ? <WidgetKeySection /> : null}
         {/* TV : profil épuré (serveur, demandes, idées, clés et options téléphone masqués) */}
         <SectionGroup title="Compte et serveur" id="grp-serveur">
         <Section title="Jellyfin">
@@ -442,28 +437,3 @@ const styles = StyleSheet.create({
   avatarText: { color: '#000', fontSize: 18, fontWeight: '800' },
 });
 
-/** Admin : copie la clé du widget, à coller dans le widget (appui long → Modifier le widget → Clé admin). */
-function WidgetKeySection() {
-  const { settings } = useSettings();
-  return (
-    <Section title="Widget" id="widget-key">
-      <Text style={styles.help}>
-        Pour voir le partage et qui regarde quoi sur le widget : copie la clé, puis appui long sur le widget → Modifier le widget → Clé admin → colle. Elle ne sert qu’au widget.
-      </Text>
-      <Button
-        title="Copier la clé du widget"
-        icon="copy-outline"
-        variant="secondary"
-        onPress={async () => {
-          try {
-            const { key } = await serverCall<{ key: string }>(settings, '/api/widget/key');
-            await Clipboard.setStringAsync(key);
-            toast('Clé copiée : colle-la dans les réglages du widget');
-          } catch (e: any) {
-            toast(/404|inconnue/.test(e?.message ?? '') ? 'Mets d’abord le serveur à jour (3.82.0)' : e?.message ?? String(e), 'error');
-          }
-        }}
-      />
-    </Section>
-  );
-}
