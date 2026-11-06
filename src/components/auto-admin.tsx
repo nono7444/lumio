@@ -4,6 +4,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { Image } from 'expo-image';
 import { ActivityIndicator, Alert, Linking, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -11,10 +12,10 @@ import { Picker, Toggle } from '@/components/arr-section';
 import { toast } from '@/components/toast';
 import { Button, Field, ScreenTitle, Section, SectionCollapse, SegChip } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
-import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
+import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
 import { useSettings } from '@/lib/settings';
 
-type Tab = 'demandes' | 'telechargements' | 'qbit';
+type Tab = 'demandes' | 'manquants' | 'telechargements' | 'qbit';
 const CLIENT_LABEL: Record<string, string> = { rdt: 'rdt-client', qbit: 'qBittorrent', alldebrid: 'AllDebrid' };
 const RUNNING: AutoGrab['state'][] = ['sent', 'downloading', 'importing'];
 const STATE_LABEL: Record<AutoGrab['state'], string> = { sent: 'envoyé', downloading: 'téléchargement', importing: 'rangement', done: 'terminé', failed: 'échec' };
@@ -165,8 +166,9 @@ export default function AutoTab() {
         {(
           [
             { id: 'demandes', label: 'Titres', icon: 'film-outline', badge: toChoose, badgeColor: C.warning },
+            { id: 'manquants', label: 'Manquants', icon: 'albums-outline', badge: 0, badgeColor: C.accent },
             { id: 'telechargements', label: 'Transferts', icon: 'swap-vertical', badge: running, badgeColor: C.accent },
-            { id: 'qbit', label: 'qBittorrent', icon: 'magnet-outline', badge: 0, badgeColor: C.accent },
+            { id: 'qbit', label: 'qBit', icon: 'magnet-outline', badge: 0, badgeColor: C.accent },
           ] as { id: Tab; label: string; icon: keyof typeof Ionicons.glyphMap; badge: number; badgeColor: string }[]
         ).map((t) => (
           <Pressable key={t.id} onPress={() => setTab(t.id)} style={[styles.segItem, tab === t.id && styles.segOn]} accessibilityRole="tab" accessibilityState={{ selected: tab === t.id }}>
@@ -189,6 +191,7 @@ export default function AutoTab() {
           <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: TAB_SPACE + insets.bottom + 20 }} refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
             <Switches st={st} save={save} running={running} toChoose={toChoose} />
             {tab === 'demandes' ? <Demandes st={st} onItem={(i) => setItemOpen(i.id)} /> : null}
+            {tab === 'manquants' ? <Manquants /> : null}
             {tab === 'telechargements' ? <Telechargements st={st} reload={load} onItem={(id) => setItemOpen(id)} /> : null}
             {tab === 'qbit' ? <QbitTab /> : null}
           </ScrollView>
@@ -273,6 +276,155 @@ function Switches({ st, save, running, toChoose }: { st: AutoState; save: (b: an
           .join(' · ')}
       </Text>
     </View>
+  );
+}
+
+/** « Manquants » : les saisons / épisodes déjà sortis qui manquent dans tes séries. Rien ne part tout seul : tu lances. */
+function Manquants() {
+  const { settings } = useSettings();
+  const [data, setData] = useState<{ series: AutoMissingSeries[]; at: string | null; busy: boolean; hidden: number } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<number | null>(null);
+  const [q, setQ] = useState('');
+  const load = useCallback(
+    (refresh = false) =>
+      autoApi
+        .missing(settings, refresh)
+        .then((d) => (setData(d), setErr(null)))
+        .catch((e) => setErr(e?.message ?? String(e))),
+    [settings]
+  );
+  useEffect(() => {
+    load();
+  }, [load]);
+  // Pendant le calcul (1re fois ou « Revérifier »), on relit toutes les 10 s
+  useEffect(() => {
+    if (!data?.busy) return;
+    const t = setInterval(() => load(), 10000);
+    return () => clearInterval(t);
+  }, [data?.busy, load]);
+
+  const launch = (sr: AutoMissingSeries, seasons: number[]) =>
+    autoApi
+      .missingGet(settings, sr.tmdbId, seasons)
+      .then((r) => (toast(r.message), load()))
+      .catch((e) => Alert.alert('Lumio Auto', e?.message ?? String(e)));
+  const hide = (sr: AutoMissingSeries) =>
+    autoApi
+      .missingHide(settings, sr.tmdbId)
+      .then(() => (toast(`${sr.title} masquée`), load()))
+      .catch((e) => toast(e.message, 'error'));
+
+  if (!data) return err ? <Text style={styles.dim}>{/404|inconnue/.test(err) ? 'Mets le serveur à jour (3.84.0) : Profil → Serveur → Mettre à jour.' : err}</Text> : <ActivityIndicator color="#fff" style={{ marginTop: 30 }} />;
+  const list = data.series.filter((x) => !q || x.title.toLowerCase().includes(q.toLowerCase()));
+  const total = data.series.reduce((n, x) => n + x.missing, 0);
+  return (
+    <>
+      <Text style={styles.help}>
+        Les épisodes déjà sortis qui manquent dans tes séries. Rien ne se télécharge tout seul : touche « Lancer » sur la saison voulue. Les nouveaux épisodes des séries en cours restent suivis automatiquement, comme Sonarr.
+      </Text>
+      <View style={styles.rowBetween}>
+        <Text style={styles.h2}>
+          {data.series.length} série{data.series.length > 1 ? 's' : ''} · {total} épisode{total > 1 ? 's' : ''}
+        </Text>
+        <Pressable onPress={() => load(true)} hitSlop={8} style={styles.pill} disabled={data.busy}>
+          {data.busy ? <ActivityIndicator size="small" color={C.text} /> : <Ionicons name="refresh" size={14} color={C.text} />}
+          <Text style={styles.pillTxt}>{data.busy ? 'Vérification…' : 'Revérifier'}</Text>
+        </Pressable>
+      </View>
+      {data.series.length > 6 ? <Field label="" value={q} onChangeText={setQ} placeholder="Chercher une série" /> : null}
+      {!data.series.length && !data.busy ? <Text style={styles.help}>Toutes tes séries sont complètes 🎉</Text> : null}
+      <View style={styles.list}>
+        {list.map((sr, k) => {
+          const open = openId === sr.tmdbId;
+          const todo = sr.seasons.filter((x) => !x.asked);
+          return (
+            <View key={sr.tmdbId} style={k > 0 && styles.itemSep}>
+              <Pressable onPress={() => setOpenId(open ? null : sr.tmdbId)} style={styles.itemRow} accessibilityState={{ expanded: open }}>
+                {sr.poster ? <Image source={sr.poster} style={styles.missPoster} contentFit="cover" /> : <View style={[styles.missPoster, { backgroundColor: C.surfaceHigh }]} />}
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text style={styles.title} numberOfLines={1}>
+                    {sr.title}
+                    {sr.year ? <Text style={styles.small}> {sr.year}</Text> : null}
+                  </Text>
+                  <Text style={styles.small} numberOfLines={1}>
+                    <Text style={{ color: todo.length ? C.warning : C.success, fontWeight: '700' }}>
+                      {sr.missing} manquant{sr.missing > 1 ? 's' : ''}
+                    </Text>
+                    {` · saison${sr.seasons.length > 1 ? 's' : ''} ${sr.seasons.map((x) => x.season).join(', ')}`}
+                    {sr.status === 'Returning Series' ? ' · en cours' : sr.status === 'Ended' ? ' · terminée' : ''}
+                  </Text>
+                </View>
+                <Ionicons name={open ? 'chevron-down' : 'chevron-forward'} size={16} color={C.textDim} />
+              </Pressable>
+              {open ? (
+                <View style={{ paddingHorizontal: 14, paddingBottom: 12, gap: 8 }}>
+                  {sr.seasons.map((x) => {
+                    const whole = x.have === 0;
+                    return (
+                      <View key={x.season} style={styles.missSeason}>
+                        <View style={{ flex: 1, gap: 2 }}>
+                          <Text style={styles.title}>Saison {x.season}</Text>
+                          <Text style={styles.small} numberOfLines={2}>
+                            {whole ? `Saison entière absente (${x.aired} épisode${x.aired > 1 ? 's' : ''})` : `${x.missing.length} sur ${x.aired} : ${x.missing.map((e) => `E${e}`).join(', ')}`}
+                            {x.aired < x.total ? ` · ${x.total - x.aired} à venir` : ''}
+                          </Text>
+                        </View>
+                        {x.busy ? (
+                          <Text style={[styles.small, { color: C.accent, fontWeight: '700' }]}>En cours</Text>
+                        ) : x.asked ? (
+                          <Text style={[styles.small, { color: C.success, fontWeight: '700' }]}>Lancée ✓</Text>
+                        ) : (
+                          <Pressable onPress={() => launch(sr, [x.season])} hitSlop={6} style={[styles.pill, { backgroundColor: C.accent }]}>
+                            <Ionicons name="download-outline" size={14} color="#000" />
+                            <Text style={[styles.pillTxt, { color: '#000' }]}>Lancer</Text>
+                          </Pressable>
+                        )}
+                      </View>
+                    );
+                  })}
+                  <View style={[styles.rowBetween, { marginTop: 2 }]}>
+                    <Pressable onPress={() => hide(sr)} hitSlop={6} style={styles.pill}>
+                      <Ionicons name="eye-off-outline" size={14} color={C.textDim} />
+                      <Text style={[styles.pillTxt, { color: C.textDim }]}>Ne plus proposer</Text>
+                    </Pressable>
+                    {todo.length > 1 ? (
+                      <Pressable
+                        onPress={() =>
+                          Alert.alert(sr.title, `Lancer les ${todo.length} saisons (${todo.reduce((n, x) => n + x.missing.length, 0)} épisodes) ? Attention au ratio sur les trackers.`, [
+                            { text: 'Annuler', style: 'cancel' },
+                            { text: 'Tout lancer', onPress: () => launch(sr, todo.map((x) => x.season)) },
+                          ])
+                        }
+                        hitSlop={6}
+                        style={styles.pill}>
+                        <Ionicons name="layers-outline" size={14} color={C.text} />
+                        <Text style={styles.pillTxt}>Tout lancer</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                </View>
+              ) : null}
+            </View>
+          );
+        })}
+      </View>
+      {data.hidden ? (
+        <Pressable
+          onPress={() =>
+            autoApi
+              .missingReset(settings)
+              .then(() => load())
+              .catch(() => {})
+          }
+          hitSlop={8}>
+          <Text style={[styles.dim, { textAlign: 'center' }]}>
+            {data.hidden} série{data.hidden > 1 ? 's' : ''} masquée{data.hidden > 1 ? 's' : ''} · tout réafficher
+          </Text>
+        </Pressable>
+      ) : null}
+      {data.at ? <Text style={[styles.dim, { textAlign: 'center' }]}>Vérifié {new Date(data.at).toLocaleString('fr-FR', { weekday: 'short', hour: '2-digit', minute: '2-digit' })} · revérifié toutes les 12 h</Text> : null}
+    </>
   );
 }
 
@@ -1529,6 +1681,8 @@ const styles = StyleSheet.create({
   list: { borderRadius: 20, backgroundColor: C.surface, overflow: 'hidden' },
   itemRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 11 },
   itemSep: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.border },
+  missPoster: { width: 38, height: 56, borderRadius: 7 },
+  missSeason: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: 14, backgroundColor: C.surfaceHigh },
   itemIcon: { width: 36, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   groupHead: { color: C.textDim, fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 6 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30 },

@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Auto : nouvel onglet « Manquants ». Il liste tes séries avec les saisons et les épisodes déjà sortis qui manquent. Rien ne part tout seul : touche « Lancer » sur une saison, ou « Ne plus proposer » pour masquer une série. Les nouveaux épisodes des séries en cours restent suivis automatiquement, comme Sonarr. Il faut le serveur Lumio 3.84.0.
+
 ## 1.0.140 — 5 novembre 2026
 
 - Widget : il ne reste plus bloqué en gris. Plus besoin de coller une clé : il affiche directement les torrents en partage (vitesse, nombre, Go envoyés, envoi du jour) et le nombre de lectures en cours. Il faut le serveur Lumio 3.83.0.

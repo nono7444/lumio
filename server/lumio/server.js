@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.83.0';
+const VERSION = '3.84.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3581,6 +3581,7 @@ if (!auto.have || typeof auto.have !== 'object') auto.have = {};
 if (!auto.haveCodec || typeof auto.haveCodec !== 'object') auto.haveCodec = {};
 // Séries retirées à la main du suivi (on ne les reprend pas avec les séries en cours de la bibliothèque)
 if (!Array.isArray(auto.unfollowed)) auto.unfollowed = [];
+if (!Array.isArray(auto.missingHidden)) auto.missingHidden = []; // séries masquées de « À compléter »
 // Radarr / Sonarr retirés dès que Lumio Auto a été configuré (même s'il est éteint = mode AllDebrid)
 if (config.auto && !config.auto.arrRemoved && (config.auto.enabled === true || (Array.isArray(config.auto.indexers) && config.auto.indexers.length))) {
   config.auto.arrRemoved = true;
@@ -4215,7 +4216,7 @@ async function autoWanted(item) {
   for (const n of seasonNums) {
     const eps = item.meta.seasons[n] || [];
     // Série reprise de la bibliothèque : seulement les épisodes diffusés à partir du jour où on la suit (pas de rattrapage)
-    const aired = eps.filter((e) => e.air && e.air <= today && (!item.since || e.air >= item.since));
+    const aired = eps.filter((e) => e.air && e.air <= today && (!item.since || (item.fullSeasons || []).includes(n) || e.air >= item.since));
     const missing = aired.filter((e) => !have.has(`${n}:${e.e}`) && !busy.has(`${n}:${e.e}`));
     const firstAbs = absolute;
     absolute += eps.length;
@@ -5525,6 +5526,69 @@ async function autoFollowLibrary() {
   }
 }
 setTimeout(() => autoFollowLibrary().catch((e) => autoLog(`séries en cours : ${e.message}`, 'warn')), 90_000);
+
+/**
+ * « À compléter » : pour chaque série de Jellyfin, les épisodes déjà diffusés qui manquent (saison par saison).
+ * Rien ne part tout seul : c'est l'admin qui lance une saison depuis l'onglet Auto. Recalculé toutes les 12 h.
+ */
+function autoUnhide(tmdbId) {
+  auto.missingHidden = auto.missingHidden.filter((x) => x !== tmdbId);
+}
+let missingScan = { at: 0, busy: false, series: [] };
+async function autoMissingScan() {
+  if (missingScan.busy || !tmdbKey()) return missingScan;
+  missingScan.busy = true;
+  try {
+    const idx = await loadJfIndex();
+    const token = process.env.JELLYFIN_API_KEY || jfIndexToken;
+    if (!idx || !token) return missingScan;
+    // Tous les épisodes présents, en une requête
+    const q = new URLSearchParams({ Recursive: 'true', IncludeItemTypes: 'Episode', IsMissing: 'false', EnableImages: 'false', EnableUserData: 'false', Fields: 'ParentId' });
+    const r = await fetch(`${JELLYFIN_URL}/Items?${q}`, { headers: jfHeaders(token), signal: AbortSignal.timeout(60000) });
+    const eps = r.ok ? (await r.json()).Items || [] : [];
+    const haveBy = new Map(); // id Jellyfin de la série → Set("s:e")
+    for (const e of eps) {
+      if (e.LocationType === 'Virtual' || e.ParentIndexNumber == null || e.IndexNumber == null || !e.SeriesId) continue;
+      if (!haveBy.has(e.SeriesId)) haveBy.set(e.SeriesId, new Set());
+      for (let n = e.IndexNumber; n <= (e.IndexNumberEnd || e.IndexNumber); n++) haveBy.get(e.SeriesId).add(`${e.ParentIndexNumber}:${n}`);
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    const out = [];
+    for (const [tmdbId, jf] of idx.seriesJf) {
+      const have = new Set([...(haveBy.get(jf.id) || []), ...(auto.have[autoItemKey('tv', tmdbId)] || [])]);
+      const base = await tmdbGet(`/tv/${tmdbId}`).catch(() => null);
+      if (!base) continue;
+      const nums = (base.seasons || []).map((x) => x.season_number).filter((n) => n > 0);
+      if (!nums.length) continue;
+      const seasonsData = {};
+      for (let i = 0; i < nums.length; i += 20) {
+        const part = nums.slice(i, i + 20);
+        const d = await tmdbGet(`/tv/${tmdbId}`, { append_to_response: part.map((n) => `season/${n}`).join(',') }).catch(() => null);
+        for (const n of part) seasonsData[n] = (d && d[`season/${n}`] && d[`season/${n}`].episodes) || [];
+      }
+      const item = findItem('tv', tmdbId);
+      const busy = new Set(item ? auto.grabs.filter((g) => g.itemId === item.id && ['sent', 'downloading', 'importing'].includes(g.state)).flatMap((g) => g.episodes || []) : []);
+      const seasons = [];
+      for (const n of nums) {
+        const all = seasonsData[n];
+        const aired = all.filter((e) => e.air_date && e.air_date <= today);
+        const missing = aired.filter((e) => !have.has(`${n}:${e.episode_number}`)).map((e) => e.episode_number);
+        if (!missing.length) continue;
+        seasons.push({ season: n, missing, aired: aired.length, total: all.length, have: aired.length - missing.length, busy: missing.filter((e) => busy.has(`${n}:${e}`)).length, asked: Boolean(item && item.seasons.includes(n) && (!item.since || (item.fullSeasons || []).includes(n))) });
+      }
+      if (!seasons.length) continue;
+      out.push({ tmdbId, title: base.name, year: base.first_air_date ? Number(base.first_air_date.slice(0, 4)) : null, poster: base.poster_path ? `https://image.tmdb.org/t/p/w185${base.poster_path}` : null, status: base.status, followed: Boolean(item), seasons, missing: seasons.reduce((n, x) => n + x.missing.length, 0) });
+      await new Promise((ok) => setTimeout(ok, 120)); // doux avec TMDB
+    }
+    out.sort((a, b) => a.title.localeCompare(b.title, 'fr'));
+    missingScan = { at: Date.now(), busy: false, series: out };
+    return missingScan;
+  } finally {
+    missingScan.busy = false;
+  }
+}
+setTimeout(() => autoMissingScan().catch((e) => autoLog(`à compléter : ${e.message}`, 'warn')), 150_000);
+setInterval(() => autoMissingScan().catch(() => {}), 12 * 3600e3);
 setInterval(() => autoFollowLibrary().catch(() => {}), 12 * 3600e3);
 
 /** Progression d'une demande passée par Lumio Auto (même forme que la file Radarr / Sonarr). */
@@ -6080,6 +6144,44 @@ async function autoRoutes(req, res, p, q, user) {
       autoSave();
     } else throw new HttpError(400, 'Action inconnue');
     autoLog(`qBittorrent : ${b.action} (${hashes.length || 'vitesse'}) par ${user.name}`);
+    send(res, 200, { ok: true });
+    return true;
+  }
+  // « À compléter » : saisons / épisodes manquants des séries de la bibliothèque (lancés à la main)
+  if (req.method === 'GET' && p === '/api/auto/missing') {
+    if (q.get('refresh') === '1' || Date.now() - missingScan.at > 12 * 3600e3) {
+      const run = autoMissingScan().catch(() => null);
+      if (!missingScan.at) await Promise.race([run, new Promise((ok) => setTimeout(ok, 20000))]);
+    }
+    const hidden = new Set(auto.missingHidden);
+    send(res, 200, { at: missingScan.at ? new Date(missingScan.at).toISOString() : null, busy: missingScan.busy, series: missingScan.series.filter((x) => !hidden.has(x.tmdbId)), hidden: hidden.size });
+    return true;
+  }
+  if (req.method === 'POST' && p === '/api/auto/missing/get') {
+    const b = await readBody(req);
+    const tmdbId = Number(b.tmdbId);
+    const seasons = (Array.isArray(b.seasons) ? b.seasons : [b.season]).map(Number).filter((n) => n > 0);
+    const sr = missingScan.series.find((x) => x.tmdbId === tmdbId);
+    if (!tmdbId || !seasons.length) throw new HttpError(400, 'Série ou saison manquante');
+    const idx = await loadJfIndex().catch(() => null);
+    const jf = idx && idx.seriesJf.get(tmdbId);
+    const item = await autoAdd({ type: 'tv', tmdbId, title: (sr && sr.title) || b.title, seasons, folderPath: jf && jf.path ? path.dirname(jf.path) : null, future: false });
+    // Saison demandée à la main : tous ses épisodes manquants, même anciens
+    item.fullSeasons = [...new Set([...(item.fullSeasons || []), ...seasons])];
+    autoUnhide(tmdbId);
+    autoSave();
+    if (sr) for (const x of sr.seasons) if (seasons.includes(x.season)) x.asked = true;
+    autoEvent(item, 'added', `Saison ${seasons.join(', ')} à compléter, lancée à la main par ${user.name}`);
+    send(res, 200, { ok: true, message: `${item.title} : saison ${seasons.join(', ')} lancée${autoActive() ? '' : ' (Lumio Auto est en pause : elle partira quand tu le rallumeras)'}` });
+    return true;
+  }
+  if (req.method === 'POST' && p === '/api/auto/missing/hide') {
+    const b = await readBody(req);
+    const tmdbId = Number(b.tmdbId);
+    if (b.show) autoUnhide(tmdbId);
+    else if (tmdbId && !auto.missingHidden.includes(tmdbId)) auto.missingHidden.push(tmdbId);
+    if (b.reset) auto.missingHidden = [];
+    autoSave();
     send(res, 200, { ok: true });
     return true;
   }

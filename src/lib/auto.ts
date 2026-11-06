@@ -207,6 +207,11 @@ export const autoApi = {
   removeItem: (s: Settings, id: string) => serverCall(s, `/api/auto/items/${id}`, { method: 'DELETE' }),
   pauseItem: (s: Settings, id: string) => serverCall(s, `/api/auto/items/${id}/pause`, { method: 'POST' }),
   searchItem: (s: Settings, id: string) => serverCall<{ message: string }>(s, `/api/auto/items/${id}/search`, { method: 'POST' }),
+  missing: (s: Settings, refresh = false) => serverCall<AutoMissing>(s, `/api/auto/missing${refresh ? '?refresh=1' : ''}`),
+  missingGet: (s: Settings, tmdbId: number, seasons: number[]) =>
+    serverCall<{ ok: boolean; message: string }>(s, '/api/auto/missing/get', { method: 'POST', body: JSON.stringify({ tmdbId, seasons }) }),
+  missingHide: (s: Settings, tmdbId: number, show = false) => serverCall<{ ok: boolean }>(s, '/api/auto/missing/hide', { method: 'POST', body: JSON.stringify({ tmdbId, show }) }),
+  missingReset: (s: Settings) => serverCall<{ ok: boolean }>(s, '/api/auto/missing/hide', { method: 'POST', body: JSON.stringify({ reset: true }) }),
   searchAll: (s: Settings) => serverCall<{ message: string }>(s, '/api/auto/search-all', { method: 'POST' }),
   releases: (s: Settings, id: string, season?: number, episode?: number) =>
     serverCall<{ want: AutoWant; wanted: AutoWant[]; status: { name: string; count: number; error?: string; skipped?: boolean; tries?: AutoTry[] }[]; results: AutoRelease[] }>(
@@ -234,3 +239,8 @@ export const autoApi = {
 };
 
 export const gb = (n?: number) => (n ? `${(n / 1e9).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} Go` : '—');
+
+/** « À compléter » : épisodes diffusés qui manquent dans les séries de la bibliothèque */
+export type AutoMissingSeason = { season: number; missing: number[]; aired: number; total: number; have: number; busy: number; asked: boolean };
+export type AutoMissingSeries = { tmdbId: number; title: string; year: number | null; poster: string | null; status?: string; followed: boolean; seasons: AutoMissingSeason[]; missing: number };
+export type AutoMissing = { at: string | null; busy: boolean; series: AutoMissingSeries[]; hidden: number };

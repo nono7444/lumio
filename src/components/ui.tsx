@@ -297,7 +297,7 @@ export function Button({
 export function Field({ label, hint, ...props }: TextInputProps & { label: string; hint?: string }) {
   return (
     <View style={{ marginBottom: 14 }}>
-      <Text style={styles.label}>{label}</Text>
+      {label ? <Text style={styles.label}>{label}</Text> : null}
       <TextInput
         placeholderTextColor={C.textFaint}
         autoCapitalize="none"
