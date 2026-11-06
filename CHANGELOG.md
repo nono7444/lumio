@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Demandes : nouveau quota pour protéger le ratio. Chaque membre peut demander 2 films et 1 série par semaine (une série compte pour une demande, quel que soit le nombre de saisons). L'admin n'a pas de limite. Réglable dans Utilisateurs. Il faut le serveur Lumio 3.85.0.
+
 ## 1.0.141 — 6 novembre 2026
 
 - Auto : nouvel onglet « Manquants ». Il liste tes séries avec les saisons et les épisodes déjà sortis qui manquent. Rien ne part tout seul : touche « Lancer » sur une saison, ou « Ne plus proposer » pour masquer une série. Les nouveaux épisodes des séries en cours restent suivis automatiquement, comme Sonarr. Il faut le serveur Lumio 3.84.0.

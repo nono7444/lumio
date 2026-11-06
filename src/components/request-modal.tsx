@@ -72,7 +72,7 @@ export function RequestModal({
 
   const allOn = requestable.length > 0 && requestable.every((n) => selected.has(n));
   const quota = me ? (isTv ? me.quota.tv : me.quota.movie) : null;
-  const overQuota = Boolean(quota && quota.remaining != null && (isTv ? selected.size > quota.remaining : quota.remaining < 1));
+  const overQuota = Boolean(quota && quota.remaining != null && (isTv && me?.quota.tv.unit !== 'series' ? selected.size > quota.remaining : quota.remaining < 1));
   const canSend = !busy && !overQuota && (!isTv || selected.size > 0);
 
   async function submit() {
@@ -230,7 +230,7 @@ export function RequestModal({
               <View style={[styles.info, overQuota && { borderColor: C.danger }]}>
                 <Ionicons name="speedometer-outline" size={11} color={overQuota ? C.danger : C.textDim} />
                 <Text style={[styles.infoTxt, overQuota && { color: C.danger }]}>
-                  {quota.remaining}/{quota.limit} {isTv ? 'saisons' : 'films'} · {quota.days} j
+                  {quota.remaining}/{quota.limit} {isTv ? (me?.quota.tv.unit === 'series' ? 'séries' : 'saisons') : 'films'} · {quota.days} j
                 </Text>
               </View>
             ) : null}

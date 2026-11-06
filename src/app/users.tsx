@@ -7,7 +7,7 @@ import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Switch, Text
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FocusPressable as Pressable } from '@/components/tv';
-import { tap } from '@/components/ui';
+import { SegChip, tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
 import { requestsApi, type AdminSettings, type AdminUser } from '@/lib/requests';
 import { useSettings } from '@/lib/settings';
@@ -203,11 +203,16 @@ export default function Users() {
                 onChange={(l, d) => saveGlobal({ defaultMovieQuotaLimit: l, defaultMovieQuotaDays: d })}
               />
               <QuotaRow
-                label="Saisons"
+                label={global.tvQuotaUnit === 'series' ? 'Séries' : 'Saisons'}
                 limit={global.defaultTvQuotaLimit}
                 days={global.defaultTvQuotaDays}
                 onChange={(l, d) => saveGlobal({ defaultTvQuotaLimit: l, defaultTvQuotaDays: d })}
               />
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+                <SegChip label="Compter en séries" on={global.tvQuotaUnit === 'series'} onPress={() => saveGlobal({ tvQuotaUnit: 'series' })} />
+                <SegChip label="Compter en saisons" on={global.tvQuotaUnit !== 'series'} onPress={() => saveGlobal({ tvQuotaUnit: 'seasons' })} />
+              </View>
+              <Text style={[styles.dim, { marginTop: 4 }]}>L’admin n’a jamais de limite. Les quotas protègent le ratio sur les trackers.</Text>
             </View>
 
             <Text style={[styles.section, { marginTop: 12 }]}>Comptes Jellyfin</Text>
@@ -258,7 +263,7 @@ export default function Users() {
                         onChange={(l, d) => saveUser(u.id, { tvQuotaLimit: l, tvQuotaDays: d })}
                       />
                       <Text style={styles.dim}>
-                        Utilisé : {u.quota.movie.used} film(s) en {u.quota.movie.days} j · {u.quota.tv.used} saison(s) en {u.quota.tv.days} j
+                        Utilisé : {u.quota.movie.used} film(s) en {u.quota.movie.days} j · {u.quota.tv.used} {u.quota.tv.unit === 'series' ? 'série(s)' : 'saison(s)'} en {u.quota.tv.days} j
                       </Text>
                       {custom ? (
                         <Pressable

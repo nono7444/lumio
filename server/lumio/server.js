@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.84.1';
+const VERSION = '3.85.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -101,6 +101,20 @@ const label = (kind) => (kind === 'radarr' ? 'Radarr' : 'Sonarr');
 const kindOf = (type) => (type === 'tv' ? 'sonarr' : 'radarr');
 
 // Réglages généraux (comme « Paramètres → Utilisateurs » de Seerr)
+// Quotas pour protéger le ratio : 2 films et 1 série par semaine pour les membres (l'admin n'a pas de limite). Posé une seule fois.
+if (!config.quotaPresetRatio) {
+  config.quotaPresetRatio = true;
+  config.defaultMovieQuotaLimit = 2;
+  config.defaultMovieQuotaDays = 7;
+  config.defaultTvQuotaLimit = 1;
+  config.defaultTvQuotaDays = 7;
+  config.tvQuotaUnit = 'series';
+  try {
+    writeJson(CONFIG_FILE, config);
+  } catch {}
+}
+const tvBySeries = () => config.tvQuotaUnit === 'series';
+
 function settings() {
   return {
     ntfyTopic: ntfyTopic(),
@@ -112,6 +126,7 @@ function settings() {
     defaultMovieQuotaDays: Number(config.defaultMovieQuotaDays) || 7,
     defaultTvQuotaLimit: Number(config.defaultTvQuotaLimit) || 0,
     defaultTvQuotaDays: Number(config.defaultTvQuotaDays) || 7,
+    tvQuotaUnit: tvBySeries() ? 'series' : 'seasons',
     usersSeeAllRequests: config.usersSeeAllRequests === true,
     lockedProfile: lockedProfileName('radarr'),
     lockedProfileSonarr: lockedProfileName('sonarr'),
@@ -227,12 +242,11 @@ function quotaOf(user) {
   const since = (days) => Date.now() - days * 86400000;
   const mine = requests.filter((r) => r.requestedBy.id === user.id && r.status !== RequestStatus.DECLINED);
   const movieUsed = mine.filter((r) => r.type === 'movie' && Date.parse(r.createdAt) > since(perm.movieQuotaDays)).length;
-  const tvUsed = mine
-    .filter((r) => r.type === 'tv' && Date.parse(r.createdAt) > since(perm.tvQuotaDays))
-    .reduce((n, r) => n + (r.seasons || []).length, 0);
+  const tvRecent = mine.filter((r) => r.type === 'tv' && Date.parse(r.createdAt) > since(perm.tvQuotaDays));
+  const tvUsed = tvBySeries() ? new Set(tvRecent.map((r) => r.tmdbId)).size : tvRecent.reduce((n, r) => n + (r.seasons || []).length, 0);
   return {
     movie: { limit: perm.movieQuotaLimit, days: perm.movieQuotaDays, used: movieUsed, remaining: perm.movieQuotaLimit ? Math.max(0, perm.movieQuotaLimit - movieUsed) : null },
-    tv: { limit: perm.tvQuotaLimit, days: perm.tvQuotaDays, used: tvUsed, remaining: perm.tvQuotaLimit ? Math.max(0, perm.tvQuotaLimit - tvUsed) : null },
+    tv: { limit: perm.tvQuotaLimit, days: perm.tvQuotaDays, used: tvUsed, remaining: perm.tvQuotaLimit ? Math.max(0, perm.tvQuotaLimit - tvUsed) : null, unit: tvBySeries() ? 'series' : 'seasons' },
     bonus,
   };
 }
@@ -6463,7 +6477,7 @@ async function createRequest(user, b) {
     const m = lib.movies.get(tmdbId);
     if ((m && m.hasFile) || (lib.jf && lib.jf.movies.has(tmdbId))) throw new HttpError(409, 'Ce film est déjà disponible dans Jellyfin.');
     if (existing.length) throw new HttpError(409, 'Ce film a déjà été demandé.');
-    if (quota.movie.remaining === 0) throw new HttpError(429, `Quota atteint : ${quota.movie.limit} film(s) tous les ${quota.movie.days} jours.`);
+    if (quota.movie.remaining === 0) throw new HttpError(429, `Quota atteint : ${quota.movie.limit} film(s) tous les ${quota.movie.days} jours, pour protéger le ratio. Réessaie plus tard ou demande à l’admin.`);
   } else {
     if (!Number(b.tvdbId) && !autoOn()) throw new HttpError(400, 'Pas d’identifiant TVDB : Sonarr ne peut pas ajouter cette série.');
     const wanted = (Array.isArray(b.seasons) ? b.seasons : []).map(Number).filter((n) => n > 0);
@@ -6472,7 +6486,10 @@ async function createRequest(user, b) {
     // Saisons déjà disponibles ou déjà demandées : ignorées, comme dans Seerr
     seasons = st.seasons.filter((s) => s.status === MediaStatus.UNKNOWN).map((s) => s.seasonNumber);
     if (!seasons.length) throw new HttpError(409, 'Ces saisons sont déjà disponibles ou demandées.');
-    if (quota.tv.remaining != null && seasons.length > quota.tv.remaining)
+    // Quota en séries : une demande = une série, quel que soit le nombre de saisons (sauf une série déjà demandée par lui)
+    if (tvBySeries() && quota.tv.remaining === 0 && !requests.some((r) => r.type === 'tv' && r.tmdbId === tmdbId && r.requestedBy.id === user.id))
+      throw new HttpError(429, `Quota atteint : ${quota.tv.limit} série(s) tous les ${quota.tv.days} jours, pour protéger le ratio. Réessaie plus tard ou demande à l’admin.`);
+    if (!tvBySeries() && quota.tv.remaining != null && seasons.length > quota.tv.remaining)
       throw new HttpError(429, `Quota atteint : il te reste ${quota.tv.remaining} saison(s) sur ${quota.tv.limit} tous les ${quota.tv.days} jours.`);
   }
 
@@ -7916,6 +7933,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       if (typeof b.lockedProfile === 'string') config.lockedProfile = b.lockedProfile.trim();
       if (typeof b.lockedProfileSonarr === 'string') config.lockedProfileSonarr = b.lockedProfileSonarr.trim();
       if (b.newNtfyTopic) config.ntfyTopic = `lumio-${crypto.randomBytes(8).toString('hex')}`;
+      if (b.tvQuotaUnit === 'series' || b.tvQuotaUnit === 'seasons') config.tvQuotaUnit = b.tvQuotaUnit;
       for (const k of ['defaultMovieQuotaLimit', 'defaultMovieQuotaDays', 'defaultTvQuotaLimit', 'defaultTvQuotaDays'])
         if (b[k] !== undefined) config[k] = Math.max(0, Number(b[k]) || 0);
       saveConfig();

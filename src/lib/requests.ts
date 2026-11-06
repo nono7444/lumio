@@ -58,7 +58,7 @@ export type Me = {
   permissions: { admin: boolean; autoApprove: boolean; movieQuotaLimit: number; movieQuotaDays: number; tvQuotaLimit: number; tvQuotaDays: number };
   quota: {
     movie: { limit: number; days: number; used: number; remaining: number | null };
-    tv: { limit: number; days: number; used: number; remaining: number | null };
+    tv: { limit: number; days: number; used: number; remaining: number | null; unit?: 'series' | 'seasons' };
   };
 };
 
@@ -81,6 +81,8 @@ export type AdminSettings = {
   defaultMovieQuotaDays: number;
   defaultTvQuotaLimit: number;
   defaultTvQuotaDays: number;
+  /** Quota des séries compté en séries (une demande) ou en saisons */
+  tvQuotaUnit?: 'series' | 'seasons';
   usersSeeAllRequests: boolean;
 };
 
