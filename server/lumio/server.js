@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.84.0';
+const VERSION = '3.84.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4853,6 +4853,10 @@ async function autoProgressTick() {
           autoEvent(auto.items.find((i) => i.id === g.itemId), 'imported', `Rangé dans la bibliothèque (${done.includes('movie') ? 'film' : done.length + ' épisode(s)'})`);
           notify({ title: '✅ Lumio Auto · importé', message: g.title, tags: ['white_check_mark'], click: 'lumio://activity' });
           autoCompleteRequests();
+          // Une place se libère (un téléchargement à la fois) : l'épisode suivant part tout de suite, sans attendre 15 min
+          const nextIt = auto.items.find((i) => i.id === g.itemId);
+          if (nextIt) nextIt.nextSearch = 0;
+          setTimeout(() => autoSearchTick().catch(() => {}), 5000);
         } catch (e) {
           g.state = 'failed';
           g.error = `import : ${e.message}`;
