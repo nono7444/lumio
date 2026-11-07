@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Lumio Auto : la langue indiquée par le site (C411 : « Multi VF2 (FR + QC inclus) ») est maintenant prise en compte, en plus du nom de la version. Un « MULTi » qui contient du québécois est refusé. Il faut le serveur Lumio 3.89.0.
+
 - Lumio Auto : plus aucune version avec une piste québécoise. Lumio refuse VFQ, VF2 (VFF + VFQ), QC, VQ, French-Canadian, même dans un MULTI qui a aussi une piste VFF. Pour en accepter de nouveau, coche VFQ ou VF2 dans les langues. Il faut le serveur Lumio 3.88.0.
 
 ## 1.0.144 — 7 novembre 2026

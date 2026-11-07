@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.88.0';
+const VERSION = '3.89.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3821,6 +3821,7 @@ const torznabBase = (ix) => {
 };
 const hideKey = (u) => String(u).replace(/(apikey=)[^&]+/i, '$1•••');
 
+const torznabAttrsSeen = {};
 function parseTorznab(xml, ix) {
   const items = [];
   for (const block of xml.split(/<item>/i).slice(1)) {
@@ -3833,7 +3834,23 @@ function parseTorznab(xml, ix) {
     if (!link && magnet) link = decodeHtml(magnet);
     if (!title || !link) continue;
     const imdb = attr('imdbid') || attr('imdb');
+    // Langue donnée par le site en plus du nom (C411 : « Multi VF2 (FR + QC inclus) ») : attributs, description, catégories
+    const attrs = {};
+    for (const m of block.matchAll(/name="([^"]+)"\s+value="([^"]*)"/gi)) attrs[m[1].toLowerCase()] = decodeHtml(m[2]);
+    const langHint = [
+      ...Object.entries(attrs).filter(([k]) => /lang|audio|dub|tag|flag|genre/.test(k)).map(([, v]) => v),
+      tag('description'),
+      ...[...block.matchAll(/<category[^>]*>([^<]*)<\/category>/gi)].map((m) => m[1]),
+    ]
+      .filter(Boolean)
+      .join(' · ')
+      .slice(0, 400);
+    if (!torznabAttrsSeen[ix.id]) {
+      torznabAttrsSeen[ix.id] = true;
+      autoLog(`${ix.name} : infos données par le site → ${Object.keys(attrs).join(', ') || 'aucune'}${tag('description') ? ' + description' : ''}`);
+    }
     items.push({
+      langHint: langHint || null,
       title,
       link,
       magnet: magnet ? decodeHtml(magnet) : null,
@@ -3970,6 +3987,8 @@ const autoNorm = (t) =>
     .trim();
 const stripArticle = (n) => n.replace(/^(the|le|la|les|l|a|an) /, '');
 
+// Doublage québécois : VFQ, VQ, QC, Québec, French-Canadian, FRCA… (VF2 en contient aussi une)
+const QUEBEC_RE = /\b(vfq|vq|qc|qu[eé]bec|canadian|french[ -]?canadian|frca|fr[ -]?ca|vf2)\b/;
 function autoParse(title) {
   const t = String(title).replace(/[._]+/g, ' ').replace(/\s+/g, ' ');
   const low = t.toLowerCase();
@@ -3981,8 +4000,7 @@ function autoParse(title) {
   if (/\bvff\b/.test(low)) langs.push('vff');
   if (/\btruefrench\b/.test(low)) langs.push('truefrench');
   if (/\bvf2\b/.test(low)) langs.push('vf2');
-  // Doublage québécois : VFQ, VQ, QC, Québec, French-Canadian, FRCA… (VF2 en contient aussi une)
-  if (/\b(vfq|vq|qc|quebec|canadian|french[ -]?canadian|frca|fr[ -]?ca|vf2)\b/.test(low)) langs.push('vfq');
+  if (QUEBEC_RE.test(low)) langs.push('vfq');
   if (/\bvfi\b|\bfrench\b|\bvf\b/.test(low)) langs.push('french');
   r.langs = langs;
   r.vostfr = /\b(vostfr|subfrench|vost)\b/.test(low) && !langs.length;
@@ -4048,6 +4066,12 @@ const nameMatches = (item, rel) => {
 function autoScore(rel, item, want) {
   const pf = autoProfile();
   const p = autoParse(rel.title);
+  // Le nom dit souvent juste « MULTi » : on regarde aussi la langue donnée par le site (VF2, QC, VFQ…)
+  if (rel.langHint) {
+    const h = String(rel.langHint).toLowerCase().replace(/[._]+/g, ' ');
+    if (QUEBEC_RE.test(h) && !p.langs.includes('vfq')) p.langs.push('vfq');
+    if (/\bvf2\b/.test(h) && !p.langs.includes('vf2')) p.langs.push('vf2');
+  }
   const out = { ...rel, parsed: p, score: 0, rejected: null, reasons: [] };
   const no = (why) => out.reasons.push(why);
   // Bon titre : par identifiant quand l'indexeur le donne (TMDB / IMDb), sinon par le nom
