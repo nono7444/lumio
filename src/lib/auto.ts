@@ -215,6 +215,11 @@ export const autoApi = {
     serverCall<{ ok: boolean; message: string }>(s, '/api/auto/missing/get', { method: 'POST', body: JSON.stringify({ tmdbId, season, episodes }) }),
   missingHide: (s: Settings, tmdbId: number, show = false) => serverCall<{ ok: boolean }>(s, '/api/auto/missing/hide', { method: 'POST', body: JSON.stringify({ tmdbId, show }) }),
   missingReset: (s: Settings) => serverCall<{ ok: boolean }>(s, '/api/auto/missing/hide', { method: 'POST', body: JSON.stringify({ reset: true }) }),
+  ratio: (s: Settings) => serverCall<AutoRatio>(s, '/api/auto/ratio'),
+  ratioBase: (s: Settings, indexerId: string, up: number, down: number) =>
+    serverCall<{ ok: boolean }>(s, '/api/auto/ratio/base', { method: 'POST', body: JSON.stringify({ indexerId, up, down }) }),
+  ratioBaseClear: (s: Settings, indexerId: string) =>
+    serverCall<{ ok: boolean }>(s, '/api/auto/ratio/base', { method: 'POST', body: JSON.stringify({ indexerId, clear: true }) }),
   searchAll: (s: Settings) => serverCall<{ message: string }>(s, '/api/auto/search-all', { method: 'POST' }),
   releases: (s: Settings, id: string, season?: number, episode?: number) =>
     serverCall<{ want: AutoWant; wanted: AutoWant[]; status: { name: string; count: number; error?: string; skipped?: boolean; tries?: AutoTry[] }[]; results: AutoRelease[] }>(
@@ -247,3 +252,21 @@ export const gb = (n?: number) => (n ? `${(n / 1e9).toLocaleString('fr-FR', { ma
 export type AutoMissingSeason = { season: number; missing: number[]; aired: number; total: number; have: number; busy: number; asked: boolean; askedEps?: number[] };
 export type AutoMissingSeries = { tmdbId: number; title: string; year: number | null; poster: string | null; status?: string; followed: boolean; seasons: AutoMissingSeason[]; missing: number };
 export type AutoMissing = { at: string | null; busy: boolean; series: AutoMissingSeries[]; hidden: number };
+
+/** Onglet « Ratio » : par site (C411…), en octets */
+export type AutoRatioSite = {
+  id: string;
+  name: string;
+  type: string | null;
+  lumio: { up: number; down: number; freeDown: number; ratio: number | null };
+  estimate: { up: number; down: number; ratio: number | null; since: string } | null;
+  base: { up: number; down: number; at: string } | null;
+  today: number;
+  cap: number;
+  days: { day: string; bytes: number }[];
+  seeding: number;
+  upSpeed: number;
+  hr: { title: string; hoursLeft: number; ratio: number }[];
+  rules: string[];
+};
+export type AutoRatio = { qbit: { up: number; down: number; upSpeed: number; downSpeed: number; ratio: number | null } | null; sites: AutoRatioSite[]; at: string };

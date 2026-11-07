@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Auto : nouvel onglet « Ratio ». Pour chaque site (C411…), il affiche ton ratio, l'envoyé, le reçu (le freeleech à part), le quota du jour avec une jauge, les 7 derniers jours et les torrents encore sous la règle des 72 h. Une alerte orange s'affiche si le ratio approche de 1 ou si le quota est presque atteint. Entre une fois les chiffres de ton profil du site pour avoir ton vrai ratio, Lumio ajoute ensuite tout seul ce qu'il envoie et reçoit.
+- Auto : les interrupteurs Lumio Auto et AllDebrid sont maintenant dans Réglages (Profil → Lumio Auto). Une petite ligne d'état reste en haut de l'onglet Auto. Il faut le serveur Lumio 3.87.0.
+
 ## 1.0.143 — 7 novembre 2026
 
 - Auto → Manquants : tu choisis maintenant les épisodes à lancer (touche E4, E5… puis « Lancer »). Le bouton « Toute la saison » demande une confirmation. Il faut le serveur Lumio 3.86.0.

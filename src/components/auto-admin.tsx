@@ -12,10 +12,10 @@ import { Picker, Toggle } from '@/components/arr-section';
 import { toast } from '@/components/toast';
 import { Button, Field, ScreenTitle, Section, SectionCollapse, SegChip } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
-import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
+import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
 import { useSettings } from '@/lib/settings';
 
-type Tab = 'demandes' | 'manquants' | 'telechargements' | 'qbit';
+type Tab = 'demandes' | 'manquants' | 'telechargements' | 'qbit' | 'ratio';
 const CLIENT_LABEL: Record<string, string> = { rdt: 'rdt-client', qbit: 'qBittorrent', alldebrid: 'AllDebrid' };
 const RUNNING: AutoGrab['state'][] = ['sent', 'downloading', 'importing'];
 const STATE_LABEL: Record<AutoGrab['state'], string> = { sent: 'envoyé', downloading: 'téléchargement', importing: 'rangement', done: 'terminé', failed: 'échec' };
@@ -169,6 +169,7 @@ export default function AutoTab() {
             { id: 'manquants', label: 'Manquants', icon: 'albums-outline', badge: 0, badgeColor: C.accent },
             { id: 'telechargements', label: 'Transferts', icon: 'swap-vertical', badge: running, badgeColor: C.accent },
             { id: 'qbit', label: 'qBit', icon: 'magnet-outline', badge: 0, badgeColor: C.accent },
+            { id: 'ratio', label: 'Ratio', icon: 'speedometer-outline', badge: 0, badgeColor: C.accent },
           ] as { id: Tab; label: string; icon: keyof typeof Ionicons.glyphMap; badge: number; badgeColor: string }[]
         ).map((t) => (
           <Pressable key={t.id} onPress={() => setTab(t.id)} style={[styles.segItem, tab === t.id && styles.segOn]} accessibilityRole="tab" accessibilityState={{ selected: tab === t.id }}>
@@ -189,11 +190,19 @@ export default function AutoTab() {
       ) : (
         <SectionCollapse.Provider value={COLLAPSE}>
           <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: TAB_SPACE + insets.bottom + 20 }} refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
-            <Switches st={st} save={save} running={running} toChoose={toChoose} />
+            <Pressable onPress={() => router.push('/lumio-auto')} style={styles.stateLine} accessibilityLabel="État de Lumio Auto et d’AllDebrid, ouvrir les réglages">
+              <View style={[styles.stateDot, { backgroundColor: st.enabled ? C.success : C.textDim }]} />
+              <Text style={styles.small}>Lumio Auto {st.enabled ? 'actif' : 'en pause'}</Text>
+              <View style={[styles.stateDot, { backgroundColor: st.debridOnly ? C.accent : C.textDim, marginLeft: 10 }]} />
+              <Text style={styles.small}>AllDebrid {st.debridOnly ? 'actif' : 'éteint'}</Text>
+              <View style={{ flex: 1 }} />
+              <Ionicons name="chevron-forward" size={14} color={C.textDim} />
+            </Pressable>
             {tab === 'demandes' ? <Demandes st={st} onItem={(i) => setItemOpen(i.id)} /> : null}
             {tab === 'manquants' ? <Manquants /> : null}
             {tab === 'telechargements' ? <Telechargements st={st} reload={load} onItem={(id) => setItemOpen(id)} /> : null}
             {tab === 'qbit' ? <QbitTab /> : null}
+            {tab === 'ratio' ? <RatioTab /> : null}
           </ScrollView>
         </SectionCollapse.Provider>
       )}
@@ -229,6 +238,7 @@ export function AutoSettingsScreen() {
       ) : (
         <SectionCollapse.Provider value={COLLAPSE}>
           <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 40 }} refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
+            <Switches st={st} save={save} running={st.grabs.filter((g) => RUNNING.includes(g.state)).length} toChoose={st.items.filter((i) => i.needsChoice).length} />
             {part === 'sites' ? <Indexeurs st={st} reload={load} onEdit={setEditIx} /> : <Reglages st={st} save={save} />}
           </ScrollView>
         </SectionCollapse.Provider>
@@ -485,6 +495,190 @@ function MissingSeason({ x, onSeason, onEpisodes }: { x: AutoMissingSeason; onSe
           ) : null}
         </>
       ) : null}
+    </View>
+  );
+}
+
+const ratioColor = (r: number | null | undefined) => (r == null ? C.textDim : r >= 1.2 ? C.success : r >= 1 ? C.warning : C.danger);
+const fmtRatio = (r: number | null | undefined) => (r == null ? '—' : r.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+
+/** Onglet « Ratio » : pour chaque site (C411…), ratio, quota du jour, torrents encore sous la règle des 72 h. */
+function RatioTab() {
+  const { settings } = useSettings();
+  const [data, setData] = useState<AutoRatio | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const load = useCallback(
+    () =>
+      autoApi
+        .ratio(settings)
+        .then((d) => (setData(d), setErr(null)))
+        .catch((e) => setErr(e?.message ?? String(e))),
+    [settings]
+  );
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 30000);
+    return () => clearInterval(t);
+  }, [load]);
+  if (!data) return err ? <Text style={styles.dim}>{/404|inconnue/.test(err) ? 'Mets le serveur à jour (3.87.0) : Profil → Serveur → Mettre à jour.' : err}</Text> : <ActivityIndicator color="#fff" style={{ marginTop: 30 }} />;
+  return (
+    <>
+      {data.qbit ? (
+        <View style={styles.ratioCard}>
+          <Text style={styles.ratioLabel}>qBittorrent, depuis le début</Text>
+          <View style={styles.ratioRow}>
+            <RatioStat label="Envoyé" value={gb(data.qbit.up)} color={C.success} icon="arrow-up" />
+            <RatioStat label="Reçu" value={gb(data.qbit.down)} color={C.accent} icon="arrow-down" />
+            <RatioStat label="Ratio" value={fmtRatio(data.qbit.ratio)} color={ratioColor(data.qbit.ratio)} />
+          </View>
+          <Text style={styles.small}>
+            Maintenant : ↑ {fmtSpeed(data.qbit.upSpeed)} · ↓ {fmtSpeed(data.qbit.downSpeed)}
+          </Text>
+        </View>
+      ) : null}
+      {!data.sites.length ? <Text style={styles.help}>Ajoute un site dans Réglages → Sites pour suivre ton ratio.</Text> : null}
+      {data.sites.map((x) => (
+        <RatioSite key={x.id} x={x} reload={load} />
+      ))}
+      <Text style={[styles.dim, { textAlign: 'center' }]}>Mis à jour toutes les 30 s · les chiffres du site sont estimés à partir de ce que Lumio a envoyé et reçu</Text>
+    </>
+  );
+}
+
+function RatioStat({ label, value, color, icon }: { label: string; value: string; color: string; icon?: keyof typeof Ionicons.glyphMap }) {
+  return (
+    <View style={{ flex: 1, gap: 2 }}>
+      <Text style={styles.small}>{label}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+        {icon ? <Ionicons name={icon} size={14} color={color} /> : null}
+        <Text style={[styles.ratioBig, { color }]} numberOfLines={1} adjustsFontSizeToFit>
+          {value}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function RatioSite({ x, reload }: { x: AutoRatioSite; reload: () => void }) {
+  const { settings } = useSettings();
+  const [edit, setEdit] = useState(false);
+  const [up, setUp] = useState(x.base ? String(Math.round((x.base.up / 1e9) * 10) / 10) : '');
+  const [down, setDown] = useState(x.base ? String(Math.round((x.base.down / 1e9) * 10) / 10) : '');
+  const ratio = x.estimate?.ratio ?? x.lumio.ratio;
+  const pct = x.cap ? Math.min(100, (x.today / x.cap) * 100) : 0;
+  const quotaColor = pct >= 90 ? C.danger : pct >= 70 ? C.warning : C.success;
+  const alerts = [
+    ratio != null && ratio < 1 ? 'Ratio sous 1 : laisse partager avant de télécharger' : ratio != null && ratio < 1.1 ? 'Ratio juste au-dessus de 1 : prudence' : null,
+    x.cap && pct >= 80 ? `Quota du jour presque atteint (${Math.round(pct)} %)` : null,
+  ].filter(Boolean) as string[];
+  const save = () => {
+    const u = Number(up.replace(',', '.'));
+    const d = Number(down.replace(',', '.'));
+    if (!(u >= 0) || !(d > 0)) return Alert.alert('Ratio', 'Entre l’envoyé et le reçu en Go, comme sur ton profil du site.');
+    autoApi
+      .ratioBase(settings, x.id, u * 1e9, d * 1e9)
+      .then(() => (setEdit(false), toast('Chiffres enregistrés'), reload()))
+      .catch((e) => Alert.alert('Ratio', e?.message ?? String(e)));
+  };
+  return (
+    <View style={styles.ratioCard}>
+      <View style={styles.rowBetween}>
+        <Text style={styles.h2}>{x.name}</Text>
+        <Text style={[styles.ratioHuge, { color: ratioColor(ratio) }]}>{fmtRatio(ratio)}</Text>
+      </View>
+      <Text style={styles.small}>
+        {x.estimate
+          ? `Ratio estimé sur le site (tes chiffres du ${new Date(x.estimate.since).toLocaleDateString('fr-FR')} + Lumio depuis)`
+          : 'Ratio des torrents de Lumio seulement. Entre les chiffres de ton profil pour avoir ton vrai ratio.'}
+      </Text>
+      {alerts.map((a) => (
+        <View key={a} style={styles.ratioAlert}>
+          <Ionicons name="warning" size={14} color={C.warning} />
+          <Text style={[styles.small, { color: C.warning, flex: 1 }]}>{a}</Text>
+        </View>
+      ))}
+      <View style={styles.ratioRow}>
+        <RatioStat label="Envoyé" value={gb(x.estimate?.up ?? x.lumio.up)} color={C.success} icon="arrow-up" />
+        <RatioStat label="Reçu" value={gb(x.estimate?.down ?? x.lumio.down)} color={C.accent} icon="arrow-down" />
+        <RatioStat label="En partage" value={String(x.seeding)} color={C.text} />
+      </View>
+      {x.estimate ? (
+        <Text style={styles.small}>
+          Par Lumio : ↑ {gb(x.lumio.up)} · ↓ {gb(x.lumio.down)}
+          {x.lumio.freeDown ? ` (+ ${gb(x.lumio.freeDown)} en freeleech, non compté)` : ''}
+        </Text>
+      ) : x.lumio.freeDown ? (
+        <Text style={styles.small}>+ {gb(x.lumio.freeDown)} reçus en freeleech (non comptés)</Text>
+      ) : null}
+      {x.cap ? (
+        <View style={{ gap: 5 }}>
+          <View style={styles.rowBetween}>
+            <Text style={styles.small}>Téléchargé aujourd’hui</Text>
+            <Text style={[styles.small, { color: quotaColor, fontWeight: '800' }]}>
+              {gb(x.today) === '—' ? '0 Go' : gb(x.today)} / {gb(x.cap)}
+            </Text>
+          </View>
+          <View style={styles.bar}>
+            <View style={[styles.barFill, { width: `${Math.max(pct, 2)}%`, backgroundColor: quotaColor }]} />
+          </View>
+          {x.days.length > 1 ? (
+            <Text style={styles.small}>
+              7 derniers jours : {x.days.map((d) => `${new Date(d.day).toLocaleDateString('fr-FR', { weekday: 'short' })} ${(d.bytes / 1e9).toFixed(1)}`).join(' · ')} Go
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+      <View style={{ gap: 4 }}>
+        <Text style={styles.title}>Règle des 72 h</Text>
+        {!x.hr.length ? (
+          <Text style={[styles.small, { color: C.success }]}>Aucun torrent en danger : tous ont 72 h de partage ou un ratio de 1 ✓</Text>
+        ) : (
+          x.hr.map((h) => (
+            <Text key={h.title} style={styles.small} numberOfLines={1}>
+              <Text style={{ color: C.warning, fontWeight: '800' }}>encore {h.hoursLeft} h</Text> · {h.title} · ratio {fmtRatio(h.ratio)}
+            </Text>
+          ))
+        )}
+        {x.hr.length ? <Text style={styles.small}>Ne les supprime pas avant : Lumio les garde de lui-même.</Text> : null}
+      </View>
+      {x.rules.length ? <Text style={styles.small}>Règles : {x.rules.join(' · ')}</Text> : null}
+      {edit ? (
+        <View style={{ gap: 8 }}>
+          <Text style={styles.small}>Recopie les chiffres de ton profil {x.name} (en Go). Lumio ajoutera ensuite tout seul ce qu’il envoie et reçoit.</Text>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <View style={{ flex: 1 }}>
+              <Field label="Envoyé (Go)" value={up} onChangeText={setUp} keyboardType="decimal-pad" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Field label="Reçu (Go)" value={down} onChangeText={setDown} keyboardType="decimal-pad" />
+            </View>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Button title="Enregistrer" onPress={save} />
+            <Button title="Annuler" variant="secondary" onPress={() => setEdit(false)} />
+          </View>
+        </View>
+      ) : (
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Pressable onPress={() => setEdit(true)} hitSlop={6} style={styles.pill}>
+            <Ionicons name="create-outline" size={14} color={C.text} />
+            <Text style={styles.pillTxt}>{x.base ? 'Mettre à jour mes chiffres' : 'Entrer mes chiffres du site'}</Text>
+          </Pressable>
+          {x.base ? (
+            <Pressable
+              onPress={() =>
+                autoApi
+                  .ratioBaseClear(settings, x.id)
+                  .then(reload)
+                  .catch(() => {})
+              }
+              hitSlop={6}
+              style={styles.pill}>
+              <Text style={[styles.pillTxt, { color: C.textDim }]}>Effacer</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      )}
     </View>
   );
 }
@@ -1745,6 +1939,14 @@ const styles = StyleSheet.create({
   epGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   epChip: { minWidth: 46, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, borderWidth: 1, borderColor: C.border, alignItems: 'center' },
   epChipTxt: { color: C.text, fontSize: 13, fontWeight: '800' },
+  ratioCard: { borderRadius: 20, backgroundColor: C.surface, padding: 16, gap: 10 },
+  ratioRow: { flexDirection: 'row', gap: 10 },
+  ratioLabel: { color: C.textDim, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  ratioBig: { fontSize: 20, fontWeight: '900', letterSpacing: -0.4 },
+  ratioHuge: { fontSize: 34, fontWeight: '900', letterSpacing: -1 },
+  ratioAlert: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 8, borderRadius: 10, backgroundColor: 'rgba(255,159,10,0.12)' },
+  stateLine: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 14, backgroundColor: C.surface },
+  stateDot: { width: 8, height: 8, borderRadius: 4 },
   missPoster: { width: 38, height: 56, borderRadius: 7 },
   missSeason: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: 14, backgroundColor: C.surfaceHigh },
   itemIcon: { width: 36, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },

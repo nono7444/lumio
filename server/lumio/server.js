@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.86.0';
+const VERSION = '3.87.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3616,6 +3616,9 @@ if (!auto.v375) {
 }
 // Volume téléchargé par indexeur et par jour ({ ixId: { '2026-11-04': octets } }) : quota des trackers privés
 if (!auto.dlStats || typeof auto.dlStats !== 'object') auto.dlStats = {};
+// Ratio par site : compteurs cumulés de qBittorrent (gardés même après retrait des torrents) + ratio de départ saisi par l'admin
+if (!auto.siteStats || typeof auto.siteStats !== 'object') auto.siteStats = {};
+if (!auto.ratioBase || typeof auto.ratioBase !== 'object') auto.ratioBase = {};
 let autoSaveTimer = null;
 const autoSave = () => {
   clearTimeout(autoSaveTimer);
@@ -4526,7 +4529,7 @@ async function autoGrab(item, rel, want, by = 'auto') {
     id: autoId(),
     itemId: item.id,
     title: item.title,
-    release: { title: rel.title, size: rel.size, indexer: rel.indexer, guid: rel.guid, seeders: rel.seeders },
+    release: { title: rel.title, size: rel.size, indexer: rel.indexer, indexerId: rel.indexerId, freeleech: Boolean(rel.freeleech), guid: rel.guid, seeders: rel.seeders },
     episodes: item.type === 'movie' ? ['movie'] : want.kind === 'season' ? (want.episodes || []).map((e) => `${want.season}:${e}`) : episodesOf(rel, want),
     want,
     state: 'sent',
@@ -5176,6 +5179,94 @@ async function autoSeedTick() {
 }
 setInterval(() => autoSeedTick().catch(() => {}), 2 * 60_000);
 
+// ——— Ratio par site (C411…) ———
+// Toutes les 5 min : on additionne ce que chaque torrent de Lumio a envoyé / reçu depuis la dernière fois,
+// rangé par site. Le freeleech reçu est compté à part (il ne compte pas dans le ratio du site).
+function grabSite(g) {
+  if (g.release && g.release.indexerId) return g.release.indexerId;
+  const ix = autoIndexers().find((x) => g.release && x.name === g.release.indexer);
+  return ix ? ix.id : null;
+}
+let ratioBusy = false;
+async function autoRatioTick() {
+  if (ratioBusy || !(autoCfg().qbit || {}).url) return;
+  ratioBusy = true;
+  try {
+    const list = await (await qbitFetch('/api/v2/torrents/info')).json();
+    const byHash = new Map(auto.grabs.filter((g) => g.hash && g.client === 'qbit').map((g) => [g.hash, g]));
+    for (const t of list) {
+      const hash = String(t.hash || '').toLowerCase();
+      const g = byHash.get(hash);
+      const site = g && grabSite(g);
+      if (!site) continue;
+      const st = (auto.siteStats[site] = auto.siteStats[site] || { up: 0, down: 0, freeDown: 0, last: {} });
+      const prev = st.last[hash] || { u: 0, d: 0 };
+      const u = Number(t.uploaded) || 0;
+      const d = Number(t.downloaded) || 0;
+      if (u > prev.u) st.up += u - prev.u;
+      if (d > prev.d) {
+        if (g.release && g.release.freeleech) st.freeDown += d - prev.d;
+        else st.down += d - prev.d;
+      }
+      st.last[hash] = { u: Math.max(u, prev.u), d: Math.max(d, prev.d), at: Date.now() };
+    }
+    // On oublie les torrents disparus depuis 30 jours (leurs chiffres restent dans les totaux)
+    for (const st of Object.values(auto.siteStats)) for (const [h, v] of Object.entries(st.last)) if (Date.now() - (v.at || 0) > 30 * 86400e3) delete st.last[h];
+    autoSave();
+  } catch (e) {
+    // qBittorrent injoignable : on réessaie au prochain tour
+  } finally {
+    ratioBusy = false;
+  }
+}
+setTimeout(() => autoRatioTick().catch(() => {}), 60_000);
+setInterval(() => autoRatioTick().catch(() => {}), 5 * 60_000);
+
+async function autoRatioReport() {
+  await autoRatioTick().catch(() => {});
+  let qb = null;
+  try {
+    const main = await (await qbitFetch('/api/v2/sync/maindata?rid=0')).json();
+    const ss = (main && main.server_state) || {};
+    qb = { up: Number(ss.alltime_ul) || 0, down: Number(ss.alltime_dl) || 0, upSpeed: Number(ss.up_info_speed) || 0, downSpeed: Number(ss.dl_info_speed) || 0, ratio: Number(ss.global_ratio) || null };
+  } catch {}
+  const sites = autoIndexers().map((ix) => {
+    const st = auto.siteStats[ix.id] || { up: 0, down: 0, freeDown: 0 };
+    const base = auto.ratioBase[ix.id] || null;
+    const cap = Number(ix.maxGbPerDay ?? (ix.type === 'c411' ? 15 : 0)) || 0;
+    const grabs = auto.grabs.filter((g) => grabSite(g) === ix.id);
+    const seeding = grabs.filter((g) => g.seeding);
+    const hr = seeding
+      .filter((g) => !hrSafe(g.seedTime, g.ratio))
+      .map((g) => ({ title: g.title, hoursLeft: hrLeft(g.seedTime), ratio: g.ratio ?? 0 }))
+      .sort((a, b) => b.hoursLeft - a.hoursLeft);
+    // Estimation du ratio sur le site = chiffres saisis (profil du site) + ce que Lumio a fait depuis
+    let estimate = null;
+    if (base && base.down > 0) {
+      const up = base.up + Math.max(0, st.up - (base.lumioUp || 0));
+      const down = base.down + Math.max(0, st.down - (base.lumioDown || 0));
+      estimate = { up, down, ratio: down > 0 ? Math.round((up / down) * 100) / 100 : null, since: base.at };
+    }
+    const days = Object.entries(auto.dlStats[ix.id] || {}).sort(([a], [b]) => (a < b ? 1 : -1)).slice(0, 7).map(([day, bytes]) => ({ day, bytes }));
+    return {
+      id: ix.id,
+      name: ix.name,
+      type: ix.type || null,
+      lumio: { up: st.up, down: st.down, freeDown: st.freeDown, ratio: st.down > 0 ? Math.round((st.up / st.down) * 100) / 100 : null },
+      estimate,
+      base,
+      today: autoDlToday(ix.id),
+      cap: cap ? cap * 1e9 : 0,
+      days,
+      seeding: seeding.length,
+      upSpeed: seeding.reduce((n, g) => n + (g.upSpeed || 0), 0),
+      hr,
+      rules: ix.type === 'c411' || /c411/i.test(ix.name || '') ? ['Garder chaque torrent 72 h ou jusqu’au ratio 1 (Hit & Run)', 'Ratio global au-dessus de 1', 'Le freeleech ne compte pas en téléchargement'] : [],
+    };
+  });
+  return { qbit: qb, sites, at: new Date().toISOString() };
+}
+
 // ——— Résumé du soir (21 h) : envoyé / reçu dans la journée, partages, quota des sites ———
 const parisNow = () => {
   const d = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
@@ -5741,6 +5832,29 @@ async function autoRoutes(req, res, p, q, user) {
     return true;
   }
   // Indexeurs : ajout / modification (la clé reste sur le serveur)
+  // Onglet « Ratio » : ratio par site, quota du jour, torrents encore sous la règle des 72 h
+  if (req.method === 'GET' && p === '/api/auto/ratio') {
+    send(res, 200, await autoRatioReport());
+    return true;
+  }
+  // Chiffres du profil du site (envoyé / reçu, en octets) pour estimer le vrai ratio ; vide = effacer
+  if (req.method === 'POST' && p === '/api/auto/ratio/base') {
+    const b = await readBody(req);
+    const ix = autoIndexers().find((x) => x.id === b.indexerId);
+    if (!ix) throw new HttpError(404, 'Site inconnu');
+    if (b.clear) delete auto.ratioBase[ix.id];
+    else {
+      const up = Number(b.up);
+      const down = Number(b.down);
+      if (!(up >= 0) || !(down > 0)) throw new HttpError(400, 'Envoyé et reçu en Go, reçu plus grand que 0');
+      await autoRatioTick().catch(() => {});
+      const st = auto.siteStats[ix.id] || { up: 0, down: 0 };
+      auto.ratioBase[ix.id] = { up, down, at: new Date().toISOString(), lumioUp: st.up, lumioDown: st.down };
+    }
+    autoSave();
+    send(res, 200, { ok: true });
+    return true;
+  }
   if (req.method === 'POST' && p === '/api/auto/indexers') {
     const b = await readBody(req);
     const type = ['c411', 'prowlarr', 'torznab'].includes(b.type) ? b.type : 'torznab';
