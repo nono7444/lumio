@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.89.0';
+const VERSION = '3.89.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4071,6 +4071,8 @@ function autoScore(rel, item, want) {
     const h = String(rel.langHint).toLowerCase().replace(/[._]+/g, ' ');
     if (QUEBEC_RE.test(h) && !p.langs.includes('vfq')) p.langs.push('vfq');
     if (/\bvf2\b/.test(h) && !p.langs.includes('vf2')) p.langs.push('vf2');
+    // « MULTI.VFF » / TRUEFRENCH annoncé par le site : version France confirmée (préférée)
+    if (/\b(vff|truefrench)\b/.test(h) && !p.langs.includes('vff')) p.langs.push('vff');
   }
   const out = { ...rel, parsed: p, score: 0, rejected: null, reasons: [] };
   const no = (why) => out.reasons.push(why);
@@ -4121,6 +4123,8 @@ function autoScore(rel, item, want) {
   // Note : langue d'abord, puis codec, source, sources actives, taille raisonnable
   const li = p.langs.length ? Math.min(...p.langs.map((l) => (pf.languages.indexOf(l) >= 0 ? pf.languages.indexOf(l) : 9))) : 9;
   out.score += 100 - li * 8;
+  // Piste française de France confirmée (nom ou site) : passe devant un MULTi sans précision
+  if (p.langs.includes('vff') || p.langs.includes('truefrench')) out.score += 15;
   if (p.codec === 'h265') out.score += pf.h265 === 'any' ? 5 : 30;
   out.score += { bluray: 12, webdl: 10, webrip: 8, hdtv: 3 }[p.source] || 0;
   if (p.resolution === pf.resolution) out.score += 20;
