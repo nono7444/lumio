@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.87.0';
+const VERSION = '3.88.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3652,7 +3652,7 @@ const AUTO_PROFILE = {
   h265: 'preferred', // 'required' | 'preferred' | 'any'
   h265Wait: 48, // sortie récente : on attend une version H.265 pendant ce nombre d'heures avant de prendre du H.264
   upgradeDays: 30, // version H.264 rangée : on cherche encore du H.265 (plus léger) pendant ce nombre de jours, puis on remplace
-  languages: ['multi', 'vff', 'truefrench', 'vf2', 'french'], // ordre de préférence (VFQ = doublage québécois : refusé sauf si on l'ajoute)
+  languages: ['multi', 'vff', 'truefrench', 'french'], // ordre de préférence (VFQ et VF2 = piste québécoise : refusées sauf si on les ajoute)
   maxMovieGb: 8,
   maxEpisodeGb: 2.5,
   minSeeders: 1,
@@ -3672,6 +3672,12 @@ const autoProfile = () => {
   if (c.profile && !c.profileV3) {
     c.profileV3 = true;
     if (Array.isArray(c.profile.languages)) c.profile.languages = c.profile.languages.filter((l) => l !== 'vfq');
+    saveConfig();
+  }
+  // VF2 = deux pistes françaises (France + Québec) : la piste québécoise passe souvent en premier → plus acceptée par défaut
+  if (c.profile && !c.profileV4) {
+    c.profileV4 = true;
+    if (Array.isArray(c.profile.languages)) c.profile.languages = c.profile.languages.filter((l) => l !== 'vf2' && l !== 'vfq');
     saveConfig();
   }
   return { ...AUTO_PROFILE, ...(c.profile || {}) };
@@ -3975,7 +3981,8 @@ function autoParse(title) {
   if (/\bvff\b/.test(low)) langs.push('vff');
   if (/\btruefrench\b/.test(low)) langs.push('truefrench');
   if (/\bvf2\b/.test(low)) langs.push('vf2');
-  if (/\bvfq\b|\bquebec\b/.test(low)) langs.push('vfq');
+  // Doublage québécois : VFQ, VQ, QC, Québec, French-Canadian, FRCA… (VF2 en contient aussi une)
+  if (/\b(vfq|vq|qc|quebec|canadian|french[ -]?canadian|frca|fr[ -]?ca|vf2)\b/.test(low)) langs.push('vfq');
   if (/\bvfi\b|\bfrench\b|\bvf\b/.test(low)) langs.push('french');
   r.langs = langs;
   r.vostfr = /\b(vostfr|subfrench|vost)\b/.test(low) && !langs.length;
@@ -4066,7 +4073,9 @@ function autoScore(rel, item, want) {
   else if (!p.langs.length) no('pas de version française indiquée');
   else if (!p.langs.some((l) => pf.languages.includes(l))) no(`langue non acceptée (${p.langs.join(', ').toUpperCase()})`);
   // MULTI.VFQ : la piste française est québécoise ; refusée sauf si VFQ est dans les langues (ou VFF / TRUEFRENCH / VF2 aussi présents)
-  else if (p.langs.includes('vfq') && !pf.languages.includes('vfq') && !p.langs.some((l) => ['vff', 'truefrench', 'vf2'].includes(l))) no('VFQ (doublage québécois)');
+  // Toute piste québécoise est refusée (même avec une piste VFF à côté : le lecteur peut choisir la québécoise),
+  // sauf si VFQ (ou VF2) est coché dans les langues
+  else if (p.langs.includes('vfq') && !pf.languages.includes('vfq') && !(p.langs.includes('vf2') && pf.languages.includes('vf2'))) no(p.langs.includes('vf2') ? 'VF2 (contient le doublage québécois)' : 'VFQ (doublage québécois)');
   if (p.resolution && p.resolution > pf.resolution) no(`${p.resolution}p (trop lourd)`);
   else if (p.resolution !== pf.resolution && !(pf.allowLower && p.resolution >= 720)) no(p.resolution ? `${p.resolution}p (${pf.resolution}p demandé)` : 'résolution inconnue');
   if ((pf.h265 === 'required' || want.h265Only) && p.codec !== 'h265')

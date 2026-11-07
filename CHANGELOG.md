@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Lumio Auto : plus aucune version avec une piste québécoise. Lumio refuse VFQ, VF2 (VFF + VFQ), QC, VQ, French-Canadian, même dans un MULTI qui a aussi une piste VFF. Pour en accepter de nouveau, coche VFQ ou VF2 dans les langues. Il faut le serveur Lumio 3.88.0.
+
 ## 1.0.144 — 7 novembre 2026
 
 - Auto : nouvel onglet « Ratio ». Pour chaque site (C411…), il affiche ton ratio, l'envoyé, le reçu (le freeleech à part), le quota du jour avec une jauge, les 7 derniers jours et les torrents encore sous la règle des 72 h. Une alerte orange s'affiche si le ratio approche de 1 ou si le quota est presque atteint. Entre une fois les chiffres de ton profil du site pour avoir ton vrai ratio, Lumio ajoute ensuite tout seul ce qu'il envoie et reçoit.
