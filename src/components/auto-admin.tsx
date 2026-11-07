@@ -12,7 +12,7 @@ import { Picker, Toggle } from '@/components/arr-section';
 import { toast } from '@/components/toast';
 import { Button, Field, ScreenTitle, Section, SectionCollapse, SegChip } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
-import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
+import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
 import { useSettings } from '@/lib/settings';
 
 type Tab = 'demandes' | 'manquants' | 'telechargements' | 'qbit';
@@ -309,6 +309,11 @@ function Manquants() {
       .missingGet(settings, sr.tmdbId, seasons)
       .then((r) => (toast(r.message), load()))
       .catch((e) => Alert.alert('Lumio Auto', e?.message ?? String(e)));
+  const launchEps = (sr: AutoMissingSeries, season: number, eps: number[]) =>
+    autoApi
+      .missingGetEpisodes(settings, sr.tmdbId, season, eps)
+      .then((r) => (toast(r.message), load()))
+      .catch((e) => Alert.alert('Lumio Auto', e?.message ?? String(e)));
   const hide = (sr: AutoMissingSeries) =>
     autoApi
       .missingHide(settings, sr.tmdbId)
@@ -359,30 +364,17 @@ function Manquants() {
               </Pressable>
               {open ? (
                 <View style={{ paddingHorizontal: 14, paddingBottom: 12, gap: 8 }}>
-                  {sr.seasons.map((x) => {
-                    const whole = x.have === 0;
-                    return (
-                      <View key={x.season} style={styles.missSeason}>
-                        <View style={{ flex: 1, gap: 2 }}>
-                          <Text style={styles.title}>Saison {x.season}</Text>
-                          <Text style={styles.small} numberOfLines={2}>
-                            {whole ? `Saison entière absente (${x.aired} épisode${x.aired > 1 ? 's' : ''})` : `${x.missing.length} sur ${x.aired} : ${x.missing.map((e) => `E${e}`).join(', ')}`}
-                            {x.aired < x.total ? ` · ${x.total - x.aired} à venir` : ''}
-                          </Text>
-                        </View>
-                        {x.busy ? (
-                          <Text style={[styles.small, { color: C.accent, fontWeight: '700' }]}>En cours</Text>
-                        ) : x.asked ? (
-                          <Text style={[styles.small, { color: C.success, fontWeight: '700' }]}>Lancée ✓</Text>
-                        ) : (
-                          <Pressable onPress={() => launch(sr, [x.season])} hitSlop={6} style={[styles.pill, { backgroundColor: C.accent }]}>
-                            <Ionicons name="download-outline" size={14} color="#000" />
-                            <Text style={[styles.pillTxt, { color: '#000' }]}>Lancer</Text>
-                          </Pressable>
-                        )}
-                      </View>
-                    );
-                  })}
+                  {sr.seasons.map((x) => (
+                    <MissingSeason
+                      key={x.season}
+                      x={x}
+                      onSeason={() =>
+                        Alert.alert(sr.title, `Lancer les ${x.missing.length} épisodes manquants de la saison ${x.season} ?`, [
+                          { text: 'Annuler', style: 'cancel' },
+                          { text: 'Lancer', onPress: () => launch(sr, [x.season]) },
+                        ])
+                      } onEpisodes={(eps) => launchEps(sr, x.season, eps)} />
+                  ))}
                   <View style={[styles.rowBetween, { marginTop: 2 }]}>
                     <Pressable onPress={() => hide(sr)} hitSlop={6} style={styles.pill}>
                       <Ionicons name="eye-off-outline" size={14} color={C.textDim} />
@@ -425,6 +417,75 @@ function Manquants() {
       ) : null}
       {data.at ? <Text style={[styles.dim, { textAlign: 'center' }]}>Vérifié {new Date(data.at).toLocaleString('fr-FR', { weekday: 'short', hour: '2-digit', minute: '2-digit' })} · revérifié toutes les 12 h</Text> : null}
     </>
+  );
+}
+
+/** Une saison de « Manquants » : la saison entière, ou les épisodes cochés un par un. */
+function MissingSeason({ x, onSeason, onEpisodes }: { x: AutoMissingSeason; onSeason: () => void; onEpisodes: (eps: number[]) => void }) {
+  const [pick, setPick] = useState<number[]>([]);
+  const asked = new Set(x.askedEps ?? []);
+  const whole = x.have === 0;
+  const toggle = (e: number) => setPick((p) => (p.includes(e) ? p.filter((y) => y !== e) : [...p, e].sort((a, b) => a - b)));
+  return (
+    <View style={[styles.missSeason, { flexDirection: 'column', alignItems: 'stretch', gap: 10 }]}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={styles.title}>Saison {x.season}</Text>
+          <Text style={styles.small} numberOfLines={1}>
+            {whole ? `Saison entière absente · ${x.aired} épisode${x.aired > 1 ? 's' : ''}` : `${x.missing.length} manquant${x.missing.length > 1 ? 's' : ''} sur ${x.aired}`}
+            {x.aired < x.total ? ` · ${x.total - x.aired} à venir` : ''}
+          </Text>
+        </View>
+        {x.busy ? (
+          <Text style={[styles.small, { color: C.accent, fontWeight: '700' }]}>En cours</Text>
+        ) : x.asked ? (
+          <Text style={[styles.small, { color: C.success, fontWeight: '700' }]}>Lancée ✓</Text>
+        ) : (
+          <Pressable onPress={onSeason} hitSlop={6} style={styles.pill} accessibilityLabel={`Lancer toute la saison ${x.season}`}>
+            <Ionicons name="layers-outline" size={14} color={C.text} />
+            <Text style={styles.pillTxt}>Toute la saison</Text>
+          </Pressable>
+        )}
+      </View>
+      {!x.asked ? (
+        <>
+          <Text style={styles.small}>Ou choisis les épisodes :</Text>
+          <View style={styles.epGrid}>
+            {x.missing.map((e) => {
+              const done = asked.has(e);
+              const on = pick.includes(e);
+              return (
+                <Pressable
+                  key={e}
+                  disabled={done}
+                  onPress={() => toggle(e)}
+                  style={[styles.epChip, on && { backgroundColor: C.accent, borderColor: C.accent }, done && { borderColor: C.success, opacity: 0.7 }]}
+                  accessibilityState={{ selected: on, disabled: done }}
+                  accessibilityLabel={`Épisode ${e}`}>
+                  <Text style={[styles.epChipTxt, on && { color: '#000' }, done && { color: C.success }]}>
+                    E{e}
+                    {done ? ' ✓' : ''}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {pick.length ? (
+            <Pressable
+              onPress={() => {
+                onEpisodes(pick);
+                setPick([]);
+              }}
+              style={[styles.pill, { backgroundColor: C.accent, alignSelf: 'flex-start' }]}>
+              <Ionicons name="download-outline" size={14} color="#000" />
+              <Text style={[styles.pillTxt, { color: '#000' }]}>
+                Lancer {pick.length === 1 ? `l’épisode ${pick[0]}` : `${pick.length} épisodes`}
+              </Text>
+            </Pressable>
+          ) : null}
+        </>
+      ) : null}
+    </View>
   );
 }
 
@@ -1681,6 +1742,9 @@ const styles = StyleSheet.create({
   list: { borderRadius: 20, backgroundColor: C.surface, overflow: 'hidden' },
   itemRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 11 },
   itemSep: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.border },
+  epGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  epChip: { minWidth: 46, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, borderWidth: 1, borderColor: C.border, alignItems: 'center' },
+  epChipTxt: { color: C.text, fontSize: 13, fontWeight: '800' },
   missPoster: { width: 38, height: 56, borderRadius: 7 },
   missSeason: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: 14, backgroundColor: C.surfaceHigh },
   itemIcon: { width: 36, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },

@@ -210,6 +210,9 @@ export const autoApi = {
   missing: (s: Settings, refresh = false) => serverCall<AutoMissing>(s, `/api/auto/missing${refresh ? '?refresh=1' : ''}`),
   missingGet: (s: Settings, tmdbId: number, seasons: number[]) =>
     serverCall<{ ok: boolean; message: string }>(s, '/api/auto/missing/get', { method: 'POST', body: JSON.stringify({ tmdbId, seasons }) }),
+  /** Seulement certains épisodes d'une saison */
+  missingGetEpisodes: (s: Settings, tmdbId: number, season: number, episodes: number[]) =>
+    serverCall<{ ok: boolean; message: string }>(s, '/api/auto/missing/get', { method: 'POST', body: JSON.stringify({ tmdbId, season, episodes }) }),
   missingHide: (s: Settings, tmdbId: number, show = false) => serverCall<{ ok: boolean }>(s, '/api/auto/missing/hide', { method: 'POST', body: JSON.stringify({ tmdbId, show }) }),
   missingReset: (s: Settings) => serverCall<{ ok: boolean }>(s, '/api/auto/missing/hide', { method: 'POST', body: JSON.stringify({ reset: true }) }),
   searchAll: (s: Settings) => serverCall<{ message: string }>(s, '/api/auto/search-all', { method: 'POST' }),
@@ -241,6 +244,6 @@ export const autoApi = {
 export const gb = (n?: number) => (n ? `${(n / 1e9).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} Go` : '—');
 
 /** « À compléter » : épisodes diffusés qui manquent dans les séries de la bibliothèque */
-export type AutoMissingSeason = { season: number; missing: number[]; aired: number; total: number; have: number; busy: number; asked: boolean };
+export type AutoMissingSeason = { season: number; missing: number[]; aired: number; total: number; have: number; busy: number; asked: boolean; askedEps?: number[] };
 export type AutoMissingSeries = { tmdbId: number; title: string; year: number | null; poster: string | null; status?: string; followed: boolean; seasons: AutoMissingSeason[]; missing: number };
 export type AutoMissing = { at: string | null; busy: boolean; series: AutoMissingSeries[]; hidden: number };

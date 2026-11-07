@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.85.0';
+const VERSION = '3.86.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4227,16 +4227,20 @@ async function autoWanted(item) {
   const out = [];
   let absolute = 0;
   const seasonNums = Object.keys((item.meta && item.meta.seasons) || {}).map(Number).sort((a, b) => a - b);
+  const extra = new Set(item.extraEps || []); // épisodes lancés un par un depuis « Manquants »
   for (const n of seasonNums) {
     const eps = item.meta.seasons[n] || [];
+    const full = (item.fullSeasons || []).includes(n);
+    const inSeason = item.seasons.includes(n);
     // Série reprise de la bibliothèque : seulement les épisodes diffusés à partir du jour où on la suit (pas de rattrapage)
-    const aired = eps.filter((e) => e.air && e.air <= today && (!item.since || (item.fullSeasons || []).includes(n) || e.air >= item.since));
-    const missing = aired.filter((e) => !have.has(`${n}:${e.e}`) && !busy.has(`${n}:${e.e}`));
+    const aired = eps.filter((e) => e.air && e.air <= today && (!item.since || full || extra.has(`${n}:${e.e}`) || e.air >= item.since));
+    let missing = aired.filter((e) => !have.has(`${n}:${e.e}`) && !busy.has(`${n}:${e.e}`));
+    if (!inSeason) missing = missing.filter((e) => extra.has(`${n}:${e.e}`));
     const firstAbs = absolute;
     absolute += eps.length;
-    if (!item.seasons.includes(n) || !missing.length) continue;
+    if (!missing.length) continue;
     // Saison terminée et entièrement manquante : on cherche d'abord le pack de la saison
-    if (missing.length === eps.length && aired.length === eps.length && eps.length > 1) out.push({ kind: 'season', season: n, count: eps.length, episodes: eps.map((e) => e.e) });
+    if (inSeason && (full || !item.since) && missing.length === eps.length && aired.length === eps.length && eps.length > 1) out.push({ kind: 'season', season: n, count: eps.length, episodes: eps.map((e) => e.e) });
     else for (const e of missing) out.push({ kind: 'episode', season: n, episode: e.e, absolute: firstAbs + e.e });
   }
   return out;
@@ -5592,7 +5596,7 @@ async function autoMissingScan() {
         const aired = all.filter((e) => e.air_date && e.air_date <= today);
         const missing = aired.filter((e) => !have.has(`${n}:${e.episode_number}`)).map((e) => e.episode_number);
         if (!missing.length) continue;
-        seasons.push({ season: n, missing, aired: aired.length, total: all.length, have: aired.length - missing.length, busy: missing.filter((e) => busy.has(`${n}:${e}`)).length, asked: Boolean(item && item.seasons.includes(n) && (!item.since || (item.fullSeasons || []).includes(n))) });
+        seasons.push({ season: n, missing, aired: aired.length, total: all.length, have: aired.length - missing.length, busy: missing.filter((e) => busy.has(`${n}:${e}`)).length, asked: Boolean(item && item.seasons.includes(n) && (!item.since || (item.fullSeasons || []).includes(n))), askedEps: item ? missing.filter((e) => (item.extraEps || []).includes(`${n}:${e}`)) : [] });
       }
       if (!seasons.length) continue;
       out.push({ tmdbId, title: base.name, year: base.first_air_date ? Number(base.first_air_date.slice(0, 4)) : null, poster: base.poster_path ? `https://image.tmdb.org/t/p/w185${base.poster_path}` : null, status: base.status, followed: Boolean(item), seasons, missing: seasons.reduce((n, x) => n + x.missing.length, 0) });
@@ -6178,19 +6182,30 @@ async function autoRoutes(req, res, p, q, user) {
   if (req.method === 'POST' && p === '/api/auto/missing/get') {
     const b = await readBody(req);
     const tmdbId = Number(b.tmdbId);
-    const seasons = (Array.isArray(b.seasons) ? b.seasons : [b.season]).map(Number).filter((n) => n > 0);
+    // Soit des saisons entières, soit des épisodes précis ({ season, episodes: [4, 5] })
+    const eps = Array.isArray(b.episodes) ? b.episodes.map(Number).filter((n) => n > 0) : [];
+    const seasons = eps.length ? [] : (Array.isArray(b.seasons) ? b.seasons : [b.season]).map(Number).filter((n) => n > 0);
     const sr = missingScan.series.find((x) => x.tmdbId === tmdbId);
-    if (!tmdbId || !seasons.length) throw new HttpError(400, 'Série ou saison manquante');
+    if (!tmdbId || (!seasons.length && !(eps.length && Number(b.season) > 0))) throw new HttpError(400, 'Série, saison ou épisode manquant');
     const idx = await loadJfIndex().catch(() => null);
     const jf = idx && idx.seriesJf.get(tmdbId);
     const item = await autoAdd({ type: 'tv', tmdbId, title: (sr && sr.title) || b.title, seasons, folderPath: jf && jf.path ? path.dirname(jf.path) : null, future: false });
     // Saison demandée à la main : tous ses épisodes manquants, même anciens
     item.fullSeasons = [...new Set([...(item.fullSeasons || []), ...seasons])];
+    const sn = Number(b.season);
+    if (eps.length) item.extraEps = [...new Set([...(item.extraEps || []), ...eps.map((e) => `${sn}:${e}`)])];
+    item.nextSearch = 0;
     autoUnhide(tmdbId);
     autoSave();
-    if (sr) for (const x of sr.seasons) if (seasons.includes(x.season)) x.asked = true;
-    autoEvent(item, 'added', `Saison ${seasons.join(', ')} à compléter, lancée à la main par ${user.name}`);
-    send(res, 200, { ok: true, message: `${item.title} : saison ${seasons.join(', ')} lancée${autoActive() ? '' : ' (Lumio Auto est en pause : elle partira quand tu le rallumeras)'}` });
+    if (sr)
+      for (const x of sr.seasons) {
+        if (seasons.includes(x.season)) x.asked = true;
+        if (eps.length && x.season === sn) x.askedEps = [...new Set([...(x.askedEps || []), ...eps])];
+      }
+    const what = eps.length ? `S${autoPad(sn)} ${eps.map((e) => `E${autoPad(e)}`).join(', ')}` : `saison ${seasons.join(', ')}`;
+    autoEvent(item, 'added', `${what} à compléter, lancé à la main par ${user.name}`);
+    setTimeout(() => autoSearchTick().catch(() => {}), 2000);
+    send(res, 200, { ok: true, message: `${item.title} : ${what} lancé${autoActive() ? '' : ' (Lumio Auto est en pause : ça partira quand tu le rallumeras)'}` });
     return true;
   }
   if (req.method === 'POST' && p === '/api/auto/missing/hide') {
