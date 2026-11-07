@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.143 — 7 novembre 2026
+
 - Auto → Manquants : tu choisis maintenant les épisodes à lancer (touche E4, E5… puis « Lancer »). Le bouton « Toute la saison » demande une confirmation. Il faut le serveur Lumio 3.86.0.
 
 ## 1.0.142 — 6 novembre 2026
