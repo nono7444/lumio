@@ -15,6 +15,13 @@ import { C, TAB_SPACE } from '@/constants/theme';
 import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
 import { useSettings } from '@/lib/settings';
 import { IS_AUTO } from '@/lib/variant';
+import { ServerRequests } from '@/components/server-requests';
+import { ServerActionsSection } from '@/components/server-actions';
+import { StorageSection } from '@/components/storage-section';
+import { UptimeSection } from '@/components/uptime';
+import { serverCall } from '@/lib/chat';
+import { jf, type JfSession } from '@/lib/jellyfin';
+import { useFocusEffect } from 'expo-router';
 
 type Tab = 'demandes' | 'manquants' | 'telechargements' | 'qbit' | 'ratio';
 const CLIENT_LABEL: Record<string, string> = { rdt: 'rdt-client', qbit: 'qBittorrent', alldebrid: 'AllDebrid' };
@@ -1221,7 +1228,7 @@ const grabColor = (g: AutoGrab) => (g.paused ? C.textDim : /bloqué|erreur|manqu
 const grabStatus = (g: AutoGrab) =>
   g.paused ? 'En pause' : g.state === 'downloading' ? (g.statusText ? g.statusText[0].toUpperCase() + g.statusText.slice(1) : 'Téléchargement') : STATE_LABEL[g.state][0].toUpperCase() + STATE_LABEL[g.state].slice(1);
 
-function Telechargements({ st, reload, onItem }: { st: AutoState; reload: () => void; onItem: (id: string) => void }) {
+function Telechargements({ st, reload, onItem, hideSeed }: { st: AutoState; reload: () => void; onItem: (id: string) => void; hideSeed?: boolean }) {
   const { settings } = useSettings();
   const [filter, setFilter] = useState<'all' | 'done' | 'failed'>('all');
   const queue = st.grabs.filter((g) => RUNNING.includes(g.state));
@@ -1257,7 +1264,7 @@ function Telechargements({ st, reload, onItem }: { st: AutoState; reload: () => 
         ))}
       </Fold>
 
-      {seeding.length ? (
+      {seeding.length && !hideSeed ? (
         <Fold id="tr-seed" title="En partage" count={seeding.length} color={C.success} right={<Text style={styles.small}>↑ {fmtSpeed(seeding.reduce((n, g) => n + (g.upSpeed || 0), 0))}</Text>}>
           <Text style={styles.help}>
             Partagé jusqu’au ratio {st.seed?.ratio || 1}
@@ -1637,7 +1644,7 @@ const QB_STATE: Record<string, { label: string; color: string }> = {
 };
 const qbGroup = (st: string) => (/DL$|^downloading$|^metaDL$/.test(st) ? 'dl' : /UP$|^uploading$/.test(st) ? 'up' : 'other');
 
-function QbitTab() {
+function QbitTab({ noPrefs }: { noPrefs?: boolean } = {}) {
   const { settings } = useSettings();
   const [d, setD] = useState<Awaited<ReturnType<typeof autoApi.qbit>> | null>(null);
   const [filter, setFilter] = useState<'all' | 'dl' | 'up'>('all');
@@ -1711,7 +1718,7 @@ function QbitTab() {
           <Button title="Tout mettre en pause" icon="pause" variant="secondary" small onPress={() => act('pause', d.torrents.filter((x) => qbGroup(x.state) === 'dl').map((x) => x.hash), 'Téléchargements en pause')} style={{ flex: 1 }} />
         ) : null}
       </View>
-      <QbitPrefsSection />
+      {noPrefs ? null : <QbitPrefsSection />}
       <View style={styles.metaRow}>
         <SegChip label={`Tout (${d.torrents.length})`} on={filter === 'all'} onPress={() => setFilter('all')} />
         <SegChip label={`Téléchargement (${nDl})`} on={filter === 'dl'} onPress={() => setFilter('dl')} />
@@ -1947,6 +1954,15 @@ const styles = StyleSheet.create({
   segTxt: { color: C.textDim, fontSize: 11, fontWeight: '700' },
   segBadge: { position: 'absolute', top: 2, right: 6, minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
   segBadgeTxt: { color: '#000', fontSize: 10, fontWeight: '900' },
+  ahead: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 4 },
+  aheadTitle: { color: C.text, fontSize: 34, fontWeight: '900', letterSpacing: -0.8 },
+  aheadSub: { color: C.textDim, fontSize: 14, fontWeight: '600', flexShrink: 1 },
+  aheadDot: { width: 9, height: 9, borderRadius: 5 },
+  gear: { width: 40, height: 40, borderRadius: 20, backgroundColor: C.surface, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
+  bigCard: { backgroundColor: C.surface, borderRadius: 22, padding: 16, gap: 8 },
+  bigCardTitle: { color: C.text, fontSize: 17, fontWeight: '800' },
+  bigNum: { fontSize: 28, fontWeight: '900' },
+  watchRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   foldHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4, marginTop: 4 },
   foldTitle: { color: C.text, fontSize: 17, fontWeight: '800' },
   foldCount: { minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: C.surfaceHigh },
@@ -2003,3 +2019,222 @@ const styles = StyleSheet.create({
   event: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
   eventTxt: { color: C.text, fontSize: 13, lineHeight: 18 },
 });
+
+
+// ═══════════════════ Lumio Auto : quatre onglets très lisibles ═══════════════════
+// Performance (le serveur), Seed (ratio et partage), Demandes, qBittorrent. Les réglages : roue en haut à droite.
+
+const fmtSpeed2 = (b: number) => (b >= 1e6 ? `${(b / 1e6).toFixed(1)} Mo/s` : `${Math.round(b / 1e3)} ko/s`).replace('.', ',');
+
+/** Grand titre + une phrase d'état + la roue des réglages. */
+function AutoHeader({ title, sub, color }: { title: string; sub?: string | null; color?: string }) {
+  return (
+    <View style={styles.ahead}>
+      <View style={{ flex: 1, gap: 4 }}>
+        <Text style={styles.aheadTitle}>{title}</Text>
+        {sub ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+            {color ? <View style={[styles.aheadDot, { backgroundColor: color }]} /> : null}
+            <Text style={styles.aheadSub} numberOfLines={2}>
+              {sub}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+      <Pressable onPress={() => router.push('/settings')} hitSlop={10} style={styles.gear} accessibilityLabel="Réglages">
+        <Ionicons name="settings-outline" size={20} color={C.text} />
+      </Pressable>
+    </View>
+  );
+}
+
+/** Onglet « Performance » : le serveur (services, machine, lectures, mises à jour, disques). */
+export function AutoPerfScreen() {
+  const { settings } = useSettings();
+  const insets = useSafeAreaInsets();
+  const [services, setServices] = useState<{ name: string; ok: boolean }[] | null>(null);
+  const [watching, setWatching] = useState<JfSession[]>([]);
+  const load = useCallback(() => {
+    serverCall<{ services: { name: string; ok: boolean }[] }>(settings, '/api/uptime')
+      .then((r) => setServices(r.services))
+      .catch(() => setServices(null));
+    jf.sessions(settings)
+      .then((l) => setWatching(l.filter((x) => x.NowPlayingItem)))
+      .catch(() => {});
+  }, [settings]);
+  useFocusEffect(
+    useCallback(() => {
+      load();
+      const t = setInterval(load, 15000);
+      return () => clearInterval(t);
+    }, [load])
+  );
+  const bad = services?.filter((x) => !x.ok) ?? [];
+  return (
+    <SectionCollapse.Provider value={COLLAPSE}>
+      <ScrollView
+        style={{ flex: 1, backgroundColor: C.bg }}
+        contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: TAB_SPACE + 20, gap: 14 }}
+        refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
+        <AutoHeader
+          title="Performance"
+          sub={!services ? 'Connexion au serveur…' : bad.length ? `${bad.map((x) => x.name).join(', ')} hors ligne` : 'Tout fonctionne'}
+          color={!services ? C.textFaint : bad.length ? C.danger : C.success}
+        />
+        <View style={styles.bigCard}>
+          <View style={styles.rowBetween}>
+            <Text style={styles.bigCardTitle}>En lecture</Text>
+            <Text style={[styles.bigNum, { color: watching.length ? C.success : C.textDim }]}>{watching.length}</Text>
+          </View>
+          {!watching.length ? <Text style={styles.small}>Personne ne regarde en ce moment.</Text> : null}
+          {watching.map((w) => (
+            <View key={w.Id} style={styles.watchRow}>
+              <Ionicons name={w.PlayState?.IsPaused ? 'pause' : 'play'} size={13} color={C.success} />
+              <Text style={[styles.title, { fontSize: 14 }]}>{w.UserName}</Text>
+              <Text style={[styles.small, { flex: 1 }]} numberOfLines={1}>
+                {w.NowPlayingItem?.SeriesName ? `${w.NowPlayingItem.SeriesName} · ` : ''}
+                {w.NowPlayingItem?.Name}
+              </Text>
+            </View>
+          ))}
+        </View>
+        <UptimeSection />
+        <ServerActionsSection />
+        <StorageSection />
+      </ScrollView>
+    </SectionCollapse.Provider>
+  );
+}
+
+/** Onglet « Seed » : ratio et marge par site, torrents en partage, réglages du partage. */
+export function AutoSeedScreen() {
+  const insets = useSafeAreaInsets();
+  const { st, load } = useAutoState();
+  const seeding = st?.grabs.filter((g) => g.seeding) ?? [];
+  const up = seeding.reduce((n, g) => n + (g.upSpeed || 0), 0);
+  const goal = st?.seed ?? { ratio: 1, days: 7 };
+  return (
+    <SectionCollapse.Provider value={COLLAPSE}>
+      <ScrollView
+        style={{ flex: 1, backgroundColor: C.bg }}
+        contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: TAB_SPACE + 20, gap: 14 }}
+        refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
+        <AutoHeader title="Seed" sub={st ? `${seeding.length} en partage · ↑ ${fmtSpeed2(up)}` : null} color={seeding.length ? C.success : C.textFaint} />
+        <RatioTab />
+        {st ? (
+          <Fold id="seed-list" title="En partage" count={seeding.length} color={seeding.length ? C.success : undefined}>
+            {!seeding.length ? <Text style={styles.help}>Rien en partage pour le moment.</Text> : null}
+            {seeding.map((g) => {
+              const pct = Math.min(100, Math.max(goal.ratio ? ((g.ratio ?? 0) / goal.ratio) * 100 : 0, goal.days ? ((g.seedTime ?? 0) / (goal.days * 86400)) * 100 : 0));
+              return (
+                <View key={g.id} style={styles.card}>
+                  <View style={{ flex: 1, gap: 4 }}>
+                    <View style={styles.rowBetween}>
+                      <Text style={[styles.title, { flex: 1 }]} numberOfLines={1}>
+                        {g.title}
+                      </Text>
+                      <Text style={[styles.title, { color: (g.ratio ?? 0) >= 1 ? C.success : C.warning }]}>{(g.ratio ?? 0).toFixed(2).replace('.', ',')}</Text>
+                    </View>
+                    <Text style={styles.small}>
+                      ↑ {gb(g.uploaded ?? 0)} envoyés · {fmtEta(g.seedTime)} de partage{g.upSpeed ? ` · ${fmtSpeed2(g.upSpeed)}` : ''}
+                    </Text>
+                    <View style={styles.bar}>
+                      <View style={[styles.barFill, { width: `${pct || 2}%`, backgroundColor: C.success }]} />
+                    </View>
+                  </View>
+                </View>
+              );
+            })}
+          </Fold>
+        ) : null}
+        <QbitPrefsSection />
+      </ScrollView>
+    </SectionCollapse.Provider>
+  );
+}
+
+/** Onglet « qBittorrent » : interrupteurs, téléchargements en cours, liste des torrents, historique. */
+export function AutoQbitScreen() {
+  const insets = useSafeAreaInsets();
+  const { st, error, load, save } = useAutoState();
+  const [itemOpen, setItemOpen] = useState<string | null>(null);
+  const open = st?.items.find((i) => i.id === itemOpen) ?? null;
+  const running = st?.grabs.filter((g) => RUNNING.includes(g.state)) ?? [];
+  const down = running.reduce((n, g) => n + (g.paused ? 0 : g.speed || 0), 0);
+  return (
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <SectionCollapse.Provider value={COLLAPSE}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: TAB_SPACE + 20, gap: 14 }}
+          refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
+          <AutoHeader title="qBittorrent" sub={st ? (running.length ? `${running.length} en téléchargement · ↓ ${fmtSpeed2(down)}` : 'Rien en téléchargement') : null} color={running.length ? C.accent : C.textFaint} />
+          {!st ? (
+            <Loading error={error} />
+          ) : (
+            <>
+              <Switches st={st} save={save} running={running.length} toChoose={st.items.filter((i) => i.needsChoice).length} />
+              <Telechargements st={st} reload={load} onItem={(id) => setItemOpen(id)} hideSeed />
+              <Fold id="qb-all" title="Tous les torrents" defaultOpen={false}>
+                <QbitTab noPrefs />
+              </Fold>
+            </>
+          )}
+        </ScrollView>
+      </SectionCollapse.Provider>
+      {open && st ? <ItemSheet item={open} st={st} onClose={() => setItemOpen(null)} reload={load} /> : null}
+    </View>
+  );
+}
+
+/** Onglet « Demandes » : les demandes de la famille, les titres suivis par Lumio Auto, les épisodes manquants. */
+export function AutoDemandesScreen() {
+  const insets = useSafeAreaInsets();
+  const [part, setPart] = useState<'demandes' | 'titres' | 'manquants'>('demandes');
+  const { st, error, load } = useAutoState();
+  const [itemOpen, setItemOpen] = useState<string | null>(null);
+  const open = st?.items.find((i) => i.id === itemOpen) ?? null;
+  const toChoose = st?.items.filter((i) => i.needsChoice).length ?? 0;
+  const seg = (
+    <View style={[styles.seg, { marginHorizontal: 16, marginBottom: 10 }]}>
+      {(
+        [
+          { id: 'demandes', label: 'Demandes', badge: 0 },
+          { id: 'titres', label: 'Titres', badge: toChoose },
+          { id: 'manquants', label: 'Manquants', badge: 0 },
+        ] as const
+      ).map((t) => (
+        <Pressable key={t.id} onPress={() => setPart(t.id)} style={[styles.segItem, part === t.id && styles.segOn]} accessibilityRole="tab" accessibilityState={{ selected: part === t.id }}>
+          <Text style={[styles.segTxt, part === t.id && { color: '#000' }]}>{t.label}</Text>
+          {t.badge ? (
+            <View style={[styles.segBadge, { backgroundColor: C.warning }]}>
+              <Text style={styles.segBadgeTxt}>{t.badge}</Text>
+            </View>
+          ) : null}
+        </Pressable>
+      ))}
+    </View>
+  );
+  const header = (
+    <View>
+      <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
+        <AutoHeader title="Demandes" sub={toChoose ? `${toChoose} version(s) à choisir` : null} color={toChoose ? C.warning : undefined} />
+      </View>
+      {seg}
+    </View>
+  );
+  if (part === 'demandes') return <ServerRequests header={header} />;
+  return (
+    <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
+      <SectionCollapse.Provider value={COLLAPSE}>
+        <ScrollView contentContainerStyle={{ paddingBottom: TAB_SPACE + 20 }} refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
+          {header}
+          <View style={{ paddingHorizontal: 16, gap: 12 }}>
+            {part === 'titres' ? st ? <Demandes st={st} onItem={(i) => setItemOpen(i.id)} /> : <Loading error={error} /> : <Manquants />}
+          </View>
+        </ScrollView>
+      </SectionCollapse.Provider>
+      {open && st ? <ItemSheet item={open} st={st} onClose={() => setItemOpen(null)} reload={load} /> : null}
+    </View>
+  );
+}

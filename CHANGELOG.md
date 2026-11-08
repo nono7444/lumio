@@ -6,6 +6,13 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Lumio Auto réorganisée en quatre onglets :
+  - Performance : services, machine, qui regarde quoi, mises à jour et redémarrages, disques ;
+  - Seed : ratio et marge par site, torrents en partage, réglages du partage ;
+  - Demandes : les demandes, les titres suivis par Lumio Auto, les épisodes manquants ;
+  - qBittorrent : interrupteurs, téléchargements en cours, historique, tous les torrents.
+  Les réglages sont derrière la roue, en haut à droite de chaque onglet.
+
 ## 1.0.147 — 8 novembre 2026
 
 - Lumio Auto redessinée, pour la gestion du serveur seulement. Quatre onglets :

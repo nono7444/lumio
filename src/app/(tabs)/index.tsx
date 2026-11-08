@@ -2,7 +2,7 @@ import { HomeShortcuts } from '@/components/home-shortcuts';
 import { PlatformsRow } from '@/components/platforms-row';
 import { ProfileRank } from '@/components/rank-shield';
 import { router, useFocusEffect } from 'expo-router';
-import { AutoDashboard } from '@/components/auto-dashboard';
+import { AutoPerfScreen } from '@/components/auto-admin';
 import { IS_AUTO } from '@/lib/variant';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useCached } from '@/lib/cached';
@@ -330,8 +330,8 @@ function JfDynamicRow({ kind, view, nonce }: { kind: 'continue' | 'nextup' | 'fa
 }
 
 export default function HomeTab() {
-  // Lumio Auto : tableau de bord du serveur
-  if (IS_AUTO) return <AutoDashboard />;
+  // Lumio Auto : onglet « Performance » (le serveur)
+  if (IS_AUTO) return <AutoPerfScreen />;
   return <Home />;
 }
 

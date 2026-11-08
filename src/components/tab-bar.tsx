@@ -23,7 +23,7 @@ import { IS_AUTO } from '@/lib/variant';
 type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>>[0];
 
 const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
-  index: IS_AUTO ? 'speedometer' : 'home',
+  index: IS_AUTO ? 'pulse' : 'home',
   search: 'search',
   library: 'albums',
   calendar: 'calendar',
@@ -31,14 +31,15 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   chat: 'chatbubbles',
   activity: 'file-tray-full',
   watchlist: 'bookmark',
-  auto: IS_AUTO ? 'magnet' : 'flash',
+  auto: IS_AUTO ? 'arrow-up-circle' : 'flash',
+  qbit: 'magnet',
   // Lumio Auto : l'onglet « Réglages »
   settings: 'settings',
 };
 
 // Libellés courts, affichés sous chaque icône (comme la barre d'onglets d'iOS)
 const SHORT: Record<string, string> = {
-  index: IS_AUTO ? 'Tableau' : 'Accueil',
+  index: IS_AUTO ? 'Perf' : 'Accueil',
   search: 'Recherche',
   library: 'Biblio',
   calendar: 'Agenda',
@@ -46,7 +47,8 @@ const SHORT: Record<string, string> = {
   chat: 'Chat',
   activity: 'Demandes',
   watchlist: 'À voir',
-  auto: IS_AUTO ? 'Torrents' : 'Auto',
+  auto: IS_AUTO ? 'Seed' : 'Auto',
+  qbit: 'qBit',
   settings: IS_AUTO ? 'Réglages' : 'Profil',
 };
 

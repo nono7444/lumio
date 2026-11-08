@@ -7,10 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AnnouncementEditor } from '@/components/announcement';
 import { AppVersionSection } from '@/components/app-version';
-import { ServerActionsSection } from '@/components/server-actions';
-import { StorageSection } from '@/components/storage-section';
 import { Button, Field, ScreenTitle, Section, SectionCollapse, SectionGroup } from '@/components/ui';
-import { UptimeSection } from '@/components/uptime';
 import { C, TAB_SPACE } from '@/constants/theme';
 import { serverCall } from '@/lib/chat';
 import { logout as logoutJellyfin } from '@/lib/jellyfin';
@@ -48,14 +45,8 @@ export function AutoServerScreen() {
           style={{ flex: 1, backgroundColor: C.bg }}
           contentContainerStyle={{ paddingTop: insets.top, paddingHorizontal: 16, paddingBottom: TAB_SPACE }}
           keyboardShouldPersistTaps="handled">
-          <ScreenTitle title="Réglages" />
+          <ScreenTitle title="Réglages" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
           <AppVersionSection />
-
-          <SectionGroup title="Serveur" id="la-grp-serveur">
-            <ServerActionsSection />
-            <UptimeSection />
-            <StorageSection />
-          </SectionGroup>
 
           <SectionGroup title="Torrents" id="la-grp-torrents">
             <Section title="Lumio Auto" id="la-reglages">

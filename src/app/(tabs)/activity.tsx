@@ -11,6 +11,8 @@ import { Button, ScreenTitle, SegChip, SetupPrompt } from '@/components/ui';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { formatBytes, radarr, refreshDownloads, sonarr, type QueueItem } from '@/lib/arr';
 import { ServerRequests } from '@/components/server-requests';
+import { AutoDemandesScreen } from '@/components/auto-admin';
+import { IS_AUTO } from '@/lib/variant';
 import { invalidateHealth, lumio } from '@/lib/lumio-server';
 import { useServerRequests } from '@/lib/requests';
 import { openMedia } from '@/lib/navigation';
@@ -237,7 +239,12 @@ const styles = StyleSheet.create({
   barFill: { height: '100%', borderRadius: 3 },
 });
 
-export default function Activity() {
+export default function ActivityTab() {
+  // Lumio Auto : Demandes + Titres suivis + Manquants
+  return IS_AUTO ? <AutoDemandesScreen /> : <Activity />;
+}
+
+function Activity() {
   const { settings } = useSettings();
   const [nonce, setNonce] = useState(0);
   const serverReq = useServerRequests(nonce);
