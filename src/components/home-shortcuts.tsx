@@ -12,6 +12,7 @@ import { useTabInBar } from '@/lib/home-layout';
 import { useActiveDownloads } from '@/lib/files';
 import { useProblemCount } from '@/lib/ideas';
 import { useSettings } from '@/lib/settings';
+import { adminUI } from '@/lib/variant';
 
 const MONTHS = ['JANV', 'FÉVR', 'MARS', 'AVR', 'MAI', 'JUIN', 'JUIL', 'AOÛT', 'SEPT', 'OCT', 'NOV', 'DÉC'];
 
@@ -45,7 +46,7 @@ export function HomeShortcuts({ onCustomize }: { onCustomize: () => void }) {
   const { settings } = useSettings();
   const problems = useProblemCount();
   const downloads = useActiveDownloads();
-  const admin = settings.jellyfin?.isAdmin === true && Boolean(settings.chatUrl);
+  const admin = adminUI(settings) && Boolean(settings.chatUrl);
   const unread = useUnreadChat();
   const calendarInBar = useTabInBar('calendar');
   const chatInBar = useTabInBar('chat');

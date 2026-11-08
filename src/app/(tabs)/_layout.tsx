@@ -6,6 +6,8 @@ import { FloatingTabBar } from '@/components/tab-bar';
 import { C } from '@/constants/theme';
 import { fetchIsAdmin } from '@/lib/jellyfin';
 import { useSettings } from '@/lib/settings';
+import { IS_AUTO } from '@/lib/variant';
+import { AutoAdminOnly } from '@/components/auto-server';
 
 // « Qui regarde ? » proposé une fois par ouverture de l'appli (si des profils existent)
 let askedThisLaunch = false;
@@ -15,7 +17,7 @@ export default function TabsLayout() {
 
   useEffect(() => {
     const h = settings.household;
-    if (askedThisLaunch || Platform.isTV || !h || !h.askOnLaunch || !h.count || !settings.jellyfin) return;
+    if (askedThisLaunch || IS_AUTO || Platform.isTV || !h || !h.askOnLaunch || !h.count || !settings.jellyfin) return;
     askedThisLaunch = true;
     const t = setTimeout(() => router.push('/profiles'), 300);
     return () => clearTimeout(t);
@@ -48,6 +50,28 @@ export default function TabsLayout() {
   // Premier lancement : écran de connexion Jellyfin (on peut le passer)
   if (!settings.jellyfin && !settings.skipJellyfin) return <Redirect href="/login" />;
 
+  // Lumio Auto : appli de l'admin, quatre onglets
+  if (IS_AUTO) {
+    if (settings.jellyfin && settings.jellyfin.isAdmin === false) return <AutoAdminOnly />;
+    return (
+      <Tabs
+        tabBar={(props) => <FloatingTabBar {...props} />}
+        initialRouteName="auto"
+        screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: C.bg } }}>
+        <Tabs.Screen name="auto" options={{ title: 'Auto' }} />
+        <Tabs.Screen name="activity" options={{ title: 'Demandes' }} />
+        <Tabs.Screen name="library" options={{ title: 'Bibliothèque' }} />
+        <Tabs.Screen name="settings" options={{ title: 'Serveur' }} />
+        <Tabs.Screen name="index" options={{ href: null }} />
+        <Tabs.Screen name="search" options={{ href: null }} />
+        <Tabs.Screen name="live" options={{ href: null }} />
+        <Tabs.Screen name="calendar" options={{ href: null }} />
+        <Tabs.Screen name="chat" options={{ href: null }} />
+        <Tabs.Screen name="watchlist" options={{ href: null }} />
+      </Tabs>
+    );
+  }
+
   return (
     <Tabs
       tabBar={(props) => <FloatingTabBar {...props} />}
@@ -65,7 +89,8 @@ export default function TabsLayout() {
       <Tabs.Screen name="chat" options={{ title: 'Chat', href: settings.jellyfin ? undefined : null }} />
       <Tabs.Screen name="activity" options={{ title: 'Demandes' }} />
       {/* Lumio Auto : admin seulement, jamais sur la TV */}
-      <Tabs.Screen name="auto" options={{ title: 'Auto', href: settings.jellyfin?.isAdmin && !Platform.isTV ? undefined : null }} />
+      {/* Lumio Auto est une appli à part (outils d'admin) */}
+      <Tabs.Screen name="auto" options={{ title: 'Auto', href: null }} />
       <Tabs.Screen name="watchlist" options={{ title: 'À voir', href: Platform.isTV ? null : undefined }} />
       <Tabs.Screen name="settings" options={{ title: 'Profil' }} />
     </Tabs>

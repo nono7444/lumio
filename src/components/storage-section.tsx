@@ -11,6 +11,7 @@ import { C, R } from '@/constants/theme';
 import { formatBytes } from '@/lib/arr';
 import { serverCall } from '@/lib/chat';
 import { useSettings } from '@/lib/settings';
+import { adminUI } from '@/lib/variant';
 
 type Disk = { path: string; label: string; free: number; total: number };
 type Item = {
@@ -53,7 +54,7 @@ export function StorageSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.chatUrl, settings.jellyfin?.token]);
 
-  if (!settings.chatUrl || settings.jellyfin?.isAdmin !== true || Platform.isTV) return null;
+  if (!settings.chatUrl || !adminUI(settings) || Platform.isTV) return null;
 
   // Plus de liste « À nettoyer » (titres jamais / plus regardés) : seulement les plus gros, supprimés à la main
   const list = report ? report.biggest : [];

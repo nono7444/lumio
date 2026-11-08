@@ -23,6 +23,7 @@ import {
   type SecourTarget,
 } from '@/lib/secour';
 import { useSettings } from '@/lib/settings';
+import { adminUI } from '@/lib/variant';
 
 const STATUS_COLOR: Record<string, string> = { online: C.success, offline: C.danger, unconfigured: C.textFaint, unknown: C.warning };
 const STATUS_FR: Record<string, string> = { online: 'En ligne', offline: 'Hors ligne', unconfigured: 'Non configurée', unknown: 'Pas encore vérifiée' };
@@ -53,7 +54,7 @@ const fmtDate = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString
 export default function SecourAdmin() {
   const { settings } = useSettings();
   const insets = useSafeAreaInsets();
-  const admin = settings.jellyfin?.isAdmin === true;
+  const admin = adminUI(settings);
 
   const [status, setStatus] = useState<SecourStatus | null>(null);
   const [auto, setAuto] = useState<SecourAuto | null>(null);

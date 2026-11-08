@@ -4,13 +4,18 @@ import Constants from 'expo-constants';
 import { useEffect, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 
+import { IS_AUTO } from './variant';
+
 export const APP_VERSION = Constants.expoConfig?.version ?? '0.0.0';
 export const SOURCE_URL = 'https://github.com/nono7444/lumio/releases/latest/download/altstore.json';
 export const RELEASES_URL = 'https://github.com/nono7444/lumio/releases/latest';
 /** Android : l'APK de la dernière version (s'installe par-dessus, réglages conservés). */
 export const ANDROID_APK_URL = Platform.isTV
   ? 'https://github.com/nono7444/lumio/releases/latest/download/lumio-tv.apk'
-  : 'https://github.com/nono7444/lumio/releases/latest/download/lumio-android.apk';
+  : IS_AUTO
+    ? 'https://github.com/nono7444/lumio/releases/latest/download/lumio-auto-android.apk'
+    : 'https://github.com/nono7444/lumio/releases/latest/download/lumio-android.apk';
+const BUNDLE_ID = IS_AUTO ? 'lol.wawanono.lumio.auto' : 'lol.wawanono.lumio';
 /** Mac : l'image disque de la dernière version (glisser Lumio dans Applications pour remplacer l'ancienne). */
 export const MAC_DMG_URL = 'https://github.com/nono7444/lumio/releases/latest/download/lumio-mac.dmg';
 
@@ -40,7 +45,7 @@ async function check(force = false) {
       const res = await fetch(`${SOURCE_URL}?t=${Date.now()}`, { headers: { 'Cache-Control': 'no-cache' } });
       if (!res.ok) return;
       const src = await res.json();
-      const app = src?.apps?.[0];
+      const app = src?.apps?.find((a: any) => a?.bundleIdentifier === BUNDLE_ID) ?? src?.apps?.[0];
       const v = app?.versions?.[0];
       const version = v?.version ?? app?.version;
       if (typeof version !== 'string') return;

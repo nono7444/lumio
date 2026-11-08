@@ -1,4 +1,4 @@
-name: Build Lumio (iOS, Android, Android TV, Mac)
+name: Build Lumio et Lumio Auto (iOS, Android)
 
 # Lance le build à chaque push sur main, à chaque tag v*, ou à la main depuis l'onglet Actions.
 on:
@@ -25,9 +25,22 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
 
+  # Deux applis du même code : Lumio (famille) et Lumio Auto (admin, APP_VARIANT=auto)
   ios:
     needs: check
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: lumio
+            proj: Lumio
+            ipa: lumio-unsigned.ipa
+          - variant: auto
+            proj: LumioAuto
+            ipa: lumio-auto-unsigned.ipa
+    env:
+      APP_VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -47,8 +60,8 @@ jobs:
       - name: Compile l'app (non signée)
         run: |
           xcodebuild \
-            -workspace ios/Lumio.xcworkspace \
-            -scheme Lumio \
+            -workspace ios/${{ matrix.proj }}.xcworkspace \
+            -scheme ${{ matrix.proj }} \
             -configuration Release \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
@@ -61,25 +74,35 @@ jobs:
               exit 1
             }
           tail -n 20 xcodebuild.log
-          test -f build/Build/Products/Release-iphoneos/Lumio.app/Info.plist
+          test -f build/Build/Products/Release-iphoneos/${{ matrix.proj }}.app/Info.plist
       - name: Emballe l'IPA (à resigner avec SideStore / AltStore / Sideloadly)
         run: |
           mkdir Payload
-          cp -R build/Build/Products/Release-iphoneos/Lumio.app Payload/
-          zip -qry lumio-unsigned.ipa Payload
+          cp -R build/Build/Products/Release-iphoneos/${{ matrix.proj }}.app Payload/
+          zip -qry ${{ matrix.ipa }} Payload
           # Garde-fou : une IPA de quelques octets ne doit jamais être publiée
-          size=$(stat -c %s lumio-unsigned.ipa 2>/dev/null || stat -f %z lumio-unsigned.ipa)
+          size=$(stat -c %s ${{ matrix.ipa }} 2>/dev/null || stat -f %z ${{ matrix.ipa }})
           echo "IPA : $size octets"
-          if [ "$size" -lt 5000000 ]; then echo "::error::IPA anormalement petite ($size octets)"; ls -la Payload/Lumio.app | head -30; exit 1; fi
+          if [ "$size" -lt 5000000 ]; then echo "::error::IPA anormalement petite ($size octets)"; ls -la Payload/${{ matrix.proj }}.app | head -30; exit 1; fi
       - uses: actions/upload-artifact@v4
         with:
-          name: lumio-ios
-          path: lumio-unsigned.ipa
+          name: ${{ matrix.variant }}-ios
+          path: ${{ matrix.ipa }}
 
   # Appli Android (téléphones) : APK signé avec une clé fixe, pour pouvoir mettre à jour par-dessus
   android:
     needs: check
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: lumio
+            apk: lumio-android.apk
+          - variant: auto
+            apk: lumio-auto-android.apk
+    env:
+      APP_VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -110,16 +133,26 @@ jobs:
           }
           tail -n 15 gradle.log
       - name: Renomme l'APK
-        run: cp android/app/build/outputs/apk/release/app-release.apk lumio-android.apk
+        run: cp android/app/build/outputs/apk/release/app-release.apk ${{ matrix.apk }}
       - uses: actions/upload-artifact@v4
         with:
-          name: lumio-android
-          path: lumio-android.apk
+          name: ${{ matrix.variant }}-android
+          path: ${{ matrix.apk }}
 
   android-smoke:
     needs: android
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: lumio
+            apk: lumio-android.apk
+            pkg: lol.wawanono.lumio
+          - variant: auto
+            apk: lumio-auto-android.apk
+            pkg: lol.wawanono.lumio.auto
     steps:
       - name: Accélération matérielle de l'émulateur
         run: |
@@ -128,7 +161,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - uses: actions/download-artifact@v4
         with:
-          name: lumio-android
+          name: ${{ matrix.variant }}-android
       - name: Ouvre l'appli 40 s sur un téléphone virtuel (Android 14)
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -138,12 +171,12 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           script: |
-            adb install -r lumio-android.apk
+            adb install -r ${{ matrix.apk }}
             adb logcat -c
-            adb shell monkey -p lol.wawanono.lumio -c android.intent.category.LAUNCHER 1
+            adb shell monkey -p ${{ matrix.pkg }} -c android.intent.category.LAUNCHER 1
             sleep 40
             adb logcat -d > logcat.txt || true
-            if adb shell pidof lol.wawanono.lumio > /dev/null; then echo "::notice::L'appli tourne toujours après 40 s"; else msg=$(grep -A30 "FATAL EXCEPTION" logcat.txt | head -32 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}'); echo "::error::Plantage au démarrage%0A$msg"; exit 1; fi
+            if adb shell pidof ${{ matrix.pkg }} > /dev/null; then echo "::notice::L'appli tourne toujours après 40 s"; else msg=$(grep -A30 "FATAL EXCEPTION" logcat.txt | head -32 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}'); echo "::error::Plantage au démarrage%0A$msg"; exit 1; fi
 
   release:
     needs: [ios, android, android-smoke]
@@ -161,7 +194,7 @@ jobs:
           merge-multiple: true
       - name: APK Android non publié s'il plante au démarrage
         if: ${{ needs.android-smoke.result != 'success' }}
-        run: rm -f lumio-android.apk
+        run: rm -f lumio-android.apk lumio-auto-android.apk
       - name: Notes de version (section « À venir » du CHANGELOG, sinon message du commit)
         env:
           COMMIT_MSG: ${{ github.event.head_commit.message }}
@@ -183,6 +216,7 @@ jobs:
             echo "---"
             echo "iPhone : mets à jour depuis FlareStore (source : https://github.com/${{ github.repository }}/releases/latest/download/altstore.json), ou installe lumio-unsigned.ipa avec Sideloadly / SideStore."
             echo "Android (téléphone) : https://github.com/${{ github.repository }}/releases/latest/download/lumio-android.apk"
+            echo "Lumio Auto (admin) : dans la même source FlareStore ; Android : https://github.com/${{ github.repository }}/releases/latest/download/lumio-auto-android.apk"
             echo "Android TV : Lumio TV (https://github.com/nono7444/lumio-tv/releases/latest), ou lumio.wawanono.lol/tv dans Downloader"
             echo "Toutes les notes : https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md"
           } > body.md
@@ -197,6 +231,8 @@ jobs:
           files: |
             lumio-unsigned.ipa
             lumio-android.apk
+            lumio-auto-unsigned.ipa
+            lumio-auto-android.apk
             altstore.json
       - name: Range les notes sous le numéro de version dans CHANGELOG.md
         if: github.ref == 'refs/heads/main'

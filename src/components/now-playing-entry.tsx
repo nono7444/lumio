@@ -9,6 +9,7 @@ import { tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
 import { jf, type JfSession } from '@/lib/jellyfin';
 import { useSettings } from '@/lib/settings';
+import { adminUI } from '@/lib/variant';
 
 export function NowPlayingEntry() {
   const { settings } = useSettings();
@@ -16,7 +17,7 @@ export function NowPlayingEntry() {
 
   useFocusEffect(
     useCallback(() => {
-      if (!settings.jellyfin || settings.jellyfin.isAdmin === false) return;
+      if (!settings.jellyfin || !adminUI(settings)) return;
       const load = () => jf.sessions(settings).then(setList).catch(() => {});
       load();
       const t = setInterval(load, 15000);
@@ -24,7 +25,7 @@ export function NowPlayingEntry() {
     }, [settings])
   );
 
-  if (!settings.jellyfin || settings.jellyfin.isAdmin === false) return null;
+  if (!settings.jellyfin || !adminUI(settings)) return null;
   const playing = (list ?? []).filter((s) => s.NowPlayingItem);
   const names = [...new Set(playing.map((s) => s.UserName).filter(Boolean))];
 

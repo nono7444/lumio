@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 
 import { serverCall } from './chat';
 import { useSettings, type Settings } from './settings';
+import { adminUI } from './variant';
 
 export type Disk = { name: string; free: number | null; total: number | null };
 export type FileEntry = { name: string; dir: boolean; size: number; mtime: string | null };
@@ -69,7 +70,7 @@ export function formatSize(n?: number | null) {
 export function useActiveDownloads() {
   const { settings } = useSettings();
   const [n, setN] = useState(0);
-  const admin = settings.jellyfin?.isAdmin === true;
+  const admin = adminUI(settings);
   useEffect(() => {
     if (!admin || !settings.chatUrl) return;
     let alive = true;

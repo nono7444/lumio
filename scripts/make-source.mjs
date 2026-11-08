@@ -1,7 +1,7 @@
 // Génère la source AltStore (compatible FlareStore, SideStore, ESign…) pour la dernière build.
 // Usage : node scripts/make-source.mjs <version> <tag> <ipa>
 // Bêta : SOURCE_KIND=beta → « Lumio Bêta », identifiant lol.wawanono.lumio.beta, fichier altstore-beta.json
-import { statSync, writeFileSync } from 'node:fs';
+import { existsSync, statSync, writeFileSync } from 'node:fs';
 
 const [version, tag, ipa = 'lumio-unsigned.ipa'] = process.argv.slice(2);
 const repo = process.env.GITHUB_REPOSITORY || 'nono7444/lumio';
@@ -49,6 +49,30 @@ const source = {
   ],
   news: [],
 };
+
+// Lumio Auto (appli de l'admin) : dans la même source quand son IPA existe
+const autoIpa = 'lumio-auto-unsigned.ipa';
+if (!beta && existsSync(autoIpa)) {
+  const autoSize = statSync(autoIpa).size;
+  const autoURL = `https://github.com/${repo}/releases/download/${tag}/${autoIpa}`;
+  const autoIcon = `https://raw.githubusercontent.com/${repo}/main/assets/images/auto/icon.png`;
+  source.apps.push({
+    name: 'Lumio Auto',
+    bundleIdentifier: 'lol.wawanono.lumio.auto',
+    developerName: 'Norman',
+    subtitle: 'L’admin du serveur Lumio',
+    localizedDescription: 'Lumio Auto, torrents et partage, ratio, demandes à valider, état et mises à jour du serveur Lumio.',
+    iconURL: autoIcon,
+    tintColor: '#FF7A1A',
+    category: 'utilities',
+    version,
+    versionDate: date,
+    downloadURL: autoURL,
+    size: autoSize,
+    versions: [{ version, buildVersion: version.split('.').pop(), date, size: autoSize, downloadURL: autoURL, minOSVersion: '16.4', localizedDescription: notes || `Build ${tag}` }],
+    appPermissions: { entitlements: [], privacy: {} },
+  });
+}
 
 writeFileSync(out, JSON.stringify(source, null, 2));
 console.log(`${out} : Lumio ${version} → ${downloadURL} (${size} octets)`);

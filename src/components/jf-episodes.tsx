@@ -14,6 +14,7 @@ import { formatRuntime, jf, jfEpisodeThumb, type JfItem } from '@/lib/jellyfin';
 import { useSettings } from '@/lib/settings';
 import { serverCall } from '@/lib/chat';
 import { usePrompt } from '@/components/prompt-modal';
+import { adminUI } from '@/lib/variant';
 
 /** Saisons et épisodes d'une série Jellyfin (partagé par la fiche Jellyfin et la fiche TMDB). */
 export function useSeriesEpisodes(seriesId: string | undefined) {
@@ -87,7 +88,7 @@ export function EpisodePicker({
   useEffect(() => setLimit(30), [season]);
   if (!seasons.length) return null;
   const current = seasons.find((x) => x.Id === season);
-  const admin = settings.jellyfin?.isAdmin === true && Boolean(settings.chatUrl) && !Platform.isTV;
+  const admin = adminUI(settings) && Boolean(settings.chatUrl) && !Platform.isTV;
 
   // Admin : « Saison 3 » qui est en fait la saison 2 (séries en parties…) → changement de numéro
   const renumber = async () => {

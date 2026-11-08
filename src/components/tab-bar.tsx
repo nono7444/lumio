@@ -18,6 +18,7 @@ import { orderTabs } from '@/lib/home-layout';
 import { useSeason } from '@/lib/seasons';
 import { useAppUpdate } from '@/lib/app-update';
 import { useSettings } from '@/lib/settings';
+import { IS_AUTO } from '@/lib/variant';
 
 type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>>[0];
 
@@ -31,6 +32,8 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   activity: 'file-tray-full',
   watchlist: 'bookmark',
   auto: 'flash',
+  // Lumio Auto : l'onglet « Serveur »
+  settings: 'server',
 };
 
 // Libellés courts, affichés sous chaque icône (comme la barre d'onglets d'iOS)
@@ -44,7 +47,7 @@ const SHORT: Record<string, string> = {
   activity: 'Demandes',
   watchlist: 'À voir',
   auto: 'Auto',
-  settings: 'Profil',
+  settings: IS_AUTO ? 'Serveur' : 'Profil',
 };
 
 const glass = Platform.OS === 'ios' && isLiquidGlassAvailable();
@@ -205,7 +208,7 @@ function PhoneTabBar({ state, descriptors, navigation }: TabBarProps) {
           const { options } = descriptors[route.key];
           const label = typeof options.title === 'string' ? options.title : route.name;
           const short = SHORT[route.name] ?? label;
-          const isProfile = route.name === 'settings';
+          const isProfile = route.name === 'settings' && !IS_AUTO;
           const color = focused ? activeColor : C.textDim;
           const dot = (route.name === 'chat' && unread > 0) || (route.name === 'settings' && update);
           const count = route.name === 'activity' ? pending : 0;

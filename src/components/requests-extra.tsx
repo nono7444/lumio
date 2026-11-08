@@ -14,6 +14,7 @@ import { serverCall } from '@/lib/chat';
 import { filesApi, formatSize, type DownloadJob } from '@/lib/files';
 import { openMedia } from '@/lib/navigation';
 import { useSettings } from '@/lib/settings';
+import { adminUI } from '@/lib/variant';
 
 function Block({ title, count, open, onToggle, children }: { title: string; count?: string; open: boolean; onToggle: () => void; children: ReactNode }) {
   return (
@@ -59,7 +60,7 @@ export function DiskDownloadsBlock() {
   const { settings } = useSettings();
   const [jobs, setJobs] = useState<DownloadJob[]>([]);
   const [open, setOpen] = useState(true);
-  const admin = settings.jellyfin?.isAdmin === true;
+  const admin = adminUI(settings);
   const load = useCallback(() => {
     if (!admin) return;
     filesApi.downloads(settings).then(setJobs).catch(() => {});

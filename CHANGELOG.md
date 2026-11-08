@@ -6,6 +6,14 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Nouvelle appli **Lumio Auto** pour l'admin, sur iPhone et Android, avec une icône orange. Elle a quatre onglets :
+  - Auto : Titres, Manquants, Transferts, qBittorrent, Ratio ;
+  - Demandes : validation des demandes ;
+  - Bibliothèque : les actions d'admin sur les titres ;
+  - Serveur : état, mises à jour du serveur, stockage, utilisateurs et quotas, annonces, signalements, Lumio Secour, clé TMDB, compte.
+  Elle s'installe depuis la même source FlareStore que Lumio, ou avec l'APK lumio-auto-android.apk.
+- Lumio devient l'appli de la famille : plus d'onglet Auto ni d'outils d'admin. L'admin y trouve juste un bouton « Ouvrir Lumio Auto » dans le Profil.
+
 ## 1.0.145 — 8 novembre 2026
 
 - Auto → Ratio : la marge de téléchargement C411 s'affiche (envoyé ÷ 0,8 − reçu), avec une alerte sous 10 Go. Sans tes chiffres du site, la carte précise maintenant qu'elle ne montre que les torrents de Lumio.

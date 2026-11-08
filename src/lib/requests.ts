@@ -5,6 +5,7 @@ import type { LibraryEntry } from './arr';
 import { serverCall } from './chat';
 import { serverHealth, type ServerFolder } from './lumio-server';
 import { useSettings, type Settings } from './settings';
+import { adminUI } from './variant';
 
 // Valeurs identiques à Seerr (server/constants/media.ts)
 export const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 } as const;
@@ -231,7 +232,7 @@ export function timeAgo(iso: string) {
 export function usePendingRequests() {
   const { settings } = useSettings();
   const [n, setN] = useState(0);
-  const admin = settings.jellyfin?.isAdmin === true;
+  const admin = adminUI(settings);
   useEffect(() => {
     if (!admin || !settings.chatUrl) return;
     let alive = true;

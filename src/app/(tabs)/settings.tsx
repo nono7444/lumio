@@ -12,16 +12,14 @@ import { ADDONS_ENABLED } from '@/constants/features';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { AppVersionSection } from '@/components/app-version';
 import { ConnectTvButton } from '@/components/connect-tv';
-import { NowPlayingEntry } from '@/components/now-playing-entry';
 import { useAppUpdate } from '@/lib/app-update';
 import { ChatSection, ThemeSection } from '@/components/extra-sections';
-import { ServerStatusSection, SimpleServerDot } from '@/components/server-status';
-import { UptimeSection } from '@/components/uptime';
+import { SimpleServerDot } from '@/components/server-status';
 import { DEFAULT_TV_SCALE, TV_SCALES } from '@/lib/tv-ui';
-import { AnnouncementEditor } from '@/components/announcement';
 import { NotifySubscribeSection } from '@/components/notify-subscribe';
-import { ServerActionsSection } from '@/components/server-actions';
-import { StorageSection } from '@/components/storage-section';
+import { AutoServerScreen } from '@/components/auto-server';
+import { IS_AUTO, LUMIO_AUTO_URL } from '@/lib/variant';
+import * as Linking from 'expo-linking';
 import { HOME_BACKGROUNDS, pickHomePhoto } from '@/components/home-backdrop';
 import { Addon, DEFAULT_ADDON, isManager, useSettings, type HomeBackground } from '@/lib/settings';
 import { logout as logoutJellyfin, QUALITIES } from '@/lib/jellyfin';
@@ -100,7 +98,12 @@ function AddonCard({ addon, onChange, onRemove }: { addon: Addon; onChange: (a: 
   );
 }
 
-export default function SettingsScreen() {
+export default function SettingsTab() {
+  // Lumio Auto : l'onglet « Serveur » de l'admin ; Lumio : le profil de la famille, sans outils d'admin
+  return IS_AUTO ? <AutoServerScreen /> : <SettingsScreen />;
+}
+
+function SettingsScreen() {
   const { settings, update } = useSettings();
   // Sections repliées : « Tout ouvrir » / « Tout fermer » en haut
   const [allOpen, setAllOpen] = useState<boolean | null>(null);
@@ -199,8 +202,23 @@ export default function SettingsScreen() {
           />
         </View>
         {appUpdate ? <AppVersionSection /> : null}
-        {Platform.isTV ? null : <NowPlayingEntry />}
-        {Platform.isTV ? null : settings.jellyfin?.isAdmin && settings.chatUrl ? <UptimeSection /> : isManager(settings) ? <ServerStatusSection /> : <SimpleServerDot />}
+        {Platform.isTV ? null : <SimpleServerDot />}
+        {/* Admin : tous les outils sont dans l'appli Lumio Auto */}
+        {settings.jellyfin?.isAdmin && !Platform.isTV ? (
+          <Section title="Administration" id="admin-lumio-auto">
+            <Text style={styles.help}>Serveur, Lumio Auto, torrents, ratio, demandes à valider, utilisateurs et mises à jour sont dans l’appli Lumio Auto.</Text>
+            <Button
+              title="Ouvrir Lumio Auto"
+              icon="flash-outline"
+              variant="secondary"
+              onPress={() =>
+                Linking.openURL(LUMIO_AUTO_URL).catch(() =>
+                  Alert.alert('Lumio Auto', 'Installe Lumio Auto depuis FlareStore (même source que Lumio) ou avec l’APK lumio-auto-android.apk.')
+                )
+              }
+            />
+          </Section>
+        ) : null}
         {/* TV : profil épuré (serveur, demandes, idées, clés et options téléphone masqués) */}
         <SectionGroup title="Compte et serveur" id="grp-serveur">
         <Section title="Jellyfin">
@@ -242,20 +260,10 @@ export default function SettingsScreen() {
 
         {Platform.isTV || settings.jellyfin?.isAdmin === false ? null : <ChatSection />}
 
-        <ServerActionsSection />
-        {settings.jellyfin?.isAdmin && settings.chatUrl && !Platform.isTV ? (
-          <Section title="Lumio Auto" id="lumio-auto">
-            <Text style={styles.help}>Les sites (C411, TR4KER…) et les réglages : qualité, qBittorrent, partage, AllDebrid, dossiers.</Text>
-            <Button title="Sites et réglages de Lumio Auto" icon="flash-outline" variant="secondary" onPress={() => router.push('/lumio-auto')} />
-          </Section>
-        ) : null}
-        <StorageSection />
 
         {serverReq && !Platform.isTV ? (
           <Section title="Idées & signalements">
-            <Text style={styles.help}>
-              Propose une idée ou signale un bug. L’admin la reçoit en notification et peut la faire développer par Claude.
-            </Text>
+            <Text style={styles.help}>Propose une idée ou signale un bug. L’admin la reçoit en notification.</Text>
             <Button title="Idées & signalements" icon="bulb-outline" variant="secondary" onPress={() => router.push('/ideas')} />
           </Section>
         ) : null}
@@ -264,14 +272,6 @@ export default function SettingsScreen() {
         </SectionGroup>
 
         {serverReq && !Platform.isTV ? <NotifySubscribeSection /> : null}
-        {serverReq && settings.jellyfin?.isAdmin !== false && !Platform.isTV ? <AnnouncementEditor /> : null}
-
-        {serverReq && settings.jellyfin?.isAdmin !== false && !Platform.isTV ? (
-          <Section title="Demandes">
-            <Text style={styles.help}>Notifications push des demandes, validation automatique ou par toi, quotas de films et de saisons.</Text>
-            <Button title="Utilisateurs, droits et notifications" icon="people-outline" variant="secondary" onPress={() => router.push('/users')} />
-          </Section>
-        ) : null}
 
 
         <ThemeSection />
@@ -385,8 +385,8 @@ export default function SettingsScreen() {
           </View>
         </Section>
 
-        {/* Clé TMDB : réglage d'admin (les autres la reçoivent du serveur Lumio) */}
-        {Platform.isTV || settings.jellyfin?.isAdmin === false ? null : (
+        {/* Clé TMDB : partagée par le serveur Lumio (réglée dans Lumio Auto) ; ici seulement sans serveur */}
+        {Platform.isTV || settings.chatUrl ? null : (
         <Section title="TMDB">
           <Field
             label="Clé API"

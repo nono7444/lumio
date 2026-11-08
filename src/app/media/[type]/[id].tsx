@@ -33,6 +33,7 @@ import { chat } from '@/lib/chat';
 import { MoveFolder } from '@/components/move-folder';
 import { arrReady, hasTmdb, isManager, useSettings } from '@/lib/settings';
 import { pickLogo, tmdb, tmdbImg, upcomingRelease, type TmdbMovie, type TmdbTv } from '@/lib/tmdb';
+import { adminUI } from '@/lib/variant';
 
 type Details =
   | { kind: 'movie'; data: TmdbMovie; arr: RadarrMovie | null; arrError?: string }
@@ -85,7 +86,7 @@ export default function MediaScreen() {
   // Serveur Lumio : demandes façon Seerr pour tout le monde (admin compris)
   const serverReq = useServerRequests();
   useEffect(() => {
-    if (!settings.chatUrl || settings.jellyfin?.isAdmin !== true) return;
+    if (!settings.chatUrl || !adminUI(settings)) return;
     requestsApi
       .media(settings, isTv ? 'tv' : 'movie', Number(id))
       .then((m) => setMediaStatus(m.status))
@@ -379,11 +380,11 @@ export default function MediaScreen() {
                 <Button title="" icon="chatbubbles-outline" variant="glass" small onPress={propose} style={{ width: 46, paddingHorizontal: 0 }} />
               ) : null}
               {/* Déplacer (admin) : titre rangé dans le mauvais dossier → Radarr / Sonarr le déplacent */}
-              {settings.chatUrl && settings.jellyfin?.isAdmin === true && jfItem?.Path ? (
+              {settings.chatUrl && adminUI(settings) && jfItem?.Path ? (
                 <MoveButton path={jfItem!.Path!} title={title} />
               ) : null}
               {/* « DL » (admin) : seulement si le titre n'est pas (entièrement) disponible */}
-              {settings.chatUrl && settings.jellyfin?.isAdmin === true && !(details.kind === 'movie' && jfItem) && mediaStatus !== MediaStatus.AVAILABLE ? (
+              {settings.chatUrl && adminUI(settings) && !(details.kind === 'movie' && jfItem) && mediaStatus !== MediaStatus.AVAILABLE ? (
                 <LsButton
                   loadSources={() => secourApi.status(settings).then((st) => st.sources ?? [])}
                   onPickSource={(source) =>

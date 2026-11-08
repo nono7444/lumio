@@ -11,6 +11,7 @@ import { C, R } from '@/constants/theme';
 import { login, serverInfo } from '@/lib/jellyfin';
 import { seerr } from '@/lib/seerr';
 import { useSettings } from '@/lib/settings';
+import { IS_AUTO } from '@/lib/variant';
 
 /** Serveur Lumio de la maison : donne l'adresse de Jellyfin, la famille n'a que son identifiant à taper. */
 const HOME_LUMIO = 'https://lumio.wawanono.lol';
@@ -91,9 +92,9 @@ export default function Login() {
         }
       }
       // Compte admin : il peut avoir des profils pour la famille → « Qui regarde ? »
-      const household = session.isAdmin ? { owner: session, askOnLaunch: true, count: 0 } : null;
+      const household = session.isAdmin && !IS_AUTO ? { owner: session, askOnLaunch: true, count: 0 } : null;
       await update({ jellyfin: session, household, skipJellyfin: false, seerr: seerrCfg });
-      router.replace(session.isAdmin ? '/profiles' : '/');
+      router.replace(IS_AUTO ? '/auto' : session.isAdmin ? '/profiles' : '/');
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {

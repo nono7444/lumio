@@ -1,7 +1,8 @@
 import { HomeShortcuts } from '@/components/home-shortcuts';
 import { PlatformsRow } from '@/components/platforms-row';
 import { ProfileRank } from '@/components/rank-shield';
-import { router, useFocusEffect } from 'expo-router';
+import { Redirect, router, useFocusEffect } from 'expo-router';
+import { IS_AUTO } from '@/lib/variant';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useCached } from '@/lib/cached';
 import { StatusBar } from 'expo-status-bar';
@@ -327,7 +328,13 @@ function JfDynamicRow({ kind, view, nonce }: { kind: 'continue' | 'nextup' | 'fa
   );
 }
 
-export default function Home() {
+export default function HomeTab() {
+  // Lumio Auto n'a pas d'accueil : on ouvre l'onglet Auto
+  if (IS_AUTO) return <Redirect href="/auto" />;
+  return <Home />;
+}
+
+function Home() {
   const { settings } = useSettings();
   const insets = useSafeAreaInsets();
   const [nonce, setNonce] = useState(0);

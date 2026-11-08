@@ -12,6 +12,7 @@ import { MediaStatus, requestsApi, type MediaInfo } from '@/lib/requests';
 import { useSettings } from '@/lib/settings';
 import { serverCall } from '@/lib/chat';
 import { tmdbImg, type TmdbTv } from '@/lib/tmdb';
+import { adminUI } from '@/lib/variant';
 
 type SeasonStat = MediaInfo['seasons'][number];
 
@@ -80,7 +81,7 @@ export function SeasonRequests({
   const stat = (n: number) => media?.seasons.find((x) => x.seasonNumber === n);
 
   // Admin : épisodes mal rangés par Sonarr (séries sorties en « parties », ex. Lupin) → réparation en un appui
-  const admin = settings.jellyfin?.isAdmin === true;
+  const admin = adminUI(settings);
   const [fix, setFix] = useState<{ title: string; moves: { from: string; to: string; duplicate: boolean }[] } | null>(null);
   const [fixing, setFixing] = useState(false);
   useEffect(() => {

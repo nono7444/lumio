@@ -14,6 +14,7 @@ import { C, R } from '@/constants/theme';
 import { filesApi, formatSize, joinPath, parentPath, type Disk, type FileEntry, type MoveJob } from '@/lib/files';
 import { SecourSearch } from '@/components/secour-search';
 import { useSettings } from '@/lib/settings';
+import { adminUI } from '@/lib/variant';
 
 type Item = { root: string; path: string; name: string };
 type Hit = Item & { dir: boolean; size: number };
@@ -262,7 +263,7 @@ export default function Files() {
         ) : null}
       </View>
 
-      {!root && !query && settings.jellyfin?.isAdmin === true && !Platform.isTV ? <SecourSearch /> : null}
+      {!root && !query && adminUI(settings) && !Platform.isTV ? <SecourSearch /> : null}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 

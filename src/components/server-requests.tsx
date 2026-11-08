@@ -22,6 +22,7 @@ import {
 } from '@/lib/requests';
 import { secourAdminApi } from '@/lib/secour';
 import { useSettings } from '@/lib/settings';
+import { managerUI } from '@/lib/variant';
 
 const FILTERS: { id: RequestFilter; label: string }[] = [
   { id: 'all', label: 'Toutes' },
@@ -154,7 +155,7 @@ function RequestCard({ r, admin, meId, onChanged }: { r: Req; admin: boolean; me
 export function ServerRequests({ header }: { header: React.ReactNode }) {
   const { settings } = useSettings();
   const insets = useSafeAreaInsets();
-  const admin = settings.jellyfin?.isAdmin !== false;
+  const admin = managerUI(settings);
   // TV : tout afficher d'emblée (« À valider » restait souvent vide)
   const [filter, setFilter] = useState<RequestFilter>(admin && !Platform.isTV ? 'pending' : 'all');
   const [rows, setRows] = useState<Req[]>([]);

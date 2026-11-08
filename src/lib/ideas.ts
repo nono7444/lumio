@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { serverCall } from './chat';
 import { useSettings } from './settings';
 import type { Settings } from './settings';
+import { adminUI } from './variant';
 
 export type IdeaStatus = 'new' | 'planned' | 'sent' | 'done' | 'rejected';
 export type Idea = {
@@ -73,7 +74,7 @@ let problemCount = 0;
 const problemListeners = new Set<(n: number) => void>();
 
 export async function refreshProblemCount(s: Settings) {
-  if (!s.jellyfin?.isAdmin || !s.chatUrl) return;
+  if (!adminUI(s) || !s.chatUrl) return;
   const list = await ideasApi.list(s).catch(() => null);
   if (!list) return;
   problemCount = list.filter((i) => i.kind === 'bug' && i.status === 'new').length;
@@ -84,7 +85,7 @@ export async function refreshProblemCount(s: Settings) {
 export function useProblemCount() {
   const { settings } = useSettings();
   const [n, setN] = useState(problemCount);
-  const admin = settings.jellyfin?.isAdmin === true;
+  const admin = adminUI(settings);
   useEffect(() => {
     problemListeners.add(setN);
     if (!admin || !settings.chatUrl) return () => void problemListeners.delete(setN);

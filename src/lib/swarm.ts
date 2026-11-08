@@ -6,6 +6,7 @@ import { Platform } from 'react-native';
 
 import { serverCall } from './chat';
 import type { Settings } from './settings';
+import { adminUI } from './variant';
 
 export type Swarm = { s: number | null; l: number | null; src: 'qbit' | 'recherche'; seeding?: boolean };
 
@@ -32,7 +33,7 @@ async function refresh(s: Settings) {
 /** Sources / téléchargeurs d'un titre (admin seulement, jamais sur la TV). */
 export function useSwarm(s: Settings, type: 'movie' | 'tv' | undefined, tmdbId: number | undefined): Swarm | null {
   const [, force] = useState(0);
-  const admin = s.jellyfin?.isAdmin === true && !Platform.isTV && Boolean(s.chatUrl);
+  const admin = adminUI(s) && !Platform.isTV && Boolean(s.chatUrl);
   useEffect(() => {
     if (!admin) return;
     const l = () => force((n) => n + 1);

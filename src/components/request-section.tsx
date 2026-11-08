@@ -21,6 +21,7 @@ import {
 } from '@/lib/requests';
 import { RecheckButton } from '@/components/recheck-button';
 import { useSettings } from '@/lib/settings';
+import { managerUI } from '@/lib/variant';
 
 export function RequestSection({
   target,
@@ -46,7 +47,7 @@ export function RequestSection({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const admin = settings.jellyfin?.isAdmin !== false;
+  const admin = managerUI(settings);
   const me = settings.jellyfin?.userId;
 
   const load = useCallback(() => {

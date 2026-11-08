@@ -7,6 +7,7 @@ import { Button, Section } from '@/components/ui';
 import { C } from '@/constants/theme';
 import { serverCall } from '@/lib/chat';
 import { useSettings } from '@/lib/settings';
+import { adminUI } from '@/lib/variant';
 
 type Action = 'scan' | 'jellyfin' | 'reboot' | 'update' | 'containers';
 
@@ -51,7 +52,7 @@ type RefreshStatus = { active: boolean; progress: number; libraries: { name: str
 export function ServerActionsSection() {
   const { settings } = useSettings();
   const [busy, setBusy] = useState<Action | null>(null);
-  const allowed = Boolean(settings.chatUrl) && settings.jellyfin?.isAdmin === true && !Platform.isTV;
+  const allowed = Boolean(settings.chatUrl) && adminUI(settings) && !Platform.isTV;
   // Avancement de Jellyfin (scan des bibliothèques) : vérifié toutes les 3 s tant qu'il travaille
   const [refresh, setRefresh] = useState<RefreshStatus | null>(null);
   const [host, setHost] = useState<HostStatus | null>(null);

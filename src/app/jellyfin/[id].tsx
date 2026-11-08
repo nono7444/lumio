@@ -34,6 +34,7 @@ import { FamilyRating } from '@/components/family-rating';
 import { ReportProblemButton } from '@/components/report-problem';
 import { useServerRequests } from '@/lib/requests';
 import { hasTmdb, useSettings } from '@/lib/settings';
+import { adminUI } from '@/lib/variant';
 
 const FOLDER_TYPES = ['CollectionFolder', 'UserView', 'Folder', 'BoxSet'];
 
@@ -424,7 +425,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
 
 
           {/* Admin : voir le fichier dans la gestion des disques, ou supprimer le titre */}
-          {settings.jellyfin?.isAdmin === true && !Platform.isTV ? <AdminItemActions item={item} reload={reload} /> : null}
+          {adminUI(settings) && !Platform.isTV ? <AdminItemActions item={item} reload={reload} /> : null}
 
           {/* Notes de la famille et signalement d'un problème (serveur Lumio) */}
           {serverReq && tmdbId && Platform.isTV ? (
