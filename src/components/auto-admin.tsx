@@ -565,11 +565,15 @@ function RatioSite({ x, reload }: { x: AutoRatioSite; reload: () => void }) {
   const [up, setUp] = useState(x.base ? String(Math.round((x.base.up / 1e9) * 10) / 10) : '');
   const [down, setDown] = useState(x.base ? String(Math.round((x.base.down / 1e9) * 10) / 10) : '');
   const ratio = x.estimate?.ratio ?? x.lumio.ratio;
+  // C411 : on peut télécharger tant que l'envoyé reste au-dessus de 80 % du reçu → marge = envoyé ÷ 0,8 − reçu
+  const isC411 = x.type === 'c411' || /c411/i.test(x.name);
+  const marge = isC411 && x.estimate ? x.estimate.up / 0.8 - x.estimate.down : null;
   const pct = x.cap ? Math.min(100, (x.today / x.cap) * 100) : 0;
   const quotaColor = pct >= 90 ? C.danger : pct >= 70 ? C.warning : C.success;
   const alerts = [
     ratio != null && ratio < 1 ? 'Ratio sous 1 : laisse partager avant de télécharger' : ratio != null && ratio < 1.1 ? 'Ratio juste au-dessus de 1 : prudence' : null,
     x.cap && pct >= 80 ? `Quota du jour presque atteint (${Math.round(pct)} %)` : null,
+    marge != null && marge < 10e9 ? (marge <= 0 ? 'Marge épuisée : C411 bloque le téléchargement' : `Plus que ${gb(marge)} de marge avant blocage`) : null,
   ].filter(Boolean) as string[];
   const save = () => {
     const u = Number(up.replace(',', '.'));
@@ -589,7 +593,7 @@ function RatioSite({ x, reload }: { x: AutoRatioSite; reload: () => void }) {
       <Text style={styles.small}>
         {x.estimate
           ? `Ratio estimé sur le site (tes chiffres du ${new Date(x.estimate.since).toLocaleDateString('fr-FR')} + Lumio depuis)`
-          : 'Ratio des torrents de Lumio seulement. Entre les chiffres de ton profil pour avoir ton vrai ratio.'}
+          : 'Attention : ce n’est que le ratio des torrents téléchargés par Lumio, pas celui de ton compte. Touche « Entrer mes chiffres du site » ci-dessous.'}
       </Text>
       {alerts.map((a) => (
         <View key={a} style={styles.ratioAlert}>
@@ -597,6 +601,12 @@ function RatioSite({ x, reload }: { x: AutoRatioSite; reload: () => void }) {
           <Text style={[styles.small, { color: C.warning, flex: 1 }]}>{a}</Text>
         </View>
       ))}
+      {marge != null ? (
+        <View style={styles.rowBetween}>
+          <Text style={styles.title}>Marge de téléchargement</Text>
+          <Text style={[styles.ratioBig, { color: marge > 20e9 ? C.success : marge > 5e9 ? C.warning : C.danger }]}>{marge > 0 ? gb(marge) : '0 Go'}</Text>
+        </View>
+      ) : null}
       <View style={styles.ratioRow}>
         <RatioStat label="Envoyé" value={gb(x.estimate?.up ?? x.lumio.up)} color={C.success} icon="arrow-up" />
         <RatioStat label="Reçu" value={gb(x.estimate?.down ?? x.lumio.down)} color={C.accent} icon="arrow-down" />
@@ -644,7 +654,9 @@ function RatioSite({ x, reload }: { x: AutoRatioSite; reload: () => void }) {
       {x.rules.length ? <Text style={styles.small}>Règles : {x.rules.join(' · ')}</Text> : null}
       {edit ? (
         <View style={{ gap: 8 }}>
-          <Text style={styles.small}>Recopie les chiffres de ton profil {x.name} (en Go). Lumio ajoutera ensuite tout seul ce qu’il envoie et reçoit.</Text>
+          <Text style={styles.small}>
+            Recopie les chiffres de ton profil {x.name} (en Go){isC411 ? ' : « Upload » (crédit inclus) et « Download », dans la bulle « Marge de téléchargement »' : ''}. Lumio ajoutera ensuite tout seul ce qu’il envoie et reçoit.
+          </Text>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <View style={{ flex: 1 }}>
               <Field label="Envoyé (Go)" value={up} onChangeText={setUp} keyboardType="decimal-pad" />
