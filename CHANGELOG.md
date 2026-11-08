@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.145 — 8 novembre 2026
+
 - Auto → Ratio : la marge de téléchargement C411 s'affiche (envoyé ÷ 0,8 − reçu), avec une alerte sous 10 Go. Sans tes chiffres du site, la carte précise maintenant qu'elle ne montre que les torrents de Lumio.
 
 - Lumio Auto : la langue indiquée par le site (C411 : « Multi VF2 (FR + QC inclus) ») est maintenant prise en compte, en plus du nom de la version. Un « MULTi » qui contient du québécois est refusé. Il faut le serveur Lumio 3.89.0.
