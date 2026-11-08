@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.148 — 8 novembre 2026
+
 - Lumio Auto réorganisée en quatre onglets :
   - Performance : services, machine, qui regarde quoi, mises à jour et redémarrages, disques ;
   - Seed : ratio et marge par site, torrents en partage, réglages du partage ;
