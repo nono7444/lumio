@@ -53,6 +53,13 @@ export function AutoServerScreen() {
               <Text style={styles.help}>Sites (C411, TR4KER…), qualité, langues, qBittorrent, partage, AllDebrid, dossiers.</Text>
               <Button title="Sites et réglages" icon="options-outline" variant="secondary" onPress={() => router.push('/lumio-auto')} />
             </Section>
+            <Section title="Disques et téléchargements" id="la-disques">
+              <Text style={styles.help}>Fichiers des disques, et téléchargements AllDebrid (liens, magnets, .torrent) vers un disque.</Text>
+              <View style={{ gap: 8 }}>
+                <Button title="Disques" icon="folder-open-outline" variant="secondary" onPress={() => router.push('/files')} />
+                <Button title="Téléchargements AllDebrid" icon="cloud-download-outline" variant="secondary" onPress={() => router.push('/downloads')} />
+              </View>
+            </Section>
             <Section title="Lumio Secour" id="la-secour">
               <Text style={styles.help}>Recherche et téléchargement directs par AllDebrid, sans passer par Lumio Auto.</Text>
               <Button title="Ouvrir Lumio Secour" icon="medkit-outline" variant="secondary" onPress={() => router.push('/secour-admin')} />

@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Lumio Auto : la gestion des disques (parcourir, ranger, déplacer, supprimer) et les téléchargements AllDebrid sur les disques sont de retour, dans l'onglet Performance et dans Réglages → Torrents.
+
 - Demandes : la TV (et les autres applis) peuvent de nouveau demander les films et séries absents. Le serveur cherchait les identifiants des titres dans Radarr et Sonarr, qui n'existent plus ; il les prend maintenant sur TMDB. Il faut le serveur Lumio 3.90.0.
 
 ## 1.0.148 — 8 novembre 2026

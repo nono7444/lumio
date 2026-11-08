@@ -2098,9 +2098,24 @@ export function AutoPerfScreen() {
             </View>
           ))}
         </View>
+        {/* Disques et téléchargements, comme avant dans Lumio */}
+        <View style={styles.bigCard}>
+          <Text style={styles.bigCardTitle}>Disques et téléchargements</Text>
+          <Text style={styles.small}>Parcourir, ranger, renommer, déplacer ou supprimer les fichiers ; télécharger un lien, un magnet ou un .torrent par AllDebrid sur un disque.</Text>
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+            <Pressable onPress={() => router.push('/files')} style={[styles.pill, { flex: 1, justifyContent: 'center', paddingVertical: 12 }]}>
+              <Ionicons name="folder-open-outline" size={16} color={C.text} />
+              <Text style={styles.pillTxt}>Disques</Text>
+            </Pressable>
+            <Pressable onPress={() => router.push('/downloads')} style={[styles.pill, { flex: 1, justifyContent: 'center', paddingVertical: 12 }]}>
+              <Ionicons name="cloud-download-outline" size={16} color={C.text} />
+              <Text style={styles.pillTxt}>Téléchargements</Text>
+            </Pressable>
+          </View>
+        </View>
+        <StorageSection />
         <UptimeSection />
         <ServerActionsSection />
-        <StorageSection />
       </ScrollView>
     </SectionCollapse.Provider>
   );
