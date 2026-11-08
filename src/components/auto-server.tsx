@@ -56,6 +56,7 @@ export function AutoServerScreen() {
             <Section title="Disques et téléchargements" id="la-disques">
               <Text style={styles.help}>Fichiers des disques, et téléchargements AllDebrid (liens, magnets, .torrent) vers un disque.</Text>
               <View style={{ gap: 8 }}>
+                <Button title="Chercher dans les bibliothèques" icon="search" variant="secondary" onPress={() => router.push('/library-admin')} />
                 <Button title="Disques" icon="folder-open-outline" variant="secondary" onPress={() => router.push('/files')} />
                 <Button title="Téléchargements AllDebrid" icon="cloud-download-outline" variant="secondary" onPress={() => router.push('/downloads')} />
               </View>
