@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.89.1';
+const VERSION = '3.90.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -6571,45 +6571,65 @@ const requireAdmin = (user) => {
 
 // ——— Identifiants : l'appli TV peut n'avoir que l'IMDb (catalogues Stremio) ———
 const idCache = new Map();
+// Identifiants d'un titre (TMDB, TVDB, saisons). TMDB d'abord (Radarr / Sonarr ont été remplacés par Lumio Auto),
+// Radarr / Sonarr seulement en secours s'ils sont encore là.
+async function resolveIdsTmdb(type, tmdbId, imdbId) {
+  if (!tmdbKey()) return null;
+  let id = tmdbId;
+  if (!id && imdbId) {
+    const f = await tmdbGet(`/find/${imdbId}`, { external_source: 'imdb_id' }).catch(() => null);
+    const hit = f && (type === 'movie' ? f.movie_results : f.tv_results);
+    id = hit && hit[0] ? hit[0].id : 0;
+  }
+  if (!id) return null;
+  if (type === 'movie') {
+    const m = await tmdbGet(`/movie/${id}`).catch(() => null);
+    if (!m) return null;
+    return { tmdbId: id, title: m.title, year: m.release_date ? Number(m.release_date.slice(0, 4)) : undefined, poster: m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : undefined };
+  }
+  const t = await tmdbGet(`/tv/${id}`, { append_to_response: 'external_ids' }).catch(() => null);
+  if (!t) return null;
+  return {
+    tmdbId: id,
+    tvdbId: (t.external_ids && t.external_ids.tvdb_id) || undefined,
+    title: t.name,
+    year: t.first_air_date ? Number(t.first_air_date.slice(0, 4)) : undefined,
+    poster: t.poster_path ? `https://image.tmdb.org/t/p/w500${t.poster_path}` : undefined,
+    seasons: (t.seasons || []).map((x) => x.season_number).filter((n) => n > 0),
+  };
+}
+
 async function resolveIds(type, b) {
   const tmdbId = Number(b.tmdbId) || 0;
   const tvdbId = Number(b.tvdbId) || 0;
   const imdbId = typeof b.imdbId === 'string' && /^tt\d+$/.test(b.imdbId) ? b.imdbId : '';
-  if (type === 'movie') {
-    if (tmdbId) return { tmdbId };
-    if (!imdbId) throw new HttpError(400, 'Identifiant TMDB ou IMDb manquant');
-    const key = `movie:${imdbId}`;
-    if (!idCache.has(key)) {
-      const m = await arr('radarr', `/movie/lookup/imdb?imdbId=${imdbId}`);
-      const found = Array.isArray(m) ? m[0] : m;
-      if (!found || !found.tmdbId) throw new HttpError(404, 'Film introuvable dans Radarr');
-      idCache.set(key, { tmdbId: found.tmdbId, title: found.title, year: found.year, poster: posterOf(found) });
-    }
-    return idCache.get(key);
-  }
-  if (tmdbId && tvdbId) return { tmdbId, tvdbId };
-  const key = `tv:${tmdbId || imdbId}`;
+  if (type === 'movie' && tmdbId) return { tmdbId };
+  if (type === 'tv' && tmdbId && tvdbId) return { tmdbId, tvdbId };
+  if (!tmdbId && !imdbId) throw new HttpError(400, 'Identifiant TMDB ou IMDb manquant');
+  const key = `${type}:${tmdbId || imdbId}`;
   if (!idCache.has(key)) {
-    let found = null;
-    for (const term of [tmdbId ? `tmdb:${tmdbId}` : null, imdbId ? `imdb:${imdbId}` : null].filter(Boolean)) {
-      const list = await arr('sonarr', `/series/lookup?term=${encodeURIComponent(term)}`).catch(() => []);
-      if (list && list[0] && list[0].tvdbId) {
-        found = list[0];
-        break;
+    let found = await resolveIdsTmdb(type, tmdbId, imdbId).catch(() => null);
+    if (!found && !arrOff()) {
+      if (type === 'movie') {
+        const m = await arr('radarr', `/movie/lookup/imdb?imdbId=${imdbId}`).catch(() => null);
+        const x = Array.isArray(m) ? m[0] : m;
+        if (x && x.tmdbId) found = { tmdbId: x.tmdbId, title: x.title, year: x.year, poster: posterOf(x) };
+      } else {
+        for (const term of [tmdbId ? `tmdb:${tmdbId}` : null, imdbId ? `imdb:${imdbId}` : null].filter(Boolean)) {
+          const list = await arr('sonarr', `/series/lookup?term=${encodeURIComponent(term)}`).catch(() => []);
+          if (list && list[0] && list[0].tvdbId) {
+            const x = list[0];
+            found = { tmdbId: tmdbId || x.tmdbId, tvdbId: x.tvdbId, title: x.title, year: x.year, poster: posterOf(x), seasons: (x.seasons || []).map((y) => y.seasonNumber).filter((n) => n > 0) };
+            break;
+          }
+        }
       }
     }
-    if (!found) throw new HttpError(404, 'Série introuvable dans Sonarr');
-    idCache.set(key, {
-      tmdbId: tmdbId || found.tmdbId,
-      tvdbId: found.tvdbId,
-      title: found.title,
-      year: found.year,
-      poster: posterOf(found),
-      seasons: (found.seasons || []).map((x) => x.seasonNumber).filter((n) => n > 0),
-    });
+    if (!found) throw new HttpError(404, type === 'movie' ? 'Film introuvable (TMDB)' : 'Série introuvable (TMDB)');
+    idCache.set(key, found);
   }
   const r = idCache.get(key);
-  if (!r.tmdbId) throw new HttpError(404, 'Pas d’identifiant TMDB pour cette série');
+  if (!r.tmdbId) throw new HttpError(404, 'Pas d’identifiant TMDB pour ce titre');
   return r;
 }
 function posterOf(item) {
