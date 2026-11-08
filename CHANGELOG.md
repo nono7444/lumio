@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Serveur 3.91.0 : après un téléchargement, la fiche affiche « Ajout dans la bibliothèque… » (100 %) jusqu'à ce que Jellyfin voie le fichier, puis passe toute seule à « Lire » (bibliothèque relue toutes les 10 s pendant ce temps).
+
 ## 1.0.149 — 8 novembre 2026
 
 - Lumio Auto : la gestion des disques (parcourir, ranger, déplacer, supprimer) et les téléchargements AllDebrid sur les disques sont de retour, dans l'onglet Performance et dans Réglages → Torrents.

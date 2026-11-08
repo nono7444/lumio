@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.90.0';
+const VERSION = '3.91.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4911,6 +4911,7 @@ async function autoProgressTick() {
           autoEvent(auto.items.find((i) => i.id === g.itemId), 'imported', `Rangé dans la bibliothèque (${done.includes('movie') ? 'film' : done.length + ' épisode(s)'})`);
           notify({ title: '✅ Lumio Auto · importé', message: g.title, tags: ['white_check_mark'], click: 'lumio://activity' });
           autoCompleteRequests();
+          libraryAt = 0; // la prochaine lecture de la bibliothèque repart de Jellyfin
           // Une place se libère (un téléchargement à la fois) : l'épisode suivant part tout de suite, sans attendre 15 min
           const nextIt = auto.items.find((i) => i.id === g.itemId);
           if (nextIt) nextIt.nextSearch = 0;
@@ -7117,11 +7118,20 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         }
         if (['searching', 'partial'].includes(downloadOf(live, lib).state) && Date.now() - libraryAt > 15_000) lib = await loadLibrary(true).catch(() => lib);
       }
+      // Lumio Auto : pas de file Radarr / Sonarr. Pendant un téléchargement, et juste après (le temps que Jellyfin
+      // range le fichier), la bibliothèque est relue toutes les 10 s pour passer à « Disponible » au plus vite
+      const recent = requests.find((r) => r.type === type && r.tmdbId === tmdbId && r.status === RequestStatus.COMPLETED && r.completedAt && Date.now() - Date.parse(r.completedAt) < 20 * 60_000);
+      if ((live && !lib.queue) || recent) {
+        if (Date.now() - libraryAt > 10_000) lib = await loadLibrary(true).catch(() => lib);
+      }
       refreshCompleted(lib);
       const st = mediaStatus(lib, type, tmdbId, ids.tvdbId || q.get('tvdbId'), seasons);
       const reqs = requests
         .filter((r) => r.type === type && r.tmdbId === tmdbId && r.status !== RequestStatus.COMPLETED)
         .map((r) => publicRequest(r, lib));
+      // Téléchargé mais pas encore vu par Jellyfin : on reste « en cours · 100 % » (les applis continuent de surveiller)
+      if (recent && st.status !== MediaStatus.AVAILABLE && !reqs.length)
+        reqs.push({ ...publicRequest(recent, lib), status: RequestStatus.APPROVED, download: { state: 'importing', via: 'auto', progress: 100, title: 'Ajout dans la bibliothèque…' } });
       return send(res, 200, { ...st, tmdbId, tvdbId: ids.tvdbId, requests: reqs });
     }
 
