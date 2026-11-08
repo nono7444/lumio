@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.146 — 8 novembre 2026
+
 - Nouvelle appli **Lumio Auto** pour l'admin, sur iPhone et Android, avec une icône orange. Elle a quatre onglets :
   - Auto : Titres, Manquants, Transferts, qBittorrent, Ratio ;
   - Demandes : validation des demandes ;
