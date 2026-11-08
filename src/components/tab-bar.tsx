@@ -23,7 +23,7 @@ import { IS_AUTO } from '@/lib/variant';
 type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>>[0];
 
 const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
-  index: 'home',
+  index: IS_AUTO ? 'speedometer' : 'home',
   search: 'search',
   library: 'albums',
   calendar: 'calendar',
@@ -31,14 +31,14 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   chat: 'chatbubbles',
   activity: 'file-tray-full',
   watchlist: 'bookmark',
-  auto: 'flash',
-  // Lumio Auto : l'onglet « Serveur »
-  settings: 'server',
+  auto: IS_AUTO ? 'magnet' : 'flash',
+  // Lumio Auto : l'onglet « Réglages »
+  settings: 'settings',
 };
 
 // Libellés courts, affichés sous chaque icône (comme la barre d'onglets d'iOS)
 const SHORT: Record<string, string> = {
-  index: 'Accueil',
+  index: IS_AUTO ? 'Tableau' : 'Accueil',
   search: 'Recherche',
   library: 'Biblio',
   calendar: 'Agenda',
@@ -46,8 +46,8 @@ const SHORT: Record<string, string> = {
   chat: 'Chat',
   activity: 'Demandes',
   watchlist: 'À voir',
-  auto: 'Auto',
-  settings: IS_AUTO ? 'Serveur' : 'Profil',
+  auto: IS_AUTO ? 'Torrents' : 'Auto',
+  settings: IS_AUTO ? 'Réglages' : 'Profil',
 };
 
 const glass = Platform.OS === 'ios' && isLiquidGlassAvailable();
@@ -84,13 +84,16 @@ function PhoneTabBar({ state, descriptors, navigation }: TabBarProps) {
   const update = useAppUpdate();
   const initial = (settings.jellyfin?.userName ?? 'L').slice(0, 1).toUpperCase();
 
+  // Onglets cachés (href: null) : expo-router les transforme en tabBarItemStyle { display: 'none' }
   const visible = state.routes.filter((r) => {
-    const opts = descriptors[r.key].options as { href?: string | null };
-    return opts.href !== null;
+    const opts = descriptors[r.key].options as { href?: string | null; tabBarItemStyle?: unknown };
+    const style = opts.tabBarItemStyle as { display?: string } | undefined;
+    return opts.href !== null && style?.display !== 'none';
   });
   const order = orderTabs(
     visible.map((r) => r.name),
-    settings.tabsLayout
+    // Lumio Auto : onglets fixes, dans l'ordre du code
+    IS_AUTO ? [] : settings.tabsLayout
   );
   // TV : expérience épurée, seulement Accueil, Bibliothèque, Recherche, Demandes (et le profil)
   const TV_TABS = ['index', 'library', 'search', 'activity', 'settings'];

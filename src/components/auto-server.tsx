@@ -7,10 +7,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AnnouncementEditor } from '@/components/announcement';
 import { AppVersionSection } from '@/components/app-version';
-import { NowPlayingEntry } from '@/components/now-playing-entry';
 import { ServerActionsSection } from '@/components/server-actions';
 import { StorageSection } from '@/components/storage-section';
-import { Button, Field, ScreenTitle, Section, SectionCollapse } from '@/components/ui';
+import { Button, Field, ScreenTitle, Section, SectionCollapse, SectionGroup } from '@/components/ui';
 import { UptimeSection } from '@/components/uptime';
 import { C, TAB_SPACE } from '@/constants/theme';
 import { serverCall } from '@/lib/chat';
@@ -49,36 +48,39 @@ export function AutoServerScreen() {
           style={{ flex: 1, backgroundColor: C.bg }}
           contentContainerStyle={{ paddingTop: insets.top, paddingHorizontal: 16, paddingBottom: TAB_SPACE }}
           keyboardShouldPersistTaps="handled">
-          <ScreenTitle title="Serveur" />
+          <ScreenTitle title="Réglages" />
           <AppVersionSection />
-          <NowPlayingEntry />
-          <UptimeSection />
-          <ServerActionsSection />
 
-          <Section title="Lumio Auto" id="la-reglages">
-            <Text style={styles.help}>Sites (C411, TR4KER…), qualité, langues, qBittorrent, partage, AllDebrid, dossiers, interrupteurs.</Text>
-            <Button title="Sites et réglages" icon="flash-outline" variant="secondary" onPress={() => router.push('/lumio-auto')} />
-          </Section>
+          <SectionGroup title="Serveur" id="la-grp-serveur">
+            <ServerActionsSection />
+            <UptimeSection />
+            <StorageSection />
+          </SectionGroup>
 
-          <StorageSection />
+          <SectionGroup title="Torrents" id="la-grp-torrents">
+            <Section title="Lumio Auto" id="la-reglages">
+              <Text style={styles.help}>Sites (C411, TR4KER…), qualité, langues, qBittorrent, partage, AllDebrid, dossiers.</Text>
+              <Button title="Sites et réglages" icon="options-outline" variant="secondary" onPress={() => router.push('/lumio-auto')} />
+            </Section>
+            <Section title="Lumio Secour" id="la-secour">
+              <Text style={styles.help}>Recherche et téléchargement directs par AllDebrid, sans passer par Lumio Auto.</Text>
+              <Button title="Ouvrir Lumio Secour" icon="medkit-outline" variant="secondary" onPress={() => router.push('/secour-admin')} />
+            </Section>
+          </SectionGroup>
 
-          <Section title="Utilisateurs et demandes" id="la-users">
-            <Text style={styles.help}>Droits, validation automatique, quotas (2 films et 1 série par semaine…), notifications.</Text>
-            <Button title="Utilisateurs et quotas" icon="people-outline" variant="secondary" onPress={() => router.push('/users')} />
-          </Section>
+          <SectionGroup title="Famille" id="la-grp-famille">
+            <Section title="Utilisateurs et quotas" id="la-users">
+              <Text style={styles.help}>Droits, validation automatique, quotas (2 films et 1 série par semaine…), notifications.</Text>
+              <Button title="Utilisateurs et quotas" icon="people-outline" variant="secondary" onPress={() => router.push('/users')} />
+            </Section>
+            <AnnouncementEditor />
+            <Section title="Idées et signalements" id="la-ideas">
+              <Text style={styles.help}>Ce que la famille propose ou signale depuis Lumio.</Text>
+              <Button title="Voir les idées et signalements" icon="bulb-outline" variant="secondary" onPress={() => router.push('/ideas')} />
+            </Section>
+          </SectionGroup>
 
-          <AnnouncementEditor />
-
-          <Section title="Idées et signalements" id="la-ideas">
-            <Text style={styles.help}>Ce que la famille propose ou signale depuis Lumio.</Text>
-            <Button title="Voir les idées et signalements" icon="bulb-outline" variant="secondary" onPress={() => router.push('/ideas')} />
-          </Section>
-
-          <Section title="Lumio Secour" id="la-secour">
-            <Text style={styles.help}>Recherche et téléchargement directs par AllDebrid, sans passer par Lumio Auto.</Text>
-            <Button title="Ouvrir Lumio Secour" icon="medkit-outline" variant="secondary" onPress={() => router.push('/secour-admin')} />
-          </Section>
-
+          <SectionGroup title="Compte et clés" id="la-grp-compte">
           <Section title="TMDB" id="la-tmdb">
             <Field
               label="Nouvelle clé API"
@@ -90,7 +92,6 @@ export function AutoServerScreen() {
             />
             <Button title="Enregistrer et tester" icon="flash-outline" onPress={saveTmdb} loading={testing} disabled={!tmdb.trim()} />
           </Section>
-
           <Section title="Compte" id="la-compte">
             <Text style={styles.help}>
               {settings.jellyfin ? `${settings.jellyfin.userName} · administrateur${settings.jellyfin.serverName ? ` · ${settings.jellyfin.serverName}` : ''}` : 'Pas connecté'}
@@ -106,6 +107,7 @@ export function AutoServerScreen() {
               }}
             />
           </Section>
+          </SectionGroup>
         </ScrollView>
       </SectionCollapse.Provider>
     </KeyboardAvoidingView>

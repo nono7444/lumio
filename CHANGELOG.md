@@ -6,6 +6,14 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Lumio Auto redessinée, pour la gestion du serveur seulement. Quatre onglets :
+  - Tableau : état des services, les deux interrupteurs, téléchargements, partage, versions à choisir, demandes en attente, ratio et marge C411, quota du jour, qui regarde quoi ;
+  - Torrents ;
+  - Demandes ;
+  - Réglages, rangés en Serveur, Torrents, Famille, Compte et clés.
+  Plus d'Accueil, de Live TV, de Recherche ni de « À voir ».
+- Lumio : l'onglet Auto n'apparaît plus. Les onglets cachés réapparaissaient à cause d'un bug de la barre d'onglets, corrigé.
+
 ## 1.0.146 — 8 novembre 2026
 
 - Nouvelle appli **Lumio Auto** pour l'admin, sur iPhone et Android, avec une icône orange. Elle a quatre onglets :

@@ -56,13 +56,14 @@ export default function TabsLayout() {
     return (
       <Tabs
         tabBar={(props) => <FloatingTabBar {...props} />}
-        initialRouteName="auto"
+        initialRouteName="index"
         screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: C.bg } }}>
-        <Tabs.Screen name="auto" options={{ title: 'Auto' }} />
+        {/* Gestion du serveur seulement : Tableau, Torrents, Demandes, Réglages */}
+        <Tabs.Screen name="index" options={{ title: 'Tableau' }} />
+        <Tabs.Screen name="auto" options={{ title: 'Torrents' }} />
         <Tabs.Screen name="activity" options={{ title: 'Demandes' }} />
-        <Tabs.Screen name="library" options={{ title: 'Bibliothèque' }} />
-        <Tabs.Screen name="settings" options={{ title: 'Serveur' }} />
-        <Tabs.Screen name="index" options={{ href: null }} />
+        <Tabs.Screen name="settings" options={{ title: 'Réglages' }} />
+        <Tabs.Screen name="library" options={{ href: null }} />
         <Tabs.Screen name="search" options={{ href: null }} />
         <Tabs.Screen name="live" options={{ href: null }} />
         <Tabs.Screen name="calendar" options={{ href: null }} />

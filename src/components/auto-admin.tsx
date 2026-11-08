@@ -2,7 +2,7 @@
 // recherches site par site, raisons des refus), on choisit une version à la main (recherche interactive),
 // et on règle les indexeurs (C411…), le téléchargement et le profil de qualité.
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { Image } from 'expo-image';
 import { ActivityIndicator, Alert, Linking, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
@@ -14,6 +14,7 @@ import { Button, Field, ScreenTitle, Section, SectionCollapse, SegChip } from '@
 import { C, TAB_SPACE } from '@/constants/theme';
 import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
 import { useSettings } from '@/lib/settings';
+import { IS_AUTO } from '@/lib/variant';
 
 type Tab = 'demandes' | 'manquants' | 'telechargements' | 'qbit' | 'ratio';
 const CLIENT_LABEL: Record<string, string> = { rdt: 'rdt-client', qbit: 'qBittorrent', alldebrid: 'AllDebrid' };
@@ -142,7 +143,12 @@ function Fold({ id, title, count, color, right, defaultOpen = true, children }: 
 
 export default function AutoTab() {
   const insets = useSafeAreaInsets();
+  // Le tableau de bord peut ouvrir directement une rubrique (?tab=ratio…)
+  const params = useLocalSearchParams<{ tab?: string }>();
   const [tab, setTab] = useState<Tab>('demandes');
+  useEffect(() => {
+    if (params.tab && ['demandes', 'manquants', 'telechargements', 'qbit', 'ratio'].includes(params.tab)) setTab(params.tab as Tab);
+  }, [params.tab]);
   const { st, error, load, save } = useAutoState();
   const [itemOpen, setItemOpen] = useState<string | null>(null);
 
@@ -153,7 +159,7 @@ export default function AutoTab() {
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
       <ScreenTitle
-        title="Auto"
+        title={IS_AUTO ? 'Torrents' : 'Auto'}
         right={
           <Pressable onPress={() => router.push('/lumio-auto')} hitSlop={8} style={styles.pill} accessibilityLabel="Sites et réglages de Lumio Auto">
             <Ionicons name="settings-outline" size={15} color={C.text} />
@@ -249,7 +255,7 @@ export function AutoSettingsScreen() {
 }
 
 /** Les deux interrupteurs : Lumio Auto et AllDebrid, avec un résumé d'une ligne. */
-function Switches({ st, save, running, toChoose }: { st: AutoState; save: (b: any, msg?: string) => void; running: number; toChoose: number }) {
+export function Switches({ st, save, running, toChoose }: { st: AutoState; save: (b: any, msg?: string) => void; running: number; toChoose: number }) {
   const seeding = st.grabs.filter((g) => g.seeding).length;
   return (
     <View style={[styles.banner, { borderColor: st.enabled ? 'rgba(48,209,88,0.5)' : C.border, flexDirection: 'column', alignItems: 'stretch', gap: 12 }]}>

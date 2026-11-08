@@ -94,7 +94,7 @@ export default function Login() {
       // Compte admin : il peut avoir des profils pour la famille → « Qui regarde ? »
       const household = session.isAdmin && !IS_AUTO ? { owner: session, askOnLaunch: true, count: 0 } : null;
       await update({ jellyfin: session, household, skipJellyfin: false, seerr: seerrCfg });
-      router.replace(IS_AUTO ? '/auto' : session.isAdmin ? '/profiles' : '/');
+      router.replace(IS_AUTO ? '/' : session.isAdmin ? '/profiles' : '/');
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
