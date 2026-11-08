@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.147 — 8 novembre 2026
+
 - Lumio Auto redessinée, pour la gestion du serveur seulement. Quatre onglets :
   - Tableau : état des services, les deux interrupteurs, téléchargements, partage, versions à choisir, demandes en attente, ratio et marge C411, quota du jour, qui regarde quoi ;
   - Torrents ;
