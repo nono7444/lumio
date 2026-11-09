@@ -6,6 +6,7 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Source FlareStore « Lumio » : Lumio iOS (version Nuvio) y apparaît aussi, à côté de Lumio et Lumio Auto ; elle se met à jour toute seule toutes les 2 heures.
 ## 1.0.150 — 8 novembre 2026
 
 - Serveur 3.91.0 : après un téléchargement, la fiche affiche « Ajout dans la bibliothèque… » (100 %) jusqu'à ce que Jellyfin voie le fichier, puis passe toute seule à « Lire » (bibliothèque relue toutes les 10 s pendant ce temps).

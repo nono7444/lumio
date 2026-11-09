@@ -1,0 +1,37 @@
+# Met à jour la source FlareStore « Lumio » avec la dernière Lumio iOS (dépôt lumio-ios),
+# sans reconstruire l'appli : toutes les 2 heures, ou à la main (Actions → Source Lumio iOS → Run).
+name: Source Lumio iOS
+
+on:
+  schedule:
+    - cron: '17 */2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: source-ios
+  cancel-in-progress: false
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+      - name: Ajoute Lumio iOS à la source de la dernière Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release view -R "$GITHUB_REPOSITORY" --json tagName -q .tagName)
+          gh release download "$tag" -R "$GITHUB_REPOSITORY" -p altstore.json -O altstore.json --clobber
+          cp altstore.json before.json
+          node scripts/add-ios-app.mjs altstore.json
+          if cmp -s before.json altstore.json; then
+            echo "Source déjà à jour ($tag)"
+          else
+            gh release upload "$tag" altstore.json -R "$GITHUB_REPOSITORY" --clobber
+            echo "Source mise à jour ($tag)"
+          fi
