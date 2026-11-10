@@ -1010,6 +1010,11 @@ async function removeFromArr(r, deleteFiles) {
 const WATCHLIST_FILE = path.join(DATA_DIR, 'watchlist.json');
 let watchlists = readJson(WATCHLIST_FILE, {}); // userId → [{ type, tmdbId, title, year, poster, backdrop, addedAt }]
 const saveWatchlists = () => persist(WATCHLIST_FILE, () => watchlists);
+// Titres retirés de « À voir » : userId → { "type:tmdbId": date (ms) }. Sert aux applis qui gardent une copie
+// (Nuvio iOS) pour savoir qu'un titre a été retiré sur un autre appareil, et ne pas le renvoyer.
+const WATCHLIST_REMOVED_FILE = path.join(DATA_DIR, 'watchlist-removed.json');
+let watchlistRemoved = readJson(WATCHLIST_REMOVED_FILE, {});
+const saveWatchlistRemoved = () => persist(WATCHLIST_REMOVED_FILE, () => watchlistRemoved);
 // Date de sortie en numérique (VOD) d'un film, en France de préférence ; série : prochain épisode ou 1re diffusion
 const digitalCache = new Map();
 async function digitalDate(type, id) {
@@ -7473,6 +7478,10 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
               digital: tmdbKey() ? await digitalDate(x.type, x.tmdbId).catch(() => null) : null,
             }))
           ),
+          removed: Object.entries(watchlistRemoved[user.id] || {}).map(([key, removedAt]) => {
+            const [type, id] = key.split(':');
+            return { type, tmdbId: Number(id), removedAt };
+          }),
         });
       }
       if (req.method === 'POST') {
@@ -7492,6 +7501,10 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         };
         watchlists[user.id] = [item, ...list.filter((x) => !(x.type === type && x.tmdbId === tmdbId))].slice(0, 500);
         saveWatchlists();
+        if (watchlistRemoved[user.id] && watchlistRemoved[user.id][`${type}:${tmdbId}`]) {
+          delete watchlistRemoved[user.id][`${type}:${tmdbId}`];
+          saveWatchlistRemoved();
+        }
         return send(res, 200, { ok: true });
       }
       if (req.method === 'DELETE') {
@@ -7499,6 +7512,12 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         const tmdbId = Number(q.get('tmdbId'));
         watchlists[user.id] = list.filter((x) => !(x.type === type && x.tmdbId === tmdbId));
         saveWatchlists();
+        if (tmdbId) {
+          const gone = { ...(watchlistRemoved[user.id] || {}), [`${type}:${tmdbId}`]: Date.now() };
+          // On ne garde que les 500 retraits les plus récents
+          watchlistRemoved[user.id] = Object.fromEntries(Object.entries(gone).sort((x, y) => y[1] - x[1]).slice(0, 500));
+          saveWatchlistRemoved();
+        }
         return send(res, 200, { ok: true });
       }
     }
