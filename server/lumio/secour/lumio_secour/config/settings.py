@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # ===========================
     # Source Configuration
     # ===========================
-    WAWACITY_URL: Optional[str] = None
+    WAWACITY_URL: Optional[str] = "https://www.wawacity.rentals"
     FREE_TELECHARGER_URL: Optional[str] = None
     DARKI_API_URL: Optional[str] = None
     DARKI_API_KEY: Optional[str] = None
@@ -205,7 +205,7 @@ class Settings(BaseSettings):
     # ===========================
     LUMIO_API_KEY: Optional[str] = None  # clé partagée avec le serveur Lumio (en-tête X-Lumio-Key)
     # Sources utilisées par Lumio (recherches et contrôle de nuit) ; vide = toutes celles qui ont une adresse
-    LUMIO_SOURCES: List[str] = ["movix"]
+    LUMIO_SOURCES: List[str] = ["movix", "wawacity"]
 
     # ===========================
     # Kitsu Configuration

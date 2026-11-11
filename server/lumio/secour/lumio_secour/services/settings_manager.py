@@ -160,7 +160,7 @@ DESCRIPTIONS = {
         "Maximum delay in seconds for one Idrix retry; a longer Retry-After blocks "
         "that host for the current run (default: 30)."
     ),
-    "LUMIO_SOURCES": "Sources utilisées par Lumio, une par ligne (movix, wawacity, zone-telechargement, free-telecharger, darki-api, webshare). Vide = toutes. Par défaut : movix.",
+    "LUMIO_SOURCES": "Sources utilisées par Lumio, une par ligne (movix, wawacity, zone-telechargement, free-telecharger, darki-api, webshare). Vide = toutes. Par défaut : movix et wawacity.",
     "DOMAIN_FOLLOW_REDIRECTS": "Lumio Secour : quand un site redirige vers une nouvelle adresse (même nom de site), l'adresse est mise à jour toute seule, vérifiée à chaque contrôle des sources (par défaut : oui).",
     "DOMAIN_SYNC_ENABLED": "Enable automatic source-domain updates from the configured Telegram channels (default: false).",
     "DOMAIN_SYNC_INTERVAL": "Full Telegram domain synchronization interval in seconds (default: 7200 = 2h).",

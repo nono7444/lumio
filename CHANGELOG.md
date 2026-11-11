@@ -6,6 +6,7 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Serveur 3.92.3 : onglet DL et mode ratio — Wawacity (wawacity.rentals) ajouté à côté de Movix. C411 : le vrai ratio et les périodes freeleech du compte sont lus sur le profil du site (clé API avec le droit « Profil (lecture) ») ; le booster démarre dès qu'un freeleech commence et cherche sur les 300 dernières sorties.
 ## 1.0.152 — 11 novembre 2026
 
 - Lumio Auto : trois nouveaux onglets dans la barre du bas. « Disques » (place libre de chaque disque, recherche d'un film ou d'une série, fichiers, téléchargements, stockage), « Serveur » (scanner, redémarrer, mettre à jour) et « Lecture » (qui regarde quoi : affiche, avancement, temps restant et heure de fin, compte, appareil, à la maison ou à distance, lecture directe ou conversion, statistiques). L'onglet Perf devient une vue d'ensemble : trois tuiles (lectures, service en route, place libre), le booster, puis la machine et les services.

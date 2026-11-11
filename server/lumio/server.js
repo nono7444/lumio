@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.92.2';
+const VERSION = '3.92.3';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2613,9 +2613,9 @@ async function arrHandOff(r) {
 
 // ——— Adresse connue d'un site, posée une fois dans le moteur quand le site a déménagé sans redirection ———
 // Une seule fois par adresse : ensuite l'admin (ou le suivi automatique) peut la changer sans être écrasé.
-const SECOUR_SEED = { MOVIX_URL: 'https://movix.miami' };
+const SECOUR_SEED = { MOVIX_URL: 'https://movix.miami', WAWACITY_URL: 'https://www.wawacity.rentals', LUMIO_SOURCES: ['movix', 'wawacity'] };
 const secourSeedTimer = setInterval(async () => {
-  const todo = Object.entries(SECOUR_SEED).filter(([k, v]) => (config.secourSeeded || {})[k] !== v);
+  const todo = Object.entries(SECOUR_SEED).filter(([k, v]) => JSON.stringify((config.secourSeeded || {})[k]) !== JSON.stringify(v));
   if (!todo.length) return clearInterval(secourSeedTimer);
   if (!secourEmbedded() || !secourProc) return;
   try {
@@ -3648,6 +3648,7 @@ if (!auto.ratioBase || typeof auto.ratioBase !== 'object') auto.ratioBase = {};
 // Mode ratio : { ixId: { on, ratio, since } } ; booster de seed : torrents freeleech pris seulement pour partager
 if (!auto.guard || typeof auto.guard !== 'object') auto.guard = {};
 if (!Array.isArray(auto.boost)) auto.boost = [];
+if (!auto.siteProfile || typeof auto.siteProfile !== 'object') auto.siteProfile = {}; // profil du site (C411) : vrai ratio, freeleech du compte
 if (!Array.isArray(auto.guardLog)) auto.guardLog = []; // dernières bascules du mode ratio
 let autoSaveTimer = null;
 const autoSave = () => {
@@ -3894,7 +3895,8 @@ function parseTorznab(xml, ix) {
       guid: tag('guid') || link,
       pub: tag('pubDate') || null,
       details: tag('comments') || (tag('link') !== link ? tag('link') : null),
-      freeleech: attr('downloadvolumefactor') === '0',
+      // 0 = freeleech (0.5 = demi, 1 = normal) ; ou freeleech actif sur tout le compte (événement du site)
+      freeleech: (attr('downloadvolumefactor') != null && attr('downloadvolumefactor') !== '' && Number(attr('downloadvolumefactor')) === 0) || autoSiteFree(ix.id),
       indexer: ix.name,
       indexerId: ix.id,
     });
@@ -3926,7 +3928,7 @@ async function idxCaps(ix, force = false) {
  * Une requête à un indexeur. Avec des identifiants (tmdbid, imdbid, saison, épisode) quand le site les accepte,
  * sinon recherche texte ; sans rien : dernières sorties (veille RSS).
  */
-async function idxQuery(ix, { q = '', cats = [], mode = 'search', ids = {} }) {
+async function idxQuery(ix, { q = '', cats = [], mode = 'search', ids = {}, offset = 0 }) {
   if (!idxAllowed(ix)) return { skipped: true, items: [] };
   const preset = IDX_PRESETS[ix.type] || IDX_PRESETS.torznab;
   const prev = idxCalls.get(ix.id);
@@ -3974,6 +3976,7 @@ async function idxQuery(ix, { q = '', cats = [], mode = 'search', ids = {} }) {
       const base = torznabBase(ix);
       const qs = new URLSearchParams({ t: mode, limit: '100', extended: '1' });
       if (q) qs.set('q', q);
+      if (offset > 0) qs.set('offset', String(offset));
       for (const [k, v] of Object.entries(ids)) if (v != null && v !== '') qs.set(k, String(v));
       if (cats.length) qs.set('cat', cats.join(','));
       if (ix.key) qs.set('apikey', ix.key);
@@ -5321,6 +5324,9 @@ const autoGuardCfg = () => ({ enabled: true, min: 1.1, margin: 0.05, ...(autoCfg
 function autoSiteRatio(ixId) {
   const st = auto.siteStats[ixId] || { up: 0, down: 0 };
   const base = auto.ratioBase[ixId] || null;
+  // Le vrai ratio, lu sur le profil du site (C411), quand la clé en a le droit
+  const prof = autoSiteProfile(ixId);
+  if (prof && prof.down > 0) return prof.up / prof.down;
   if (base && base.down > 0) {
     const up = base.up + Math.max(0, st.up - (base.lumioUp || 0));
     const down = base.down + Math.max(0, st.down - (base.lumioDown || 0));
@@ -5328,6 +5334,56 @@ function autoSiteRatio(ixId) {
   }
   return st.down > 0 ? st.up / st.down : null;
 }
+// ——— Profil du site (C411 : /api/user/profile, clé avec le droit « Profil (lecture) ») ———
+// Donne le vrai ratio du compte et dit si un freeleech est actif sur le compte (événement du site, fenêtre, personnel).
+const autoSiteProfile = (ixId) => {
+  const p = auto.siteProfile[ixId];
+  return p && !p.error && Date.now() - Date.parse(p.at || 0) < 6 * 3600e3 ? p : null;
+};
+const autoSiteFree = (ixId) => Boolean((autoSiteProfile(ixId) || {}).freeleech);
+let profileBusy = false;
+async function autoProfileTick() {
+  if (profileBusy) return;
+  profileBusy = true;
+  try {
+    for (const ix of autoIndexers().filter((x) => x.enabled !== false && x.key && (x.type === 'c411' || /c411/i.test(x.url || '')))) {
+      const prev = auto.siteProfile[ix.id] || {};
+      try {
+        const origin = torznabBase(ix).replace(/\/api(\/torznab)?$/, '');
+        const r = await autoHttp(`${origin}/api/user/profile`, { headers: { Authorization: `Bearer ${ix.key}`, Accept: 'application/json' }, timeout: 20000 });
+        if (r.status === 401 || r.status === 403) throw new Error('clé sans le droit « Profil (lecture) »');
+        if (r.status >= 400) throw new Error(`HTTP ${r.status}`);
+        const j = JSON.parse(r.text());
+        const num = (v) => Number(v && typeof v === 'object' ? v.total : v) || 0;
+        const t = j.transfer || {};
+        const fl = j.freeleech || {};
+        const cur = { at: new Date().toISOString(), up: num(t.uploaded), down: num(t.downloaded), allowed: !(j.download && j.download.allowed === false), freeleech: Boolean(fl.active), sources: Array.isArray(fl.sources) ? fl.sources.map(String).slice(0, 5) : [] };
+        cur.ratio = cur.down > 0 ? Math.round((cur.up / cur.down) * 100) / 100 : null;
+        auto.siteProfile[ix.id] = cur;
+        if (!prev.at || prev.error) autoLog(`${ix.name} : profil lu (ratio ${cur.ratio ?? '?'}, freeleech ${cur.freeleech ? 'actif' : 'non'})`);
+        if (cur.freeleech !== Boolean(prev.freeleech) && (prev.at || cur.freeleech)) {
+          autoLog(cur.freeleech ? `${ix.name} : freeleech actif sur le compte (${cur.sources.join(', ') || 'événement'}) : les téléchargements ne comptent pas` : `${ix.name} : freeleech terminé`);
+          notify({ title: cur.freeleech ? '🎁 Freeleech sur ' + ix.name : 'Freeleech terminé', message: cur.freeleech ? 'Les téléchargements ne comptent pas dans le ratio. Le booster de seed en profite tout de suite.' : `${ix.name} : retour à la normale.`, tags: ['gift'], click: 'lumio://auto' }).catch(() => {});
+          if (cur.freeleech) {
+            // Début d'un freeleech : le booster n'attend pas la semaine, et les demandes en attente repartent
+            auto.boostLastRun = null;
+            for (const i of auto.items) if (!i.paused) i.nextSearch = Math.min(i.nextSearch || 0, Date.now() + 60e3);
+            setTimeout(() => autoBoostRun().catch(() => {}), 5000);
+          }
+        }
+      } catch (e) {
+        auto.siteProfile[ix.id] = { ...prev, error: String((e && e.message) || e).slice(0, 160), errorAt: new Date().toISOString(), freeleech: false };
+        if (prev.error !== auto.siteProfile[ix.id].error) autoLog(`${ix.name} : profil illisible (${auto.siteProfile[ix.id].error})`, 'warn');
+      }
+    }
+    autoSave();
+  } finally {
+    profileBusy = false;
+  }
+}
+setTimeout(() => autoProfileTick().then(autoGuardTick).catch(() => {}), 45_000);
+setInterval(() => autoProfileTick().then(autoGuardTick).catch(() => {}), 30 * 60_000);
+
 const autoGuardOn = (ixId) => autoGuardCfg().enabled && Boolean((auto.guard[ixId] || {}).on);
 const autoGuardAny = () => autoGuardCfg().enabled && !autoDebridOnly() && autoIndexers().some((ix) => ix.enabled !== false && autoGuardOn(ix.id));
 function autoGuardTick() {
@@ -5362,6 +5418,7 @@ function autoGuardTick() {
   }
 }
 
+let secourDiagAt = 0;
 /** Mode ratio : cherche un lien Movix pour ce film / cet épisode et le télécharge par AllDebrid (rien côté tracker). */
 async function autoMovixTry(item, want) {
   if (want.kind === 'season' || want.upgrade) return false;
@@ -5386,7 +5443,16 @@ async function autoMovixTry(item, want) {
       if (want.h265Only && !isH265(l)) return false;
       return true;
     });
-    if (!ok.length) return false;
+    if (!ok.length) {
+      // Aucun lien du tout : on regarde si les sites répondent (au plus une fois par heure) et on le dit dans le journal
+      if (!((found && found.links) || []).length && Date.now() - secourDiagAt > 3600e3) {
+        secourDiagAt = Date.now();
+        secour('/lumio/health?refresh=true', { timeout: 60000 })
+          .then((h) => autoLog(`sites de téléchargement direct : ${(h.sources || []).map((x) => `${x.name || x.key} ${x.status || '?'}${x.error ? ` (${String(x.error).slice(0, 80)})` : ''}`).join(' · ') || 'aucun site réglé'}`, 'warn'))
+          .catch((e) => autoLog(`sites de téléchargement direct : contrôle impossible (${e.message})`, 'warn'));
+      }
+      return false;
+    }
     // Classement de Lumio Secour (dispo AllDebrid, langue, 1080p, taille), le H.265 d'abord à dispo égale
     const ranked = rankSecourLinks(ok);
     const l = ranked.find((x) => x.cached && isH265(x)) || ranked.find((x) => x.cached) || ranked.find(isH265) || ranked[0];
@@ -5427,7 +5493,7 @@ async function autoMovixTry(item, want) {
     auto.grabs.unshift(grab);
     if (auto.grabs.length > 200) auto.grabs.length = 200;
     item.needsChoice = false;
-    autoEvent(item, 'sent', `Mode ratio : pris sur Movix par AllDebrid (rien ne compte dans le ratio) : ${title}`, { indexer: 'Movix', size: grab.release.size, by: 'mode ratio' });
+    autoEvent(item, 'sent', `Mode ratio : pris en téléchargement direct (${l.source || 'Movix'}) par AllDebrid, rien ne compte dans le ratio : ${title}`, { indexer: l.source || 'Movix', size: grab.release.size, by: 'mode ratio' });
     autoSave();
     autoLog(`${item.title} : mode ratio → lien Movix (${l.hoster || 'hébergeur'}) par AllDebrid`);
     notify({ title: '⬇️ Lumio Auto · Movix', message: `${item.title} · mode ratio (hors tracker)`, tags: ['arrow_down'], click: 'lumio://activity' });
@@ -5541,13 +5607,20 @@ async function autoBoostRun(manual = false) {
     let cands = [];
     for (const ix of autoIndexers().filter((x) => x.enabled !== false && x.type !== 'prowlarr')) {
       const cats = [...new Set([...parseCats(ix.catMovie, '2000'), ...parseCats(ix.catTv, '5000'), ...parseCats(ix.catAnime, '5070')])];
-      const r = await idxQuery(ix, { q: '', cats }).catch(() => ({ items: [] }));
-      cands.push(...(r.items || []));
+      // Jusqu'à 3 pages (300 dernières sorties) : les freeleech par torrent sont rares
+      for (let page = 0; page < 3; page++) {
+        const r = await idxQuery(ix, { q: '', cats, offset: page * 100 }).catch(() => ({ items: [] }));
+        const got = (r.items || []).filter((x) => !cands.some((c) => c.guid === x.guid));
+        cands.push(...got);
+        if (got.length < 50) break;
+      }
     }
     const seen = cands.length;
+    const noProfile = autoIndexers().filter((x) => x.enabled !== false && (auto.siteProfile[x.id] || {}).error).map((x) => x.name);
+    const hint = noProfile.length ? ` Pour voir les périodes freeleech du compte et ton vrai ratio, donne le droit « Profil (lecture) » à ta clé API ${noProfile.join(', ')} (page Intégrations du site).` : '';
     cands = cands.filter((r) => r.freeleech && r.size >= 300e6 && r.size <= 60e9 && !knownGuid.has(r.guid) && !(r.hash && known.has(r.hash)) && (r.leechers == null || r.leechers >= 1));
     if (!cands.length) auto.boostLastRun = new Date(Date.now() - 6 * 86400e3).toISOString();
-    if (!cands.length) return say(seen ? `aucun torrent freeleech parmi les ${seen} dernières sorties : nouvel essai demain` : 'les sites n’ont rien renvoyé : nouvel essai demain');
+    if (!cands.length) return say(seen ? `pas de freeleech en ce moment (ni sur le compte, ni parmi les ${seen} dernières sorties) : rien n’est pris pour ne pas toucher au ratio, nouvel essai demain.${hint}` : 'les sites n’ont rien renvoyé : nouvel essai demain');
     // Demande = téléchargeurs par partageur ; sans ces chiffres, les plus récents d'abord
     const demand = (r) => (r.leechers == null ? -1 : r.leechers / ((r.seeders || 0) + 1));
     cands.sort((a, b) => demand(b) - demand(a) || (b.leechers || 0) - (a.leechers || 0) || Date.parse(b.pub || 0) - Date.parse(a.pub || 0));
@@ -5641,7 +5714,9 @@ async function autoRatioReport() {
       .sort((a, b) => b.hoursLeft - a.hoursLeft);
     // Estimation du ratio sur le site = chiffres saisis (profil du site) + ce que Lumio a fait depuis
     let estimate = null;
-    if (base && base.down > 0) {
+    const prof = autoSiteProfile(ix.id);
+    if (prof && prof.down > 0) estimate = { up: prof.up, down: prof.down, ratio: prof.ratio, since: prof.at, real: true };
+    else if (base && base.down > 0) {
       const up = base.up + Math.max(0, st.up - (base.lumioUp || 0));
       const down = base.down + Math.max(0, st.down - (base.lumioDown || 0));
       estimate = { up, down, ratio: down > 0 ? Math.round((up / down) * 100) / 100 : null, since: base.at };
@@ -5670,6 +5745,7 @@ async function autoRatioReport() {
     auto: autoActive(),
     debridOnly: autoDebridOnly(),
     guardOn: autoGuardAny(),
+    freeleech: autoIndexers().filter((x) => autoSiteFree(x.id)).map((x) => x.name),
     movixReady: Boolean(secourUrl() && secourKey() && secourDebridKey()),
     current: autoDebridOnly() ? 'alldebrid' : autoGuardAny() ? 'guard' : 'torrent',
     running: running.map((g) => ({ title: g.title, client: g.client || null, progress: g.progress || 0, freeleech: Boolean(g.release && g.release.freeleech) })),
