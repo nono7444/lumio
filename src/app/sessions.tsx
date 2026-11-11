@@ -3,7 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View, Platform } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FocusPressable as Pressable } from '@/components/tv';
@@ -63,6 +63,10 @@ function SessionCard({ s }: { s: JfSession }) {
   const pct = dur ? Math.min(100, (pos / dur) * 100) : 0;
   const m = method(s);
   const paused = s.PlayState?.IsPaused;
+  const left = dur ? Math.max(0, dur - pos) : 0;
+  const endAt = left && !paused ? new Date(Date.now() + left * 1000).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : null;
+  const ip = s.RemoteEndPoint ?? '';
+  const where = !ip ? null : /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.|::1|fe80|fd)/.test(ip) ? 'à la maison' : 'à distance';
 
   return (
     <View style={styles.card}>
@@ -88,10 +92,17 @@ function SessionCard({ s }: { s: JfSession }) {
         </View>
         <Text style={styles.dim}>
           {clock(pos)} / {dur ? clock(dur) : '—'}
+          {dur ? ` · ${Math.round(pct)} %` : ''}
           {paused ? ' · en pause' : ''}
         </Text>
+        {left ? (
+          <Text style={styles.dim}>
+            Reste {Math.max(1, Math.round(left / 60))} min{endAt ? ` · fin vers ${endAt}` : ''}
+          </Text>
+        ) : null}
         <Text style={styles.dim} numberOfLines={1}>
           {s.DeviceName ?? 'Appareil'} · {s.Client ?? ''}
+          {where ? ` · ${where}` : ''}
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <View style={[styles.badge, { backgroundColor: m.color + '26' }]}>
@@ -104,9 +115,9 @@ function SessionCard({ s }: { s: JfSession }) {
   );
 }
 
-export default function Sessions() {
+/** Qui regarde quoi (cartes), connectés récemment et statistiques : utilisé par l'écran et par l'onglet « Lecture » de Lumio Auto. */
+export function SessionsBody({ stats = true }: { stats?: boolean }) {
   const { settings } = useSettings();
-  const insets = useSafeAreaInsets();
   const [list, setList] = useState<JfSession[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -132,6 +143,46 @@ export default function Sessions() {
   const idle = (list ?? []).filter((s) => !s.NowPlayingItem && s.UserName);
 
   return (
+    <>
+      {error ? (
+        <Text style={[styles.dim, { textAlign: 'center', marginTop: 20 }]}>{error}</Text>
+      ) : !list ? (
+        <ActivityIndicator color={C.text} style={{ marginTop: 30 }} />
+      ) : (
+        <>
+          <Text style={styles.section}>
+            {playing.length ? `${playing.length} lecture${playing.length > 1 ? 's' : ''} en cours` : 'Personne ne regarde en ce moment'}
+          </Text>
+          {playing.map((s) => (
+            <SessionCard key={s.Id} s={s} />
+          ))}
+          {idle.length ? (
+            <>
+              <Text style={[styles.section, { marginTop: 10 }]}>Connectés récemment</Text>
+              <View style={[styles.card, { flexDirection: 'column', gap: 8 }]}>
+                {idle.map((s) => (
+                  <Text key={s.Id} style={styles.dim}>
+                    <Text style={{ color: C.text, fontWeight: '700' }}>{s.UserName}</Text> · {s.DeviceName} · {s.Client}
+                  </Text>
+                ))}
+              </View>
+            </>
+          ) : null}
+        </>
+      )}
+      {stats ? (
+        <>
+          <Text style={styles.statsTitle}>Statistiques</Text>
+          <WatchStats />
+        </>
+      ) : null}
+    </>
+  );
+}
+
+export default function Sessions() {
+  const insets = useSafeAreaInsets();
+  return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <Text style={styles.h1}>En cours de lecture</Text>
@@ -139,37 +190,8 @@ export default function Sessions() {
           <Ionicons name="close" size={20} color={C.text} />
         </Pressable>
       </View>
-      <ScrollView
-        contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40, gap: 12 }}
-        refreshControl={Platform.isTV ? undefined : <RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
-        {error ? (
-          <Text style={[styles.dim, { textAlign: 'center', marginTop: 20 }]}>{error}</Text>
-        ) : !list ? (
-          <ActivityIndicator color={C.text} style={{ marginTop: 30 }} />
-        ) : (
-          <>
-            <Text style={styles.section}>
-              {playing.length ? `${playing.length} lecture${playing.length > 1 ? 's' : ''} en cours` : 'Personne ne regarde en ce moment'}
-            </Text>
-            {playing.map((s) => (
-              <SessionCard key={s.Id} s={s} />
-            ))}
-            {idle.length ? (
-              <>
-                <Text style={[styles.section, { marginTop: 10 }]}>Connectés récemment</Text>
-                <View style={[styles.card, { flexDirection: 'column', gap: 8 }]}>
-                  {idle.map((s) => (
-                    <Text key={s.Id} style={styles.dim}>
-                      <Text style={{ color: C.text, fontWeight: '700' }}>{s.UserName}</Text> · {s.DeviceName} · {s.Client}
-                    </Text>
-                  ))}
-                </View>
-              </>
-            ) : null}
-          </>
-        )}
-        <Text style={styles.statsTitle}>Statistiques</Text>
-        <WatchStats />
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40, gap: 12 }}>
+        <SessionsBody />
       </ScrollView>
     </View>
   );

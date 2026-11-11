@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Lumio Auto : trois nouveaux onglets dans la barre du bas. « Disques » (place libre de chaque disque, recherche d'un film ou d'une série, fichiers, téléchargements, stockage), « Serveur » (scanner, redémarrer, mettre à jour) et « Lecture » (qui regarde quoi : affiche, avancement, temps restant et heure de fin, compte, appareil, à la maison ou à distance, lecture directe ou conversion, statistiques). L'onglet Perf devient une vue d'ensemble : trois tuiles (lectures, service en route, place libre), le booster, puis la machine et les services.
+- Serveur 3.92.2 : le booster de seed rend sa place tout seul quand le disque passe sous 20 Go libres.
+
 ## 1.0.151 — 11 novembre 2026
 
 - Source FlareStore « Lumio » : Lumio iOS (version Nuvio) y apparaît aussi, à côté de Lumio et Lumio Auto ; elle se met à jour toute seule toutes les 2 heures.

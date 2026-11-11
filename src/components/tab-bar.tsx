@@ -33,6 +33,9 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   watchlist: 'bookmark',
   auto: IS_AUTO ? 'arrow-up-circle' : 'flash',
   qbit: 'magnet',
+  disks: 'server',
+  server: 'power',
+  playing: 'play-circle',
   // Lumio Auto : l'onglet « Réglages »
   settings: 'settings',
 };
@@ -49,6 +52,9 @@ const SHORT: Record<string, string> = {
   watchlist: 'À voir',
   auto: IS_AUTO ? 'Seed' : 'Auto',
   qbit: 'qBit',
+  disks: 'Disques',
+  server: 'Serveur',
+  playing: 'Lecture',
   settings: IS_AUTO ? 'Réglages' : 'Profil',
 };
 

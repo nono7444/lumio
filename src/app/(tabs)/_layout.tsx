@@ -58,11 +58,14 @@ export default function TabsLayout() {
         tabBar={(props) => <FloatingTabBar {...props} />}
         initialRouteName="index"
         screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: C.bg } }}>
-        {/* Gestion du serveur seulement : Performance, Seed, Demandes, qBittorrent (réglages : roue en haut à droite) */}
+        {/* Gestion du serveur seulement : Performance, Seed, Demandes, qBittorrent, Disques, Serveur, Lecture (réglages : roue en haut à droite) */}
         <Tabs.Screen name="index" options={{ title: 'Performance' }} />
         <Tabs.Screen name="auto" options={{ title: 'Seed' }} />
         <Tabs.Screen name="activity" options={{ title: 'Demandes' }} />
         <Tabs.Screen name="qbit" options={{ title: 'qBittorrent' }} />
+        <Tabs.Screen name="disks" options={{ title: 'Disques' }} />
+        <Tabs.Screen name="server" options={{ title: 'Serveur' }} />
+        <Tabs.Screen name="playing" options={{ title: 'Lecture' }} />
         <Tabs.Screen name="settings" options={{ href: null }} />
         <Tabs.Screen name="library" options={{ href: null }} />
         <Tabs.Screen name="search" options={{ href: null }} />
@@ -94,6 +97,9 @@ export default function TabsLayout() {
       {/* Lumio Auto est une appli à part (outils d'admin) */}
       <Tabs.Screen name="auto" options={{ title: 'Auto', href: null }} />
       <Tabs.Screen name="qbit" options={{ href: null }} />
+      <Tabs.Screen name="disks" options={{ href: null }} />
+      <Tabs.Screen name="server" options={{ href: null }} />
+      <Tabs.Screen name="playing" options={{ href: null }} />
       <Tabs.Screen name="watchlist" options={{ title: 'À voir', href: Platform.isTV ? null : undefined }} />
       <Tabs.Screen name="settings" options={{ title: 'Profil' }} />
     </Tabs>

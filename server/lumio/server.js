@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.92.1';
+const VERSION = '3.92.2';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -5454,6 +5454,7 @@ function autoBoostView() {
   return {
     ...cfg,
     diskFound: Boolean(boostDisk()),
+    diskFree: auto.boostDiskFree ?? null,
     used: boostUsed(),
     budget: cfg.gb * 1e9,
     lastRun: auto.boostLastRun || null,
@@ -5494,6 +5495,16 @@ async function autoBoostTick() {
       b.state = Number(t.progress) >= 1 ? 'seeding' : 'downloading';
       // Jamais fini au bout de 3 jours (plus de source) : place rendue, rien n'a été compté (freeleech)
       if (b.state === 'downloading' && Date.now() - Date.parse(b.addedAt) > 3 * 86400e3 && b.progress < 100) await boostRemove(b, 'téléchargement bloqué').catch(() => {});
+    }
+    // Disque presque plein : les vrais téléchargements passent avant le booster. On rend de la place
+    // (torrents pas finis d'abord, puis ceux qui ont leurs 72 h ou ratio 1), un par passage.
+    const bd = boostDisk();
+    const di = bd ? await diskInfo(bd).catch(() => null) : null;
+    auto.boostDiskFree = di && di.free != null ? di.free : null;
+    if (di && di.free != null && di.free < 20e9) {
+      const left = boostActive();
+      const victim = left.find((b) => b.state === 'downloading') || left.filter((b) => b.state === 'seeding' && hrSafe(b.seedTime, b.ratio)).sort((a, b) => (a.leechers || 0) - (b.leechers || 0))[0];
+      if (victim) await boostRemove(victim, 'disque presque plein').catch(() => {});
     }
     // Historique court des torrents retirés
     const gone = auto.boost.filter((b) => b.state === 'removed');

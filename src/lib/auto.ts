@@ -274,7 +274,7 @@ export type AutoRatioSite = {
 };
 export type AutoBoostTorrent = { id: string; title: string; size: number; indexer: string; addedAt: string; state: 'downloading' | 'seeding'; progress: number; ratio: number; uploaded: number; upSpeed: number; leechers: number | null; seeders: number | null; hoursLeft: number | null };
 /** Booster de seed : torrents freeleech pris seulement pour partager */
-export type AutoBoost = { enabled: boolean; gb: number; disk: string; perWeek: number; diskFound: boolean; used: number; budget: number; lastRun: string | null; nextRun: string | null; lastNote: string | null; torrents: AutoBoostTorrent[] };
+export type AutoBoost = { enabled: boolean; gb: number; disk: string; perWeek: number; diskFound: boolean; diskFree?: number | null; used: number; budget: number; lastRun: string | null; nextRun: string | null; lastNote: string | null; torrents: AutoBoostTorrent[] };
 /** Par où passent les demandes en ce moment */
 export type AutoService = {
   auto: boolean;

@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { Image } from 'expo-image';
-import { ActivityIndicator, Alert, Linking, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Picker, Toggle } from '@/components/arr-section';
@@ -20,7 +20,9 @@ import { ServerActionsSection } from '@/components/server-actions';
 import { StorageSection } from '@/components/storage-section';
 import { UptimeSection } from '@/components/uptime';
 import { serverCall } from '@/lib/chat';
-import { jf, type JfSession } from '@/lib/jellyfin';
+import { jf, jfPoster, type JfItem, type JfSession } from '@/lib/jellyfin';
+import { filesApi, type Disk } from '@/lib/files';
+import { SessionsBody } from '@/app/sessions';
 import { useFocusEffect } from 'expo-router';
 
 type Tab = 'demandes' | 'manquants' | 'telechargements' | 'qbit' | 'ratio';
@@ -715,6 +717,11 @@ function BoostCard({ b, reload }: { b: AutoBoost; reload: () => void }) {
       <View style={styles.svcBar}>
         <View style={{ width: `${pct}%`, height: 8, backgroundColor: pct > 90 ? C.warning : C.success }} />
       </View>
+      {b.diskFree != null ? (
+        <Text style={[styles.small, b.diskFree < 40e9 ? { color: C.warning } : null]}>
+          {gb(b.diskFree)} libres sur {b.disk}. Le booster laisse toujours 20 Go libres : s’il manque de place il ne prend rien, et il rend sa place si le disque se remplit.
+        </Text>
+      ) : null}
       <View style={[styles.ratioRow, { flexWrap: 'wrap' }]}>
         {[50, 100, 200, 300].map((g) => (
           <SegChip key={g} label={`${g} Go`} on={b.gb === g} onPress={() => set({ gb: g })} />
@@ -2159,6 +2166,10 @@ const styles = StyleSheet.create({
   epChipTxt: { color: C.text, fontSize: 13, fontWeight: '800' },
   ratioCard: { borderRadius: 20, backgroundColor: C.surface, padding: 16, gap: 10 },
   svcStep: { flex: 1, alignItems: 'center', gap: 4, paddingVertical: 10, paddingHorizontal: 4, borderRadius: 14, backgroundColor: C.surfaceHigh, borderWidth: 1.5, borderColor: 'transparent' },
+  tile: { flex: 1, backgroundColor: C.surface, borderRadius: 18, padding: 12, gap: 3 },
+  tileNum: { fontSize: 22, fontWeight: '900', letterSpacing: -0.4 },
+  searchBox: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, height: 46, borderRadius: 14, backgroundColor: C.surfaceHigh },
+  searchInput: { flex: 1, color: C.text, fontSize: 16 },
   svcBar: { height: 8, borderRadius: 4, backgroundColor: C.surfaceHigh, overflow: 'hidden' },
   ratioRow: { flexDirection: 'row', gap: 10 },
   ratioLabel: { color: C.textDim, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
@@ -2207,8 +2218,8 @@ const styles = StyleSheet.create({
 });
 
 
-// ═══════════════════ Lumio Auto : quatre onglets très lisibles ═══════════════════
-// Performance (le serveur), Seed (ratio et partage), Demandes, qBittorrent. Les réglages : roue en haut à droite.
+// ═══════════════════ Lumio Auto : sept onglets très lisibles ═══════════════════
+// Performance (vue d'ensemble), Seed, Demandes, qBittorrent, Disques, Serveur, Lecture. Les réglages : roue en haut à droite.
 
 const fmtSpeed2 = (b: number) => (b >= 1e6 ? `${(b / 1e6).toFixed(1)} Mo/s` : `${Math.round(b / 1e3)} ko/s`).replace('.', ',');
 
@@ -2234,12 +2245,31 @@ function AutoHeader({ title, sub, color }: { title: string; sub?: string | null;
   );
 }
 
-/** Onglet « Performance » : le serveur (services, machine, lectures, mises à jour, disques). */
+const fmtDisk = (n?: number | null) => (n == null ? '—' : n >= 1e12 ? `${(n / 1e12).toFixed(2).replace('.', ',')} To` : `${Math.round(n / 1e9)} Go`);
+
+/** Petite tuile de la vue d'ensemble : un chiffre, une légende, ouvre l'onglet concerné. */
+function PerfTile({ icon, value, label, color, to }: { icon: keyof typeof Ionicons.glyphMap; value: string; label: string; color: string; to: string }) {
+  return (
+    <Pressable onPress={() => router.navigate(to as never)} style={({ pressed }) => [styles.tile, pressed && { opacity: 0.75 }]}>
+      <Ionicons name={icon} size={18} color={color} />
+      <Text style={[styles.tileNum, { color }]} numberOfLines={1} adjustsFontSizeToFit>
+        {value}
+      </Text>
+      <Text style={styles.small} numberOfLines={2}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+/** Onglet « Performance » : vue d'ensemble (lectures, service en route, place) puis la machine et les services. */
 export function AutoPerfScreen() {
   const { settings } = useSettings();
   const insets = useSafeAreaInsets();
   const [services, setServices] = useState<{ name: string; ok: boolean }[] | null>(null);
   const [watching, setWatching] = useState<JfSession[]>([]);
+  const [disks, setDisks] = useState<Disk[] | null>(null);
+  const [ratio, setRatio] = useState<AutoRatio | null>(null);
   const load = useCallback(() => {
     serverCall<{ services: { name: string; ok: boolean }[] }>(settings, '/api/uptime')
       .then((r) => setServices(r.services))
@@ -2247,6 +2277,8 @@ export function AutoPerfScreen() {
     jf.sessions(settings)
       .then((l) => setWatching(l.filter((x) => x.NowPlayingItem)))
       .catch(() => {});
+    filesApi.disks(settings).then(setDisks).catch(() => {});
+    autoApi.ratio(settings).then(setRatio).catch(() => {});
   }, [settings]);
   useFocusEffect(
     useCallback(() => {
@@ -2256,6 +2288,12 @@ export function AutoPerfScreen() {
     }, [load])
   );
   const bad = services?.filter((x) => !x.ok) ?? [];
+  const free = disks ? disks.reduce((n, d) => n + (d.free || 0), 0) : null;
+  const tight = disks?.some((d) => d.free != null && d.free < 30e9);
+  const sv = ratio?.service;
+  const svc = !sv ? { v: '—', l: 'Service en route', c: C.textDim } : sv.current === 'guard' ? { v: 'Mode ratio', l: 'Freeleech puis Movix', c: C.warning } : sv.current === 'alldebrid' ? { v: 'AllDebrid', l: 'Versions en cache seulement', c: C.accent } : { v: 'Torrents', l: 'Ratio correct', c: C.success };
+  const names = [...new Set(watching.map((w) => w.UserName).filter(Boolean))];
+  const boost = ratio?.boost;
   return (
     <SectionCollapse.Provider value={COLLAPSE}>
       <ScrollView
@@ -2267,35 +2305,140 @@ export function AutoPerfScreen() {
           sub={!services ? 'Connexion au serveur…' : bad.length ? `${bad.map((x) => x.name).join(', ')} hors ligne` : 'Tout fonctionne'}
           color={!services ? C.textFaint : bad.length ? C.danger : C.success}
         />
-        <View style={styles.bigCard}>
-          <View style={styles.rowBetween}>
-            <Text style={styles.bigCardTitle}>En lecture</Text>
-            <Text style={[styles.bigNum, { color: watching.length ? C.success : C.textDim }]}>{watching.length}</Text>
-          </View>
-          {!watching.length ? <Text style={styles.small}>Personne ne regarde en ce moment.</Text> : null}
-          {watching.map((w) => (
-            <View key={w.Id} style={styles.watchRow}>
-              <Ionicons name={w.PlayState?.IsPaused ? 'pause' : 'play'} size={13} color={C.success} />
-              <Text style={[styles.title, { fontSize: 14 }]}>{w.UserName}</Text>
-              <Text style={[styles.small, { flex: 1 }]} numberOfLines={1}>
-                {w.NowPlayingItem?.SeriesName ? `${w.NowPlayingItem.SeriesName} · ` : ''}
-                {w.NowPlayingItem?.Name}
+        <View style={styles.ratioRow}>
+          <PerfTile icon="play-circle" value={String(watching.length)} label={watching.length ? names.join(', ') : 'Personne ne regarde'} color={watching.length ? C.success : C.textDim} to="/playing" />
+          <PerfTile icon="swap-vertical" value={svc.v} label={svc.l} color={svc.c} to="/auto" />
+          <PerfTile icon="server" value={fmtDisk(free)} label={tight ? 'Un disque est presque plein' : 'libres sur les disques'} color={tight ? C.warning : C.text} to="/disks" />
+        </View>
+        {boost?.enabled ? (
+          <Pressable onPress={() => router.navigate('/auto' as never)} style={styles.stateLine}>
+            <Ionicons name="rocket" size={14} color={C.success} />
+            <Text style={[styles.small, { flex: 1 }]} numberOfLines={1}>
+              Booster de seed : {boost.torrents.length} torrent{boost.torrents.length > 1 ? 's' : ''} · {gb(boost.used)} / {boost.gb} Go
+            </Text>
+            <Ionicons name="chevron-forward" size={14} color={C.textFaint} />
+          </Pressable>
+        ) : null}
+        <UptimeSection />
+      </ScrollView>
+    </SectionCollapse.Provider>
+  );
+}
+
+/** Recherche dans les bibliothèques Jellyfin : ouvrir un titre pour le supprimer, le déplacer, le rescanner. */
+function LibrarySearchCard() {
+  const { settings } = useSettings();
+  const [q, setQ] = useState('');
+  const [items, setItems] = useState<JfItem[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    const term = q.trim();
+    if (term.length < 2) {
+      setItems(null);
+      return;
+    }
+    let alive = true;
+    setLoading(true);
+    const t = setTimeout(() => {
+      jf.items(settings, { search: term, types: 'Movie,Series', limit: 20 })
+        .then((r) => alive && setItems(r.Items))
+        .catch(() => alive && setItems([]))
+        .finally(() => alive && setLoading(false));
+    }, 300);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [q, settings]);
+  return (
+    <View style={styles.bigCard}>
+      <Text style={styles.bigCardTitle}>Chercher un film ou une série</Text>
+      <View style={styles.searchBox}>
+        <Ionicons name="search" size={18} color={C.textDim} />
+        <TextInput value={q} onChangeText={setQ} placeholder="Titre dans les bibliothèques" placeholderTextColor={C.textFaint} style={styles.searchInput} autoCorrect={false} returnKeyType="search" clearButtonMode="while-editing" />
+        {loading ? <ActivityIndicator size="small" color={C.textDim} /> : null}
+      </View>
+      {items === null ? (
+        <Text style={styles.small}>Tape au moins 2 lettres, puis ouvre le titre : supprimer, déplacer sur un autre disque, modifier les infos, rescanner.</Text>
+      ) : !items.length ? (
+        <Text style={styles.small}>Aucun titre trouvé dans les bibliothèques.</Text>
+      ) : (
+        items.map((item) => (
+          <Pressable key={item.Id} onPress={() => router.push({ pathname: '/jellyfin/[id]', params: { id: item.Id } })} style={({ pressed }) => [styles.watchRow, { gap: 12 }, pressed && { opacity: 0.75 }]}>
+            <Image source={jfPoster(settings, item, 180)} style={styles.missPoster} contentFit="cover" />
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={styles.title} numberOfLines={1}>
+                {item.Name}
+              </Text>
+              <Text style={styles.small}>
+                {item.Type === 'Series' ? 'Série' : 'Film'}
+                {item.ProductionYear ? ` · ${item.ProductionYear}` : ''}
               </Text>
             </View>
-          ))}
-        </View>
-        {/* Disques et téléchargements, comme avant dans Lumio */}
-        <View style={styles.bigCard}>
-          <Text style={styles.bigCardTitle}>Disques et téléchargements</Text>
-          <Text style={styles.small}>Chercher un titre pour le supprimer ou le déplacer, parcourir les disques, télécharger par AllDebrid.</Text>
-          <Pressable onPress={() => router.push('/library-admin')} style={[styles.pill, { justifyContent: 'center', paddingVertical: 12, marginTop: 4 }]}>
-            <Ionicons name="search" size={16} color={C.text} />
-            <Text style={styles.pillTxt}>Chercher dans les bibliothèques</Text>
+            <Ionicons name="chevron-forward" size={16} color={C.textFaint} />
           </Pressable>
+        ))
+      )}
+    </View>
+  );
+}
+
+/** Onglet « Disques » : place sur chaque disque, recherche dans les bibliothèques, fichiers, téléchargements, stockage. */
+export function AutoDisksScreen() {
+  const { settings } = useSettings();
+  const insets = useSafeAreaInsets();
+  const [disks, setDisks] = useState<Disk[] | null>(null);
+  const load = useCallback(() => {
+    filesApi.disks(settings).then(setDisks).catch(() => setDisks([]));
+  }, [settings]);
+  useFocusEffect(
+    useCallback(() => {
+      load();
+      const t = setInterval(load, 30000);
+      return () => clearInterval(t);
+    }, [load])
+  );
+  const free = (disks ?? []).reduce((n, d) => n + (d.free || 0), 0);
+  const tight = (disks ?? []).filter((d) => d.free != null && d.free < 30e9);
+  return (
+    <SectionCollapse.Provider value={COLLAPSE}>
+      <ScrollView
+        style={{ flex: 1, backgroundColor: C.bg }}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: TAB_SPACE + 20, gap: 14 }}
+        refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
+        <AutoHeader
+          title="Disques"
+          sub={!disks ? 'Lecture des disques…' : tight.length ? `${tight.map((d) => d.name).join(', ')} presque plein` : `${fmtDisk(free)} libres en tout`}
+          color={!disks ? C.textFaint : tight.length ? C.warning : C.success}
+        />
+        <View style={styles.bigCard}>
+          <Text style={styles.bigCardTitle}>Place sur les disques</Text>
+          {!disks ? <ActivityIndicator color={C.text} /> : null}
+          {disks && !disks.length ? <Text style={styles.small}>Aucun disque déclaré sur le serveur.</Text> : null}
+          {(disks ?? []).map((d) => {
+            const used = d.total && d.free != null ? d.total - d.free : null;
+            const pct = d.total && used != null ? Math.min(100, (used / d.total) * 100) : 0;
+            const color = d.free != null && d.free < 30e9 ? C.danger : pct > 85 ? C.warning : C.success;
+            return (
+              <Pressable key={d.name} onPress={() => router.push({ pathname: '/files', params: { root: d.name } })} style={({ pressed }) => [{ gap: 5 }, pressed && { opacity: 0.75 }]}>
+                <View style={styles.rowBetween}>
+                  <Text style={styles.title}>{d.name}</Text>
+                  <Text style={[styles.small, { color, fontWeight: '800' }]}>{fmtDisk(d.free)} libres</Text>
+                </View>
+                <View style={styles.svcBar}>
+                  <View style={{ width: `${pct}%`, height: 8, backgroundColor: color }} />
+                </View>
+                <Text style={styles.small}>
+                  {fmtDisk(used)} utilisés sur {fmtDisk(d.total)} · {Math.round(pct)} %
+                </Text>
+              </Pressable>
+            );
+          })}
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
             <Pressable onPress={() => router.push('/files')} style={[styles.pill, { flex: 1, justifyContent: 'center', paddingVertical: 12 }]}>
               <Ionicons name="folder-open-outline" size={16} color={C.text} />
-              <Text style={styles.pillTxt}>Disques</Text>
+              <Text style={styles.pillTxt}>Parcourir</Text>
             </Pressable>
             <Pressable onPress={() => router.push('/downloads')} style={[styles.pill, { flex: 1, justifyContent: 'center', paddingVertical: 12 }]}>
               <Ionicons name="cloud-download-outline" size={16} color={C.text} />
@@ -2303,11 +2446,43 @@ export function AutoPerfScreen() {
             </Pressable>
           </View>
         </View>
+        <LibrarySearchCard />
         <StorageSection />
-        <UptimeSection />
+      </ScrollView>
+    </SectionCollapse.Provider>
+  );
+}
+
+/** Onglet « Serveur » : scanner, redémarrer, mettre à jour (serveur Lumio, conteneurs, PC). */
+export function AutoServerScreen() {
+  const { settings } = useSettings();
+  const insets = useSafeAreaInsets();
+  const [version, setVersion] = useState<string | null>(null);
+  useFocusEffect(
+    useCallback(() => {
+      serverCall<{ version?: string }>(settings, '/health')
+        .then((r) => setVersion(r.version ?? null))
+        .catch(() => setVersion(null));
+    }, [settings])
+  );
+  return (
+    <SectionCollapse.Provider value={COLLAPSE}>
+      <ScrollView style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: TAB_SPACE + 20, gap: 14 }}>
+        <AutoHeader title="Serveur" sub={version ? `Serveur Lumio ${version}` : 'Redémarrer et mettre à jour'} color={version ? C.success : C.textFaint} />
         <ServerActionsSection />
       </ScrollView>
     </SectionCollapse.Provider>
+  );
+}
+
+/** Onglet « Lecture » : qui regarde quoi (affiche, avancement, compte, appareil, lecture directe ou conversion) et les statistiques. */
+export function AutoPlayingScreen() {
+  const insets = useSafeAreaInsets();
+  return (
+    <ScrollView style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: TAB_SPACE + 20, gap: 12 }}>
+      <AutoHeader title="Lecture" sub="Mis à jour toutes les 5 secondes" />
+      <SessionsBody />
+    </ScrollView>
   );
 }
 
