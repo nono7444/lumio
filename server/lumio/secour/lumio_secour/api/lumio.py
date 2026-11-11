@@ -214,6 +214,42 @@ async def resolve(request: Request, body: Dict[str, Any] = Body(...)):
     raise HTTPException(status_code=422, detail=messages.get(str(result), f"Conversion impossible ({result or 'erreur'})"))
 
 
+@router.post("/redirect")
+async def redirect(request: Request, body: Dict[str, Any] = Body(...)):
+    """Lien protégé (dl-protect de Wawacity…) → lien d'hébergeur (1fichier…), par le « redirector » d'AllDebrid.
+
+    Sert au streaming : AllDebrid ouvre le lien protégé, puis un autre service (TorBox) lit le lien d'hébergeur.
+    """
+    _check_key(request)
+    debrid_key = _debrid_key(request)
+    if not debrid_key:
+        raise HTTPException(status_code=400, detail="Clé AllDebrid manquante")
+    link = str(body.get("link") or "").strip()
+    if not link.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="Lien invalide")
+    from lumio_secour.debrid.alldebrid import alldebrid_service
+    from lumio_secour.utils.http_client import http_client
+
+    if alldebrid_service._is_direct_hoster_link(link):
+        return {"link": link}
+    try:
+        response = await http_client.get(
+            f"{settings.ALLDEBRID_API_URL}/link/redirector",
+            params={"agent": settings.ADDON_NAME, "apikey": debrid_key, "link": link},
+        )
+        data = response.json() if response.status_code == 200 else {}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AllDebrid ne répond pas ({type(e).__name__})")
+    if data.get("status") != "success":
+        code = (data.get("error") or {}).get("code") or f"HTTP {response.status_code}"
+        raise HTTPException(status_code=422, detail=f"AllDebrid n'a pas pu ouvrir ce lien ({code})")
+    links = (data.get("data") or {}).get("links") or []
+    selected = await alldebrid_service._select_redirected_link(links, debrid_key, body.get("hoster") or None)
+    if not selected:
+        raise HTTPException(status_code=422, detail="Aucun lien d'hébergeur derrière ce lien")
+    return {"link": selected}
+
+
 @router.get("/settings")
 async def get_settings(request: Request):
     _check_key(request)

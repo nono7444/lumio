@@ -6,6 +6,7 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Serveur 3.96.0 : streaming depuis Wawacity — AllDebrid ouvre le lien protégé, TorBox lit le lien d'hébergeur obtenu (le streaming reste sur TorBox).
 ## 1.0.154 — 11 novembre 2026
 
 - « Lire » sur un titre absent du serveur (admin) : même bouton que d'habitude. Lumio trouve un lien (Movix, Wawacity), TorBox le lit en streaming, et le fichier arrive en arrière-plan sur le serveur (torrent C411, ou téléchargement direct si le ratio est bas). Quitter puis relancer reprend au même endroit, depuis Jellyfin si le fichier est arrivé. Réglage dans Lumio Auto → Serveur → « Streaming direct » (clé TorBox gardée sur le serveur). Les membres gardent « Demander » : rien ne se lance tout seul, l'admin reçoit une notification. Demande le serveur 3.95.0.

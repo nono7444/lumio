@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.95.0';
+const VERSION = '3.96.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2793,6 +2793,43 @@ async function watchNow(user, b) {
       }
     } catch (e) {
       tried.push(`${l.hoster || l.source || 'lien'} : ${e.message.replace(/^Lumio Secour : /, '')}`);
+    }
+  }
+  // Wawacity : ses liens sont protégés et TorBox ne sait pas les ouvrir. AllDebrid ouvre le lien protégé
+  // (il ne sert qu'à ça), et c'est TorBox qui lit le lien d'hébergeur obtenu : le streaming reste sur TorBox.
+  if (secourDebridKey()) {
+    const TB_HOSTS = /1fichier|turbobit|rapidgator|send\.?(cm|now)|darkibox|webshare/i;
+    let viaAd = null;
+    try {
+      viaAd = await secour(`/lumio/links?${qs}`, { timeout: 90000 });
+    } catch (e) {
+      tried.push(e.message);
+    }
+    const seen = new Set(ok.map((l) => l.link));
+    const more = ((viaAd && viaAd.links) || []).filter((l) => {
+      const txt = `${l.name || ''} ${l.language || ''}`;
+      if (seen.has(l.link)) return false;
+      if (/vostfr|\bsub/i.test(txt) && !/multi|french|truefrench|\bvf[fi2]?\b/i.test(txt)) return false;
+      if (QUEBEC_RE.test(txt.toLowerCase().replace(/[._]+/g, ' '))) return false;
+      return true;
+    });
+    for (const l of rankSecourLinks(more).slice(0, 4)) {
+      try {
+        const opened = await secour('/lumio/redirect', { method: 'POST', timeout: 45000, body: { link: l.link, hoster: l.hoster } });
+        if (!opened || !TB_HOSTS.test(opened.link || '')) {
+          tried.push(`${l.hoster || l.source || 'lien'} : hébergeur non lu par TorBox`);
+          continue;
+        }
+        const r = await secour('/lumio/resolve', { method: 'POST', timeout: 60000, service: 'torbox', body: { link: opened.link, hoster: l.hoster, season: l.season, episode: l.episode, type: qs.get('type') } });
+        if (r && /^https?:\/\//.test(r.url || '')) {
+          const out = { url: r.url, service: 'torbox', source: l.source || null, hoster: l.hoster || null, name: l.name || null, quality: l.quality || null, language: l.language || null, sizeBytes: Number(l.sizeBytes) || 0 };
+          watchCache.set(ck, { at: Date.now(), out });
+          console.log(`Lire en streaming : « ${b.title || tmdbId} » pour ${user.name} (lien ouvert par AllDebrid, lu par TorBox, ${l.source || '?'} · ${l.hoster || '?'})`);
+          return { ...out, position: watchPosition(user, type, tmdbId, season, episode), download: dl };
+        }
+      } catch (e) {
+        tried.push(`${l.hoster || l.source || 'lien'} : ${e.message.replace(/^Lumio Secour : /, '')}`);
+      }
     }
   }
   const dlNote = dl.state === 'started' ? ' Le téléchargement sur le serveur est lancé.' : dl.state === 'already' ? ' Le titre est déjà en cours de téléchargement sur le serveur.' : '';
