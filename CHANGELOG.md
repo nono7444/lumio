@@ -6,10 +6,13 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.151 — 11 novembre 2026
+
 - Source FlareStore « Lumio » : Lumio iOS (version Nuvio) y apparaît aussi, à côté de Lumio et Lumio Auto ; elle se met à jour toute seule toutes les 2 heures.
 - Lumio Auto, onglet Ratio : nouvelle carte « Service en route » (torrents, freeleech ou Movix : ce qui tourne en ce moment, ratio de chaque site, réglage du seuil, téléchargements en cours, dernières bascules) et carte « Booster de seed » (place utilisée, torrents en partage, envoyé, prochaine sélection, bouton pour en lancer une). Demande le serveur 3.92.1.
 - Serveur 3.92.0 : mode ratio — sous 1,10 sur un site, Lumio Auto ne prend plus que du freeleech, sinon le lien Movix par AllDebrid (rien ne compte dans le ratio), et revient aux torrents tout seul au-dessus de 1,15. Booster de seed : une fois par semaine, quelques torrents freeleech très demandés sont pris seulement pour partager (200 Go sur jellyfin3).
 - Serveur 3.91.1 : onglet DL — nouvelle adresse de Movix (movix.miami) posée toute seule dans Lumio Secour après la mise à jour du serveur.
+
 ## 1.0.150 — 8 novembre 2026
 
 - Serveur 3.91.0 : après un téléchargement, la fiche affiche « Ajout dans la bibliothèque… » (100 %) jusqu'à ce que Jellyfin voie le fichier, puis passe toute seule à « Lire » (bibliothèque relue toutes les 10 s pendant ce temps).
