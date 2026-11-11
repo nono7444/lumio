@@ -85,7 +85,7 @@ export default function MediaScreen() {
   // Serveur Lumio : demandes façon Seerr pour tout le monde (admin compris)
   const serverReq = useServerRequests();
   useEffect(() => {
-    if (!settings.chatUrl || !adminUI(settings)) return;
+    if (!settings.chatUrl || settings.jellyfin?.isAdmin !== true) return;
     requestsApi
       .media(settings, isTv ? 'tv' : 'movie', Number(id))
       .then((m) => setMediaStatus(m.status))
@@ -173,7 +173,8 @@ export default function MediaScreen() {
 
   // Proposer le titre dans le chat famille (petit mot facultatif)
   // « Movix » (admin) : seulement si le titre n'est pas (entièrement) disponible sur le serveur
-  const canMovix = Boolean(settings.chatUrl) && adminUI(settings) && !(details.kind === 'movie' && jfItem) && mediaStatus !== MediaStatus.AVAILABLE;
+  // Dans Lumio comme dans Lumio Auto : c'est le seul bouton admin gardé dans l'appli Lumio (les réglages restent dans Lumio Auto)
+  const canMovix = Boolean(settings.chatUrl) && settings.jellyfin?.isAdmin === true && !(details.kind === 'movie' && jfItem) && mediaStatus !== MediaStatus.AVAILABLE;
   const openMovix = () => router.push({ pathname: '/secour', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title } });
   const propose = () => {
     const share = (msg: string) =>

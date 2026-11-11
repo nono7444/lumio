@@ -6,6 +6,7 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Le bouton « Movix » s'affiche aussi dans l'appli Lumio pour l'admin (il n'apparaissait que dans Lumio Auto).
 ## 1.0.157 — 11 novembre 2026
 
 - Bouton « Movix » (admin) sur la fiche d'un titre absent, à la place du petit « DL » vert : il ouvre le choix des fichiers et télécharge sans passer par le tracker. À utiliser quand le ratio est bas ; sinon « Demander » prend le torrent.
