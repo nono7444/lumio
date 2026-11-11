@@ -6,7 +6,10 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.154 — 11 novembre 2026
+
 - « Regarder » sur un titre absent du serveur : Lumio trouve un lien (Movix, Wawacity), TorBox (sinon AllDebrid) le lit tout de suite, et le titre se télécharge en même temps en arrière-plan pour toute la famille. La suite d'une série s'enchaîne de la même façon. Réglage dans Lumio Auto → Serveur → « Streaming direct » (clé TorBox gardée sur le serveur). Demande le serveur 3.94.0.
+
 ## 1.0.153 — 11 novembre 2026
 
 - Lumio Auto, booster de seed : « Meilleurs torrents en ce moment » — la liste des torrents les plus intéressants d'après les chiffres de C411 (téléchargeurs, partageurs, taille, gratuit ou payant, gain estimé), avec un bouton « Prendre » pour chacun. Nouvelle option, éteinte par défaut : prendre aussi des torrents payants très demandés, dans une limite par semaine. Demande le serveur 3.93.0.
