@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.92.3';
+const VERSION = '3.93.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -5287,7 +5287,7 @@ async function autoRatioTick() {
     const list = await (await qbitFetch('/api/v2/torrents/info')).json();
     const byHash = new Map(auto.grabs.filter((g) => g.hash && g.client === 'qbit').map((g) => [g.hash, g]));
     // Booster de seed : compté sur son site, téléchargement en freeleech (hors ratio)
-    for (const b of auto.boost) if (b.hash && b.state !== 'removed') byHash.set(b.hash, { release: { indexerId: b.indexerId, indexer: b.indexer, freeleech: true } });
+    for (const b of auto.boost) if (b.hash && b.state !== 'removed') byHash.set(b.hash, { release: { indexerId: b.indexerId, indexer: b.indexer, freeleech: b.free !== false } });
     for (const t of list) {
       const hash = String(t.hash || '').toLowerCase();
       const g = byHash.get(hash);
@@ -5507,7 +5507,8 @@ async function autoMovixTry(item, want) {
 // ——— Booster de seed : une fois par semaine, quelques torrents freeleech très demandés, pris seulement pour partager ———
 // Freeleech = le téléchargement ne compte pas, l'envoi compte : le ratio ne peut que monter.
 // Rangés sur un seul disque (jellyfin3 par défaut), dans un budget de place ; jamais dans Jellyfin.
-const autoBoostCfg = () => ({ enabled: true, gb: 200, disk: 'jellyfin3', perWeek: 6, ...(autoCfg().boost || {}) });
+// paid : prendre aussi des torrents payants très rentables (éteint par défaut), au plus paidGb par semaine
+const autoBoostCfg = () => ({ enabled: true, gb: 200, disk: 'jellyfin3', perWeek: 6, paid: false, paidGb: 10, ...(autoCfg().boost || {}) });
 const BOOST_CATEGORY = 'lumio-boost';
 const boostActive = () => auto.boost.filter((b) => b.state !== 'removed');
 const boostUsed = () => boostActive().reduce((n, b) => n + (b.size || 0), 0);
@@ -5526,7 +5527,8 @@ function autoBoostView() {
     lastRun: auto.boostLastRun || null,
     nextRun: auto.boostLastRun ? new Date(Date.parse(auto.boostLastRun) + 7 * 86400e3).toISOString() : null,
     lastNote: auto.boostNote || null,
-    torrents: boostActive().map((b) => ({ id: b.id, title: b.title, size: b.size, indexer: b.indexer, addedAt: b.addedAt, state: b.state, progress: b.progress || 0, ratio: b.ratio || 0, uploaded: b.uploaded || 0, upSpeed: b.upSpeed || 0, leechers: b.leechers ?? null, seeders: b.seeders ?? null, hoursLeft: b.state === 'seeding' ? hrLeft(b.seedTime) : null })),
+    paidWeek: boostPaidWeek(),
+    torrents: boostActive().map((b) => ({ id: b.id, title: b.title, size: b.size, indexer: b.indexer, addedAt: b.addedAt, state: b.state, free: b.free !== false, progress: b.progress || 0, ratio: b.ratio || 0, uploaded: b.uploaded || 0, upSpeed: b.upSpeed || 0, leechers: b.leechers ?? null, seeders: b.seeders ?? null, hoursLeft: b.state === 'seeding' ? hrLeft(b.seedTime) : null })),
   };
 }
 async function boostRemove(b, why) {
@@ -5582,7 +5584,81 @@ async function autoBoostTick() {
     boostBusy = false;
   }
 }
-/** Sélection de la semaine : les freeleech les plus demandés (beaucoup de téléchargeurs, peu de partageurs). */
+/** Candidats du booster, classés par intérêt d'après les chiffres du site (API Torznab : partageurs, téléchargeurs, taille, freeleech).
+ *  Gain estimé = ce qu'on peut espérer envoyer (taille × téléchargeurs par partageur) moins ce que le téléchargement coûte. */
+let boostCands = { at: 0, list: [], seen: 0 };
+async function boostCandidates(force = false) {
+  if (!force && Date.now() - boostCands.at < 10 * 60e3) return boostCands;
+  const known = new Set([...boostActive().map((b) => b.hash), ...auto.grabs.map((g) => g.hash)].filter(Boolean));
+  const knownGuid = new Set([...boostActive().map((b) => b.guid), ...auto.grabs.map((g) => g.release && g.release.guid)].filter(Boolean));
+  const all = [];
+  for (const ix of autoIndexers().filter((x) => x.enabled !== false && x.type !== 'prowlarr')) {
+    const video = [...new Set([...parseCats(ix.catMovie, '2000'), ...parseCats(ix.catTv, '5000'), ...parseCats(ix.catAnime, '5070')])];
+    // Toutes les catégories (les petits fichiers très demandés rapportent le plus), puis films et séries : 300 sorties chacune au plus
+    for (const cats of [[], video]) {
+      for (let page = 0; page < 3; page++) {
+        const r = await idxQuery(ix, { q: '', cats, offset: page * 100 }).catch(() => ({ items: [] }));
+        const got = (r.items || []).filter((x) => !all.some((c) => c.guid === x.guid));
+        all.push(...got);
+        if (got.length < 50) break;
+      }
+    }
+  }
+  const list = all
+    .filter((r) => r.size >= 20e6 && r.size <= 60e9 && !knownGuid.has(r.guid) && !(r.hash && known.has(r.hash)) && r.leechers != null && r.leechers >= 1)
+    .map((r) => {
+      const demand = r.leechers / ((r.seeders || 0) + 1);
+      const expected = r.size * Math.min(5, demand);
+      const cost = r.freeleech ? 0 : r.size;
+      return { ...r, demand: Math.round(demand * 100) / 100, expected: Math.round(expected), cost, gain: Math.round(expected - cost) };
+    })
+    // Gratuits d'abord, puis le meilleur gain estimé
+    .sort((a, b) => Number(b.freeleech) - Number(a.freeleech) || b.gain - a.gain);
+  boostCands = { at: Date.now(), list, seen: all.length };
+  return boostCands;
+}
+const boostPaidWeek = () => auto.boost.filter((b) => b.free === false && Date.now() - Date.parse(b.addedAt) < 7 * 86400e3).reduce((n, b) => n + (b.size || 0), 0);
+/** Torrent payant « rentable » : au moins 3 téléchargeurs et deux fois plus de téléchargeurs que de partageurs, 5 Go au plus. */
+const boostWorthPaying = (r) => !r.freeleech && r.leechers >= 3 && r.demand >= 2 && r.size <= 5e9;
+const boostPublic = (r) => ({ guid: r.guid, title: r.title, size: r.size, seeders: r.seeders, leechers: r.leechers, grabs: r.grabs, free: Boolean(r.freeleech), demand: r.demand, expected: r.expected, gain: r.gain, indexer: r.indexer, pub: r.pub || null, worth: r.freeleech || boostWorthPaying(r) });
+
+/** Ajoute un torrent au booster (budget et place vérifiés). Renvoie l'entrée, ou lève une erreur lisible. */
+async function boostAdd(r) {
+  const cfg = autoBoostCfg();
+  const disk = boostDisk();
+  if (!disk) throw new Error(`disque « ${cfg.disk} » introuvable`);
+  if (boostUsed() + r.size > cfg.gb * 1e9) throw new Error('budget du booster plein');
+  const info = await diskInfo(disk);
+  if (((info && info.free) || 0) - r.size < 20e9) throw new Error('pas assez de place sur le disque (20 Go de marge)');
+  const qc = autoCfg().qbit || {};
+  const t = await fetchTorrent(r);
+  const hash = (t.buf ? torrentHash(t.buf) : magnetHash(t.magnet)) || r.hash;
+  if (!hash) throw new Error('empreinte du torrent illisible');
+  if (boostActive().some((b) => b.hash === hash) || auto.grabs.some((g) => g.hash === hash)) throw new Error('déjà dans qBittorrent');
+  const fd = new FormData();
+  if (t.buf) fd.append('torrents', new Blob([t.buf], { type: 'application/x-bittorrent' }), `${cleanName(r.title)}.torrent`);
+  else fd.append('urls', t.magnet);
+  fd.append('category', BOOST_CATEGORY);
+  // Un dossier par disque (réglage habituel) : /downloads/<disque>/boost ; sinon le dossier de qBittorrent
+  fd.append('savepath', `${String(qc.remotePath || '/downloads').replace(/\/+$/, '')}/${qc.perDisk !== false ? `${disk.name}/` : ''}boost`);
+  fd.append('ratioLimit', '-1');
+  fd.append('seedingTimeLimit', '-1');
+  const resp = await qbitFetch('/api/v2/torrents/add', { method: 'POST', body: fd });
+  if (/fail/i.test(await resp.text())) throw new Error('refusé par qBittorrent');
+  const b = { id: autoId(), hash, guid: r.guid, title: r.title, size: r.size, indexer: r.indexer, indexerId: r.indexerId, addedAt: new Date().toISOString(), state: 'downloading', leechers: r.leechers, seeders: r.seeders, free: Boolean(r.freeleech) };
+  auto.boost.push(b);
+  // Torrent payant : compté dans le volume du jour du site, comme un téléchargement normal
+  if (!b.free && r.indexerId) {
+    const day = new Date().toISOString().slice(0, 10);
+    const st0 = (auto.dlStats[r.indexerId] = auto.dlStats[r.indexerId] || {});
+    st0[day] = (st0[day] || 0) + (r.size || 0);
+  }
+  boostCands.list = boostCands.list.filter((x) => x.guid !== r.guid);
+  autoSave();
+  return b;
+}
+
+/** Sélection de la semaine : les freeleech les plus demandés ; en option, quelques torrents payants très rentables. */
 let boostRunning = false;
 async function autoBoostRun(manual = false) {
   const cfg = autoBoostCfg();
@@ -5601,39 +5677,32 @@ async function autoBoostRun(manual = false) {
   try {
     await autoBoostTick().catch(() => {});
     auto.boostLastRun = new Date().toISOString();
-    // 1. Candidats : dernières sorties freeleech de chaque site
-    const known = new Set([...boostActive().map((b) => b.hash), ...auto.grabs.map((g) => g.hash)].filter(Boolean));
-    const knownGuid = new Set([...auto.boost.map((b) => b.guid), ...auto.grabs.map((g) => g.release && g.release.guid)].filter(Boolean));
-    let cands = [];
-    for (const ix of autoIndexers().filter((x) => x.enabled !== false && x.type !== 'prowlarr')) {
-      const cats = [...new Set([...parseCats(ix.catMovie, '2000'), ...parseCats(ix.catTv, '5000'), ...parseCats(ix.catAnime, '5070')])];
-      // Jusqu'à 3 pages (300 dernières sorties) : les freeleech par torrent sont rares
-      for (let page = 0; page < 3; page++) {
-        const r = await idxQuery(ix, { q: '', cats, offset: page * 100 }).catch(() => ({ items: [] }));
-        const got = (r.items || []).filter((x) => !cands.some((c) => c.guid === x.guid));
-        cands.push(...got);
-        if (got.length < 50) break;
-      }
-    }
-    const seen = cands.length;
-    const noProfile = autoIndexers().filter((x) => x.enabled !== false && (auto.siteProfile[x.id] || {}).error).map((x) => x.name);
-    const hint = noProfile.length ? ` Pour voir les périodes freeleech du compte et ton vrai ratio, donne le droit « Profil (lecture) » à ta clé API ${noProfile.join(', ')} (page Intégrations du site).` : '';
-    cands = cands.filter((r) => r.freeleech && r.size >= 300e6 && r.size <= 60e9 && !knownGuid.has(r.guid) && !(r.hash && known.has(r.hash)) && (r.leechers == null || r.leechers >= 1));
-    if (!cands.length) auto.boostLastRun = new Date(Date.now() - 6 * 86400e3).toISOString();
-    if (!cands.length) return say(seen ? `pas de freeleech en ce moment (ni sur le compte, ni parmi les ${seen} dernières sorties) : rien n’est pris pour ne pas toucher au ratio, nouvel essai demain.${hint}` : 'les sites n’ont rien renvoyé : nouvel essai demain');
-    // Demande = téléchargeurs par partageur ; sans ces chiffres, les plus récents d'abord
-    const demand = (r) => (r.leechers == null ? -1 : r.leechers / ((r.seeders || 0) + 1));
-    cands.sort((a, b) => demand(b) - demand(a) || (b.leechers || 0) - (a.leechers || 0) || Date.parse(b.pub || 0) - Date.parse(a.pub || 0));
+    const retryTomorrow = () => (auto.boostLastRun = new Date(Date.now() - 6 * 86400e3).toISOString());
+    const { list, seen } = await boostCandidates(true);
+    const budget = cfg.gb * 1e9;
+    // 1. Choix : les gratuits (meilleur gain d'abord), puis, si l'option est allumée, les payants rentables dans la limite de la semaine
     const picks = [];
     let need = 0;
-    for (const r of cands) {
+    let paid = boostPaidWeek();
+    for (const r of list) {
       if (picks.length >= cfg.perWeek) break;
-      if (need + r.size > cfg.gb * 1e9) continue;
+      if (need + r.size > budget) continue;
+      if (!r.freeleech) {
+        if (!cfg.paid || !boostWorthPaying(r) || paid + r.size > cfg.paidGb * 1e9) continue;
+        paid += r.size;
+      }
       picks.push(r);
       need += r.size;
     }
-    // 2. Place : on retire d'abord les anciens que plus personne ne télécharge, puis les plus vieux (toujours après 72 h ou ratio 1)
-    const budget = cfg.gb * 1e9;
+    if (!picks.length) {
+      retryTomorrow();
+      const noProfile = autoIndexers().filter((x) => x.enabled !== false && (auto.siteProfile[x.id] || {}).error).map((x) => x.name);
+      const hint = noProfile.length ? ` Pour voir les périodes freeleech du compte et ton vrai ratio, donne le droit « Profil (lecture) » à ta clé API ${noProfile.join(', ')} (page Intégrations du site).` : '';
+      const worth = list.filter(boostWorthPaying).length;
+      if (!seen) return say('les sites n’ont rien renvoyé : nouvel essai demain');
+      return say(`pas de freeleech en ce moment (ni sur le compte, ni parmi les ${seen} dernières sorties) : rien n’est pris, nouvel essai demain.${worth ? ` ${worth} torrent(s) payant(s) très demandé(s) repéré(s) : regarde « Meilleurs torrents ».` : ''}${hint}`);
+    }
+    // 2. Place : on retire d'abord les anciens que plus personne ne télécharge, puis ce qu'il faut (toujours après 72 h ou ratio 1)
     const removable = boostActive()
       .filter((b) => b.state === 'seeding' && hrSafe(b.seedTime, b.ratio))
       .sort((a, b) => (a.leechers || 0) - (b.leechers || 0) || Date.parse(a.addedAt) - Date.parse(b.addedAt));
@@ -5644,41 +5713,19 @@ async function autoBoostRun(manual = false) {
       await boostRemove(b, over ? 'place pour la sélection de la semaine' : 'plus demandé').catch(() => {});
     }
     // 3. Envoi à qBittorrent (catégorie à part, partage sans limite)
-    const info = await diskInfo(disk);
-    let free = (info && info.free) || 0;
-    const qc = autoCfg().qbit || {};
     const added = [];
     for (const r of picks) {
-      if (boostUsed() + r.size > budget) continue;
-      if (free - r.size < 20e9) continue; // toujours 20 Go de marge sur le disque
       try {
-        const t = await fetchTorrent(r);
-        const hash = (t.buf ? torrentHash(t.buf) : magnetHash(t.magnet)) || r.hash;
-        if (!hash || known.has(hash)) continue;
-        const fd = new FormData();
-        if (t.buf) fd.append('torrents', new Blob([t.buf], { type: 'application/x-bittorrent' }), `${cleanName(r.title)}.torrent`);
-        else fd.append('urls', t.magnet);
-        fd.append('category', BOOST_CATEGORY);
-        // Un dossier par disque (réglage habituel) : /downloads/<disque>/boost ; sinon le dossier de qBittorrent
-        fd.append('savepath', `${String(qc.remotePath || '/downloads').replace(/\/+$/, '')}/${qc.perDisk !== false ? `${disk.name}/` : ''}boost`);
-        fd.append('ratioLimit', '-1');
-        fd.append('seedingTimeLimit', '-1');
-        const resp = await qbitFetch('/api/v2/torrents/add', { method: 'POST', body: fd });
-        if (/fail/i.test(await resp.text())) throw new Error('refusé par qBittorrent');
-        const b = { id: autoId(), hash, guid: r.guid, title: r.title, size: r.size, indexer: r.indexer, indexerId: r.indexerId, addedAt: new Date().toISOString(), state: 'downloading', leechers: r.leechers, seeders: r.seeders };
-        auto.boost.push(b);
-        known.add(hash);
-        added.push(b);
-        free -= r.size;
+        added.push(await boostAdd(r));
       } catch (e) {
         autoLog(`booster : ${r.title} non ajouté (${e.message})`, 'warn');
       }
     }
     const gb = (added.reduce((n, b) => n + b.size, 0) / 1e9).toFixed(1).replace('.', ',');
-    if (added.length) notify({ title: '🚀 Lumio Auto · booster de seed', message: `${added.length} torrent${added.length > 1 ? 's' : ''} freeleech ajouté${added.length > 1 ? 's' : ''} (${gb} Go) pour remonter le ratio`, tags: ['rocket'], click: 'lumio://auto' }).catch(() => {});
-    // Rien pris : nouvel essai demain plutôt que dans une semaine
-    if (!added.length) auto.boostLastRun = new Date(Date.now() - 6 * 86400e3).toISOString();
-    return say(added.length ? `${added.length} torrent(s) freeleech ajouté(s), ${gb} Go (${(boostUsed() / 1e9).toFixed(0)} / ${cfg.gb} Go utilisés)` : 'freeleech trouvés, mais pas de place (budget ou disque plein)');
+    const nPaid = added.filter((b) => !b.free).length;
+    if (added.length) notify({ title: '🚀 Lumio Auto · booster de seed', message: `${added.length} torrent${added.length > 1 ? 's' : ''} ajouté${added.length > 1 ? 's' : ''} (${gb} Go${nPaid ? `, dont ${nPaid} payant${nPaid > 1 ? 's' : ''}` : ', freeleech'}) pour remonter le ratio`, tags: ['rocket'], click: 'lumio://auto' }).catch(() => {});
+    if (!added.length) retryTomorrow();
+    return say(added.length ? `${added.length} torrent(s) ajouté(s), ${gb} Go${nPaid ? ` (dont ${nPaid} payant(s))` : ' en freeleech'} · ${(boostUsed() / 1e9).toFixed(0)} / ${cfg.gb} Go utilisés` : 'torrents trouvés, mais pas de place (budget ou disque plein)');
   } catch (e) {
     return say(`sélection impossible (${e.message})`);
   } finally {
@@ -6328,6 +6375,8 @@ async function autoRoutes(req, res, p, q, user) {
       if (Number(b.boost.gb) > 0) c.boost.gb = Number(b.boost.gb);
       if (Number(b.boost.perWeek) > 0) c.boost.perWeek = Math.min(20, Number(b.boost.perWeek));
       if (typeof b.boost.disk === 'string' && b.boost.disk.trim()) c.boost.disk = b.boost.disk.trim();
+      if (typeof b.boost.paid === 'boolean') c.boost.paid = b.boost.paid;
+      if (Number(b.boost.paidGb) > 0) c.boost.paidGb = Math.min(100, Number(b.boost.paidGb));
     }
     saveConfig();
     send(res, 200, { ok: true });
@@ -6341,6 +6390,26 @@ async function autoRoutes(req, res, p, q, user) {
   }
   // Chiffres du profil du site (envoyé / reçu, en octets) pour estimer le vrai ratio ; vide = effacer
   // Booster de seed : lancer la sélection de la semaine tout de suite
+  // Meilleurs torrents pour le booster, d'après les chiffres du site (gratuits d'abord, puis gain estimé)
+  if (req.method === 'GET' && p === '/api/auto/boost/candidates') {
+    const c2 = await boostCandidates(q.get('refresh') === '1');
+    send(res, 200, { at: new Date(c2.at).toISOString(), seen: c2.seen, total: c2.list.length, candidates: c2.list.slice(0, 40).map(boostPublic) });
+    return true;
+  }
+  // Prendre un torrent précis de cette liste (choix de l'admin, gratuit ou payant)
+  if (req.method === 'POST' && p === '/api/auto/boost/take') {
+    const b = await readBody(req);
+    const r = boostCands.list.find((x) => x.guid === b.guid);
+    if (!r) throw new HttpError(404, 'Torrent plus dans la liste : actualise-la');
+    try {
+      const x = await boostAdd(r);
+      autoLog(`booster : ${x.title} ajouté à la main (${x.free ? 'freeleech' : 'payant'})`);
+      send(res, 200, { ok: true, message: `${x.title} ajouté au booster` });
+    } catch (e) {
+      throw new HttpError(400, e.message);
+    }
+    return true;
+  }
   if (req.method === 'POST' && p === '/api/auto/boost/run') {
     send(res, 200, await autoBoostRun(true));
     return true;

@@ -12,7 +12,7 @@ import { Picker, Toggle } from '@/components/arr-section';
 import { toast } from '@/components/toast';
 import { Button, Field, ScreenTitle, Section, SectionCollapse, SegChip } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
-import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoBoost, type AutoService, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
+import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoBoost, type AutoBoostCandidate, type AutoService, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
 import { useSettings } from '@/lib/settings';
 import { IS_AUTO } from '@/lib/variant';
 import { ServerRequests } from '@/components/server-requests';
@@ -674,7 +674,29 @@ function ServiceCard({ sv, guard, sites, reload }: { sv: AutoService; guard: { e
 function BoostCard({ b, reload }: { b: AutoBoost; reload: () => void }) {
   const { settings } = useSettings();
   const [busy, setBusy] = useState(false);
-  const set = (x: { enabled?: boolean; gb?: number }) =>
+  const [cands, setCands] = useState<{ seen: number; list: AutoBoostCandidate[] } | null>(null);
+  const [candBusy, setCandBusy] = useState(false);
+  const loadCands = (refresh = false) => {
+    setCandBusy(true);
+    autoApi
+      .boostCandidates(settings, refresh)
+      .then((r) => setCands({ seen: r.seen, list: r.candidates }))
+      .catch((e) => Alert.alert('Booster de seed', /404|inconnue/.test(e?.message ?? '') ? 'Mets le serveur à jour (3.93.0).' : (e?.message ?? String(e))))
+      .finally(() => setCandBusy(false));
+  };
+  const take = (c: AutoBoostCandidate) => {
+    const go = () =>
+      autoApi
+        .boostTake(settings, c.guid)
+        .then((r) => (toast(r.message), setCands((o) => (o ? { ...o, list: o.list.filter((x) => x.guid !== c.guid) } : o)), reload()))
+        .catch((e) => Alert.alert('Booster de seed', e?.message ?? String(e)));
+    if (c.free) return go();
+    Alert.alert('Torrent payant', `${c.title}\n\nLe téléchargement (${gb(c.size)}) compte dans ton ratio. Envoi espéré : environ ${gb(c.expected)} (estimation, pas une garantie).`, [
+      { text: 'Annuler', style: 'cancel' },
+      { text: 'Prendre', onPress: go },
+    ]);
+  };
+  const set = (x: { enabled?: boolean; gb?: number; paid?: boolean; paidGb?: number }) =>
     autoApi
       .save(settings, { boost: x })
       .then(reload)
@@ -737,6 +759,7 @@ function BoostCard({ b, reload }: { b: AutoBoost; reload: () => void }) {
             {t.title}
           </Text>
           <Text style={styles.small}>
+            {t.free === false ? 'payant · ' : ''}
             {t.state === 'downloading' ? `arrive · ${t.progress}%` : `ratio ${fmtRatio(t.ratio)} · ${gb(t.uploaded)} envoyés`}
             {t.upSpeed ? ` · ↑ ${fmtSpeed(t.upSpeed)}` : ''} · {gb(t.size)}
             {t.leechers != null ? ` · ${t.leechers} le téléchargent` : ''}
@@ -745,6 +768,52 @@ function BoostCard({ b, reload }: { b: AutoBoost; reload: () => void }) {
         </View>
       ))}
       <Button title="Lancer une sélection maintenant" icon="rocket" variant="secondary" loading={busy} onPress={run} />
+      <Toggle label="Prendre aussi des torrents payants très demandés" value={!!b.paid} onChange={(v) => set({ paid: v })} />
+      {b.paid ? (
+        <>
+          <View style={[styles.ratioRow, { flexWrap: 'wrap' }]}>
+            {[5, 10, 20, 50].map((g) => (
+              <SegChip key={g} label={`${g} Go / semaine`} on={b.paidGb === g} onPress={() => set({ paidGb: g })} />
+            ))}
+          </View>
+          <Text style={styles.small}>
+            Seulement les torrents de 5 Go au plus avec au moins 3 téléchargeurs et deux fois plus de téléchargeurs que de partageurs. Le téléchargement compte dans le ratio : {gb(b.paidWeek ?? 0)} pris sur les 7 derniers jours.
+          </Text>
+        </>
+      ) : (
+        <Text style={styles.small}>Éteint : le booster ne prend que du freeleech, ton ratio ne peut pas baisser.</Text>
+      )}
+      <Text style={styles.ratioLabel}>Meilleurs torrents en ce moment</Text>
+      {!cands ? (
+        <Button title="Voir les meilleurs torrents" icon="trophy-outline" variant="secondary" loading={candBusy} onPress={() => loadCands()} />
+      ) : (
+        <>
+          <Text style={styles.small}>
+            Classés d’après les chiffres du site ({cands.seen} dernières sorties) : gratuits d’abord, puis le meilleur gain estimé (envoi espéré moins le téléchargement).
+          </Text>
+          {!cands.list.length ? <Text style={styles.small}>Aucun torrent demandé pour l’instant.</Text> : null}
+          {cands.list.slice(0, 15).map((c) => (
+            <View key={c.guid} style={[styles.watchRow, { alignItems: 'flex-start' }]}>
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={[styles.small, { color: C.text, fontWeight: '700' }]} numberOfLines={2}>
+                  {c.title}
+                </Text>
+                <Text style={styles.small}>
+                  <Text style={{ color: c.free ? C.success : c.worth ? C.warning : C.textDim, fontWeight: '800' }}>{c.free ? 'Gratuit' : c.worth ? 'Payant rentable' : 'Payant'}</Text> · {gb(c.size)} · {c.leechers ?? '?'} téléchargent / {c.seeders ?? '?'} partagent
+                </Text>
+                <Text style={[styles.small, { color: c.gain > 0 ? C.success : C.danger }]}>
+                  Gain estimé : {c.gain > 0 ? '+' : '−'}
+                  {gb(Math.abs(c.gain))}
+                </Text>
+              </View>
+              <Pressable onPress={() => take(c)} hitSlop={8} style={[styles.pill, { paddingVertical: 8 }]}>
+                <Text style={styles.pillTxt}>Prendre</Text>
+              </Pressable>
+            </View>
+          ))}
+          <Button title="Actualiser la liste" icon="refresh" variant="secondary" small loading={candBusy} onPress={() => loadCands(true)} />
+        </>
+      )}
     </View>
   );
 }

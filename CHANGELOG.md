@@ -6,6 +6,7 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Lumio Auto, booster de seed : « Meilleurs torrents en ce moment » — la liste des torrents les plus intéressants d'après les chiffres de C411 (téléchargeurs, partageurs, taille, gratuit ou payant, gain estimé), avec un bouton « Prendre » pour chacun. Nouvelle option, éteinte par défaut : prendre aussi des torrents payants très demandés, dans une limite par semaine. Demande le serveur 3.93.0.
 - Serveur 3.92.3 : onglet DL et mode ratio — Wawacity (wawacity.rentals) ajouté à côté de Movix. C411 : le vrai ratio et les périodes freeleech du compte sont lus sur le profil du site (clé API avec le droit « Profil (lecture) ») ; le booster démarre dès qu'un freeleech commence et cherche sur les 300 dernières sorties.
 ## 1.0.152 — 11 novembre 2026
 

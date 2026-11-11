@@ -193,7 +193,7 @@ const json = (b: unknown) => ({ body: JSON.stringify(b) });
 
 export const autoApi = {
   state: (s: Settings) => serverCall<AutoState>(s, '/api/auto/state'),
-  save: (s: Settings, b: Partial<{ enabled: boolean; debridOnly: boolean; client: string; rdt: Record<string, string>; qbit: Record<string, string | undefined>; seed: Partial<AutoSeed>; ratioGuard: { enabled?: boolean; min?: number }; boost: { enabled?: boolean; gb?: number; perWeek?: number; disk?: string }; profile: Partial<AutoProfile>; folders: { movie?: string | null; tv?: string | null } }>) =>
+  save: (s: Settings, b: Partial<{ enabled: boolean; debridOnly: boolean; client: string; rdt: Record<string, string>; qbit: Record<string, string | undefined>; seed: Partial<AutoSeed>; ratioGuard: { enabled?: boolean; min?: number }; boost: { enabled?: boolean; gb?: number; perWeek?: number; disk?: string; paid?: boolean; paidGb?: number }; profile: Partial<AutoProfile>; folders: { movie?: string | null; tv?: string | null } }>) =>
     serverCall(s, '/api/auto/settings', { method: 'PUT', ...json(b) }),
   saveIndexer: (s: Settings, b: Partial<AutoIndexer> & { key?: string }) => serverCall<{ indexer: AutoIndexer }>(s, '/api/auto/indexers', { method: 'POST', ...json(b) }),
   removeIndexer: (s: Settings, id: string) => serverCall(s, `/api/auto/indexers/${id}`, { method: 'DELETE' }),
@@ -216,6 +216,8 @@ export const autoApi = {
   missingHide: (s: Settings, tmdbId: number, show = false) => serverCall<{ ok: boolean }>(s, '/api/auto/missing/hide', { method: 'POST', body: JSON.stringify({ tmdbId, show }) }),
   missingReset: (s: Settings) => serverCall<{ ok: boolean }>(s, '/api/auto/missing/hide', { method: 'POST', body: JSON.stringify({ reset: true }) }),
   ratio: (s: Settings) => serverCall<AutoRatio>(s, '/api/auto/ratio'),
+  boostCandidates: (s: Settings, refresh = false) => serverCall<{ at: string; seen: number; total: number; candidates: AutoBoostCandidate[] }>(s, `/api/auto/boost/candidates${refresh ? '?refresh=1' : ''}`),
+  boostTake: (s: Settings, guid: string) => serverCall<{ ok: boolean; message: string }>(s, '/api/auto/boost/take', { method: 'POST', body: JSON.stringify({ guid }) }),
   boostRun: (s: Settings) => serverCall<{ ok: boolean; note: string }>(s, '/api/auto/boost/run', { method: 'POST' }),
   ratioBase: (s: Settings, indexerId: string, up: number, down: number) =>
     serverCall<{ ok: boolean }>(s, '/api/auto/ratio/base', { method: 'POST', body: JSON.stringify({ indexerId, up, down }) }),
@@ -272,9 +274,11 @@ export type AutoRatioSite = {
   /** Mode ratio sur ce site (serveur 3.92+) */
   guard?: { on: boolean; ratio: number | null; since: string | null } | null;
 };
-export type AutoBoostTorrent = { id: string; title: string; size: number; indexer: string; addedAt: string; state: 'downloading' | 'seeding'; progress: number; ratio: number; uploaded: number; upSpeed: number; leechers: number | null; seeders: number | null; hoursLeft: number | null };
+export type AutoBoostTorrent = { id: string; title: string; size: number; indexer: string; addedAt: string; state: 'downloading' | 'seeding'; free?: boolean; progress: number; ratio: number; uploaded: number; upSpeed: number; leechers: number | null; seeders: number | null; hoursLeft: number | null };
 /** Booster de seed : torrents freeleech pris seulement pour partager */
-export type AutoBoost = { enabled: boolean; gb: number; disk: string; perWeek: number; diskFound: boolean; diskFree?: number | null; used: number; budget: number; lastRun: string | null; nextRun: string | null; lastNote: string | null; torrents: AutoBoostTorrent[] };
+/** Torrent proposé au booster, classé d'après les chiffres du site (gain estimé = envoi espéré − coût du téléchargement) */
+export type AutoBoostCandidate = { guid: string; title: string; size: number; seeders: number | null; leechers: number | null; grabs: number | null; free: boolean; demand: number; expected: number; gain: number; indexer: string; pub: string | null; worth: boolean };
+export type AutoBoost = { enabled: boolean; gb: number; disk: string; perWeek: number; paid?: boolean; paidGb?: number; paidWeek?: number; diskFound: boolean; diskFree?: number | null; used: number; budget: number; lastRun: string | null; nextRun: string | null; lastNote: string | null; torrents: AutoBoostTorrent[] };
 /** Par où passent les demandes en ce moment */
 export type AutoService = {
   auto: boolean;
