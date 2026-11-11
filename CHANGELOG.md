@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.156 — 11 novembre 2026
+
 - Streaming direct retiré : le bouton « Lire » en streaming sur les titres absents (TorBox) ne marchait pas, tout est revenu comme avant. Titre absent : « Demander » (ou « DL » pour l'admin). La carte « Streaming direct » de Lumio Auto disparaît.
 - Serveur 3.97.0 : streaming retiré. Restent : Lumio Secour résout les sites par le DNS 1.1.1.1 (Movix et Wawacity ne répondaient pas avec le DNS de la box), et les demandes des membres ne se lancent plus toutes seules (l'admin reçoit une notification et valide).
 
