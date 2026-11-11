@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.93.0';
+const VERSION = '3.93.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -5367,6 +5367,7 @@ async function autoProfileTick() {
           if (cur.freeleech) {
             // Début d'un freeleech : le booster n'attend pas la semaine, et les demandes en attente repartent
             auto.boostLastRun = null;
+            auto.boostRetryAt = null;
             for (const i of auto.items) if (!i.paused) i.nextSearch = Math.min(i.nextSearch || 0, Date.now() + 60e3);
             setTimeout(() => autoBoostRun().catch(() => {}), 5000);
           }
@@ -5525,7 +5526,7 @@ function autoBoostView() {
     used: boostUsed(),
     budget: cfg.gb * 1e9,
     lastRun: auto.boostLastRun || null,
-    nextRun: auto.boostLastRun ? new Date(Date.parse(auto.boostLastRun) + 7 * 86400e3).toISOString() : null,
+    nextRun: auto.boostRetryAt || (auto.boostLastRun ? new Date(Date.parse(auto.boostLastRun) + 7 * 86400e3).toISOString() : null),
     lastNote: auto.boostNote || null,
     paidWeek: boostPaidWeek(),
     torrents: boostActive().map((b) => ({ id: b.id, title: b.title, size: b.size, indexer: b.indexer, addedAt: b.addedAt, state: b.state, free: b.free !== false, progress: b.progress || 0, ratio: b.ratio || 0, uploaded: b.uploaded || 0, upSpeed: b.upSpeed || 0, leechers: b.leechers ?? null, seeders: b.seeders ?? null, hoursLeft: b.state === 'seeding' ? hrLeft(b.seedTime) : null })),
@@ -5677,7 +5678,9 @@ async function autoBoostRun(manual = false) {
   try {
     await autoBoostTick().catch(() => {});
     auto.boostLastRun = new Date().toISOString();
-    const retryTomorrow = () => (auto.boostLastRun = new Date(Date.now() - 6 * 86400e3).toISOString());
+    auto.boostRetryAt = null;
+    // Rien pris : nouvel essai le lendemain (la date de la dernière sélection reste la vraie)
+    const retryTomorrow = () => (auto.boostRetryAt = new Date(Date.now() + 86400e3).toISOString());
     const { list, seen } = await boostCandidates(true);
     const budget = cfg.gb * 1e9;
     // 1. Choix : les gratuits (meilleur gain d'abord), puis, si l'option est allumée, les payants rentables dans la limite de la semaine
@@ -5736,7 +5739,8 @@ setInterval(() => autoBoostTick().catch(() => {}), 5 * 60_000);
 // Une fois par semaine (premier passage quelques minutes après la mise à jour du serveur)
 setInterval(() => {
   if (!autoBoostCfg().enabled || !autoOn()) return;
-  if (auto.boostLastRun && Date.now() - Date.parse(auto.boostLastRun) < 7 * 86400e3) return;
+  const due = auto.boostRetryAt ? Date.parse(auto.boostRetryAt) : auto.boostLastRun ? Date.parse(auto.boostLastRun) + 7 * 86400e3 : 0;
+  if (Date.now() < due) return;
   autoBoostRun().catch(() => {});
 }, 10 * 60_000);
 
@@ -6404,6 +6408,8 @@ async function autoRoutes(req, res, p, q, user) {
     try {
       const x = await boostAdd(r);
       autoLog(`booster : ${x.title} ajouté à la main (${x.free ? 'freeleech' : 'payant'})`);
+      auto.boostNote = `dernier ajout à la main : ${x.title} (${x.free ? 'freeleech' : 'payant'})`;
+      autoSave();
       send(res, 200, { ok: true, message: `${x.title} ajouté au booster` });
     } catch (e) {
       throw new HttpError(400, e.message);
