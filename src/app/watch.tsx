@@ -12,6 +12,7 @@ import { C } from '@/constants/theme';
 import { useSettings } from '@/lib/settings';
 import { resolveWatch } from '@/lib/smart-play';
 import { tmdb, tmdbImg } from '@/lib/tmdb';
+import { serverCall } from '@/lib/chat';
 import { watchNowApi } from '@/lib/watch-now';
 
 type Params = {
@@ -60,6 +61,15 @@ export default function Watch() {
         // ——— Disponible sur Jellyfin ———
         if (res.kind === 'jellyfin') {
           const it = res.item;
+          // Commencé en streaming avant l'arrivée du fichier : on reprend à la position gardée par le serveur
+          let streamPos = 0;
+          if (!res.resume && settings.chatUrl) {
+            const qs = new URLSearchParams({ type, tmdbId: String(tmdbId) });
+            if (it.Type === 'Episode') (qs.set('season', String(it.ParentIndexNumber ?? 1)), qs.set('episode', String(it.IndexNumber ?? 1)));
+            streamPos = await serverCall<{ position: number }>(settings, `/api/watch/progress?${qs}`)
+              .then((r) => r.position || 0)
+              .catch(() => 0);
+          }
           router.replace({
             pathname: '/player',
             params: {
@@ -67,7 +77,7 @@ export default function Watch() {
               itemId: it.Id,
               title: it.Type === 'Episode' ? `${it.SeriesName ?? p.title} · S${it.ParentIndexNumber}E${it.IndexNumber}` : it.Name,
               subtitle: it.Type === 'Episode' ? it.Name : String(it.ProductionYear ?? ''),
-              start: res.resume ? String((it.UserData?.PlaybackPositionTicks ?? 0) / 10_000_000) : '0',
+              start: res.resume ? String((it.UserData?.PlaybackPositionTicks ?? 0) / 10_000_000) : String(streamPos),
             },
           });
           return;
@@ -78,7 +88,7 @@ export default function Watch() {
         const episode = type === 'tv' ? (res.episode ?? (p.episode ? Number(p.episode) : 1)) : undefined;
         const can = settings.chatUrl ? await watchNowApi.status(settings).catch(() => null) : null;
         if (can?.enabled) {
-          setStep('Pas encore sur ton serveur : recherche d’un lien pour regarder tout de suite…');
+          setStep('Pas encore sur ton serveur : recherche d’un lien de streaming…');
           const date = type === 'movie' ? (details as any).release_date : (details as any).first_air_date;
           const w = await watchNowApi.start(settings, {
             type,
@@ -97,7 +107,9 @@ export default function Watch() {
               kind: 'url',
               uri: w.url,
               title: type === 'tv' ? `${p.title} · S${season}E${episode}` : p.title,
-              subtitle: [w.quality, w.language, w.download?.state === 'started' ? 'se télécharge aussi pour la famille' : null].filter(Boolean).join(' · '),
+              subtitle: [w.quality, w.language, w.download?.state === 'started' ? 'téléchargement lancé sur le serveur' : null].filter(Boolean).join(' · '),
+              start: String(w.position ?? 0),
+              stream: '1',
               tmdbId: String(tmdbId),
               imdb: imdb ?? '',
               series: type === 'tv' ? p.title : undefined,

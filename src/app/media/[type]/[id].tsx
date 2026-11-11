@@ -383,10 +383,10 @@ export default function MediaScreen() {
                   style={{ flex: 1 }}
                 />
               ) : canWatchNow ? (
-                // Pas sur le serveur : lecture immédiate par lien direct, et le titre se télécharge en arrière-plan
+                // Pas sur le serveur (admin) : même bouton « Lire », en streaming, et le titre se télécharge en arrière-plan
                 <Button
-                  title="Regarder"
-                  icon="flash"
+                  title="Lire"
+                  icon="play"
                   small
                   onPress={() => router.push({ pathname: '/watch', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title } })}
                   style={{ flex: 1 }}

@@ -33,6 +33,12 @@ UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
 # ===========================
 setup_logger(settings.LOG_LEVEL)
 
+# Lumio : noms de domaine résolus par 1.1.1.1 (les DNS des fournisseurs d'accès bloquent Movix, Wawacity…)
+from lumio_secour.utils import dns_override  # noqa: E402
+
+if dns_override.install():
+    addon_logger.info("[Lumio] DNS : résolution par 1.1.1.1 activée")
+
 
 # ===========================
 # Server Start Time

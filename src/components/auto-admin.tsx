@@ -2572,9 +2572,9 @@ function WatchNowCard() {
     <View style={styles.bigCard}>
       <Text style={styles.bigCardTitle}>Streaming direct</Text>
       <Text style={styles.small}>
-        Un titre absent du serveur se regarde tout de suite : Lumio trouve un lien (Movix, Wawacity), TorBox le lit en direct, et le titre se télécharge en même temps pour toute la famille.
+        Pour toi (admin) : « Lire » sur un titre absent le lance en streaming. Lumio trouve un lien (Movix, Wawacity), TorBox le lit, et le fichier arrive en arrière-plan sur le serveur (torrent C411, ou téléchargement direct si le ratio est bas). Si tu quittes et relances, ça reprend au même endroit, depuis Jellyfin si le fichier est arrivé. Les membres gardent « Demander » : rien ne se lance, tu reçois une notification.
       </Text>
-      {old ? <Text style={[styles.small, { color: C.warning }]}>Mets le serveur à jour (3.94.0) pour régler le streaming direct.</Text> : null}
+      {old ? <Text style={[styles.small, { color: C.warning }]}>Mets le serveur à jour (3.95.0) pour régler le streaming direct.</Text> : null}
       {st ? (
         <>
           <View style={styles.kv}>
@@ -2582,7 +2582,7 @@ function WatchNowCard() {
             <Text style={[styles.small, { color: st.torbox ? C.success : C.warning, fontWeight: '700' }]}>{st.torbox ? 'clé enregistrée' : 'pas de clé'}</Text>
           </View>
           <View style={styles.kv}>
-            <Text style={styles.kvK}>AllDebrid (relais, Wawacity)</Text>
+            <Text style={styles.kvK}>AllDebrid (téléchargement direct)</Text>
             <Text style={[styles.small, { color: st.alldebrid ? C.success : C.textDim, fontWeight: '700' }]}>{st.alldebrid ? 'prêt' : 'pas de clé'}</Text>
           </View>
           <View style={styles.searchBox}>
@@ -2594,7 +2594,7 @@ function WatchNowCard() {
             {st.torbox ? <Button title="Retirer" variant="secondary" small onPress={() => save({ torboxKey: '' })} /> : null}
           </View>
           <Text style={styles.small}>La clé part sur ton serveur et y reste : elle n’est jamais renvoyée aux applis.</Text>
-          <Toggle label="Bouton « Regarder » sur les titres absents" value={st.on ?? st.enabled} onChange={(v) => save({ enabled: v })} />
+          <Toggle label="« Lire » en streaming sur les titres absents" value={st.on ?? st.enabled} onChange={(v) => save({ enabled: v })} />
           <Toggle label="Télécharger aussi le titre en arrière-plan" value={st.download} onChange={(v) => save({ download: v })} />
         </>
       ) : null}

@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.94.0';
+const VERSION = '3.95.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -215,7 +215,8 @@ function permissionsOf(user) {
   const p = userPrefs[user.id] || {};
   return {
     admin: user.admin,
-    autoApprove: user.admin || (p.autoApprove != null ? Boolean(p.autoApprove) : s.defaultAutoApprove),
+    // Membres : « Demander » ne lance rien, l'admin reçoit une notification et décide (config.membersAutoApprove pour revenir en arrière)
+    autoApprove: user.admin || (config.membersAutoApprove === true && (p.autoApprove != null ? Boolean(p.autoApprove) : s.defaultAutoApprove)),
     movieQuotaLimit: user.admin ? 0 : p.movieQuotaLimit != null ? Number(p.movieQuotaLimit) : s.defaultMovieQuotaLimit,
     movieQuotaDays: p.movieQuotaDays != null ? Number(p.movieQuotaDays) : s.defaultMovieQuotaDays,
     tvQuotaLimit: user.admin ? 0 : p.tvQuotaLimit != null ? Number(p.tvQuotaLimit) : s.defaultTvQuotaLimit,
@@ -2709,98 +2710,148 @@ async function sendOrSecour(r) {
   }
 }
 
-// ——— « Regarder maintenant » : un titre absent du serveur se regarde tout de suite ———
-// Lumio Secour trouve un lien (Movix, Wawacity), TorBox (sinon AllDebrid) le transforme en lien de lecture directe,
-// et le même titre part en téléchargement en arrière-plan pour qu'il soit ensuite dans Jellyfin pour tout le monde.
-const watchNowOn = () => config.watchNow !== false && Boolean(secourUrl() && secourKey()) && Boolean(torboxKey() || secourDebridKey());
-const watchNowView = () => ({ enabled: watchNowOn(), on: config.watchNow !== false, torbox: Boolean(torboxKey()), alldebrid: Boolean(secourDebridKey()), download: config.watchNowDownload !== false });
+// ——— « Lire » un titre absent du serveur (admin) ———
+// 1. Streaming : Lumio Secour trouve un lien (Movix, Wawacity) et TorBox, seulement TorBox, le transforme en lien de lecture.
+// 2. En arrière-plan, le titre est demandé comme une demande normale de l'admin : torrent C411 par Lumio Auto,
+//    ou téléchargement direct si le ratio est bas (mode ratio).
+// 3. La position de lecture est gardée ici, puis recopiée dans Jellyfin quand le fichier arrive : on reprend au même endroit.
+const watchNowOn = () => config.watchNow !== false && Boolean(secourUrl() && secourKey()) && Boolean(torboxKey());
+const watchNowView = (user) => ({ enabled: watchNowOn() && Boolean(user && user.admin), on: config.watchNow !== false, torbox: Boolean(torboxKey()), alldebrid: Boolean(secourDebridKey()), download: config.watchNowDownload !== false });
 const watchCache = new Map(); // « type:tmdb:s:e » → { at, out } : un second appareil reprend le même lien pendant 20 min
+const WATCH_POS_FILE = path.join(DATA_DIR, 'watch-positions.json');
+let watchPos = {};
+try {
+  watchPos = JSON.parse(fs.readFileSync(WATCH_POS_FILE, 'utf8')) || {};
+} catch {
+  watchPos = {};
+}
+const saveWatchPos = () => fs.promises.writeFile(WATCH_POS_FILE, JSON.stringify(watchPos)).catch(() => {});
+const watchKey = (type, tmdbId, season, episode) => (type === 'tv' ? `tv:${tmdbId}:${season || 1}:${episode || 1}` : `movie:${tmdbId}`);
+/** Position gardée (secondes) pour reprendre : rien si le titre était presque fini. */
+function watchPosition(user, type, tmdbId, season, episode) {
+  const e = (watchPos[user.id] || {})[watchKey(type, tmdbId, season, episode)];
+  if (!e || !(e.pos > 30) || (e.dur > 0 && e.pos / e.dur > 0.93)) return 0;
+  return Math.floor(e.pos);
+}
+function watchProgress(user, b) {
+  const type = b.type === 'tv' || b.type === 'series' ? 'tv' : 'movie';
+  const tmdbId = Number(b.tmdbId);
+  const pos = Number(b.position);
+  if (!tmdbId || !(pos >= 0)) throw new HttpError(400, 'Position invalide');
+  const season = type === 'tv' ? Number(b.season) || 1 : null;
+  const episode = type === 'tv' ? Number(b.episode) || 1 : null;
+  const mine = (watchPos[user.id] = watchPos[user.id] || {});
+  mine[watchKey(type, tmdbId, season, episode)] = { type, tmdbId, season, episode, title: String(b.title || '').slice(0, 200), pos, dur: Number(b.duration) || 0, at: Date.now() };
+  // 200 titres par personne au plus
+  const keys = Object.keys(mine);
+  if (keys.length > 200) for (const k of keys.sort((x, y) => mine[x].at - mine[y].at).slice(0, keys.length - 200)) delete mine[k];
+  saveWatchPos();
+  return { ok: true };
+}
 async function watchNow(user, b) {
-  if (!watchNowOn()) throw new HttpError(400, 'Le streaming direct n’est pas prêt (Lumio Secour et une clé TorBox ou AllDebrid)');
+  requireAdmin(user);
+  if (!watchNowOn()) throw new HttpError(400, 'Le streaming direct n’est pas prêt (Lumio Secour et une clé TorBox)');
   const type = b.type === 'tv' || b.type === 'series' ? 'tv' : 'movie';
   const tmdbId = Number(b.tmdbId);
   if (!tmdbId) throw new HttpError(400, 'Identifiant TMDB manquant');
   const season = type === 'tv' ? Number(b.season) || 1 : null;
   const episode = type === 'tv' ? Number(b.episode) || 1 : null;
   const ck = `${type}:${tmdbId}:${season}:${episode}`;
+  const extra = async () => ({ position: watchPosition(user, type, tmdbId, season, episode), download: await watchDownload(user, b, type, tmdbId, season) });
   const hit = watchCache.get(ck);
-  if (hit && Date.now() - hit.at < 20 * 60e3) return { ...hit.out, download: watchDownload(user, b, type, tmdbId, season) };
+  if (hit && Date.now() - hit.at < 20 * 60e3) return { ...hit.out, ...(await extra()) };
   const ext = await tmdbGet(`/${type}/${tmdbId}/external_ids`).catch(() => null);
   const imdb = (ext && ext.imdb_id) || '';
   if (!/^tt\d+$/.test(imdb)) throw new HttpError(404, 'Identifiant IMDb introuvable pour ce titre');
   const qs = new URLSearchParams({ imdb, type: type === 'tv' ? 'series' : 'movie' });
   if (type === 'tv') (qs.set('season', String(season)), qs.set('episode', String(episode)));
   const tried = [];
-  // TorBox d'abord (il ne lit pas tous les sites : Wawacity passe par AllDebrid), puis AllDebrid
-  for (const service of [torboxKey() ? 'torbox' : null, secourDebridKey() ? 'alldebrid' : null].filter(Boolean)) {
-    let found;
+  // Le fichier, lui, part tout de suite en téléchargement, même si aucun lien de streaming n'est trouvé
+  const dl = await watchDownload(user, b, type, tmdbId, season);
+  let found = null;
+  try {
+    found = await secour(`/lumio/links?${qs}`, { timeout: 90000, service: 'torbox' });
+  } catch (e) {
+    tried.push(e.message);
+  }
+  const ok = ((found && found.links) || []).filter((l) => {
+    const txt = `${l.name || ''} ${l.language || ''}`;
+    if (/vostfr|\bsub/i.test(txt) && !/multi|french|truefrench|\bvf[fi2]?\b/i.test(txt)) return false; // version française seulement
+    if (QUEBEC_RE.test(txt.toLowerCase().replace(/[._]+/g, ' '))) return false;
+    return true;
+  });
+  if (found && !ok.length) tried.push('aucun lien en français lisible par TorBox');
+  for (const l of rankSecourLinks(ok).slice(0, 4)) {
     try {
-      found = await secour(`/lumio/links?${qs}`, { timeout: 90000, service });
+      const r = await secour('/lumio/resolve', { method: 'POST', timeout: 60000, service: 'torbox', body: { link: l.link, hoster: l.hoster, source: l.source, season: l.season, episode: l.episode, type: qs.get('type') } });
+      if (r && /^https?:\/\//.test(r.url || '')) {
+        const out = { url: r.url, service: 'torbox', source: l.source || null, hoster: l.hoster || null, name: l.name || null, quality: l.quality || null, language: l.language || null, sizeBytes: Number(l.sizeBytes) || 0 };
+        watchCache.set(ck, { at: Date.now(), out });
+        if (watchCache.size > 200) watchCache.delete(watchCache.keys().next().value);
+        console.log(`Lire en streaming : « ${b.title || tmdbId} » pour ${user.name} (TorBox, ${l.source || '?'} · ${l.hoster || '?'})`);
+        return { ...out, position: watchPosition(user, type, tmdbId, season, episode), download: dl };
+      }
     } catch (e) {
-      tried.push(`${service} : ${e.message}`);
-      continue;
+      tried.push(`${l.hoster || l.source || 'lien'} : ${e.message.replace(/^Lumio Secour : /, '')}`);
     }
-    const ok = ((found && found.links) || []).filter((l) => {
-      const txt = `${l.name || ''} ${l.language || ''}`;
-      if (/vostfr|\bsub/i.test(txt) && !/multi|french|truefrench|\bvf[fi2]?\b/i.test(txt)) return false; // version française seulement
-      if (QUEBEC_RE.test(txt.toLowerCase().replace(/[._]+/g, ' '))) return false;
-      return true;
-    });
-    if (!ok.length) {
-      tried.push(`${service} : aucun lien en français`);
-      continue;
-    }
-    for (const l of rankSecourLinks(ok).slice(0, 4)) {
+  }
+  const dlNote = dl.state === 'started' ? ' Le téléchargement sur le serveur est lancé.' : dl.state === 'already' ? ' Le titre est déjà en cours de téléchargement sur le serveur.' : '';
+  throw new HttpError(404, `Pas de lien de streaming pour l’instant${tried.length ? ` (${tried.slice(0, 3).join(' ; ')})` : ''}.${dlNote}`);
+}
+/** En arrière-plan : une demande normale de l'admin (Lumio Auto → torrent C411, ou téléchargement direct en mode ratio). Sans doublon. */
+async function watchDownload(user, b, type, tmdbId, season) {
+  if (config.watchNowDownload === false) return { state: 'off' };
+  const had = requests.find((x) => x.type === type && x.tmdbId === tmdbId && activeReq(x) && (type === 'movie' || (x.seasons || []).includes(season)));
+  if (had) return { state: 'already', requestId: had.id };
+  try {
+    const r = await createRequest(user, { type, tmdbId, title: b.title, year: b.year, poster: b.poster, backdrop: b.backdrop, seasons: type === 'tv' ? [season] : undefined });
+    return { state: r.status === RequestStatus.FAILED ? 'skipped' : 'started', requestId: r.id, reason: r.error };
+  } catch (e) {
+    // 409 : déjà disponible ou déjà demandé
+    return { state: e && e.status === 409 ? 'already' : 'skipped', reason: String((e && e.message) || e) };
+  }
+}
+/** Le fichier est arrivé dans Jellyfin : la position gardée pendant le streaming y est recopiée (toutes les 2 min). */
+async function watchApplyPositions() {
+  const token = process.env.JELLYFIN_API_KEY || jfAdminToken;
+  if (!token) return;
+  let changed = false;
+  for (const [userId, mine] of Object.entries(watchPos)) {
+    for (const e of Object.values(mine)) {
+      if (e.applied || !(e.pos > 30) || Date.now() - e.at > 30 * 86400e3) continue;
       try {
-        const r = await secour('/lumio/resolve', { method: 'POST', timeout: 60000, service, body: { link: l.link, hoster: l.hoster, source: l.source, season: l.season, episode: l.episode, type: qs.get('type') } });
-        if (r && /^https?:\/\//.test(r.url || '')) {
-          const out = { url: r.url, service, source: l.source || null, hoster: l.hoster || null, name: l.name || null, quality: l.quality || null, language: l.language || null, sizeBytes: Number(l.sizeBytes) || 0 };
-          watchCache.set(ck, { at: Date.now(), out });
-          if (watchCache.size > 200) watchCache.delete(watchCache.keys().next().value);
-          console.log(`Regarder maintenant : « ${b.title || tmdbId} » pour ${user.name} (${service}, ${l.source || '?'} · ${l.hoster || '?'})`);
-          return { ...out, download: watchDownload(user, b, type, tmdbId, season) };
+        const find = async (types, extra = {}) => {
+          const q = new URLSearchParams({ Recursive: 'true', IncludeItemTypes: types, Fields: 'ProviderIds', EnableImages: 'false', searchTerm: e.title || '', Limit: '30', ...extra });
+          const r = await fetch(`${JELLYFIN_URL}/Items?${q}`, { headers: jfHeaders(token) });
+          return r.ok ? ((await r.json()).Items || []).find((i) => String((i.ProviderIds || {}).Tmdb || '') === String(e.tmdbId)) : null;
+        };
+        let itemId = null;
+        if (e.type === 'movie') itemId = ((await find('Movie')) || {}).Id || null;
+        else {
+          const show = await find('Series');
+          if (show) {
+            const r = await fetch(`${JELLYFIN_URL}/Shows/${show.Id}/Episodes?season=${e.season}&Fields=ProviderIds`, { headers: jfHeaders(token) });
+            const ep = r.ok ? ((await r.json()).Items || []).find((i) => i.IndexNumber === e.episode && i.ParentIndexNumber === e.season) : null;
+            itemId = ep ? ep.Id : null;
+          }
         }
-      } catch (e) {
-        tried.push(`${service} · ${l.hoster || l.source || 'lien'} : ${e.message.replace(/^Lumio Secour : /, '')}`);
+        if (!itemId) continue;
+        const body = JSON.stringify({ PlaybackPositionTicks: Math.floor(e.pos * 1e7), Played: false });
+        let r = await fetch(`${JELLYFIN_URL}/UserItems/${itemId}/UserData?userId=${userId}`, { method: 'POST', headers: { ...jfHeaders(token), 'Content-Type': 'application/json' }, body });
+        if (!r.ok) r = await fetch(`${JELLYFIN_URL}/Users/${userId}/Items/${itemId}/UserData`, { method: 'POST', headers: { ...jfHeaders(token), 'Content-Type': 'application/json' }, body });
+        if (r.ok) {
+          e.applied = true;
+          changed = true;
+          console.log(`Lire en streaming : position de « ${e.title} » recopiée dans Jellyfin (${Math.round(e.pos / 60)} min)`);
+        }
+      } catch {
+        // Jellyfin injoignable : prochain passage
       }
     }
   }
-  throw new HttpError(404, `Aucun lien lisible pour l’instant${tried.length ? ` (${tried.slice(0, 3).join(' ; ')})` : ''}`);
+  if (changed) saveWatchPos();
 }
-/** En arrière-plan : le même titre part en téléchargement direct (comme le bouton « DL »), sans doublon. */
-function watchDownload(user, b, type, tmdbId, season) {
-  try {
-    if (config.watchNowDownload === false) return { state: 'off' };
-    const seasons = type === 'tv' ? [season] : undefined;
-    const open = (x) => x.type === type && x.tmdbId === tmdbId && [RequestStatus.PENDING, RequestStatus.APPROVED, RequestStatus.COMPLETED].includes(x.status) && (type === 'movie' || (x.seasons || []).includes(season));
-    const had = requests.find(open);
-    if (had) return { state: 'already', requestId: had.id };
-    const r = {
-      id: `${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`,
-      type,
-      tmdbId,
-      title: String(b.title || '').slice(0, 200) || `TMDB ${tmdbId}`,
-      year: b.year ? String(b.year).slice(0, 4) : undefined,
-      poster: typeof b.poster === 'string' && /^https:\/\//.test(b.poster) ? b.poster : undefined,
-      backdrop: typeof b.backdrop === 'string' && /^https:\/\//.test(b.backdrop) ? b.backdrop : undefined,
-      seasons,
-      status: RequestStatus.APPROVED,
-      requestedBy: { id: user.id, name: user.name },
-      createdAt: new Date().toISOString(),
-    };
-    requests.unshift(r);
-    try {
-      startSecour(r, `regardé en streaming par ${user.name} : téléchargé pour tout le monde`);
-    } catch (e) {
-      requests.splice(requests.indexOf(r), 1);
-      return { state: 'skipped', reason: e.message };
-    }
-    library = null;
-    return { state: 'started', requestId: r.id };
-  } catch (e) {
-    return { state: 'skipped', reason: String((e && e.message) || e) };
-  }
-}
+setInterval(() => watchApplyPositions().catch(() => {}), 2 * 60_000);
 
 const secourQueue = [];
 // Demande refusée ou supprimée pendant le travail : on s'arrête
@@ -8596,9 +8647,14 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       }
     }
 
-    // ——— Regarder maintenant (tous les comptes) : lien de lecture directe + téléchargement en arrière-plan ———
-    if (req.method === 'GET' && p === '/api/watch/now') return send(res, 200, watchNowView());
+    // ——— « Lire » un titre absent (admin) : lien de streaming TorBox + téléchargement en arrière-plan + reprise ———
+    if (req.method === 'GET' && p === '/api/watch/now') return send(res, 200, watchNowView(user));
     if (req.method === 'POST' && p === '/api/watch/now') return send(res, 200, await watchNow(user, await readBody(req)));
+    if (req.method === 'POST' && p === '/api/watch/progress') return send(res, 200, watchProgress(user, await readBody(req)));
+    if (req.method === 'GET' && p === '/api/watch/progress') {
+      const type = q.get('type') === 'tv' ? 'tv' : 'movie';
+      return send(res, 200, { position: watchPosition(user, type, Number(q.get('tmdbId')), Number(q.get('season')) || null, Number(q.get('episode')) || null) });
+    }
     // Admin : clé TorBox (gardée sur le serveur, jamais renvoyée) et interrupteurs du streaming direct
     if (req.method === 'PUT' && p === '/api/watch/now') {
       requireAdmin(user);
@@ -8611,7 +8667,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       if (typeof b.download === 'boolean') config.watchNowDownload = b.download;
       saveConfig();
       watchCache.clear();
-      return send(res, 200, watchNowView());
+      return send(res, 200, watchNowView(user));
     }
     // ——— Admin : Lumio Secour (liens d'hébergeurs → AllDebrid → disques) ———
     if (p === '/api/secour' || p.startsWith('/api/secour/')) {
