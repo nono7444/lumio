@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.91.1';
+const VERSION = '3.92.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3645,6 +3645,9 @@ if (!auto.dlStats || typeof auto.dlStats !== 'object') auto.dlStats = {};
 // Ratio par site : compteurs cumulés de qBittorrent (gardés même après retrait des torrents) + ratio de départ saisi par l'admin
 if (!auto.siteStats || typeof auto.siteStats !== 'object') auto.siteStats = {};
 if (!auto.ratioBase || typeof auto.ratioBase !== 'object') auto.ratioBase = {};
+// Mode ratio : { ixId: { on, ratio, since } } ; booster de seed : torrents freeleech pris seulement pour partager
+if (!auto.guard || typeof auto.guard !== 'object') auto.guard = {};
+if (!Array.isArray(auto.boost)) auto.boost = [];
 let autoSaveTimer = null;
 const autoSave = () => {
   clearTimeout(autoSaveTimer);
@@ -4145,6 +4148,8 @@ function autoScore(rel, item, want) {
     const used = autoDlToday(ixq.id) / 1e9;
     if (used + gb > cap) no(`quota du jour atteint sur ${ixq.name} (${used.toFixed(1)} / ${cap} Go)`);
   }
+  // Mode ratio : sous le seuil, seuls les torrents freeleech passent (le reste attend ou part sur Movix)
+  if (!rel.freeleech && !autoDebridOnly() && rel.indexerId && autoGuardOn(rel.indexerId)) no(`mode ratio : ratio trop bas sur ${ixq ? ixq.name : rel.indexer} (freeleech ou Movix seulement)`);
   out.rejected = out.reasons[0] || null;
   // Note : langue d'abord, puis codec, source, sources actives, taille raisonnable
   const li = p.langs.length ? Math.min(...p.langs.map((l) => (pf.languages.indexOf(l) >= 0 ? pf.languages.indexOf(l) : 9))) : 9;
@@ -4425,7 +4430,7 @@ async function qbitFetch(p2, init = {}, retry = true) {
   return r;
 }
 const qbitCategory = () => (autoCfg().qbit && autoCfg().qbit.category) || 'lumio';
-const CLIENT_LABEL = { rdt: 'rdt-client', qbit: 'qBittorrent', alldebrid: 'AllDebrid' };
+const CLIENT_LABEL = { rdt: 'rdt-client', qbit: 'qBittorrent', alldebrid: 'AllDebrid', movix: 'Movix (AllDebrid)' };
 const tcFetch = (kind, p2, init) => (kind === 'qbit' ? qbitFetch(p2, init) : rdtFetch(p2, init));
 const tcCategory = (kind) => (kind === 'qbit' ? qbitCategory() : rdtCategory());
 /** Client d'une version : celui choisi pour son indexeur, sinon celui par défaut. */
@@ -4783,6 +4788,8 @@ async function autoImport(grab, srcPath) {
         const m = path.basename(v).match(/(?:\bE|\bEp(?:isode)?\s?|\s-\s)(\d{1,3})\b/i);
         if (m) ep = epEnd = Number(m[1]);
       }
+      // Lien Movix : il a été cherché pour cet épisode précis, quel que soit le nom du fichier
+      if (grab.client === 'movix' && grab.want && grab.want.kind === 'episode' && videos.length === 1) (season = grab.want.season), (ep = epEnd = grab.want.episode);
       if (season == null || ep == null) continue;
       const tag = `S${autoPad(season)}E${autoPad(ep)}${epEnd > ep ? `-E${autoPad(epEnd)}` : ''}`;
       const name = safeFile(`${item.title} - ${tag}`);
@@ -4815,7 +4822,7 @@ async function autoCleanup(grab, srcPath) {
       await tcFetch(grab.client, '/api/v2/torrents/delete', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ hashes: grab.hash, deleteFiles: 'true' }) });
   } catch {}
   try {
-    if (grab.client === 'alldebrid' && srcPath && srcPath.includes(`${path.sep}.lumio-auto${path.sep}`)) await fs.promises.rm(srcPath, { recursive: true, force: true });
+    if (['alldebrid', 'movix'].includes(grab.client) && srcPath && srcPath.includes(`${path.sep}.lumio-auto${path.sep}`)) await fs.promises.rm(srcPath, { recursive: true, force: true });
   } catch {}
 }
 
@@ -5055,6 +5062,7 @@ async function autoSearchTick(force = false) {
       let grabbed = false;
       let waitUntil = 0;
       let quotaWait = false;
+      let guardWait = false;
       let notCachedAll = false;
       for (const w of wanted) {
         const u = autoWaitH265(item, w, pf);
@@ -5083,6 +5091,11 @@ async function autoSearchTick(force = false) {
               grabbed = await autoTryGrab(item, r2.results, w2);
               if (grabbed) break;
               if (autoDebridOnly()) notCachedAll = true;
+            } else if (autoGuardAny()) {
+              // Mode ratio : pas de torrent freeleech → lien Movix (AllDebrid), rien ne passe par le tracker
+              grabbed = await autoMovixTry(item, w2);
+              if (grabbed) break;
+              guardWait = true;
             }
           }
           continue;
@@ -5091,6 +5104,9 @@ async function autoSearchTick(force = false) {
           const ok = await autoTryGrab(item, results, want);
           if (ok) grabbed = true;
           else if (autoDebridOnly()) notCachedAll = true;
+        } else if (!want.upgrade && autoGuardAny()) {
+          if (await autoMovixTry(item, want)) grabbed = true;
+          else guardWait = true;
         }
         if (grabbed && want.kind === 'movie') break;
       }
@@ -5099,6 +5115,14 @@ async function autoSearchTick(force = false) {
       if (!grabbed && notCachedAll) {
         item.needsChoice = false;
         item.note = 'mode AllDebrid : aucune version en cache pour l’instant (réessai dans 6 h, ou coupe AllDebrid pour passer en torrent)';
+        item.nextSearch = Date.now() + 6 * 3600e3;
+        item.lastSearch = new Date().toISOString();
+        autoSave();
+        continue;
+      }
+      if (!grabbed && guardWait && !upgrading) {
+        item.needsChoice = false;
+        item.note = `mode ratio (sous ${autoGuardCfg().min.toFixed(2).replace('.', ',')}) : rien en freeleech ni sur Movix pour l’instant, nouvel essai dans 6 h`;
         item.nextSearch = Date.now() + 6 * 3600e3;
         item.lastSearch = new Date().toISOString();
         autoSave();
@@ -5258,6 +5282,8 @@ async function autoRatioTick() {
   try {
     const list = await (await qbitFetch('/api/v2/torrents/info')).json();
     const byHash = new Map(auto.grabs.filter((g) => g.hash && g.client === 'qbit').map((g) => [g.hash, g]));
+    // Booster de seed : compté sur son site, téléchargement en freeleech (hors ratio)
+    for (const b of auto.boost) if (b.hash && b.state !== 'removed') byHash.set(b.hash, { release: { indexerId: b.indexerId, indexer: b.indexer, freeleech: true } });
     for (const t of list) {
       const hash = String(t.hash || '').toLowerCase();
       const g = byHash.get(hash);
@@ -5283,8 +5309,303 @@ async function autoRatioTick() {
     ratioBusy = false;
   }
 }
-setTimeout(() => autoRatioTick().catch(() => {}), 60_000);
-setInterval(() => autoRatioTick().catch(() => {}), 5 * 60_000);
+setTimeout(() => autoRatioTick().then(autoGuardTick).catch(() => {}), 60_000);
+setInterval(() => autoRatioTick().then(autoGuardTick).catch(() => {}), 5 * 60_000);
+
+// ——— Mode ratio : sous le seuil (1,10 par défaut), plus de torrent compté dans le ratio ———
+// Ordre pour chaque demande : torrent freeleech → lien Movix (AllDebrid) → attente. Retour aux torrents
+// tout seul quand le ratio repasse au-dessus du seuil + marge (pour ne pas basculer sans arrêt).
+const autoGuardCfg = () => ({ enabled: true, min: 1.1, margin: 0.05, ...(autoCfg().ratioGuard || {}) });
+/** Ratio d'un site : estimation (chiffres du profil saisis + activité de Lumio), sinon ce que Lumio a fait seul. */
+function autoSiteRatio(ixId) {
+  const st = auto.siteStats[ixId] || { up: 0, down: 0 };
+  const base = auto.ratioBase[ixId] || null;
+  if (base && base.down > 0) {
+    const up = base.up + Math.max(0, st.up - (base.lumioUp || 0));
+    const down = base.down + Math.max(0, st.down - (base.lumioDown || 0));
+    return down > 0 ? up / down : null;
+  }
+  return st.down > 0 ? st.up / st.down : null;
+}
+const autoGuardOn = (ixId) => autoGuardCfg().enabled && Boolean((auto.guard[ixId] || {}).on);
+const autoGuardAny = () => autoGuardCfg().enabled && !autoDebridOnly() && autoIndexers().some((ix) => ix.enabled !== false && autoGuardOn(ix.id));
+function autoGuardTick() {
+  const cfg = autoGuardCfg();
+  let changed = false;
+  for (const ix of autoIndexers()) {
+    const ratio = autoSiteRatio(ix.id);
+    const prev = auto.guard[ix.id] || { on: false };
+    let on = prev.on;
+    if (!cfg.enabled || ratio == null) on = false;
+    else if (ratio < cfg.min) on = true;
+    else if (ratio >= cfg.min + cfg.margin) on = false;
+    auto.guard[ix.id] = { on, ratio: ratio == null ? null : Math.round(ratio * 100) / 100, since: on === prev.on ? prev.since || null : new Date().toISOString() };
+    if (on === prev.on) continue;
+    changed = true;
+    const r = ratio == null ? '?' : ratio.toFixed(2).replace('.', ',');
+    const min = cfg.min.toFixed(2).replace('.', ',');
+    autoLog(on ? `mode ratio activé sur ${ix.name} (ratio ${r} sous ${min}) : freeleech ou Movix seulement` : `mode ratio terminé sur ${ix.name} (ratio ${r}) : retour aux torrents`);
+    notify({
+      title: on ? '🛡️ Lumio Auto · mode ratio' : '✅ Lumio Auto · ratio remonté',
+      message: on ? `${ix.name} : ratio ${r} (sous ${min}). Les demandes passent en freeleech ou par Movix.` : `${ix.name} : ratio ${r}. Les torrents reprennent.`,
+      tags: [on ? 'shield' : 'white_check_mark'],
+      click: 'lumio://auto',
+    }).catch(() => {});
+  }
+  if (changed) {
+    // Les demandes en attente sont revues tout de suite avec la nouvelle règle
+    for (const i of auto.items) if (!i.paused && /mode ratio|choisis une version/.test(i.note || '')) i.nextSearch = Math.min(i.nextSearch || 0, Date.now() + 60e3);
+    autoSave();
+  }
+}
+
+/** Mode ratio : cherche un lien Movix pour ce film / cet épisode et le télécharge par AllDebrid (rien côté tracker). */
+async function autoMovixTry(item, want) {
+  if (want.kind === 'season' || want.upgrade) return false;
+  if (!secourUrl() || !secourKey() || !secourDebridKey() || !item.imdbId) return false;
+  try {
+    const pf = autoProfile();
+    const dest = autoResolveFolder(item.type === 'movie' ? 'radarr' : 'sonarr', item.folderPath);
+    if (!dest) return false;
+    const query = item.type === 'movie' ? { imdb: item.imdbId, type: 'movie' } : { imdb: item.imdbId, type: 'series', season: String(want.season), episode: String(want.episode) };
+    const found = await secour(`/lumio/links?${new URLSearchParams(query)}`, { timeout: 120000 });
+    const maxGb = item.type === 'movie' ? pf.maxMovieGb : pf.maxEpisodeGb;
+    const isH265 = (l) => /\b(x265|h\.?265|hevc)\b/i.test(`${l.name} ${l.quality}`);
+    const ok = ((found && found.links) || []).filter((l) => {
+      const txt = `${l.name || ''} ${l.language || ''}`;
+      const q = String(l.quality || '');
+      if (autoBlocked({ guid: `movix:${l.link}` })) return false;
+      if (/vostfr|\bsub/i.test(txt) && !/multi|french|truefrench|\bvf[fi2]?\b/i.test(txt)) return false; // pas de version française
+      if (QUEBEC_RE.test(txt.toLowerCase().replace(/[._]+/g, ' ')) && !pf.languages.includes('vfq')) return false;
+      if (/2160|4k|uhd/i.test(q) && pf.resolution < 2160) return false;
+      if (/720|480|sd\b/i.test(q) && pf.resolution > 720 && !pf.allowLower) return false;
+      if (l.sizeBytes && l.sizeBytes / 1e9 > maxGb) return false;
+      if (want.h265Only && !isH265(l)) return false;
+      return true;
+    });
+    if (!ok.length) return false;
+    // Classement de Lumio Secour (dispo AllDebrid, langue, 1080p, taille), le H.265 d'abord à dispo égale
+    const ranked = rankSecourLinks(ok);
+    const l = ranked.find((x) => x.cached && isH265(x)) || ranked.find((x) => x.cached) || ranked.find(isH265) || ranked[0];
+    const title = l.name || `${item.title}${item.type === 'movie' ? '' : ` S${autoPad(want.season)}E${autoPad(want.episode)}`} ${l.quality || ''} (Movix)`.trim();
+    const grab = {
+      id: autoId(),
+      itemId: item.id,
+      title: item.title,
+      release: { title, size: Number(l.sizeBytes) || 0, indexer: 'Movix', indexerId: null, freeleech: false, guid: `movix:${l.link}`, seeders: null },
+      episodes: item.type === 'movie' ? ['movie'] : [`${want.season}:${want.episode}`],
+      want,
+      state: 'sent',
+      progress: 0,
+      startedAt: new Date().toISOString(),
+      by: 'mode ratio',
+      client: 'movix',
+    };
+    const job = {
+      id: crypto.randomBytes(5).toString('hex'),
+      link: l.link,
+      root: dest.root,
+      folder: `.lumio-auto/${grab.id}`,
+      status: 'queued',
+      quiet: true,
+      auto: true,
+      name: title,
+      size: Number(l.sizeBytes) || 0,
+      done: 0,
+      speed: 0,
+      token: null,
+      createdAt: new Date().toISOString(),
+      by: 'Lumio Auto',
+      secour: { link: l.link, hoster: l.hoster, source: l.source, season: l.season, episode: l.episode, type: query.type },
+    };
+    downloads.push(job);
+    runDownload(job);
+    grab.jobId = job.id;
+    auto.grabs.unshift(grab);
+    if (auto.grabs.length > 200) auto.grabs.length = 200;
+    item.needsChoice = false;
+    autoEvent(item, 'sent', `Mode ratio : pris sur Movix par AllDebrid (rien ne compte dans le ratio) : ${title}`, { indexer: 'Movix', size: grab.release.size, by: 'mode ratio' });
+    autoSave();
+    autoLog(`${item.title} : mode ratio → lien Movix (${l.hoster || 'hébergeur'}) par AllDebrid`);
+    notify({ title: '⬇️ Lumio Auto · Movix', message: `${item.title} · mode ratio (hors tracker)`, tags: ['arrow_down'], click: 'lumio://activity' });
+    return true;
+  } catch (e) {
+    autoLog(`${item.title} : Movix injoignable en mode ratio (${e.message})`, 'warn');
+    return false;
+  }
+}
+
+// ——— Booster de seed : une fois par semaine, quelques torrents freeleech très demandés, pris seulement pour partager ———
+// Freeleech = le téléchargement ne compte pas, l'envoi compte : le ratio ne peut que monter.
+// Rangés sur un seul disque (jellyfin3 par défaut), dans un budget de place ; jamais dans Jellyfin.
+const autoBoostCfg = () => ({ enabled: true, gb: 200, disk: 'jellyfin3', perWeek: 6, ...(autoCfg().boost || {}) });
+const BOOST_CATEGORY = 'lumio-boost';
+const boostActive = () => auto.boost.filter((b) => b.state !== 'removed');
+const boostUsed = () => boostActive().reduce((n, b) => n + (b.size || 0), 0);
+function boostDisk() {
+  const want = String(autoBoostCfg().disk || '').toLowerCase().replace(/\s+/g, '');
+  return disks().find((d) => d.name.toLowerCase().replace(/\s+/g, '') === want) || null;
+}
+function autoBoostView() {
+  const cfg = autoBoostCfg();
+  return {
+    ...cfg,
+    diskFound: Boolean(boostDisk()),
+    used: boostUsed(),
+    budget: cfg.gb * 1e9,
+    lastRun: auto.boostLastRun || null,
+    nextRun: auto.boostLastRun ? new Date(Date.parse(auto.boostLastRun) + 7 * 86400e3).toISOString() : null,
+    lastNote: auto.boostNote || null,
+    torrents: boostActive().map((b) => ({ id: b.id, title: b.title, size: b.size, indexer: b.indexer, addedAt: b.addedAt, state: b.state, progress: b.progress || 0, ratio: b.ratio || 0, uploaded: b.uploaded || 0, upSpeed: b.upSpeed || 0, leechers: b.leechers ?? null, seeders: b.seeders ?? null, hoursLeft: b.state === 'seeding' ? hrLeft(b.seedTime) : null })),
+  };
+}
+async function boostRemove(b, why) {
+  await qbitFetch('/api/v2/torrents/delete', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ hashes: b.hash, deleteFiles: 'true' }) });
+  b.state = 'removed';
+  b.removedAt = new Date().toISOString();
+  b.removedWhy = why;
+  autoLog(`booster : ${b.title} retiré (${why}, ratio ${b.ratio || 0})`);
+}
+/** Suivi des torrents du booster (toutes les 5 min) : avancement, envoi, personnes qui téléchargent. */
+let boostBusy = false;
+async function autoBoostTick() {
+  const act = boostActive();
+  if (boostBusy || !act.length || !(autoCfg().qbit || {}).url) return;
+  boostBusy = true;
+  try {
+    const list = await (await qbitFetch(`/api/v2/torrents/info?hashes=${act.map((b) => b.hash).join('|')}`)).json();
+    for (const b of act) {
+      const t = list.find((x) => (x.hash || '').toLowerCase() === b.hash);
+      if (!t) {
+        if (Date.now() - Date.parse(b.addedAt) > 15 * 60e3) (b.state = 'removed'), (b.removedWhy = 'retiré de qBittorrent');
+        continue;
+      }
+      b.progress = Math.round((Number(t.progress) || 0) * 100);
+      b.size = Number(t.size || t.total_size) || b.size;
+      b.ratio = Math.round((Number(t.ratio) || 0) * 100) / 100;
+      b.uploaded = Number(t.uploaded) || 0;
+      b.upSpeed = Number(t.upspeed) || 0;
+      b.seedTime = Number(t.seeding_time) || 0;
+      b.leechers = Number(t.num_incomplete) || 0;
+      b.seeders = Number(t.num_complete) || 0;
+      b.state = Number(t.progress) >= 1 ? 'seeding' : 'downloading';
+      // Jamais fini au bout de 3 jours (plus de source) : place rendue, rien n'a été compté (freeleech)
+      if (b.state === 'downloading' && Date.now() - Date.parse(b.addedAt) > 3 * 86400e3 && b.progress < 100) await boostRemove(b, 'téléchargement bloqué').catch(() => {});
+    }
+    // Historique court des torrents retirés
+    const gone = auto.boost.filter((b) => b.state === 'removed');
+    if (gone.length > 40) auto.boost = auto.boost.filter((b) => b.state !== 'removed' || gone.indexOf(b) >= gone.length - 40);
+    autoSave();
+  } catch {
+    // qBittorrent injoignable : prochain tour
+  } finally {
+    boostBusy = false;
+  }
+}
+/** Sélection de la semaine : les freeleech les plus demandés (beaucoup de téléchargeurs, peu de partageurs). */
+let boostRunning = false;
+async function autoBoostRun(manual = false) {
+  const cfg = autoBoostCfg();
+  const say = (note) => {
+    auto.boostNote = note;
+    autoSave();
+    autoLog(`booster : ${note}`);
+    return { ok: true, note, boost: autoBoostView() };
+  };
+  if (boostRunning) return { ok: false, note: 'sélection déjà en cours', boost: autoBoostView() };
+  if (!cfg.enabled && !manual) return { ok: false, note: 'booster désactivé', boost: autoBoostView() };
+  if (!(autoCfg().qbit || {}).url) return say('qBittorrent n’est pas configuré : le booster attend');
+  const disk = boostDisk();
+  if (!disk) return say(`disque « ${cfg.disk} » introuvable (disques : ${disks().map((d) => d.name).join(', ') || 'aucun'})`);
+  boostRunning = true;
+  try {
+    await autoBoostTick().catch(() => {});
+    auto.boostLastRun = new Date().toISOString();
+    // 1. Candidats : dernières sorties freeleech de chaque site
+    const known = new Set([...boostActive().map((b) => b.hash), ...auto.grabs.map((g) => g.hash)].filter(Boolean));
+    const knownGuid = new Set([...auto.boost.map((b) => b.guid), ...auto.grabs.map((g) => g.release && g.release.guid)].filter(Boolean));
+    let cands = [];
+    for (const ix of autoIndexers().filter((x) => x.enabled !== false && x.type !== 'prowlarr')) {
+      const cats = [...new Set([...parseCats(ix.catMovie, '2000'), ...parseCats(ix.catTv, '5000'), ...parseCats(ix.catAnime, '5070')])];
+      const r = await idxQuery(ix, { q: '', cats }).catch(() => ({ items: [] }));
+      cands.push(...(r.items || []));
+    }
+    const seen = cands.length;
+    cands = cands.filter((r) => r.freeleech && r.size >= 300e6 && r.size <= 60e9 && !knownGuid.has(r.guid) && !(r.hash && known.has(r.hash)) && (r.leechers == null || r.leechers >= 1));
+    if (!cands.length) auto.boostLastRun = new Date(Date.now() - 6 * 86400e3).toISOString();
+    if (!cands.length) return say(seen ? `aucun torrent freeleech parmi les ${seen} dernières sorties : nouvel essai demain` : 'les sites n’ont rien renvoyé : nouvel essai demain');
+    // Demande = téléchargeurs par partageur ; sans ces chiffres, les plus récents d'abord
+    const demand = (r) => (r.leechers == null ? -1 : r.leechers / ((r.seeders || 0) + 1));
+    cands.sort((a, b) => demand(b) - demand(a) || (b.leechers || 0) - (a.leechers || 0) || Date.parse(b.pub || 0) - Date.parse(a.pub || 0));
+    const picks = [];
+    let need = 0;
+    for (const r of cands) {
+      if (picks.length >= cfg.perWeek) break;
+      if (need + r.size > cfg.gb * 1e9) continue;
+      picks.push(r);
+      need += r.size;
+    }
+    // 2. Place : on retire d'abord les anciens que plus personne ne télécharge, puis les plus vieux (toujours après 72 h ou ratio 1)
+    const budget = cfg.gb * 1e9;
+    const removable = boostActive()
+      .filter((b) => b.state === 'seeding' && hrSafe(b.seedTime, b.ratio))
+      .sort((a, b) => (a.leechers || 0) - (b.leechers || 0) || Date.parse(a.addedAt) - Date.parse(b.addedAt));
+    for (const b of removable) {
+      const over = boostUsed() + need > budget;
+      const dead = (b.leechers || 0) < 2 && Date.now() - Date.parse(b.addedAt) >= 7 * 86400e3;
+      if (!over && !dead) continue;
+      await boostRemove(b, over ? 'place pour la sélection de la semaine' : 'plus demandé').catch(() => {});
+    }
+    // 3. Envoi à qBittorrent (catégorie à part, partage sans limite)
+    const info = await diskInfo(disk);
+    let free = (info && info.free) || 0;
+    const qc = autoCfg().qbit || {};
+    const added = [];
+    for (const r of picks) {
+      if (boostUsed() + r.size > budget) continue;
+      if (free - r.size < 20e9) continue; // toujours 20 Go de marge sur le disque
+      try {
+        const t = await fetchTorrent(r);
+        const hash = (t.buf ? torrentHash(t.buf) : magnetHash(t.magnet)) || r.hash;
+        if (!hash || known.has(hash)) continue;
+        const fd = new FormData();
+        if (t.buf) fd.append('torrents', new Blob([t.buf], { type: 'application/x-bittorrent' }), `${cleanName(r.title)}.torrent`);
+        else fd.append('urls', t.magnet);
+        fd.append('category', BOOST_CATEGORY);
+        // Un dossier par disque (réglage habituel) : /downloads/<disque>/boost ; sinon le dossier de qBittorrent
+        fd.append('savepath', `${String(qc.remotePath || '/downloads').replace(/\/+$/, '')}/${qc.perDisk !== false ? `${disk.name}/` : ''}boost`);
+        fd.append('ratioLimit', '-1');
+        fd.append('seedingTimeLimit', '-1');
+        const resp = await qbitFetch('/api/v2/torrents/add', { method: 'POST', body: fd });
+        if (/fail/i.test(await resp.text())) throw new Error('refusé par qBittorrent');
+        const b = { id: autoId(), hash, guid: r.guid, title: r.title, size: r.size, indexer: r.indexer, indexerId: r.indexerId, addedAt: new Date().toISOString(), state: 'downloading', leechers: r.leechers, seeders: r.seeders };
+        auto.boost.push(b);
+        known.add(hash);
+        added.push(b);
+        free -= r.size;
+      } catch (e) {
+        autoLog(`booster : ${r.title} non ajouté (${e.message})`, 'warn');
+      }
+    }
+    const gb = (added.reduce((n, b) => n + b.size, 0) / 1e9).toFixed(1).replace('.', ',');
+    if (added.length) notify({ title: '🚀 Lumio Auto · booster de seed', message: `${added.length} torrent${added.length > 1 ? 's' : ''} freeleech ajouté${added.length > 1 ? 's' : ''} (${gb} Go) pour remonter le ratio`, tags: ['rocket'], click: 'lumio://auto' }).catch(() => {});
+    // Rien pris : nouvel essai demain plutôt que dans une semaine
+    if (!added.length) auto.boostLastRun = new Date(Date.now() - 6 * 86400e3).toISOString();
+    return say(added.length ? `${added.length} torrent(s) freeleech ajouté(s), ${gb} Go (${(boostUsed() / 1e9).toFixed(0)} / ${cfg.gb} Go utilisés)` : 'freeleech trouvés, mais pas de place (budget ou disque plein)');
+  } catch (e) {
+    return say(`sélection impossible (${e.message})`);
+  } finally {
+    boostRunning = false;
+  }
+}
+setInterval(() => autoBoostTick().catch(() => {}), 5 * 60_000);
+// Une fois par semaine (premier passage quelques minutes après la mise à jour du serveur)
+setInterval(() => {
+  if (!autoBoostCfg().enabled || !autoOn()) return;
+  if (auto.boostLastRun && Date.now() - Date.parse(auto.boostLastRun) < 7 * 86400e3) return;
+  autoBoostRun().catch(() => {});
+}, 10 * 60_000);
+
 
 async function autoRatioReport() {
   await autoRatioTick().catch(() => {});
@@ -5328,7 +5649,8 @@ async function autoRatioReport() {
       rules: ix.type === 'c411' || /c411/i.test(ix.name || '') ? ['Garder chaque torrent 72 h ou jusqu’au ratio 1 (Hit & Run)', 'Ratio global au-dessus de 1', 'Le freeleech ne compte pas en téléchargement'] : [],
     };
   });
-  return { qbit: qb, sites, at: new Date().toISOString() };
+  for (const x of sites) x.guard = auto.guard[x.id] || null;
+  return { qbit: qb, sites, guard: autoGuardCfg(), boost: autoBoostView(), at: new Date().toISOString() };
 }
 
 // ——— Résumé du soir (21 h) : envoyé / reçu dans la journée, partages, quota des sites ———
@@ -5604,7 +5926,7 @@ async function autoForgetRequest(r, deleteFiles = false) {
     return 'Le titre reste suivi pour une autre demande.';
   }
   for (const g of auto.grabs.filter((x) => x.itemId === item.id && ['sent', 'downloading'].includes(x.state))) {
-    if (g.client === 'alldebrid') {
+    if (['alldebrid', 'movix'].includes(g.client)) {
       const job = downloads.find((d) => d.id === g.jobId);
       if (job) job.cancelled = true;
     }
@@ -5891,6 +6213,19 @@ async function autoRoutes(req, res, p, q, user) {
       c.profile = pf;
     }
     if (b.folders && typeof b.folders === 'object') c.folders = { movie: b.folders.movie || null, tv: b.folders.tv || null };
+    if (b.ratioGuard && typeof b.ratioGuard === 'object') {
+      c.ratioGuard = { ...autoGuardCfg() };
+      if (typeof b.ratioGuard.enabled === 'boolean') c.ratioGuard.enabled = b.ratioGuard.enabled;
+      if (Number(b.ratioGuard.min) > 0) c.ratioGuard.min = Number(b.ratioGuard.min);
+      setTimeout(autoGuardTick, 500);
+    }
+    if (b.boost && typeof b.boost === 'object') {
+      c.boost = { ...autoBoostCfg() };
+      if (typeof b.boost.enabled === 'boolean') c.boost.enabled = b.boost.enabled;
+      if (Number(b.boost.gb) > 0) c.boost.gb = Number(b.boost.gb);
+      if (Number(b.boost.perWeek) > 0) c.boost.perWeek = Math.min(20, Number(b.boost.perWeek));
+      if (typeof b.boost.disk === 'string' && b.boost.disk.trim()) c.boost.disk = b.boost.disk.trim();
+    }
     saveConfig();
     send(res, 200, { ok: true });
     return true;
@@ -5902,6 +6237,11 @@ async function autoRoutes(req, res, p, q, user) {
     return true;
   }
   // Chiffres du profil du site (envoyé / reçu, en octets) pour estimer le vrai ratio ; vide = effacer
+  // Booster de seed : lancer la sélection de la semaine tout de suite
+  if (req.method === 'POST' && p === '/api/auto/boost/run') {
+    send(res, 200, await autoBoostRun(true));
+    return true;
+  }
   if (req.method === 'POST' && p === '/api/auto/ratio/base') {
     const b = await readBody(req);
     const ix = autoIndexers().find((x) => x.id === b.indexerId);
@@ -6126,7 +6466,7 @@ async function autoRoutes(req, res, p, q, user) {
     const item = auto.items.find((i) => i.id === g.itemId);
     if (running) {
       if (opt('client', true)) {
-        if (g.client === 'alldebrid') {
+        if (['alldebrid', 'movix'].includes(g.client)) {
           const job = downloads.find((d) => d.id === g.jobId);
           if (job) job.cancelled = true;
         }
