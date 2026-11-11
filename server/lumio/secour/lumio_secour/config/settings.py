@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     FREE_TELECHARGER_URL: Optional[str] = None
     DARKI_API_URL: Optional[str] = None
     DARKI_API_KEY: Optional[str] = None
-    MOVIX_URL: Optional[str] = None
+    MOVIX_URL: Optional[str] = "https://movix.miami"
     WEBSHARE_URL: Optional[str] = None
     ZONE_TELECHARGEMENT_URL: Optional[str] = None
     DARKIMOVIX_KITSU_TMDB_MAPPING: List[str] = []

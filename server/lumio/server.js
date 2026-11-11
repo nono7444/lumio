@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.91.0';
+const VERSION = '3.91.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2610,6 +2610,27 @@ async function arrHandOff(r) {
     console.log(`Lumio Secour : ${r.type === 'movie' ? 'Radarr' : 'Sonarr'} pas mis à jour pour « ${r.title} » (${e.message})`);
   }
 }
+
+// ——— Adresse connue d'un site, posée une fois dans le moteur quand le site a déménagé sans redirection ———
+// Une seule fois par adresse : ensuite l'admin (ou le suivi automatique) peut la changer sans être écrasé.
+const SECOUR_SEED = { MOVIX_URL: 'https://movix.miami' };
+const secourSeedTimer = setInterval(async () => {
+  const todo = Object.entries(SECOUR_SEED).filter(([k, v]) => (config.secourSeeded || {})[k] !== v);
+  if (!todo.length) return clearInterval(secourSeedTimer);
+  if (!secourEmbedded() || !secourProc) return;
+  try {
+    const r = await secour('/lumio/settings', { method: 'PUT', body: { updates: Object.fromEntries(todo) }, timeout: 15000 });
+    const res = (r && r.results) || {};
+    for (const [k, v] of todo) {
+      if (!res[k]) continue;
+      if (res[k] === 'ok' || res[k] === 'env_locked') config.secourSeeded = { ...(config.secourSeeded || {}), [k]: v };
+      console.log(`Lumio Secour : adresse ${k} → ${v} (${res[k]})`);
+    }
+    saveConfig();
+  } catch {
+    // moteur pas encore prêt : nouvel essai dans une minute
+  }
+}, 60_000);
 
 // ——— Chaque nuit vers minuit (heure de Paris) : contrôle des sites, nouvelles adresses suivies toutes seules ———
 setInterval(async () => {
