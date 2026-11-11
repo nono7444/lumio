@@ -12,6 +12,7 @@ import { C } from '@/constants/theme';
 import { useSettings } from '@/lib/settings';
 import { resolveWatch } from '@/lib/smart-play';
 import { tmdb, tmdbImg } from '@/lib/tmdb';
+import { watchNowApi } from '@/lib/watch-now';
 
 type Params = {
   type: 'movie' | 'tv';
@@ -30,7 +31,7 @@ export default function Watch() {
   const p = useLocalSearchParams<Params>();
   const { settings } = useSettings();
   const insets = useSafeAreaInsets();
-  const [step] = useState('Recherche dans ta bibliothèque…');
+  const [step, setStep] = useState('Recherche dans ta bibliothèque…');
   const [failure, setFailure] = useState<string | null>(null);
   const [backdrop, setBackdrop] = useState<string | undefined>();
   const cancelled = useRef(false);
@@ -72,7 +73,40 @@ export default function Watch() {
           return;
         }
 
-        // ——— Pas (encore) sur Jellyfin ———
+        // ——— Pas (encore) sur Jellyfin : « Regarder maintenant » (lien direct par TorBox / AllDebrid) ———
+        const season = type === 'tv' ? (res.season ?? (p.season ? Number(p.season) : 1)) : undefined;
+        const episode = type === 'tv' ? (res.episode ?? (p.episode ? Number(p.episode) : 1)) : undefined;
+        const can = settings.chatUrl ? await watchNowApi.status(settings).catch(() => null) : null;
+        if (can?.enabled) {
+          setStep('Pas encore sur ton serveur : recherche d’un lien pour regarder tout de suite…');
+          const date = type === 'movie' ? (details as any).release_date : (details as any).first_air_date;
+          const w = await watchNowApi.start(settings, {
+            type,
+            tmdbId,
+            season,
+            episode,
+            title: p.title,
+            year: date ? String(date).slice(0, 4) : undefined,
+            poster: tmdbImg(details.poster_path, 'w342') ?? undefined,
+            backdrop: tmdbImg(details.backdrop_path, 'w1280') ?? undefined,
+          });
+          if (cancelled.current) return;
+          router.replace({
+            pathname: '/player',
+            params: {
+              kind: 'url',
+              uri: w.url,
+              title: type === 'tv' ? `${p.title} · S${season}E${episode}` : p.title,
+              subtitle: [w.quality, w.language, w.download?.state === 'started' ? 'se télécharge aussi pour la famille' : null].filter(Boolean).join(' · '),
+              tmdbId: String(tmdbId),
+              imdb: imdb ?? '',
+              series: type === 'tv' ? p.title : undefined,
+              season: season != null ? String(season) : undefined,
+              episode: episode != null ? String(episode) : undefined,
+            },
+          });
+          return;
+        }
         throw new Error(
           type === 'tv' && res.season != null
             ? `L’épisode S${res.season}E${res.episode} n’est pas encore sur ton serveur. Demande-le depuis la fiche.`

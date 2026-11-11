@@ -23,6 +23,7 @@ import { serverCall } from '@/lib/chat';
 import { jf, jfPoster, type JfItem, type JfSession } from '@/lib/jellyfin';
 import { filesApi, type Disk } from '@/lib/files';
 import { SessionsBody } from '@/app/sessions';
+import { watchNowApi, type WatchNowStatus } from '@/lib/watch-now';
 import { useFocusEffect } from 'expo-router';
 
 type Tab = 'demandes' | 'manquants' | 'telechargements' | 'qbit' | 'ratio';
@@ -2539,8 +2540,65 @@ export function AutoServerScreen() {
       <ScrollView style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: TAB_SPACE + 20, gap: 14 }}>
         <AutoHeader title="Serveur" sub={version ? `Serveur Lumio ${version}` : 'Redémarrer et mettre à jour'} color={version ? C.success : C.textFaint} />
         <ServerActionsSection />
+        <WatchNowCard />
       </ScrollView>
     </SectionCollapse.Provider>
+  );
+}
+
+/** Streaming direct (« Regarder maintenant ») : clé TorBox gardée sur le serveur, interrupteurs. */
+function WatchNowCard() {
+  const { settings } = useSettings();
+  const [st, setSt] = useState<WatchNowStatus | null>(null);
+  const [old, setOld] = useState(false);
+  const [key, setKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => {
+    watchNowApi
+      .status(settings)
+      .then((r) => (setSt(r), setOld(false)))
+      .catch(() => setOld(true));
+  }, [settings]);
+  useFocusEffect(load);
+  const save = (b: { torboxKey?: string; enabled?: boolean; download?: boolean }) => {
+    setBusy(true);
+    watchNowApi
+      .save(settings, b)
+      .then((r) => (setSt(r), b.torboxKey !== undefined && (setKey(''), toast(b.torboxKey ? 'Clé TorBox enregistrée sur le serveur' : 'Clé TorBox retirée'))))
+      .catch((e) => Alert.alert('Streaming direct', e?.message ?? String(e)))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <View style={styles.bigCard}>
+      <Text style={styles.bigCardTitle}>Streaming direct</Text>
+      <Text style={styles.small}>
+        Un titre absent du serveur se regarde tout de suite : Lumio trouve un lien (Movix, Wawacity), TorBox le lit en direct, et le titre se télécharge en même temps pour toute la famille.
+      </Text>
+      {old ? <Text style={[styles.small, { color: C.warning }]}>Mets le serveur à jour (3.94.0) pour régler le streaming direct.</Text> : null}
+      {st ? (
+        <>
+          <View style={styles.kv}>
+            <Text style={styles.kvK}>TorBox</Text>
+            <Text style={[styles.small, { color: st.torbox ? C.success : C.warning, fontWeight: '700' }]}>{st.torbox ? 'clé enregistrée' : 'pas de clé'}</Text>
+          </View>
+          <View style={styles.kv}>
+            <Text style={styles.kvK}>AllDebrid (relais, Wawacity)</Text>
+            <Text style={[styles.small, { color: st.alldebrid ? C.success : C.textDim, fontWeight: '700' }]}>{st.alldebrid ? 'prêt' : 'pas de clé'}</Text>
+          </View>
+          <View style={styles.searchBox}>
+            <Ionicons name="key-outline" size={18} color={C.textDim} />
+            <TextInput value={key} onChangeText={setKey} placeholder={st.torbox ? 'Nouvelle clé API TorBox' : 'Clé API TorBox'} placeholderTextColor={C.textFaint} style={styles.searchInput} autoCapitalize="none" autoCorrect={false} secureTextEntry />
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Button title="Enregistrer la clé" icon="save-outline" small loading={busy} disabled={!key.trim()} onPress={() => save({ torboxKey: key.trim() })} style={{ flex: 1 }} />
+            {st.torbox ? <Button title="Retirer" variant="secondary" small onPress={() => save({ torboxKey: '' })} /> : null}
+          </View>
+          <Text style={styles.small}>La clé part sur ton serveur et y reste : elle n’est jamais renvoyée aux applis.</Text>
+          <Toggle label="Bouton « Regarder » sur les titres absents" value={st.on ?? st.enabled} onChange={(v) => save({ enabled: v })} />
+          <Toggle label="Télécharger aussi le titre en arrière-plan" value={st.download} onChange={(v) => save({ download: v })} />
+        </>
+      ) : null}
+    </View>
   );
 }
 

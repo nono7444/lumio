@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.93.1';
+const VERSION = '3.94.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2709,6 +2709,99 @@ async function sendOrSecour(r) {
   }
 }
 
+// ——— « Regarder maintenant » : un titre absent du serveur se regarde tout de suite ———
+// Lumio Secour trouve un lien (Movix, Wawacity), TorBox (sinon AllDebrid) le transforme en lien de lecture directe,
+// et le même titre part en téléchargement en arrière-plan pour qu'il soit ensuite dans Jellyfin pour tout le monde.
+const watchNowOn = () => config.watchNow !== false && Boolean(secourUrl() && secourKey()) && Boolean(torboxKey() || secourDebridKey());
+const watchNowView = () => ({ enabled: watchNowOn(), on: config.watchNow !== false, torbox: Boolean(torboxKey()), alldebrid: Boolean(secourDebridKey()), download: config.watchNowDownload !== false });
+const watchCache = new Map(); // « type:tmdb:s:e » → { at, out } : un second appareil reprend le même lien pendant 20 min
+async function watchNow(user, b) {
+  if (!watchNowOn()) throw new HttpError(400, 'Le streaming direct n’est pas prêt (Lumio Secour et une clé TorBox ou AllDebrid)');
+  const type = b.type === 'tv' || b.type === 'series' ? 'tv' : 'movie';
+  const tmdbId = Number(b.tmdbId);
+  if (!tmdbId) throw new HttpError(400, 'Identifiant TMDB manquant');
+  const season = type === 'tv' ? Number(b.season) || 1 : null;
+  const episode = type === 'tv' ? Number(b.episode) || 1 : null;
+  const ck = `${type}:${tmdbId}:${season}:${episode}`;
+  const hit = watchCache.get(ck);
+  if (hit && Date.now() - hit.at < 20 * 60e3) return { ...hit.out, download: watchDownload(user, b, type, tmdbId, season) };
+  const ext = await tmdbGet(`/${type}/${tmdbId}/external_ids`).catch(() => null);
+  const imdb = (ext && ext.imdb_id) || '';
+  if (!/^tt\d+$/.test(imdb)) throw new HttpError(404, 'Identifiant IMDb introuvable pour ce titre');
+  const qs = new URLSearchParams({ imdb, type: type === 'tv' ? 'series' : 'movie' });
+  if (type === 'tv') (qs.set('season', String(season)), qs.set('episode', String(episode)));
+  const tried = [];
+  // TorBox d'abord (il ne lit pas tous les sites : Wawacity passe par AllDebrid), puis AllDebrid
+  for (const service of [torboxKey() ? 'torbox' : null, secourDebridKey() ? 'alldebrid' : null].filter(Boolean)) {
+    let found;
+    try {
+      found = await secour(`/lumio/links?${qs}`, { timeout: 90000, service });
+    } catch (e) {
+      tried.push(`${service} : ${e.message}`);
+      continue;
+    }
+    const ok = ((found && found.links) || []).filter((l) => {
+      const txt = `${l.name || ''} ${l.language || ''}`;
+      if (/vostfr|\bsub/i.test(txt) && !/multi|french|truefrench|\bvf[fi2]?\b/i.test(txt)) return false; // version française seulement
+      if (QUEBEC_RE.test(txt.toLowerCase().replace(/[._]+/g, ' '))) return false;
+      return true;
+    });
+    if (!ok.length) {
+      tried.push(`${service} : aucun lien en français`);
+      continue;
+    }
+    for (const l of rankSecourLinks(ok).slice(0, 4)) {
+      try {
+        const r = await secour('/lumio/resolve', { method: 'POST', timeout: 60000, service, body: { link: l.link, hoster: l.hoster, source: l.source, season: l.season, episode: l.episode, type: qs.get('type') } });
+        if (r && /^https?:\/\//.test(r.url || '')) {
+          const out = { url: r.url, service, source: l.source || null, hoster: l.hoster || null, name: l.name || null, quality: l.quality || null, language: l.language || null, sizeBytes: Number(l.sizeBytes) || 0 };
+          watchCache.set(ck, { at: Date.now(), out });
+          if (watchCache.size > 200) watchCache.delete(watchCache.keys().next().value);
+          console.log(`Regarder maintenant : « ${b.title || tmdbId} » pour ${user.name} (${service}, ${l.source || '?'} · ${l.hoster || '?'})`);
+          return { ...out, download: watchDownload(user, b, type, tmdbId, season) };
+        }
+      } catch (e) {
+        tried.push(`${service} · ${l.hoster || l.source || 'lien'} : ${e.message.replace(/^Lumio Secour : /, '')}`);
+      }
+    }
+  }
+  throw new HttpError(404, `Aucun lien lisible pour l’instant${tried.length ? ` (${tried.slice(0, 3).join(' ; ')})` : ''}`);
+}
+/** En arrière-plan : le même titre part en téléchargement direct (comme le bouton « DL »), sans doublon. */
+function watchDownload(user, b, type, tmdbId, season) {
+  try {
+    if (config.watchNowDownload === false) return { state: 'off' };
+    const seasons = type === 'tv' ? [season] : undefined;
+    const open = (x) => x.type === type && x.tmdbId === tmdbId && [RequestStatus.PENDING, RequestStatus.APPROVED, RequestStatus.COMPLETED].includes(x.status) && (type === 'movie' || (x.seasons || []).includes(season));
+    const had = requests.find(open);
+    if (had) return { state: 'already', requestId: had.id };
+    const r = {
+      id: `${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`,
+      type,
+      tmdbId,
+      title: String(b.title || '').slice(0, 200) || `TMDB ${tmdbId}`,
+      year: b.year ? String(b.year).slice(0, 4) : undefined,
+      poster: typeof b.poster === 'string' && /^https:\/\//.test(b.poster) ? b.poster : undefined,
+      backdrop: typeof b.backdrop === 'string' && /^https:\/\//.test(b.backdrop) ? b.backdrop : undefined,
+      seasons,
+      status: RequestStatus.APPROVED,
+      requestedBy: { id: user.id, name: user.name },
+      createdAt: new Date().toISOString(),
+    };
+    requests.unshift(r);
+    try {
+      startSecour(r, `regardé en streaming par ${user.name} : téléchargé pour tout le monde`);
+    } catch (e) {
+      requests.splice(requests.indexOf(r), 1);
+      return { state: 'skipped', reason: e.message };
+    }
+    library = null;
+    return { state: 'started', requestId: r.id };
+  } catch (e) {
+    return { state: 'skipped', reason: String((e && e.message) || e) };
+  }
+}
+
 const secourQueue = [];
 // Demande refusée ou supprimée pendant le travail : on s'arrête
 const secourStopped = (r) => !requests.includes(r) || r.status === RequestStatus.DECLINED || !r.secour || r.secour.state === 'cancelled';
@@ -2889,19 +2982,21 @@ const secourServiceName = () => 'AllDebrid';
 // Intégré : le moteur tourne dans le même conteneur (127.0.0.1) et a priorité sur une ancienne adresse enregistrée.
 const secourUrl = () => (process.env.LUMIO_SECOUR_URL || (secourEmbedded() ? `http://127.0.0.1:${SECOUR_PORT}` : config.secourUrl) || '').replace(/\/+$/, '');
 const secourKey = () => process.env.LUMIO_SECOUR_KEY || (secourEmbedded() ? config.secourEmbeddedKey : config.secourKey) || '';
-async function secour(pathname, { method = 'GET', body, timeout = 60000 } = {}) {
+// TorBox : seulement pour « Regarder maintenant » (streaming). La clé reste sur le serveur.
+const torboxKey = () => process.env.TORBOX_KEY || config.torboxKey || '';
+async function secour(pathname, { method = 'GET', body, timeout = 60000, service } = {}) {
   if (!secourUrl() || !secourKey()) throw new HttpError(400, 'Lumio Secour n’est pas configuré');
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeout);
   try {
-    const adKey = secourDebridKey();
+    const adKey = service === 'torbox' ? torboxKey() : secourDebridKey();
     const tk = tmdbKey();
     const r = await fetch(`${secourUrl()}${pathname}`, {
       method,
       signal: ctrl.signal,
       headers: {
         'X-Lumio-Key': secourKey(),
-        ...(adKey ? { 'X-Debrid-Key': adKey, 'X-Debrid-Service': secourService() } : {}),
+        ...(adKey ? { 'X-Debrid-Key': adKey, 'X-Debrid-Service': service || secourService() } : {}),
         ...(tk ? { 'X-Tmdb-Key': tk } : {}),
         ...(body ? { 'Content-Type': 'application/json' } : {}),
       },
@@ -8501,6 +8596,23 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       }
     }
 
+    // ——— Regarder maintenant (tous les comptes) : lien de lecture directe + téléchargement en arrière-plan ———
+    if (req.method === 'GET' && p === '/api/watch/now') return send(res, 200, watchNowView());
+    if (req.method === 'POST' && p === '/api/watch/now') return send(res, 200, await watchNow(user, await readBody(req)));
+    // Admin : clé TorBox (gardée sur le serveur, jamais renvoyée) et interrupteurs du streaming direct
+    if (req.method === 'PUT' && p === '/api/watch/now') {
+      requireAdmin(user);
+      const b = await readBody(req);
+      if (typeof b.torboxKey === 'string') {
+        if (b.torboxKey.trim()) config.torboxKey = b.torboxKey.trim();
+        else delete config.torboxKey;
+      }
+      if (typeof b.enabled === 'boolean') config.watchNow = b.enabled;
+      if (typeof b.download === 'boolean') config.watchNowDownload = b.download;
+      saveConfig();
+      watchCache.clear();
+      return send(res, 200, watchNowView());
+    }
     // ——— Admin : Lumio Secour (liens d'hébergeurs → AllDebrid → disques) ———
     if (p === '/api/secour' || p.startsWith('/api/secour/')) {
       requireAdmin(user);
