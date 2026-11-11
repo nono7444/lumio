@@ -12,7 +12,7 @@ import { Picker, Toggle } from '@/components/arr-section';
 import { toast } from '@/components/toast';
 import { Button, Field, ScreenTitle, Section, SectionCollapse, SegChip } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
-import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoBoost, type AutoBoostCandidate, type AutoService, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
+import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoBoost, type AutoBoostCandidate, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
 import { useSettings } from '@/lib/settings';
 import { IS_AUTO } from '@/lib/variant';
 import { ServerRequests } from '@/components/server-requests';
@@ -538,7 +538,6 @@ function RatioTab() {
   if (!data) return err ? <Text style={styles.dim}>{/404|inconnue/.test(err) ? 'Mets le serveur à jour (3.87.0) : Profil → Serveur → Mettre à jour.' : err}</Text> : <ActivityIndicator color="#fff" style={{ marginTop: 30 }} />;
   return (
     <>
-      {data.service && data.guard ? <ServiceCard sv={data.service} guard={data.guard} sites={data.sites} reload={load} /> : <Text style={styles.help}>Mets le serveur à jour (3.92.1) pour voir le service en route et le booster de seed.</Text>}
       {data.boost ? <BoostCard b={data.boost} reload={load} /> : null}
       {data.qbit ? (
         <View style={styles.ratioCard}>
@@ -563,112 +562,6 @@ function RatioTab() {
 }
 
 const fmtWhen = (iso?: string | null) => (iso ? new Date(iso).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
-
-/** « Service en route » : par où passent les demandes (torrent, freeleech + Movix, AllDebrid) et les dernières bascules. */
-function ServiceCard({ sv, guard, sites, reload }: { sv: AutoService; guard: { enabled: boolean; min: number; margin: number }; sites: AutoRatioSite[]; reload: () => void }) {
-  const { settings } = useSettings();
-  const set = (b: { enabled?: boolean; min?: number }) =>
-    autoApi
-      .save(settings, { ratioGuard: b })
-      .then(() => setTimeout(reload, 800))
-      .catch((e) => Alert.alert('Mode ratio', e?.message ?? String(e)));
-  const now =
-    sv.current === 'alldebrid'
-      ? { label: 'AllDebrid seulement', sub: 'Seulement les versions déjà en cache AllDebrid.', color: C.accent, icon: 'cloud-download' as const }
-      : sv.current === 'guard'
-        ? { label: 'Mode ratio', sub: 'Ratio trop bas : torrent freeleech d’abord, sinon lien Movix par AllDebrid. Rien ne compte dans le ratio.', color: C.warning, icon: 'shield-half' as const }
-        : { label: 'Torrents', sub: 'Ratio correct : les demandes passent par les torrents du site, puis partage.', color: C.success, icon: 'swap-vertical' as const };
-  const steps: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap; on: boolean }[] = [
-    { key: 'torrent', label: 'Torrents', icon: 'swap-vertical', on: sv.current === 'torrent' },
-    { key: 'free', label: 'Freeleech', icon: 'gift', on: sv.current === 'guard' },
-    { key: 'movix', label: 'Movix', icon: 'link', on: sv.current === 'guard' && sv.movixReady },
-  ];
-  const fr = (n: number) => n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return (
-    <View style={styles.ratioCard}>
-      <Text style={styles.ratioLabel}>Service en route</Text>
-      <View style={[styles.rowBetween, { justifyContent: 'flex-start' }]}>
-        <Ionicons name={now.icon} size={26} color={now.color} />
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.ratioBig, { color: now.color }]}>{sv.auto ? now.label : `${now.label} · Lumio Auto en pause`}</Text>
-          <Text style={styles.small}>{now.sub}</Text>
-        </View>
-      </View>
-      <View style={styles.ratioRow}>
-        {steps.map((x) => (
-          <View key={x.key} style={[styles.svcStep, x.on ? { borderColor: now.color } : { opacity: 0.45 }]}>
-            <Ionicons name={x.icon} size={18} color={x.on ? now.color : C.textDim} />
-            <Text style={[styles.small, { color: x.on ? C.text : C.textDim, fontWeight: '700' }]}>{x.label}</Text>
-            <Text style={[styles.small, { fontSize: 10 }]}>{x.on ? 'en route' : 'à l’arrêt'}</Text>
-          </View>
-        ))}
-      </View>
-      {sv.current === 'guard' && !sv.movixReady ? (
-        <View style={styles.ratioAlert}>
-          <Ionicons name="warning" size={14} color={C.warning} />
-          <Text style={[styles.small, { color: C.warning, flex: 1 }]}>Movix n’est pas prêt (Lumio Secour ou clé AllDebrid) : seuls les freeleech passent.</Text>
-        </View>
-      ) : null}
-      {sites.map((x) => {
-        const r = x.guard?.ratio ?? x.estimate?.ratio ?? x.lumio.ratio;
-        const on = !!x.guard?.on;
-        return (
-          <View key={x.id} style={styles.kv}>
-            <Text style={styles.kvK}>{x.name}</Text>
-            <Text style={[styles.small, { color: on ? C.warning : C.success, fontWeight: '700', flex: 1, textAlign: 'right' }]}>
-              {r == null ? 'ratio inconnu : torrents' : on ? `ratio ${fmtRatio(r)} · mode ratio${x.guard?.since ? ` depuis le ${fmtWhen(x.guard.since)}` : ''}` : `ratio ${fmtRatio(r)} · torrents`}
-            </Text>
-          </View>
-        );
-      })}
-      <Toggle label={`Mode ratio automatique (sous ${fr(guard.min)})`} value={guard.enabled} onChange={(v) => set({ enabled: v })} />
-      <View style={[styles.ratioRow, { flexWrap: 'wrap' }]}>
-        {[1, 1.05, 1.1, 1.2, 1.5].map((m) => (
-          <SegChip key={m} label={fr(m)} on={Math.abs(guard.min - m) < 0.001} onPress={() => set({ min: m })} />
-        ))}
-      </View>
-      <Text style={styles.small}>
-        Sous {fr(guard.min)} : plus de torrent compté dans le ratio. Retour aux torrents tout seul à partir de {fr(guard.min + guard.margin)}.
-      </Text>
-      {sv.running.length ? (
-        <>
-          <Text style={styles.ratioLabel}>En cours</Text>
-          {sv.running.map((g, i) => (
-            <Text key={`${g.title}${i}`} style={styles.small} numberOfLines={1}>
-              <Text style={{ color: C.text, fontWeight: '700' }}>{g.client === 'movix' ? 'Movix' : g.freeleech ? 'Freeleech' : (CLIENT_LABEL[g.client ?? ''] ?? 'Torrent')}</Text> · {g.progress}% · {g.title}
-            </Text>
-          ))}
-        </>
-      ) : null}
-      {sv.waiting.length ? (
-        <Text style={styles.small}>
-          <Text style={{ color: C.warning, fontWeight: '700' }}>En attente ({sv.waiting.length})</Text> : rien en freeleech ni sur Movix pour {sv.waiting.slice(0, 4).join(', ')}
-          {sv.waiting.length > 4 ? '…' : ''}
-        </Text>
-      ) : null}
-      {sv.recentMovix.length ? (
-        <>
-          <Text style={styles.ratioLabel}>Derniers passages par Movix</Text>
-          {sv.recentMovix.map((g, i) => (
-            <Text key={`${g.title}${i}`} style={styles.small} numberOfLines={1}>
-              {fmtWhen(g.at)} · {g.state === 'done' ? 'rangé' : g.state === 'failed' ? 'échec' : 'en cours'} · {g.title}
-            </Text>
-          ))}
-        </>
-      ) : null}
-      <Text style={styles.ratioLabel}>Dernières bascules</Text>
-      {sv.log.length ? (
-        sv.log.map((l, i) => (
-          <Text key={`${l.at}${i}`} style={styles.small}>
-            {fmtWhen(l.at)} · {l.site} · <Text style={{ color: l.on ? C.warning : C.success, fontWeight: '700' }}>{l.on ? 'mode ratio' : 'retour aux torrents'}</Text> (ratio {fmtRatio(l.ratio)})
-          </Text>
-        ))
-      ) : (
-        <Text style={styles.small}>Aucune bascule pour l’instant.</Text>
-      )}
-    </View>
-  );
-}
 
 /** Booster de seed : torrents freeleech pris une fois par semaine, seulement pour partager. */
 function BoostCard({ b, reload }: { b: AutoBoost; reload: () => void }) {
@@ -2359,8 +2252,10 @@ export function AutoPerfScreen() {
   const bad = services?.filter((x) => !x.ok) ?? [];
   const free = disks ? disks.reduce((n, d) => n + (d.free || 0), 0) : null;
   const tight = disks?.some((d) => d.free != null && d.free < 30e9);
-  const sv = ratio?.service;
-  const svc = !sv ? { v: '—', l: 'Service en route', c: C.textDim } : sv.current === 'guard' ? { v: 'Mode ratio', l: 'Freeleech puis Movix', c: C.warning } : sv.current === 'alldebrid' ? { v: 'AllDebrid', l: 'Versions en cache seulement', c: C.accent } : { v: 'Torrents', l: 'Ratio correct', c: C.success };
+  // Ratio du premier site (vrai ratio du profil si le serveur le lit, sinon l'estimation)
+  const site = ratio?.sites?.[0];
+  const rv = site ? (site.estimate?.ratio ?? site.lumio.ratio) : null;
+  const svc = rv == null ? { v: '—', l: site ? `Ratio ${site.name}` : 'Ratio', c: C.textDim } : { v: fmtRatio(rv), l: `Ratio ${site!.name}`, c: rv < 1 ? C.danger : rv < 1.1 ? C.warning : C.success };
   const names = [...new Set(watching.map((w) => w.UserName).filter(Boolean))];
   const boost = ratio?.boost;
   return (
@@ -2539,8 +2434,54 @@ export function AutoServerScreen() {
       <ScrollView style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: TAB_SPACE + 20, gap: 14 }}>
         <AutoHeader title="Serveur" sub={version ? `Serveur Lumio ${version}` : 'Redémarrer et mettre à jour'} color={version ? C.success : C.textFaint} />
         <ServerActionsSection />
+        <DirectDownloadCard />
       </ScrollView>
     </SectionCollapse.Provider>
+  );
+}
+
+/** Téléchargement direct (bouton « Movix ») : les deux services qui ouvrent les liens, et la clé TorBox gardée sur le serveur. */
+function DirectDownloadCard() {
+  const { settings } = useSettings();
+  const [st, setSt] = useState<{ alldebrid: boolean; torbox?: boolean } | null>(null);
+  const [key, setKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => {
+    serverCall<{ alldebrid: boolean; torbox?: boolean }>(settings, '/api/secour')
+      .then(setSt)
+      .catch(() => setSt(null));
+  }, [settings]);
+  useFocusEffect(load);
+  const save = (k: string) => {
+    setBusy(true);
+    serverCall<{ torbox: boolean }>(settings, '/api/secour/torbox', { method: 'PUT', body: JSON.stringify({ key: k }) })
+      .then(() => (setKey(''), toast(k ? 'Clé TorBox enregistrée sur le serveur' : 'Clé TorBox retirée'), load()))
+      .catch((e) => Alert.alert('Téléchargement direct', /404|inconnue/.test(e?.message ?? '') ? 'Mets le serveur à jour (3.98.0).' : (e?.message ?? String(e))))
+      .finally(() => setBusy(false));
+  };
+  if (!st) return null;
+  return (
+    <View style={styles.bigCard}>
+      <Text style={styles.bigCardTitle}>Téléchargement direct</Text>
+      <Text style={styles.small}>Le bouton « Movix » des fiches télécharge sans passer par le tracker. AllDebrid ouvre le lien ; s’il n’y arrive pas, TorBox essaie à son tour.</Text>
+      <View style={styles.kv}>
+        <Text style={styles.kvK}>AllDebrid</Text>
+        <Text style={[styles.small, { color: st.alldebrid ? C.success : C.warning, fontWeight: '700' }]}>{st.alldebrid ? 'clé enregistrée' : 'pas de clé'}</Text>
+      </View>
+      <View style={styles.kv}>
+        <Text style={styles.kvK}>TorBox</Text>
+        <Text style={[styles.small, { color: st.torbox ? C.success : C.textDim, fontWeight: '700' }]}>{st.torbox === undefined ? 'serveur à mettre à jour' : st.torbox ? 'clé enregistrée' : 'pas de clé'}</Text>
+      </View>
+      <View style={styles.searchBox}>
+        <Ionicons name="key-outline" size={18} color={C.textDim} />
+        <TextInput value={key} onChangeText={setKey} placeholder={st.torbox ? 'Nouvelle clé API TorBox' : 'Clé API TorBox'} placeholderTextColor={C.textFaint} style={styles.searchInput} autoCapitalize="none" autoCorrect={false} secureTextEntry />
+      </View>
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        <Button title="Enregistrer la clé" icon="save-outline" small loading={busy} disabled={!key.trim()} onPress={() => save(key.trim())} style={{ flex: 1 }} />
+        {st.torbox ? <Button title="Retirer" variant="secondary" small onPress={() => save('')} /> : null}
+      </View>
+      <Text style={styles.small}>La clé part sur ton serveur et y reste : elle n’est jamais renvoyée aux applis.</Text>
+    </View>
   );
 }
 

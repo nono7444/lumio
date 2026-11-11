@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.97.0';
+const VERSION = '3.98.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2890,19 +2890,21 @@ const secourServiceName = () => 'AllDebrid';
 // Intégré : le moteur tourne dans le même conteneur (127.0.0.1) et a priorité sur une ancienne adresse enregistrée.
 const secourUrl = () => (process.env.LUMIO_SECOUR_URL || (secourEmbedded() ? `http://127.0.0.1:${SECOUR_PORT}` : config.secourUrl) || '').replace(/\/+$/, '');
 const secourKey = () => process.env.LUMIO_SECOUR_KEY || (secourEmbedded() ? config.secourEmbeddedKey : config.secourKey) || '';
-async function secour(pathname, { method = 'GET', body, timeout = 60000 } = {}) {
+// TorBox : second service de téléchargement direct, quand AllDebrid n'arrive pas à ouvrir un lien. La clé reste sur le serveur.
+const torboxKey = () => process.env.TORBOX_KEY || config.torboxKey || '';
+async function secour(pathname, { method = 'GET', body, timeout = 60000, service } = {}) {
   if (!secourUrl() || !secourKey()) throw new HttpError(400, 'Lumio Secour n’est pas configuré');
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeout);
   try {
-    const adKey = secourDebridKey();
+    const adKey = service === 'torbox' ? torboxKey() : secourDebridKey();
     const tk = tmdbKey();
     const r = await fetch(`${secourUrl()}${pathname}`, {
       method,
       signal: ctrl.signal,
       headers: {
         'X-Lumio-Key': secourKey(),
-        ...(adKey ? { 'X-Debrid-Key': adKey, 'X-Debrid-Service': secourService() } : {}),
+        ...(adKey ? { 'X-Debrid-Key': adKey, 'X-Debrid-Service': service || secourService() } : {}),
         ...(tk ? { 'X-Tmdb-Key': tk } : {}),
         ...(body ? { 'Content-Type': 'application/json' } : {}),
       },
@@ -2969,7 +2971,21 @@ async function runDownload(job) {
     let files;
     if (job.secour) {
       job.status = 'debrid';
-      const r = await secour('/lumio/resolve', { method: 'POST', body: job.secour, timeout: 180000 });
+      // AllDebrid d'abord ; s'il n'arrive pas à ouvrir le lien et qu'une clé TorBox est là, TorBox essaie à son tour
+      let r;
+      try {
+        if (!secourDebridKey() && torboxKey()) throw new Error('pas de clé AllDebrid');
+        r = await secour('/lumio/resolve', { method: 'POST', body: job.secour, timeout: 180000 });
+      } catch (e) {
+        if (!torboxKey()) throw e;
+        console.log(`Lumio Secour : AllDebrid n'a pas ouvert le lien (${e.message}), essai avec TorBox`);
+        try {
+          r = await secour('/lumio/resolve', { method: 'POST', body: job.secour, timeout: 180000, service: 'torbox' });
+          job.via = 'torbox';
+        } catch (e2) {
+          throw new Error(`${e.message} ; TorBox : ${e2.message.replace(/^Lumio Secour : /, '')}`);
+        }
+      }
       const fromUrl = fileNameFromUrl(r.url);
       const ext = (fromUrl.match(/\.\w{2,4}$/) || ['.mkv'])[0];
       const name = job.baseName ? `${job.baseName}${ext}` : job.fileName || fromUrl || `${job.name || 'fichier'}.mkv`;
@@ -3646,11 +3662,9 @@ if (!auto.dlStats || typeof auto.dlStats !== 'object') auto.dlStats = {};
 // Ratio par site : compteurs cumulés de qBittorrent (gardés même après retrait des torrents) + ratio de départ saisi par l'admin
 if (!auto.siteStats || typeof auto.siteStats !== 'object') auto.siteStats = {};
 if (!auto.ratioBase || typeof auto.ratioBase !== 'object') auto.ratioBase = {};
-// Mode ratio : { ixId: { on, ratio, since } } ; booster de seed : torrents freeleech pris seulement pour partager
-if (!auto.guard || typeof auto.guard !== 'object') auto.guard = {};
+// Booster de seed : torrents freeleech pris seulement pour partager
 if (!Array.isArray(auto.boost)) auto.boost = [];
 if (!auto.siteProfile || typeof auto.siteProfile !== 'object') auto.siteProfile = {}; // profil du site (C411) : vrai ratio, freeleech du compte
-if (!Array.isArray(auto.guardLog)) auto.guardLog = []; // dernières bascules du mode ratio
 let autoSaveTimer = null;
 const autoSave = () => {
   clearTimeout(autoSaveTimer);
@@ -4153,8 +4167,6 @@ function autoScore(rel, item, want) {
     const used = autoDlToday(ixq.id) / 1e9;
     if (used + gb > cap) no(`quota du jour atteint sur ${ixq.name} (${used.toFixed(1)} / ${cap} Go)`);
   }
-  // Mode ratio : sous le seuil, seuls les torrents freeleech passent (le reste attend ou part sur Movix)
-  if (!rel.freeleech && !autoDebridOnly() && rel.indexerId && autoGuardOn(rel.indexerId)) no(`mode ratio : ratio trop bas sur ${ixq ? ixq.name : rel.indexer} (freeleech ou Movix seulement)`);
   out.rejected = out.reasons[0] || null;
   // Note : langue d'abord, puis codec, source, sources actives, taille raisonnable
   const li = p.langs.length ? Math.min(...p.langs.map((l) => (pf.languages.indexOf(l) >= 0 ? pf.languages.indexOf(l) : 9))) : 9;
@@ -5067,7 +5079,6 @@ async function autoSearchTick(force = false) {
       let grabbed = false;
       let waitUntil = 0;
       let quotaWait = false;
-      let guardWait = false;
       let notCachedAll = false;
       for (const w of wanted) {
         const u = autoWaitH265(item, w, pf);
@@ -5096,11 +5107,6 @@ async function autoSearchTick(force = false) {
               grabbed = await autoTryGrab(item, r2.results, w2);
               if (grabbed) break;
               if (autoDebridOnly()) notCachedAll = true;
-            } else if (autoGuardAny()) {
-              // Mode ratio : pas de torrent freeleech → lien Movix (AllDebrid), rien ne passe par le tracker
-              grabbed = await autoMovixTry(item, w2);
-              if (grabbed) break;
-              guardWait = true;
             }
           }
           continue;
@@ -5109,9 +5115,6 @@ async function autoSearchTick(force = false) {
           const ok = await autoTryGrab(item, results, want);
           if (ok) grabbed = true;
           else if (autoDebridOnly()) notCachedAll = true;
-        } else if (!want.upgrade && autoGuardAny()) {
-          if (await autoMovixTry(item, want)) grabbed = true;
-          else guardWait = true;
         }
         if (grabbed && want.kind === 'movie') break;
       }
@@ -5120,14 +5123,6 @@ async function autoSearchTick(force = false) {
       if (!grabbed && notCachedAll) {
         item.needsChoice = false;
         item.note = 'mode AllDebrid : aucune version en cache pour l’instant (réessai dans 6 h, ou coupe AllDebrid pour passer en torrent)';
-        item.nextSearch = Date.now() + 6 * 3600e3;
-        item.lastSearch = new Date().toISOString();
-        autoSave();
-        continue;
-      }
-      if (!grabbed && guardWait && !upgrading) {
-        item.needsChoice = false;
-        item.note = `mode ratio (sous ${autoGuardCfg().min.toFixed(2).replace('.', ',')}) : rien en freeleech ni sur Movix pour l’instant, nouvel essai dans 6 h`;
         item.nextSearch = Date.now() + 6 * 3600e3;
         item.lastSearch = new Date().toISOString();
         autoSave();
@@ -5314,13 +5309,11 @@ async function autoRatioTick() {
     ratioBusy = false;
   }
 }
-setTimeout(() => autoRatioTick().then(autoGuardTick).catch(() => {}), 60_000);
-setInterval(() => autoRatioTick().then(autoGuardTick).catch(() => {}), 5 * 60_000);
+setTimeout(() => autoRatioTick().catch(() => {}), 60_000);
+setInterval(() => autoRatioTick().catch(() => {}), 5 * 60_000);
 
-// ——— Mode ratio : sous le seuil (1,10 par défaut), plus de torrent compté dans le ratio ———
-// Ordre pour chaque demande : torrent freeleech → lien Movix (AllDebrid) → attente. Retour aux torrents
-// tout seul quand le ratio repasse au-dessus du seuil + marge (pour ne pas basculer sans arrêt).
-const autoGuardCfg = () => ({ enabled: true, min: 1.1, margin: 0.05, ...(autoCfg().ratioGuard || {}) });
+// ——— Ratio d'un site (affiché dans Lumio Auto). Plus de bascule automatique : l'admin choisit lui-même
+// le torrent (« Demander ») ou le téléchargement direct (bouton « Movix ») selon son ratio. ———
 /** Ratio d'un site : estimation (chiffres du profil saisis + activité de Lumio), sinon ce que Lumio a fait seul. */
 function autoSiteRatio(ixId) {
   const st = auto.siteStats[ixId] || { up: 0, down: 0 };
@@ -5369,7 +5362,6 @@ async function autoProfileTick() {
             // Début d'un freeleech : le booster n'attend pas la semaine, et les demandes en attente repartent
             auto.boostLastRun = null;
             auto.boostRetryAt = null;
-            for (const i of auto.items) if (!i.paused) i.nextSearch = Math.min(i.nextSearch || 0, Date.now() + 60e3);
             setTimeout(() => autoBoostRun().catch(() => {}), 5000);
           }
         }
@@ -5383,128 +5375,8 @@ async function autoProfileTick() {
     profileBusy = false;
   }
 }
-setTimeout(() => autoProfileTick().then(autoGuardTick).catch(() => {}), 45_000);
-setInterval(() => autoProfileTick().then(autoGuardTick).catch(() => {}), 30 * 60_000);
-
-const autoGuardOn = (ixId) => autoGuardCfg().enabled && Boolean((auto.guard[ixId] || {}).on);
-const autoGuardAny = () => autoGuardCfg().enabled && !autoDebridOnly() && autoIndexers().some((ix) => ix.enabled !== false && autoGuardOn(ix.id));
-function autoGuardTick() {
-  const cfg = autoGuardCfg();
-  let changed = false;
-  for (const ix of autoIndexers()) {
-    const ratio = autoSiteRatio(ix.id);
-    const prev = auto.guard[ix.id] || { on: false };
-    let on = prev.on;
-    if (!cfg.enabled || ratio == null) on = false;
-    else if (ratio < cfg.min) on = true;
-    else if (ratio >= cfg.min + cfg.margin) on = false;
-    auto.guard[ix.id] = { on, ratio: ratio == null ? null : Math.round(ratio * 100) / 100, since: on === prev.on ? prev.since || null : new Date().toISOString() };
-    if (on === prev.on) continue;
-    changed = true;
-    auto.guardLog.unshift({ at: new Date().toISOString(), site: ix.name, on, ratio: ratio == null ? null : Math.round(ratio * 100) / 100 });
-    if (auto.guardLog.length > 20) auto.guardLog.length = 20;
-    const r = ratio == null ? '?' : ratio.toFixed(2).replace('.', ',');
-    const min = cfg.min.toFixed(2).replace('.', ',');
-    autoLog(on ? `mode ratio activé sur ${ix.name} (ratio ${r} sous ${min}) : freeleech ou Movix seulement` : `mode ratio terminé sur ${ix.name} (ratio ${r}) : retour aux torrents`);
-    notify({
-      title: on ? '🛡️ Lumio Auto · mode ratio' : '✅ Lumio Auto · ratio remonté',
-      message: on ? `${ix.name} : ratio ${r} (sous ${min}). Les demandes passent en freeleech ou par Movix.` : `${ix.name} : ratio ${r}. Les torrents reprennent.`,
-      tags: [on ? 'shield' : 'white_check_mark'],
-      click: 'lumio://auto',
-    }).catch(() => {});
-  }
-  if (changed) {
-    // Les demandes en attente sont revues tout de suite avec la nouvelle règle
-    for (const i of auto.items) if (!i.paused && /mode ratio|choisis une version/.test(i.note || '')) i.nextSearch = Math.min(i.nextSearch || 0, Date.now() + 60e3);
-    autoSave();
-  }
-}
-
-let secourDiagAt = 0;
-/** Mode ratio : cherche un lien Movix pour ce film / cet épisode et le télécharge par AllDebrid (rien côté tracker). */
-async function autoMovixTry(item, want) {
-  if (want.kind === 'season' || want.upgrade) return false;
-  if (!secourUrl() || !secourKey() || !secourDebridKey() || !item.imdbId) return false;
-  try {
-    const pf = autoProfile();
-    const dest = autoResolveFolder(item.type === 'movie' ? 'radarr' : 'sonarr', item.folderPath);
-    if (!dest) return false;
-    const query = item.type === 'movie' ? { imdb: item.imdbId, type: 'movie' } : { imdb: item.imdbId, type: 'series', season: String(want.season), episode: String(want.episode) };
-    const found = await secour(`/lumio/links?${new URLSearchParams(query)}`, { timeout: 120000 });
-    const maxGb = item.type === 'movie' ? pf.maxMovieGb : pf.maxEpisodeGb;
-    const isH265 = (l) => /\b(x265|h\.?265|hevc)\b/i.test(`${l.name} ${l.quality}`);
-    const ok = ((found && found.links) || []).filter((l) => {
-      const txt = `${l.name || ''} ${l.language || ''}`;
-      const q = String(l.quality || '');
-      if (autoBlocked({ guid: `movix:${l.link}` })) return false;
-      if (/vostfr|\bsub/i.test(txt) && !/multi|french|truefrench|\bvf[fi2]?\b/i.test(txt)) return false; // pas de version française
-      if (QUEBEC_RE.test(txt.toLowerCase().replace(/[._]+/g, ' ')) && !pf.languages.includes('vfq')) return false;
-      if (/2160|4k|uhd/i.test(q) && pf.resolution < 2160) return false;
-      if (/720|480|sd\b/i.test(q) && pf.resolution > 720 && !pf.allowLower) return false;
-      if (l.sizeBytes && l.sizeBytes / 1e9 > maxGb) return false;
-      if (want.h265Only && !isH265(l)) return false;
-      return true;
-    });
-    if (!ok.length) {
-      // Aucun lien du tout : on regarde si les sites répondent (au plus une fois par heure) et on le dit dans le journal
-      if (!((found && found.links) || []).length && Date.now() - secourDiagAt > 3600e3) {
-        secourDiagAt = Date.now();
-        secour('/lumio/health?refresh=true', { timeout: 60000 })
-          .then((h) => autoLog(`sites de téléchargement direct : ${(h.sources || []).map((x) => `${x.name || x.key} ${x.status || '?'}${x.error ? ` (${String(x.error).slice(0, 80)})` : ''}`).join(' · ') || 'aucun site réglé'}`, 'warn'))
-          .catch((e) => autoLog(`sites de téléchargement direct : contrôle impossible (${e.message})`, 'warn'));
-      }
-      return false;
-    }
-    // Classement de Lumio Secour (dispo AllDebrid, langue, 1080p, taille), le H.265 d'abord à dispo égale
-    const ranked = rankSecourLinks(ok);
-    const l = ranked.find((x) => x.cached && isH265(x)) || ranked.find((x) => x.cached) || ranked.find(isH265) || ranked[0];
-    const title = l.name || `${item.title}${item.type === 'movie' ? '' : ` S${autoPad(want.season)}E${autoPad(want.episode)}`} ${l.quality || ''} (Movix)`.trim();
-    const grab = {
-      id: autoId(),
-      itemId: item.id,
-      title: item.title,
-      release: { title, size: Number(l.sizeBytes) || 0, indexer: 'Movix', indexerId: null, freeleech: false, guid: `movix:${l.link}`, seeders: null },
-      episodes: item.type === 'movie' ? ['movie'] : [`${want.season}:${want.episode}`],
-      want,
-      state: 'sent',
-      progress: 0,
-      startedAt: new Date().toISOString(),
-      by: 'mode ratio',
-      client: 'movix',
-    };
-    const job = {
-      id: crypto.randomBytes(5).toString('hex'),
-      link: l.link,
-      root: dest.root,
-      folder: `.lumio-auto/${grab.id}`,
-      status: 'queued',
-      quiet: true,
-      auto: true,
-      name: title,
-      size: Number(l.sizeBytes) || 0,
-      done: 0,
-      speed: 0,
-      token: null,
-      createdAt: new Date().toISOString(),
-      by: 'Lumio Auto',
-      secour: { link: l.link, hoster: l.hoster, source: l.source, season: l.season, episode: l.episode, type: query.type },
-    };
-    downloads.push(job);
-    runDownload(job);
-    grab.jobId = job.id;
-    auto.grabs.unshift(grab);
-    if (auto.grabs.length > 200) auto.grabs.length = 200;
-    item.needsChoice = false;
-    autoEvent(item, 'sent', `Mode ratio : pris en téléchargement direct (${l.source || 'Movix'}) par AllDebrid, rien ne compte dans le ratio : ${title}`, { indexer: l.source || 'Movix', size: grab.release.size, by: 'mode ratio' });
-    autoSave();
-    autoLog(`${item.title} : mode ratio → lien Movix (${l.hoster || 'hébergeur'}) par AllDebrid`);
-    notify({ title: '⬇️ Lumio Auto · Movix', message: `${item.title} · mode ratio (hors tracker)`, tags: ['arrow_down'], click: 'lumio://activity' });
-    return true;
-  } catch (e) {
-    autoLog(`${item.title} : Movix injoignable en mode ratio (${e.message})`, 'warn');
-    return false;
-  }
-}
+setTimeout(() => autoProfileTick().catch(() => {}), 45_000);
+setInterval(() => autoProfileTick().catch(() => {}), 30 * 60_000);
 
 // ——— Booster de seed : une fois par semaine, quelques torrents freeleech très demandés, pris seulement pour partager ———
 // Freeleech = le téléchargement ne compte pas, l'envoi compte : le ratio ne peut que monter.
@@ -5790,22 +5662,7 @@ async function autoRatioReport() {
       rules: ix.type === 'c411' || /c411/i.test(ix.name || '') ? ['Garder chaque torrent 72 h ou jusqu’au ratio 1 (Hit & Run)', 'Ratio global au-dessus de 1', 'Le freeleech ne compte pas en téléchargement'] : [],
     };
   });
-  for (const x of sites) x.guard = auto.guard[x.id] || null;
-  // « Service en route » : par où passent les demandes en ce moment, et les dernières bascules
-  const running = auto.grabs.filter((g) => ['sent', 'downloading', 'importing'].includes(g.state));
-  const service = {
-    auto: autoActive(),
-    debridOnly: autoDebridOnly(),
-    guardOn: autoGuardAny(),
-    freeleech: autoIndexers().filter((x) => autoSiteFree(x.id)).map((x) => x.name),
-    movixReady: Boolean(secourUrl() && secourKey() && secourDebridKey()),
-    current: autoDebridOnly() ? 'alldebrid' : autoGuardAny() ? 'guard' : 'torrent',
-    running: running.map((g) => ({ title: g.title, client: g.client || null, progress: g.progress || 0, freeleech: Boolean(g.release && g.release.freeleech) })),
-    recentMovix: auto.grabs.filter((g) => g.client === 'movix').slice(0, 5).map((g) => ({ title: g.title, state: g.state, at: g.doneAt || g.startedAt })),
-    waiting: auto.items.filter((i) => /^mode ratio/.test(i.note || '')).map((i) => i.title).slice(0, 20),
-    log: auto.guardLog.slice(0, 8),
-  };
-  return { qbit: qb, sites, guard: autoGuardCfg(), service, boost: autoBoostView(), at: new Date().toISOString() };
+  return { qbit: qb, sites, boost: autoBoostView(), at: new Date().toISOString() };
 }
 
 // ——— Résumé du soir (21 h) : envoyé / reçu dans la journée, partages, quota des sites ———
@@ -6368,12 +6225,6 @@ async function autoRoutes(req, res, p, q, user) {
       c.profile = pf;
     }
     if (b.folders && typeof b.folders === 'object') c.folders = { movie: b.folders.movie || null, tv: b.folders.tv || null };
-    if (b.ratioGuard && typeof b.ratioGuard === 'object') {
-      c.ratioGuard = { ...autoGuardCfg() };
-      if (typeof b.ratioGuard.enabled === 'boolean') c.ratioGuard.enabled = b.ratioGuard.enabled;
-      if (Number(b.ratioGuard.min) > 0) c.ratioGuard.min = Number(b.ratioGuard.min);
-      setTimeout(autoGuardTick, 500);
-    }
     if (b.boost && typeof b.boost === 'object') {
       c.boost = { ...autoBoostCfg() };
       if (typeof b.boost.enabled === 'boolean') c.boost.enabled = b.boost.enabled;
@@ -8507,7 +8358,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       requireAdmin(user);
       if (req.method === 'GET' && p === '/api/secour') {
         const out = { configured: Boolean(secourUrl() && secourKey()), url: secourUrl() || null, fromEnv: Boolean(process.env.LUMIO_SECOUR_URL) || secourEmbedded(),
-          embedded: secourEmbedded() || Boolean(secourInstall), install: secourInstall || undefined, alldebrid: Boolean(secourDebridKey()), service: secourService(), disks: disks().length,
+          embedded: secourEmbedded() || Boolean(secourInstall), install: secourInstall || undefined, alldebrid: Boolean(secourDebridKey()), torbox: Boolean(torboxKey()), service: secourService(), disks: disks().length,
           auto: secourAutoView() };
         if (secourInstall) Object.assign(out, { online: false, error: secourInstall.message });
         else if (out.configured) {
@@ -8527,6 +8378,15 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         if (b.url === '') delete config.secourKey;
         saveConfig();
         return send(res, 200, { configured: Boolean(secourUrl() && secourKey()) });
+      }
+      // Clé TorBox (relais du téléchargement direct) : gardée sur le serveur, jamais renvoyée
+      if (req.method === 'PUT' && p === '/api/secour/torbox') {
+        const b = await readBody(req);
+        const k = String(b.key || '').trim();
+        if (k) config.torboxKey = k;
+        else delete config.torboxKey;
+        saveConfig();
+        return send(res, 200, { torbox: Boolean(torboxKey()) });
       }
       // Groupe de secours : activé ou non, dossiers de destination
       if (req.method === 'GET' && p === '/api/secour/auto') return send(res, 200, secourAutoView());
