@@ -18,7 +18,6 @@ import { getPlayback, jf, jfImage, playback, QUALITIES, type PlaybackTarget } fr
 import { QualitySheet } from '@/components/players/quality';
 import type { SkipSegment, SubtitleFinder } from '@/components/players/types';
 import { serverCall } from '@/lib/chat';
-import { watchNowApi } from '@/lib/watch-now';
 import { tmdbNextEpisode } from '@/lib/smart-play';
 import { useSettings } from '@/lib/settings';
 
@@ -34,8 +33,6 @@ type Params = {
   title?: string;
   subtitle?: string;
   start?: string;
-  /** « 1 » : streaming d'un titre absent du serveur → la position est gardée sur le serveur Lumio */
-  stream?: string;
   // Contexte d'une série en streaming (pour l'épisode suivant)
   tmdbId?: string;
   imdb?: string;
@@ -161,24 +158,10 @@ export default function Player() {
     setError(msg);
   };
 
-  // Streaming d'un titre absent : position envoyée au serveur Lumio (reprise, puis recopie dans Jellyfin)
-  const reportStream = (pos: number) => {
-    if (p.stream !== '1' || !p.tmdbId || pos < 5) return;
-    watchNowApi.progress(settings, {
-      type: p.season ? 'tv' : 'movie',
-      tmdbId: Number(p.tmdbId),
-      season: p.season ? Number(p.season) : undefined,
-      episode: p.episode ? Number(p.episode) : undefined,
-      position: pos,
-      title: p.series ?? p.title,
-    });
-  };
-
   // Fin de lecture signalée à Jellyfin à la fermeture
   useEffect(() => {
     return () => {
       if (target.current) playback.stop(settings, { target: target.current, positionSeconds: position.current });
-      reportStream(position.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -186,11 +169,6 @@ export default function Player() {
   const onTime = (pos: number, paused: boolean) => {
     position.current = pos;
     const now = Date.now();
-    if (p.stream === '1' && now - lastReport.current >= 20_000) {
-      lastReport.current = now;
-      reportStream(pos);
-      return;
-    }
     if (!target.current || now - lastReport.current < 10_000) return;
     lastReport.current = now;
     playback.progress(settings, { target: target.current, positionSeconds: pos, isPaused: paused });

@@ -27,7 +27,6 @@ import { TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { grab, mediaFlavor } from '@/lib/grab';
 import { MediaStatus, requestsApi, useServerRequests } from '@/lib/requests';
 import { secourAdminApi, secourApi } from '@/lib/secour';
-import { watchNowApi } from '@/lib/watch-now';
 import { SeasonRequests } from '@/components/season-requests';
 import { WatchlistButton } from '@/components/watchlist-button';
 import { chat } from '@/lib/chat';
@@ -62,16 +61,6 @@ export default function MediaScreen() {
   const [fullOverview, setFullOverview] = useState(false);
   // Statut sur le serveur Lumio (disponible, partiel…) : le bouton « DL » ne s'affiche que si le titre manque
   const [mediaStatus, setMediaStatus] = useState<number | null>(null);
-  // « Regarder maintenant » : le serveur sait lire tout de suite un titre absent (TorBox / AllDebrid)
-  const [canWatchNow, setCanWatchNow] = useState(false);
-  useEffect(() => {
-    if (!settings.chatUrl) return;
-    watchNowApi
-      .status(settings)
-      .then((st) => setCanWatchNow(st.enabled))
-      .catch(() => setCanWatchNow(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.chatUrl]);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -382,19 +371,10 @@ export default function MediaScreen() {
                   onPress={() => router.push({ pathname: '/watch', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title } })}
                   style={{ flex: 1 }}
                 />
-              ) : canWatchNow ? (
-                // Pas sur le serveur (admin) : même bouton « Lire », en streaming, et le titre se télécharge en arrière-plan
-                <Button
-                  title="Lire"
-                  icon="play"
-                  small
-                  onPress={() => router.push({ pathname: '/watch', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title } })}
-                  style={{ flex: 1 }}
-                />
               ) : (
                 <WatchlistButton item={wlItem} variant="pill" />
               )}
-              {jfItem || canWatchNow ? <WatchlistButton item={wlItem} variant="icon" /> : <View style={{ flex: 1 }} />}
+              {jfItem ? <WatchlistButton item={wlItem} variant="icon" /> : <View style={{ flex: 1 }} />}
               {/* Proposer dans le chat famille : seulement pour un titre pas encore sur le serveur */}
               {settings.chatUrl && settings.jellyfin && !jfItem ? (
                 <Button title="" icon="chatbubbles-outline" variant="glass" small onPress={propose} style={{ width: 46, paddingHorizontal: 0 }} />

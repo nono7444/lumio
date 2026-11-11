@@ -6,11 +6,12 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
-- Serveur 3.96.0 : streaming depuis Wawacity — AllDebrid ouvre le lien protégé, TorBox lit le lien d'hébergeur obtenu (le streaming reste sur TorBox).
+- Streaming direct retiré : le bouton « Lire » en streaming sur les titres absents (TorBox) ne marchait pas, tout est revenu comme avant. Titre absent : « Demander » (ou « DL » pour l'admin). La carte « Streaming direct » de Lumio Auto disparaît.
+- Serveur 3.97.0 : streaming retiré. Restent : Lumio Secour résout les sites par le DNS 1.1.1.1 (Movix et Wawacity ne répondaient pas avec le DNS de la box), et les demandes des membres ne se lancent plus toutes seules (l'admin reçoit une notification et valide).
+
 ## 1.0.154 — 11 novembre 2026
 
-- « Lire » sur un titre absent du serveur (admin) : même bouton que d'habitude. Lumio trouve un lien (Movix, Wawacity), TorBox le lit en streaming, et le fichier arrive en arrière-plan sur le serveur (torrent C411, ou téléchargement direct si le ratio est bas). Quitter puis relancer reprend au même endroit, depuis Jellyfin si le fichier est arrivé. Réglage dans Lumio Auto → Serveur → « Streaming direct » (clé TorBox gardée sur le serveur). Les membres gardent « Demander » : rien ne se lance tout seul, l'admin reçoit une notification. Demande le serveur 3.95.0.
-- Serveur 3.95.0 : Lumio Secour résout les sites par le DNS 1.1.1.1 (Movix et Wawacity ne répondaient pas avec le DNS de la box).
+- « Regarder » sur un titre absent du serveur : Lumio trouve un lien (Movix, Wawacity), TorBox (sinon AllDebrid) le lit tout de suite, et le titre se télécharge en même temps en arrière-plan pour toute la famille. La suite d'une série s'enchaîne de la même façon. Réglage dans Lumio Auto → Serveur → « Streaming direct » (clé TorBox gardée sur le serveur). Demande le serveur 3.94.0.
 
 ## 1.0.153 — 11 novembre 2026
 
