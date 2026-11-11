@@ -12,7 +12,7 @@ import { Picker, Toggle } from '@/components/arr-section';
 import { toast } from '@/components/toast';
 import { Button, Field, ScreenTitle, Section, SectionCollapse, SegChip } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
-import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
+import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoBoost, type AutoService, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
 import { useSettings } from '@/lib/settings';
 import { IS_AUTO } from '@/lib/variant';
 import { ServerRequests } from '@/components/server-requests';
@@ -24,7 +24,7 @@ import { jf, type JfSession } from '@/lib/jellyfin';
 import { useFocusEffect } from 'expo-router';
 
 type Tab = 'demandes' | 'manquants' | 'telechargements' | 'qbit' | 'ratio';
-const CLIENT_LABEL: Record<string, string> = { rdt: 'rdt-client', qbit: 'qBittorrent', alldebrid: 'AllDebrid' };
+const CLIENT_LABEL: Record<string, string> = { rdt: 'rdt-client', qbit: 'qBittorrent', alldebrid: 'AllDebrid', movix: 'Movix (AllDebrid)' };
 const RUNNING: AutoGrab['state'][] = ['sent', 'downloading', 'importing'];
 const STATE_LABEL: Record<AutoGrab['state'], string> = { sent: 'envoyé', downloading: 'téléchargement', importing: 'rangement', done: 'terminé', failed: 'échec' };
 const STATE_COLOR: Record<AutoGrab['state'], string> = { sent: C.warning, downloading: C.accent, importing: C.accent, done: C.success, failed: C.danger };
@@ -536,6 +536,8 @@ function RatioTab() {
   if (!data) return err ? <Text style={styles.dim}>{/404|inconnue/.test(err) ? 'Mets le serveur à jour (3.87.0) : Profil → Serveur → Mettre à jour.' : err}</Text> : <ActivityIndicator color="#fff" style={{ marginTop: 30 }} />;
   return (
     <>
+      {data.service && data.guard ? <ServiceCard sv={data.service} guard={data.guard} sites={data.sites} reload={load} /> : <Text style={styles.help}>Mets le serveur à jour (3.92.1) pour voir le service en route et le booster de seed.</Text>}
+      {data.boost ? <BoostCard b={data.boost} reload={load} /> : null}
       {data.qbit ? (
         <View style={styles.ratioCard}>
           <Text style={styles.ratioLabel}>qBittorrent, depuis le début</Text>
@@ -555,6 +557,188 @@ function RatioTab() {
       ))}
       <Text style={[styles.dim, { textAlign: 'center' }]}>Mis à jour toutes les 30 s · les chiffres du site sont estimés à partir de ce que Lumio a envoyé et reçu</Text>
     </>
+  );
+}
+
+const fmtWhen = (iso?: string | null) => (iso ? new Date(iso).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
+
+/** « Service en route » : par où passent les demandes (torrent, freeleech + Movix, AllDebrid) et les dernières bascules. */
+function ServiceCard({ sv, guard, sites, reload }: { sv: AutoService; guard: { enabled: boolean; min: number; margin: number }; sites: AutoRatioSite[]; reload: () => void }) {
+  const { settings } = useSettings();
+  const set = (b: { enabled?: boolean; min?: number }) =>
+    autoApi
+      .save(settings, { ratioGuard: b })
+      .then(() => setTimeout(reload, 800))
+      .catch((e) => Alert.alert('Mode ratio', e?.message ?? String(e)));
+  const now =
+    sv.current === 'alldebrid'
+      ? { label: 'AllDebrid seulement', sub: 'Seulement les versions déjà en cache AllDebrid.', color: C.accent, icon: 'cloud-download' as const }
+      : sv.current === 'guard'
+        ? { label: 'Mode ratio', sub: 'Ratio trop bas : torrent freeleech d’abord, sinon lien Movix par AllDebrid. Rien ne compte dans le ratio.', color: C.warning, icon: 'shield-half' as const }
+        : { label: 'Torrents', sub: 'Ratio correct : les demandes passent par les torrents du site, puis partage.', color: C.success, icon: 'swap-vertical' as const };
+  const steps: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap; on: boolean }[] = [
+    { key: 'torrent', label: 'Torrents', icon: 'swap-vertical', on: sv.current === 'torrent' },
+    { key: 'free', label: 'Freeleech', icon: 'gift', on: sv.current === 'guard' },
+    { key: 'movix', label: 'Movix', icon: 'link', on: sv.current === 'guard' && sv.movixReady },
+  ];
+  const fr = (n: number) => n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return (
+    <View style={styles.ratioCard}>
+      <Text style={styles.ratioLabel}>Service en route</Text>
+      <View style={[styles.rowBetween, { justifyContent: 'flex-start' }]}>
+        <Ionicons name={now.icon} size={26} color={now.color} />
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.ratioBig, { color: now.color }]}>{sv.auto ? now.label : `${now.label} · Lumio Auto en pause`}</Text>
+          <Text style={styles.small}>{now.sub}</Text>
+        </View>
+      </View>
+      <View style={styles.ratioRow}>
+        {steps.map((x) => (
+          <View key={x.key} style={[styles.svcStep, x.on ? { borderColor: now.color } : { opacity: 0.45 }]}>
+            <Ionicons name={x.icon} size={18} color={x.on ? now.color : C.textDim} />
+            <Text style={[styles.small, { color: x.on ? C.text : C.textDim, fontWeight: '700' }]}>{x.label}</Text>
+            <Text style={[styles.small, { fontSize: 10 }]}>{x.on ? 'en route' : 'à l’arrêt'}</Text>
+          </View>
+        ))}
+      </View>
+      {sv.current === 'guard' && !sv.movixReady ? (
+        <View style={styles.ratioAlert}>
+          <Ionicons name="warning" size={14} color={C.warning} />
+          <Text style={[styles.small, { color: C.warning, flex: 1 }]}>Movix n’est pas prêt (Lumio Secour ou clé AllDebrid) : seuls les freeleech passent.</Text>
+        </View>
+      ) : null}
+      {sites.map((x) => {
+        const r = x.guard?.ratio ?? x.estimate?.ratio ?? x.lumio.ratio;
+        const on = !!x.guard?.on;
+        return (
+          <View key={x.id} style={styles.kv}>
+            <Text style={styles.kvK}>{x.name}</Text>
+            <Text style={[styles.small, { color: on ? C.warning : C.success, fontWeight: '700', flex: 1, textAlign: 'right' }]}>
+              {r == null ? 'ratio inconnu : torrents' : on ? `ratio ${fmtRatio(r)} · mode ratio${x.guard?.since ? ` depuis le ${fmtWhen(x.guard.since)}` : ''}` : `ratio ${fmtRatio(r)} · torrents`}
+            </Text>
+          </View>
+        );
+      })}
+      <Toggle label={`Mode ratio automatique (sous ${fr(guard.min)})`} value={guard.enabled} onChange={(v) => set({ enabled: v })} />
+      <View style={[styles.ratioRow, { flexWrap: 'wrap' }]}>
+        {[1, 1.05, 1.1, 1.2, 1.5].map((m) => (
+          <SegChip key={m} label={fr(m)} on={Math.abs(guard.min - m) < 0.001} onPress={() => set({ min: m })} />
+        ))}
+      </View>
+      <Text style={styles.small}>
+        Sous {fr(guard.min)} : plus de torrent compté dans le ratio. Retour aux torrents tout seul à partir de {fr(guard.min + guard.margin)}.
+      </Text>
+      {sv.running.length ? (
+        <>
+          <Text style={styles.ratioLabel}>En cours</Text>
+          {sv.running.map((g, i) => (
+            <Text key={`${g.title}${i}`} style={styles.small} numberOfLines={1}>
+              <Text style={{ color: C.text, fontWeight: '700' }}>{g.client === 'movix' ? 'Movix' : g.freeleech ? 'Freeleech' : (CLIENT_LABEL[g.client ?? ''] ?? 'Torrent')}</Text> · {g.progress}% · {g.title}
+            </Text>
+          ))}
+        </>
+      ) : null}
+      {sv.waiting.length ? (
+        <Text style={styles.small}>
+          <Text style={{ color: C.warning, fontWeight: '700' }}>En attente ({sv.waiting.length})</Text> : rien en freeleech ni sur Movix pour {sv.waiting.slice(0, 4).join(', ')}
+          {sv.waiting.length > 4 ? '…' : ''}
+        </Text>
+      ) : null}
+      {sv.recentMovix.length ? (
+        <>
+          <Text style={styles.ratioLabel}>Derniers passages par Movix</Text>
+          {sv.recentMovix.map((g, i) => (
+            <Text key={`${g.title}${i}`} style={styles.small} numberOfLines={1}>
+              {fmtWhen(g.at)} · {g.state === 'done' ? 'rangé' : g.state === 'failed' ? 'échec' : 'en cours'} · {g.title}
+            </Text>
+          ))}
+        </>
+      ) : null}
+      <Text style={styles.ratioLabel}>Dernières bascules</Text>
+      {sv.log.length ? (
+        sv.log.map((l, i) => (
+          <Text key={`${l.at}${i}`} style={styles.small}>
+            {fmtWhen(l.at)} · {l.site} · <Text style={{ color: l.on ? C.warning : C.success, fontWeight: '700' }}>{l.on ? 'mode ratio' : 'retour aux torrents'}</Text> (ratio {fmtRatio(l.ratio)})
+          </Text>
+        ))
+      ) : (
+        <Text style={styles.small}>Aucune bascule pour l’instant.</Text>
+      )}
+    </View>
+  );
+}
+
+/** Booster de seed : torrents freeleech pris une fois par semaine, seulement pour partager. */
+function BoostCard({ b, reload }: { b: AutoBoost; reload: () => void }) {
+  const { settings } = useSettings();
+  const [busy, setBusy] = useState(false);
+  const set = (x: { enabled?: boolean; gb?: number }) =>
+    autoApi
+      .save(settings, { boost: x })
+      .then(reload)
+      .catch((e) => Alert.alert('Booster de seed', e?.message ?? String(e)));
+  const run = () => {
+    setBusy(true);
+    autoApi
+      .boostRun(settings)
+      .then((r) => toast(r.note))
+      .catch((e) => Alert.alert('Booster de seed', e?.message ?? String(e)))
+      .finally(() => (setBusy(false), reload()));
+  };
+  const pct = b.budget > 0 ? Math.min(100, (b.used / b.budget) * 100) : 0;
+  const up = b.torrents.reduce((n, t) => n + (t.uploaded || 0), 0);
+  const speed = b.torrents.reduce((n, t) => n + (t.upSpeed || 0), 0);
+  return (
+    <View style={styles.ratioCard}>
+      <View style={styles.rowBetween}>
+        <Text style={styles.ratioLabel}>Booster de seed</Text>
+        <Switch value={b.enabled} onValueChange={(v) => set({ enabled: v })} trackColor={{ true: C.success, false: C.border }} />
+      </View>
+      <Text style={styles.small}>Une fois par semaine, {b.perWeek} torrents freeleech très demandés au plus, pris seulement pour partager. Ils ne vont pas dans Jellyfin.</Text>
+      {!b.diskFound ? (
+        <View style={styles.ratioAlert}>
+          <Ionicons name="warning" size={14} color={C.warning} />
+          <Text style={[styles.small, { color: C.warning, flex: 1 }]}>Disque « {b.disk} » introuvable : le booster ne prend rien.</Text>
+        </View>
+      ) : null}
+      <View style={styles.ratioRow}>
+        <RatioStat label="Envoyé" value={gb(up)} color={C.success} icon="arrow-up" />
+        <RatioStat label="En partage" value={String(b.torrents.filter((t) => t.state === 'seeding').length)} color={C.text} />
+        <RatioStat label="Maintenant" value={fmtSpeed(speed)} color={C.accent} />
+      </View>
+      <View style={styles.rowBetween}>
+        <Text style={styles.small}>Place sur {b.disk}</Text>
+        <Text style={[styles.small, { color: C.text, fontWeight: '700' }]}>
+          {gb(b.used)} / {b.gb} Go
+        </Text>
+      </View>
+      <View style={styles.svcBar}>
+        <View style={{ width: `${pct}%`, height: 8, backgroundColor: pct > 90 ? C.warning : C.success }} />
+      </View>
+      <View style={[styles.ratioRow, { flexWrap: 'wrap' }]}>
+        {[50, 100, 200, 300].map((g) => (
+          <SegChip key={g} label={`${g} Go`} on={b.gb === g} onPress={() => set({ gb: g })} />
+        ))}
+      </View>
+      <Text style={styles.small}>
+        Dernière sélection : {fmtWhen(b.lastRun)} · prochaine : {fmtWhen(b.nextRun)}
+        {b.lastNote ? `\n${b.lastNote}` : ''}
+      </Text>
+      {b.torrents.map((t) => (
+        <View key={t.id} style={{ gap: 2 }}>
+          <Text style={[styles.small, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
+            {t.title}
+          </Text>
+          <Text style={styles.small}>
+            {t.state === 'downloading' ? `arrive · ${t.progress}%` : `ratio ${fmtRatio(t.ratio)} · ${gb(t.uploaded)} envoyés`}
+            {t.upSpeed ? ` · ↑ ${fmtSpeed(t.upSpeed)}` : ''} · {gb(t.size)}
+            {t.leechers != null ? ` · ${t.leechers} le téléchargent` : ''}
+            {t.hoursLeft ? ` · encore ${t.hoursLeft} h obligatoires` : ''}
+          </Text>
+        </View>
+      ))}
+      <Button title="Lancer une sélection maintenant" icon="rocket" variant="secondary" loading={busy} onPress={run} />
+    </View>
   );
 }
 
@@ -1974,6 +2158,8 @@ const styles = StyleSheet.create({
   epChip: { minWidth: 46, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, borderWidth: 1, borderColor: C.border, alignItems: 'center' },
   epChipTxt: { color: C.text, fontSize: 13, fontWeight: '800' },
   ratioCard: { borderRadius: 20, backgroundColor: C.surface, padding: 16, gap: 10 },
+  svcStep: { flex: 1, alignItems: 'center', gap: 4, paddingVertical: 10, paddingHorizontal: 4, borderRadius: 14, backgroundColor: C.surfaceHigh, borderWidth: 1.5, borderColor: 'transparent' },
+  svcBar: { height: 8, borderRadius: 4, backgroundColor: C.surfaceHigh, overflow: 'hidden' },
   ratioRow: { flexDirection: 'row', gap: 10 },
   ratioLabel: { color: C.textDim, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
   ratioBig: { fontSize: 20, fontWeight: '900', letterSpacing: -0.4 },

@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.92.0';
+const VERSION = '3.92.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3648,6 +3648,7 @@ if (!auto.ratioBase || typeof auto.ratioBase !== 'object') auto.ratioBase = {};
 // Mode ratio : { ixId: { on, ratio, since } } ; booster de seed : torrents freeleech pris seulement pour partager
 if (!auto.guard || typeof auto.guard !== 'object') auto.guard = {};
 if (!Array.isArray(auto.boost)) auto.boost = [];
+if (!Array.isArray(auto.guardLog)) auto.guardLog = []; // dernières bascules du mode ratio
 let autoSaveTimer = null;
 const autoSave = () => {
   clearTimeout(autoSaveTimer);
@@ -5342,6 +5343,8 @@ function autoGuardTick() {
     auto.guard[ix.id] = { on, ratio: ratio == null ? null : Math.round(ratio * 100) / 100, since: on === prev.on ? prev.since || null : new Date().toISOString() };
     if (on === prev.on) continue;
     changed = true;
+    auto.guardLog.unshift({ at: new Date().toISOString(), site: ix.name, on, ratio: ratio == null ? null : Math.round(ratio * 100) / 100 });
+    if (auto.guardLog.length > 20) auto.guardLog.length = 20;
     const r = ratio == null ? '?' : ratio.toFixed(2).replace('.', ',');
     const min = cfg.min.toFixed(2).replace('.', ',');
     autoLog(on ? `mode ratio activé sur ${ix.name} (ratio ${r} sous ${min}) : freeleech ou Movix seulement` : `mode ratio terminé sur ${ix.name} (ratio ${r}) : retour aux torrents`);
@@ -5650,7 +5653,20 @@ async function autoRatioReport() {
     };
   });
   for (const x of sites) x.guard = auto.guard[x.id] || null;
-  return { qbit: qb, sites, guard: autoGuardCfg(), boost: autoBoostView(), at: new Date().toISOString() };
+  // « Service en route » : par où passent les demandes en ce moment, et les dernières bascules
+  const running = auto.grabs.filter((g) => ['sent', 'downloading', 'importing'].includes(g.state));
+  const service = {
+    auto: autoActive(),
+    debridOnly: autoDebridOnly(),
+    guardOn: autoGuardAny(),
+    movixReady: Boolean(secourUrl() && secourKey() && secourDebridKey()),
+    current: autoDebridOnly() ? 'alldebrid' : autoGuardAny() ? 'guard' : 'torrent',
+    running: running.map((g) => ({ title: g.title, client: g.client || null, progress: g.progress || 0, freeleech: Boolean(g.release && g.release.freeleech) })),
+    recentMovix: auto.grabs.filter((g) => g.client === 'movix').slice(0, 5).map((g) => ({ title: g.title, state: g.state, at: g.doneAt || g.startedAt })),
+    waiting: auto.items.filter((i) => /^mode ratio/.test(i.note || '')).map((i) => i.title).slice(0, 20),
+    log: auto.guardLog.slice(0, 8),
+  };
+  return { qbit: qb, sites, guard: autoGuardCfg(), service, boost: autoBoostView(), at: new Date().toISOString() };
 }
 
 // ——— Résumé du soir (21 h) : envoyé / reçu dans la journée, partages, quota des sites ———

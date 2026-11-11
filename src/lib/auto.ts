@@ -135,7 +135,7 @@ export type AutoGrab = {
   clientState?: string | null;
   paused?: boolean;
   importSrc?: string;
-  client?: 'rdt' | 'alldebrid' | 'qbit';
+  client?: 'rdt' | 'alldebrid' | 'qbit' | 'movix';
   seeding?: boolean;
   ratio?: number;
   uploaded?: number;
@@ -193,7 +193,7 @@ const json = (b: unknown) => ({ body: JSON.stringify(b) });
 
 export const autoApi = {
   state: (s: Settings) => serverCall<AutoState>(s, '/api/auto/state'),
-  save: (s: Settings, b: Partial<{ enabled: boolean; debridOnly: boolean; client: string; rdt: Record<string, string>; qbit: Record<string, string | undefined>; seed: Partial<AutoSeed>; profile: Partial<AutoProfile>; folders: { movie?: string | null; tv?: string | null } }>) =>
+  save: (s: Settings, b: Partial<{ enabled: boolean; debridOnly: boolean; client: string; rdt: Record<string, string>; qbit: Record<string, string | undefined>; seed: Partial<AutoSeed>; ratioGuard: { enabled?: boolean; min?: number }; boost: { enabled?: boolean; gb?: number; perWeek?: number; disk?: string }; profile: Partial<AutoProfile>; folders: { movie?: string | null; tv?: string | null } }>) =>
     serverCall(s, '/api/auto/settings', { method: 'PUT', ...json(b) }),
   saveIndexer: (s: Settings, b: Partial<AutoIndexer> & { key?: string }) => serverCall<{ indexer: AutoIndexer }>(s, '/api/auto/indexers', { method: 'POST', ...json(b) }),
   removeIndexer: (s: Settings, id: string) => serverCall(s, `/api/auto/indexers/${id}`, { method: 'DELETE' }),
@@ -216,6 +216,7 @@ export const autoApi = {
   missingHide: (s: Settings, tmdbId: number, show = false) => serverCall<{ ok: boolean }>(s, '/api/auto/missing/hide', { method: 'POST', body: JSON.stringify({ tmdbId, show }) }),
   missingReset: (s: Settings) => serverCall<{ ok: boolean }>(s, '/api/auto/missing/hide', { method: 'POST', body: JSON.stringify({ reset: true }) }),
   ratio: (s: Settings) => serverCall<AutoRatio>(s, '/api/auto/ratio'),
+  boostRun: (s: Settings) => serverCall<{ ok: boolean; note: string }>(s, '/api/auto/boost/run', { method: 'POST' }),
   ratioBase: (s: Settings, indexerId: string, up: number, down: number) =>
     serverCall<{ ok: boolean }>(s, '/api/auto/ratio/base', { method: 'POST', body: JSON.stringify({ indexerId, up, down }) }),
   ratioBaseClear: (s: Settings, indexerId: string) =>
@@ -268,5 +269,29 @@ export type AutoRatioSite = {
   upSpeed: number;
   hr: { title: string; hoursLeft: number; ratio: number }[];
   rules: string[];
+  /** Mode ratio sur ce site (serveur 3.92+) */
+  guard?: { on: boolean; ratio: number | null; since: string | null } | null;
 };
-export type AutoRatio = { qbit: { up: number; down: number; upSpeed: number; downSpeed: number; ratio: number | null } | null; sites: AutoRatioSite[]; at: string };
+export type AutoBoostTorrent = { id: string; title: string; size: number; indexer: string; addedAt: string; state: 'downloading' | 'seeding'; progress: number; ratio: number; uploaded: number; upSpeed: number; leechers: number | null; seeders: number | null; hoursLeft: number | null };
+/** Booster de seed : torrents freeleech pris seulement pour partager */
+export type AutoBoost = { enabled: boolean; gb: number; disk: string; perWeek: number; diskFound: boolean; used: number; budget: number; lastRun: string | null; nextRun: string | null; lastNote: string | null; torrents: AutoBoostTorrent[] };
+/** Par où passent les demandes en ce moment */
+export type AutoService = {
+  auto: boolean;
+  debridOnly: boolean;
+  guardOn: boolean;
+  movixReady: boolean;
+  current: 'torrent' | 'guard' | 'alldebrid';
+  running: { title: string; client: string | null; progress: number; freeleech: boolean }[];
+  recentMovix: { title: string; state: string; at: string }[];
+  waiting: string[];
+  log: { at: string; site: string; on: boolean; ratio: number | null }[];
+};
+export type AutoRatio = {
+  qbit: { up: number; down: number; upSpeed: number; downSpeed: number; ratio: number | null } | null;
+  sites: AutoRatioSite[];
+  guard?: { enabled: boolean; min: number; margin: number };
+  service?: AutoService;
+  boost?: AutoBoost;
+  at: string;
+};
