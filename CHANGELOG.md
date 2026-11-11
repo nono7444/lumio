@@ -6,10 +6,13 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.157 — 11 novembre 2026
+
 - Bouton « Movix » (admin) sur la fiche d'un titre absent, à la place du petit « DL » vert : il ouvre le choix des fichiers et télécharge sans passer par le tracker. À utiliser quand le ratio est bas ; sinon « Demander » prend le torrent.
 - Mode ratio automatique retiré : Lumio Auto ne bascule plus tout seul sur le téléchargement direct. La carte « Service en route » disparaît ; la tuile de l'onglet Perf affiche le ratio du site.
 - Lumio Auto → Serveur : carte « Téléchargement direct » pour enregistrer la clé TorBox (gardée sur le serveur).
 - Serveur 3.98.0 : téléchargement direct par AllDebrid, puis par TorBox si AllDebrid n'arrive pas à ouvrir le lien.
+
 ## 1.0.156 — 11 novembre 2026
 
 - Streaming direct retiré : le bouton « Lire » en streaming sur les titres absents (TorBox) ne marchait pas, tout est revenu comme avant. Titre absent : « Demander » (ou « DL » pour l'admin). La carte « Streaming direct » de Lumio Auto disparaît.
