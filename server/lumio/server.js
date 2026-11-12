@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.98.1';
+const VERSION = '3.98.2';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4163,9 +4163,9 @@ function autoScore(rel, item, want) {
   const max = item.type === 'movie' ? pf.maxMovieGb : pf.maxEpisodeGb * per;
   if (gb > max) no(`${gb.toFixed(1)} Go (max ${max.toFixed(1)} Go)`);
   if (rel.seeders != null && rel.seeders < pf.minSeeders) no(`${rel.seeders} source (minimum ${pf.minSeeders})`);
-  // Trackers privés : volume maximum par jour (sauf freeleech, qui ne compte pas dans le ratio)
+  // Plus de quota par jour sur les trackers : l'admin surveille son ratio lui-même (volume du jour gardé pour l'affichage)
   const ixq = autoIndexers().find((x) => x.id === rel.indexerId);
-  const cap = ixq ? Number(ixq.maxGbPerDay ?? (ixq.type === 'c411' ? 15 : 0)) : 0;
+  const cap = 0;
   if (autoDebridOnly() && item.notCached && Date.now() - (item.notCached[rel.guid] || 0) < 24 * 3600e3) no('pas en cache AllDebrid (réessai demain)');
   if (cap > 0 && !rel.freeleech && !autoDebridOnly()) {
     const used = autoDlToday(ixq.id) / 1e9;
@@ -5635,7 +5635,7 @@ async function autoRatioReport() {
   const sites = autoIndexers().map((ix) => {
     const st = auto.siteStats[ix.id] || { up: 0, down: 0, freeDown: 0 };
     const base = auto.ratioBase[ix.id] || null;
-    const cap = Number(ix.maxGbPerDay ?? (ix.type === 'c411' ? 15 : 0)) || 0;
+    const cap = 0; // quota par jour retiré
     const grabs = auto.grabs.filter((g) => grabSite(g) === ix.id);
     const seeding = grabs.filter((g) => g.seeding);
     const hr = seeding
@@ -5771,9 +5771,7 @@ async function autoSummaryTick() {
   autoSave();
   const go = (b) => `${(Math.max(0, b) / 1e9).toFixed(1)} Go`;
   const seeding = auto.grabs.filter((g) => g.seeding).length;
-  const quotas = autoIndexers()
-    .filter((ix) => Number(ix.maxGbPerDay ?? (ix.type === 'c411' ? 15 : 0)) > 0)
-    .map((ix) => `${ix.name} ${(autoDlToday(ix.id) / 1e9).toFixed(1)}/${ix.maxGbPerDay ?? 15} Go`);
+  const quotas = []; // quota par jour retiré
   const total = Number(st.global_ratio) || null;
   notify({
     title: '📊 Lumio · ta journée',

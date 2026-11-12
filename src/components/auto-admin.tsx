@@ -1198,7 +1198,7 @@ function IndexerRow({ ix, onEdit, reload }: { ix: AutoIndexer; onEdit: () => voi
         <Text style={styles.small} numberOfLines={2}>
           {ix.type === 'prowlarr' ? 'Prowlarr' : ix.type === 'c411' ? 'C411 (Torznab)' : 'Torznab'} · {ix.rss ? 'veille RSS · ' : ''}
           {ix.callsLastHour}/{ix.maxPerHour} requêtes cette heure
-          {ix.maxGbPerDay || (ix.type === 'c411' && ix.maxGbPerDay == null) ? ` · ${ix.todayGb ?? 0} / ${ix.maxGbPerDay ?? 15} Go aujourd’hui` : ''}
+          {ix.todayGb ? ` · ${ix.todayGb} Go aujourd’hui` : ''}
           {ix.caps ? ` · par ID : ${[ix.caps.movie?.includes('tmdbid') ? 'films' : null, ix.caps.tv?.includes('tmdbid') || ix.caps.tv?.includes('imdbid') ? 'séries' : null].filter(Boolean).join(', ') || 'non'}` : ''}
         </Text>
         {ix.status ? (
@@ -1274,12 +1274,6 @@ function IndexerEditor({ ix, onClose, onSaved }: { ix: Partial<AutoIndexer> & { 
         <Toggle label="Activé" value={f.enabled !== false} onChange={(v) => set('enabled', v)} />
         <Toggle label="Recherche des titres qui manquent" value={f.search !== false} onChange={(v) => set('search', v)} />
         {type !== 'prowlarr' ? <Toggle label="Veille RSS (nouvelles sorties)" value={f.rss !== false} onChange={(v) => set('rss', v)} /> : null}
-        <Picker
-          label="Volume maximum par jour (protège le ratio)"
-          options={[0, 5, 10, 15, 25, 50].map((n) => ({ value: n, label: n ? `${n} Go` : 'Sans limite', hint: n === 15 ? 'conseillé pour C411' : undefined }))}
-          value={f.maxGbPerDay ?? (type === 'c411' ? 15 : 0)}
-          onChange={(v) => set('maxGbPerDay', v)}
-        />
         <Picker
           label="Télécharger avec"
           options={[
@@ -2003,7 +1997,7 @@ function QbitPrefsSection() {
             </>
           ) : null}
           <Text style={styles.help}>
-            Règle C411 toujours respectée : un torrent n’est jamais retiré avant 72 h de partage ou un ratio de 1 sur ce torrent (sinon c’est un Hit & Run). Partage intelligent : un torrent encore demandé (3 personnes ou plus) reste en partage même objectif atteint ; un torrent que plus personne ne demande depuis 14 jours est retiré une fois la durée minimum passée. Le résumé du soir arrive en notification : envoyé, reçu, partages et quota.
+            Règle C411 toujours respectée : un torrent n’est jamais retiré avant 72 h de partage ou un ratio de 1 sur ce torrent (sinon c’est un Hit & Run). Partage intelligent : un torrent encore demandé (3 personnes ou plus) reste en partage même objectif atteint ; un torrent que plus personne ne demande depuis 14 jours est retiré une fois la durée minimum passée. Le résumé du soir arrive en notification : envoyé, reçu et partages.
           </Text>
           <Button
             title="Partager un maximum"
