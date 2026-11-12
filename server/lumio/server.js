@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.98.0';
+const VERSION = '3.98.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -5496,8 +5496,10 @@ async function boostCandidates(force = false) {
   return boostCands;
 }
 const boostPaidWeek = () => auto.boost.filter((b) => b.free === false && Date.now() - Date.parse(b.addedAt) < 7 * 86400e3).reduce((n, b) => n + (b.size || 0), 0);
-/** Torrent payant « rentable » : au moins 3 téléchargeurs et deux fois plus de téléchargeurs que de partageurs, 5 Go au plus. */
-const boostWorthPaying = (r) => !r.freeleech && r.leechers >= 3 && r.demand >= 2 && r.size <= 5e9;
+/** Torrent payant « rentable » : au moins 5 téléchargeurs, trois fois plus de téléchargeurs que de partageurs, sorti depuis
+ *  moins de 6 h (après, l'essaim est déjà servi), 15 Go au plus. Durci après les premiers essais : avec 1 à 3 téléchargeurs,
+ *  le torrent ne remboursait presque jamais son téléchargement. */
+const boostWorthPaying = (r) => !r.freeleech && r.leechers >= 5 && r.demand >= 3 && r.size <= 15e9 && (!r.pub || Date.now() - Date.parse(r.pub) < 6 * 3600e3);
 const boostPublic = (r) => ({ guid: r.guid, title: r.title, size: r.size, seeders: r.seeders, leechers: r.leechers, grabs: r.grabs, free: Boolean(r.freeleech), demand: r.demand, expected: r.expected, gain: r.gain, indexer: r.indexer, pub: r.pub || null, worth: r.freeleech || boostWorthPaying(r) });
 
 /** Ajoute un torrent au booster (budget et place vérifiés). Renvoie l'entrée, ou lève une erreur lisible. */

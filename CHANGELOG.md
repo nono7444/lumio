@@ -6,6 +6,7 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Serveur 3.98.1 : booster de seed — un torrent payant n'est « rentable » qu'avec au moins 5 téléchargeurs, trois fois plus de téléchargeurs que de partageurs, et sorti depuis moins de 6 h (15 Go au plus).
 ## 1.0.158 — 11 novembre 2026
 
 - Le bouton « Movix » s'affiche aussi dans l'appli Lumio pour l'admin (il n'apparaissait que dans Lumio Auto).
