@@ -21,6 +21,9 @@ export type Req = {
   poster?: string;
   backdrop?: string;
   seasons?: number[];
+  /** 'lire' : demande née du bouton « Lire » (streaming) ; streamed : le streaming a démarré */
+  from?: string;
+  streamed?: boolean;
   status: number;
   requestedBy: { id: string; name: string };
   createdAt: string;

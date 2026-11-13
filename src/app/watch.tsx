@@ -107,7 +107,7 @@ export default function Watch() {
               kind: 'url',
               uri: w.url,
               title: type === 'tv' ? `${p.title} · S${season}E${episode}` : p.title,
-              subtitle: [w.quality, w.language, w.download?.state === 'started' ? 'téléchargement lancé sur le serveur' : null].filter(Boolean).join(' · '),
+              subtitle: [w.quality, w.language, w.download?.state === 'pending' ? 'demande envoyée à l’admin' : w.download?.state === 'started' ? 'téléchargement lancé sur le serveur' : null].filter(Boolean).join(' · '),
               start: String(w.position ?? 0),
               stream: '1',
               tmdbId: String(tmdbId),

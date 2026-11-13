@@ -50,6 +50,51 @@ function statusOf(r: Req): { text: string; color: string; progress?: number } {
   return { text: 'Recherche…', color: C.textDim };
 }
 
+/** Demande à valider (admin) : grande carte avec deux vrais boutons, « Refuser » et « Valider ». Valider lance le téléchargement. */
+function PendingCard({ r, meId, onChanged }: { r: Req; meId?: string; onChanged: () => void }) {
+  const { settings } = useSettings();
+  const [busy, setBusy] = useState<'approve' | 'decline' | null>(null);
+  const mine = r.requestedBy.id === meId;
+  const run = async (kind: 'approve' | 'decline', reason?: string) => {
+    setBusy(kind);
+    try {
+      if (kind === 'approve') await requestsApi.approve(settings, r.id);
+      else await requestsApi.decline(settings, r.id, reason);
+      toast(kind === 'approve' ? `« ${r.title} » validé : le téléchargement est lancé.` : `Demande de ${mine ? 'toi' : r.requestedBy.name} refusée.`);
+      onChanged();
+    } catch (e: any) {
+      Alert.alert('Action impossible', e?.message ?? String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const decline = () => (Alert.prompt ? Alert.prompt('Refuser la demande', 'Raison (facultatif)', (reason) => run('decline', reason || undefined)) : run('decline'));
+  const seasons = r.type === 'tv' && r.seasons?.length ? r.seasons.map((n) => `S${n}`).join(' ') : null;
+  return (
+    <View style={styles.pending}>
+      <Pressable onPress={() => openMedia(r.type, r.tmdbId)} style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+        <View style={styles.poster}>{r.poster ? <Image source={r.poster} style={StyleSheet.absoluteFill} contentFit="cover" /> : null}</View>
+        <View style={{ flex: 1, gap: 3 }}>
+          <Text style={styles.title} numberOfLines={2}>
+            {r.title}
+          </Text>
+          <Text style={styles.meta} numberOfLines={1}>
+            {[r.type === 'movie' ? 'Film' : 'Série', r.year, seasons].filter(Boolean).join(' · ')}
+          </Text>
+          <Text style={styles.meta} numberOfLines={2}>
+            Demandé par <Text style={{ color: C.text, fontWeight: '700' }}>{mine ? 'toi' : r.requestedBy.name}</Text> · {timeAgo(r.createdAt)}
+            {r.from === 'lire' ? (r.streamed ? ' · regardé en streaming' : ' · bouton « Lire », pas de streaming') : ''}
+          </Text>
+        </View>
+      </Pressable>
+      <View style={{ flexDirection: 'row', gap: 10 }}>
+        <Button title="Refuser" icon="close" variant="secondary" small loading={busy === 'decline'} onPress={decline} style={{ flex: 1 }} />
+        <Button title="Valider" icon="checkmark" small loading={busy === 'approve'} onPress={() => run('approve')} style={{ flex: 1 }} />
+      </View>
+    </View>
+  );
+}
+
 function RequestCard({ r, admin, meId, onChanged }: { r: Req; admin: boolean; meId?: string; onChanged: () => void }) {
   const { settings } = useSettings();
   const [busy, setBusy] = useState<string | null>(null);
@@ -157,10 +202,12 @@ export function ServerRequests({ header }: { header: React.ReactNode }) {
   const insets = useSafeAreaInsets();
   const admin = managerUI(settings);
   // TV : tout afficher d'emblée (« À valider » restait souvent vide)
-  const [filter, setFilter] = useState<RequestFilter>(admin && !Platform.isTV ? 'pending' : 'all');
+  const [filter, setFilter] = useState<RequestFilter>('all');
   const [rows, setRows] = useState<Req[]>([]);
   const [total, setTotal] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
+  // Admin : les demandes à valider, toujours affichées en haut avec « Valider » / « Refuser »
+  const [pending, setPending] = useState<Req[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const first = useRef(true);
@@ -174,6 +221,11 @@ export function ServerRequests({ header }: { header: React.ReactNode }) {
         setTotal(r.total);
         setPendingCount(r.counts.pending);
         setError(null);
+        if (admin && !Platform.isTV)
+          requestsApi
+            .list(settings, 'pending', { take: 50 })
+            .then((x) => setPending(x.results))
+            .catch(() => {});
         // L'admin n'a rien en attente : on montre tout
         if (first.current && admin && f === 'pending' && r.total === 0) {
           first.current = false;
@@ -262,7 +314,7 @@ export function ServerRequests({ header }: { header: React.ReactNode }) {
   return (
     <FlatList
       style={{ flex: 1, backgroundColor: C.bg }}
-      data={rows}
+      data={admin && pending.length && filter !== 'pending' ? rows.filter((r) => r.status !== RequestStatus.PENDING) : rows}
       keyExtractor={(r) => r.id}
       renderItem={({ item }) => <RequestCard r={item} admin={admin} meId={settings.jellyfin?.userId} onChanged={() => load()} />}
       contentContainerStyle={{ paddingTop: insets.top, paddingHorizontal: 16, paddingBottom: TAB_SPACE }}
@@ -273,6 +325,17 @@ export function ServerRequests({ header }: { header: React.ReactNode }) {
       ListHeaderComponent={
         <View style={{ marginHorizontal: -16 }}>
           {header}
+          {admin && pending.length ? (
+            <View style={{ paddingHorizontal: 16, gap: 10, marginBottom: 16 }}>
+              <Text style={styles.sectionTitle}>
+                À valider · {pending.length}
+              </Text>
+              {pending.map((r) => (
+                <PendingCard key={r.id} r={r} meId={settings.jellyfin?.userId} onChanged={() => load()} />
+              ))}
+              <Text style={styles.meta}>Valider lance le téléchargement sur le serveur. Refuser ferme la demande, sans couper un streaming en cours.</Text>
+            </View>
+          ) : null}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 16 }} style={{ marginBottom: 14 }}>
             {FILTERS.map((f) => (
               <SegChip
@@ -307,6 +370,8 @@ export function ServerRequests({ header }: { header: React.ReactNode }) {
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
+  pending: { gap: 12, padding: 14, borderRadius: 20, backgroundColor: C.surface, borderWidth: 1, borderColor: 'rgba(255,159,10,0.35)' },
+  sectionTitle: { color: '#FF9F0A', fontSize: 13, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 },
   sep: { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.08)', marginLeft: 56 },
   poster: { width: 44, height: 66, borderRadius: 8, overflow: 'hidden', backgroundColor: C.surfaceHigh },
   title: { color: C.text, fontSize: 15, fontWeight: '700', letterSpacing: -0.2 },

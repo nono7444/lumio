@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.99.1';
+const VERSION = '3.100.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2713,8 +2713,8 @@ async function sendOrSecour(r) {
 // ——— « Regarder » un titre absent du serveur (tout le monde) ———
 // 1. Streaming : le torrent du site (C411) est cherché, par son empreinte seulement, dans le cache TorBox. S'il y est,
 //    TorBox donne un lien de lecture tout de suite. Le site ne voit rien : aucune clé du site ne part chez TorBox.
-// 2. En arrière-plan, le titre est demandé et part en téléchargement (cache AllDebrid / TorBox sous 1,20 de ratio,
-//    sinon torrent C411). Pour un membre, la demande est validée toute seule seulement si le streaming a marché.
+// 2. Rien ne se télécharge tout seul : une demande en attente est créée, l'admin la valide ou la refuse dans Lumio Auto.
+//    La validation lance le téléchargement (cache AllDebrid / TorBox sous 1,20 de ratio, sinon torrent C411).
 // 3. La position de lecture est gardée ici, puis recopiée dans Jellyfin quand le fichier arrive : on reprend au même endroit.
 const watchNowOn = () => config.watchNow !== false && Boolean(torboxKey()) && autoOn();
 const watchNowView = () => ({ enabled: watchNowOn(), on: config.watchNow !== false, torbox: Boolean(torboxKey()), alldebrid: Boolean(secourDebridKey()), download: config.watchNowDownload !== false });
@@ -2803,7 +2803,7 @@ async function watchNow(user, b) {
   const ck = `${type}:${tmdbId}:${season}:${episode}`;
   const cachedOut = watchCache.get(ck);
   // Même titre relancé depuis un autre appareil (téléphone puis TV) : même lien pendant 1 h, à la position gardée
-  if (cachedOut && Date.now() - cachedOut.at < 60 * 60e3) return { ...cachedOut.out, ...watchResume(user, type, tmdbId, season, episode), download: await watchDownload(user, b, type, tmdbId, season) };
+  if (cachedOut && Date.now() - cachedOut.at < 60 * 60e3) return { ...cachedOut.out, ...watchResume(user, type, tmdbId, season, episode), download: await watchDownload(user, b, type, tmdbId, season, true) };
   const tried = [];
   let out = null;
   try {
@@ -2839,27 +2839,27 @@ async function watchNow(user, b) {
   } catch (e) {
     tried.push(String((e && e.message) || e));
   }
-  // Le fichier part en téléchargement dans tous les cas, pour tout le monde
-  const dl = await watchDownload(user, b, type, tmdbId, season);
+  // Rien ne se télécharge tout seul : une demande part à l'admin, qui valide ou refuse dans Lumio Auto
+  const dl = await watchDownload(user, b, type, tmdbId, season, Boolean(out));
   if (out) return { ...out, ...watchResume(user, type, tmdbId, season, episode), download: dl };
-  const dlNote = dl.state === 'started' ? ' Le téléchargement sur le serveur est lancé : il arrive bientôt.' : dl.state === 'already' ? ' Il est déjà en cours de téléchargement sur le serveur.' : dl.reason ? ` Téléchargement impossible : ${dl.reason}` : '';
+  const dlNote = dl.state === 'pending' ? (user.admin ? ' La demande t’attend dans Lumio Auto → Demandes.' : ' Ta demande est envoyée à l’admin.') : dl.state === 'already' || dl.state === 'started' ? ' Il est déjà en cours de téléchargement sur le serveur.' : dl.state === 'declined' ? ' La demande a été refusée par l’admin.' : dl.reason ? ` Demande impossible : ${dl.reason}` : '';
   throw new HttpError(404, `Pas encore disponible en streaming${tried.length ? ` (${tried.slice(0, 2).join(' ; ')})` : ''}.${dlNote}`);
 }
-/** En arrière-plan : le titre part en téléchargement (Lumio Auto), pour tout le monde, sans validation ni quota : c'est le
- *  bouton « Lire ». Sans doublon. */
-async function watchDownload(user, b, type, tmdbId, season) {
-  const streamed = true;
+/** « Lire » ne télécharge rien tout seul : une demande en attente est créée (sans quota), pour tout le monde, admin compris.
+ *  L'admin la valide ou la refuse dans Lumio Auto → Demandes ; c'est la validation qui lance le téléchargement. Sans doublon :
+ *  rien de nouveau si le titre est déjà demandé, ou si une demande a été refusée depuis moins de 7 jours. */
+async function watchDownload(user, b, type, tmdbId, season, streamed) {
   if (config.watchNowDownload === false) return { state: 'off' };
-  const had = requests.find((x) => x.type === type && x.tmdbId === tmdbId && activeReq(x) && (type === 'movie' || (x.seasons || []).includes(season)));
-  if (had && had.status === RequestStatus.PENDING && streamed) {
-    await approveRequest({ id: 'lumio', name: 'Streaming' }, had, {}).catch(() => {});
-    return { state: had.status === RequestStatus.APPROVED ? 'started' : 'skipped', requestId: had.id };
+  const same = (x) => x.type === type && x.tmdbId === tmdbId && (type === 'movie' || (x.seasons || []).includes(season));
+  const had = requests.find((x) => same(x) && activeReq(x));
+  if (had) {
+    if (streamed && !had.streamed) (had.streamed = true), saveRequests();
+    return { state: had.status === RequestStatus.PENDING ? 'pending' : 'already', requestId: had.id };
   }
-  if (had) return { state: 'already', requestId: had.id };
+  if (requests.some((x) => same(x) && x.status === RequestStatus.DECLINED && Date.now() - Date.parse(x.modifiedAt || x.createdAt) < 7 * 86400e3)) return { state: 'declined' };
   try {
-    const r = await createRequest(user, { type, tmdbId, title: b.title, year: b.year, poster: b.poster, backdrop: b.backdrop, seasons: type === 'tv' ? [season] : undefined }, { noQuota: true });
-    if (r.status === RequestStatus.PENDING && streamed) await approveRequest({ id: 'lumio', name: 'Streaming' }, r, {}).catch(() => {});
-    return { state: r.status === RequestStatus.APPROVED ? 'started' : r.status === RequestStatus.PENDING ? 'pending' : 'skipped', requestId: r.id, reason: r.error };
+    const r = await createRequest(user, { type, tmdbId, title: b.title, year: b.year, poster: b.poster, backdrop: b.backdrop, seasons: type === 'tv' ? [season] : undefined }, { noQuota: true, noApprove: true, streamed: Boolean(streamed) });
+    return { state: r.status === RequestStatus.PENDING ? 'pending' : r.status === RequestStatus.APPROVED ? 'started' : 'skipped', requestId: r.id, reason: r.error };
   } catch (e) {
     // 409 : déjà disponible ou déjà demandé
     return { state: e && e.status === 409 ? 'already' : 'skipped', reason: String((e && e.message) || e) };
@@ -7748,7 +7748,10 @@ async function createRequest(user, b, opts = {}) {
     qualityProfileId: user.admin && b.qualityProfileId ? Number(b.qualityProfileId) : undefined,
   };
 
-  if (perm.autoApprove) {
+  // Demande née du bouton « Lire » : streamed = le streaming a démarré ; elle attend toujours la validation de l'admin
+  if (opts.noApprove) r.from = 'lire';
+  if (opts.streamed) r.streamed = true;
+  if (perm.autoApprove && !opts.noApprove) {
     r.status = RequestStatus.APPROVED;
     r.modifiedBy = { id: user.id, name: user.name };
     r.modifiedAt = r.createdAt;
@@ -7767,6 +7770,8 @@ async function createRequest(user, b, opts = {}) {
   const what = type === 'tv' ? ` (${seasons.length > 1 ? `${seasons.length} saisons` : `saison ${seasons[0]}`})` : '';
   // Plus d'annonce dans le chat : notification push pour l'admin (sauf pour ses propres demandes)
   if (!user.admin || r.status === RequestStatus.FAILED) notifyRequest(r, what);
+  // « Lire » lancé par l'admin lui-même : pas d'annonce à la famille tant qu'il n'a pas validé
+  if (opts.noApprove && user.admin) return r;
   notifyFamily({ title: `📥 ${user.name} a demandé`, message: `${r.title}${r.year ? ` (${r.year})` : ''}${what}`, tags: ['inbox_tray'], image: r.poster, click: 'lumio://activity' });
   return r;
 }

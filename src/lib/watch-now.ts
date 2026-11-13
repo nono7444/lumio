@@ -17,7 +17,7 @@ export type WatchNowResult = {
   sizeBytes: number;
   /** Position gardée par le serveur (secondes) pour reprendre là où on s'était arrêté */
   position?: number;
-  download?: { state: 'started' | 'already' | 'skipped' | 'off'; reason?: string };
+  download?: { state: 'started' | 'pending' | 'declined' | 'already' | 'skipped' | 'off'; reason?: string };
 };
 
 export const watchNowApi = {
