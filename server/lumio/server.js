@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.100.0';
+const VERSION = '3.100.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -5894,7 +5894,9 @@ setInterval(() => autoProfileTick().catch(() => {}), 30 * 60_000);
 // paid : prendre aussi des torrents payants très rentables (éteint par défaut), au plus paidGb par semaine
 // Automatique : un passage par heure, 3 torrents au plus par passage. Payants seulement quand le ratio du site est au-dessus
 // du seuil de la garde (1,20), et 30 Go par semaine au plus ; en dessous, freeleech uniquement.
-const autoBoostCfg = () => ({ enabled: true, gb: 200, disk: 'jellyfin3', perRun: 3, paidGb: 30, ...(autoCfg().boost || {}), paid: true });
+// Sélection automatique arrêtée (les torrents payants ne remboursaient pas leur téléchargement) : le serveur ne prend plus
+// rien tout seul. Les torrents de partage s'ajoutent à la main (Lumio Auto → qBittorrent) ; ils sont suivis et nettoyés pareil.
+const autoBoostCfg = () => ({ gb: 200, disk: 'jellyfin3', perRun: 3, paidGb: 30, ...(autoCfg().boost || {}), enabled: false, paid: false, manual: true });
 const BOOST_EVERY = 3600e3;
 function boostPaidOk(r) {
   const ratio = r.indexerId ? autoSiteRatio(r.indexerId) : null;
@@ -6911,11 +6913,53 @@ async function autoRoutes(req, res, p, q, user) {
     try {
       const x = await boostAdd(r);
       autoLog(`booster : ${x.title} ajouté à la main (${x.free ? 'freeleech' : 'payant'})`);
-      auto.boostNote = `dernier ajout à la main : ${x.title} (${x.free ? 'freeleech' : 'payant'})`;
+      auto.boostNote = `dernier ajout à la main : ${x.title} (${x.free ? 'freeleech' : 'compté dans le ratio'})`;
       autoSave();
       send(res, 200, { ok: true, message: `${x.title} ajouté au booster` });
     } catch (e) {
       throw new HttpError(400, e.message);
+    }
+    return true;
+  }
+  // Ajout à la main d'un torrent de partage : recherche sur les sites (nom), puis « Ajouter » ; ou un lien magnet / .torrent collé
+  if (req.method === 'GET' && p === '/api/auto/boost/search') {
+    const text = String(q.get('q') || '').trim();
+    if (text.length < 2) return send(res, 400, { error: 'Écris au moins 2 lettres' }), true;
+    const known = new Set([...boostActive().map((b) => b.guid), ...auto.grabs.map((g) => g.release && g.release.guid)].filter(Boolean));
+    const found = [];
+    for (const ix of autoIndexers().filter((x) => x.enabled !== false && x.search !== false)) {
+      const r = await idxQuery(ix, { q: text, cats: [] }).catch(() => ({ items: [] }));
+      for (const x of r.items || []) if (!found.some((c) => c.guid === x.guid) && !known.has(x.guid)) found.push(x);
+    }
+    const list = found
+      .map((r) => {
+        const demand = (r.leechers || 0) / ((r.seeders || 0) + 1);
+        const expected = r.size * Math.min(5, demand);
+        const cost = r.freeleech ? 0 : r.size;
+        return { ...r, demand: Math.round(demand * 100) / 100, expected: Math.round(expected), cost, gain: Math.round(expected - cost) };
+      })
+      .sort((a, b) => Number(b.freeleech) - Number(a.freeleech) || (b.leechers || 0) - (a.leechers || 0))
+      .slice(0, 40);
+    // Gardés en mémoire pour « Ajouter » (même liste que les candidats)
+    boostCands.list = [...list, ...boostCands.list.filter((x) => !list.some((y) => y.guid === x.guid))].slice(0, 400);
+    send(res, 200, { total: list.length, candidates: list.map(boostPublic) });
+    return true;
+  }
+  if (req.method === 'POST' && p === '/api/auto/boost/add') {
+    const b = await readBody(req);
+    const link = String(b.link || '').trim();
+    if (!/^magnet:\?/i.test(link) && !/^https?:\/\//i.test(link)) return send(res, 400, { error: 'Colle un lien magnet ou l’adresse d’un fichier .torrent' }), true;
+    const dn = (link.match(/[?&]dn=([^&]+)/) || [])[1];
+    let title = 'Torrent ajouté à la main';
+    try {
+      if (dn) title = decodeURIComponent(dn.replace(/\+/g, ' ')).slice(0, 200);
+    } catch {}
+    try {
+      const x = await boostAdd({ link, title, size: 0, guid: `manuel:${crypto.createHash('sha1').update(link).digest('hex')}`, indexer: 'ajout à la main', indexerId: null, freeleech: false, leechers: null, seeders: null });
+      autoLog(`partage : ${x.title} ajouté à la main (lien)`);
+      send(res, 200, { ok: true, message: 'Torrent ajouté : il part dans qBittorrent, pour le partage seulement' });
+    } catch (e) {
+      send(res, 400, { error: e.message });
     }
     return true;
   }
