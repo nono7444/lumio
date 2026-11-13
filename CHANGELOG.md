@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Titre absent du serveur : il ne reste vraiment que le bouton « Lire ». Il lance le streaming si possible, sinon il envoie la demande ; quand le fichier est sur le serveur, le même bouton lit depuis Jellyfin. Demande le serveur 3.100.2.
+
 ## 1.0.163 — 13 novembre 2026
 
 - Lumio Auto : le serveur ne prend plus aucun torrent de partage tout seul (booster automatique arrêté). Onglet qBittorrent → « Ajouter un torrent » : recherche sur le site ou lien magnet / .torrent, pour le partage seulement. Demande le serveur 3.100.1.

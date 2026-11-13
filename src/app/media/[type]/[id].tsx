@@ -407,7 +407,8 @@ export default function MediaScreen() {
 
           {/* ——— Demande façon Seerr (serveur Lumio) ——— */}
           {/* Film absent avec « Lire » en streaming : un seul bouton, pas de « Demander » (le suivi revient dès que le téléchargement est lancé) */}
-          {serverReq && !Platform.isTV && !(canWatchNow && !jfItem && details.kind === 'movie' && (mediaStatus == null || mediaStatus === MediaStatus.UNKNOWN)) ? (
+          {/* Titre absent : un seul bouton, « Lire » (streaming ou demande) ; la section des demandes ne reste que pour une série déjà en partie sur le serveur (saisons manquantes) */}
+          {serverReq && !Platform.isTV && !(canWatchNow && !jfItem) ? (
             <RequestSection
               inJellyfin={Boolean(jfItem)}
               onAvailable={refreshJf}

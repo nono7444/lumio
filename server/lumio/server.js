@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.100.1';
+const VERSION = '3.100.2';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2717,7 +2717,8 @@ async function sendOrSecour(r) {
 //    La validation lance le téléchargement (cache AllDebrid / TorBox sous 1,20 de ratio, sinon torrent C411).
 // 3. La position de lecture est gardée ici, puis recopiée dans Jellyfin quand le fichier arrive : on reprend au même endroit.
 const watchNowOn = () => config.watchNow !== false && Boolean(torboxKey()) && autoOn();
-const watchNowView = () => ({ enabled: watchNowOn(), on: config.watchNow !== false, torbox: Boolean(torboxKey()), alldebrid: Boolean(secourDebridKey()), download: config.watchNowDownload !== false });
+// enabled : le bouton « Lire » s'affiche sur un titre absent, même sans TorBox (il envoie alors seulement la demande)
+const watchNowView = () => ({ enabled: config.watchNow !== false, streaming: watchNowOn(), on: config.watchNow !== false, torbox: Boolean(torboxKey()), alldebrid: Boolean(secourDebridKey()), download: config.watchNowDownload !== false });
 const watchCache = new Map(); // « type:tmdb:s:e » → { at, out } : un second appareil reprend le même lien pendant 20 min
 const WATCH_POS_FILE = path.join(DATA_DIR, 'watch-positions.json');
 let watchPos = {};
@@ -2794,7 +2795,7 @@ async function watchFind(type, tmdbId, season, episode, title, tried) {
   return hit || null;
 }
 async function watchNow(user, b) {
-  if (!watchNowOn()) throw new HttpError(400, 'Le streaming n’est pas prêt (clé TorBox et Lumio Auto)');
+  if (config.watchNow === false) throw new HttpError(400, 'Le bouton « Lire » des titres absents est coupé sur le serveur');
   const type = b.type === 'tv' || b.type === 'series' ? 'tv' : 'movie';
   const tmdbId = Number(b.tmdbId);
   if (!tmdbId) throw new HttpError(400, 'Identifiant TMDB manquant');
@@ -2807,6 +2808,7 @@ async function watchNow(user, b) {
   const tried = [];
   let out = null;
   try {
+    if (!watchNowOn()) throw new Error('streaming pas configuré sur le serveur');
     const hit = await watchFind(type, tmdbId, season, episode, b.title, tried);
     if (hit) {
       const c = await tb('/torrents/createtorrent', { method: 'POST', form: { magnet: `magnet:?xt=urn:btih:${hit.hash}`, seed: 3, allow_zip: 'false' } });
