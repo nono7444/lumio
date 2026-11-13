@@ -88,7 +88,7 @@ export default function Watch() {
         const episode = type === 'tv' ? (res.episode ?? (p.episode ? Number(p.episode) : 1)) : undefined;
         const can = settings.chatUrl ? await watchNowApi.status(settings).catch(() => null) : null;
         if (can?.enabled) {
-          setStep('Pas encore sur ton serveur : recherche d’un lien de streaming…');
+          setStep('Pas encore sur ton serveur : préparation du streaming…');
           const date = type === 'movie' ? (details as any).release_date : (details as any).first_air_date;
           const w = await watchNowApi.start(settings, {
             type,

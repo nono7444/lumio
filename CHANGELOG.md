@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Titre absent du serveur : un seul bouton « Lire », pour tout le monde. Il lance le streaming (cache TorBox) et le téléchargement sur le serveur en arrière-plan, sans validation ni quota ; le bouton « Demander » disparaît pour les films. Demande le serveur 3.99.1.
+- Streaming commencé sur un appareil et repris sur un autre (téléphone puis TV) : même lien pendant une heure, à la même position.
+
 - « Regarder » sur un titre absent du serveur (tout le monde) : si son torrent est dans le cache TorBox, la lecture démarre tout de suite en streaming et le fichier se télécharge sur le serveur en arrière-plan. Pas en cache : « Demander » comme avant. Demande le serveur 3.99.0.
 - Le bouton « Movix » est retiré : le serveur choisit tout seul le bon chemin.
 - Serveur 3.99.0, garde du ratio à 1,20 : sous le seuil, chaque titre est d'abord cherché dans le cache AllDebrid / TorBox (rien de compté sur le site), puis remis en partage par-dessus dans qBittorrent ; pas en cache, torrent du site puis partage.

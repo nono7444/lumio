@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.99.0';
+const VERSION = '3.99.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2734,6 +2734,12 @@ function watchPosition(user, type, tmdbId, season, episode) {
   if (!e || !(e.pos > 30) || (e.dur > 0 && e.pos / e.dur > 0.93)) return 0;
   return Math.floor(e.pos);
 }
+/** Reprise pour l'appli : position (secondes) et durée connue. */
+function watchResume(user, type, tmdbId, season, episode) {
+  const position = watchPosition(user, type, tmdbId, season, episode);
+  const e = (watchPos[user.id] || {})[watchKey(type, tmdbId, season, episode)];
+  return { position, duration: position && e ? Number(e.dur) || 0 : 0 };
+}
 function watchProgress(user, b) {
   const type = b.type === 'tv' || b.type === 'series' ? 'tv' : 'movie';
   const tmdbId = Number(b.tmdbId);
@@ -2796,7 +2802,8 @@ async function watchNow(user, b) {
   const episode = type === 'tv' ? Number(b.episode) || 1 : null;
   const ck = `${type}:${tmdbId}:${season}:${episode}`;
   const cachedOut = watchCache.get(ck);
-  if (cachedOut && Date.now() - cachedOut.at < 20 * 60e3) return { ...cachedOut.out, position: watchPosition(user, type, tmdbId, season, episode), download: await watchDownload(user, b, type, tmdbId, season, true) };
+  // Même titre relancé depuis un autre appareil (téléphone puis TV) : même lien pendant 1 h, à la position gardée
+  if (cachedOut && Date.now() - cachedOut.at < 60 * 60e3) return { ...cachedOut.out, ...watchResume(user, type, tmdbId, season, episode), download: await watchDownload(user, b, type, tmdbId, season) };
   const tried = [];
   let out = null;
   try {
@@ -2832,15 +2839,16 @@ async function watchNow(user, b) {
   } catch (e) {
     tried.push(String((e && e.message) || e));
   }
-  // Le fichier part en téléchargement : toujours pour l'admin ; pour un membre, seulement si le streaming a marché
-  const dl = out || user.admin ? await watchDownload(user, b, type, tmdbId, season, Boolean(out)) : { state: 'skipped' };
-  if (out) return { ...out, position: watchPosition(user, type, tmdbId, season, episode), download: dl };
-  const dlNote = dl.state === 'started' ? ' Le téléchargement sur le serveur est lancé.' : dl.state === 'already' ? ' Le titre est déjà en cours de téléchargement sur le serveur.' : user.admin ? '' : ' Tu peux le demander avec « Demander ».';
+  // Le fichier part en téléchargement dans tous les cas, pour tout le monde
+  const dl = await watchDownload(user, b, type, tmdbId, season);
+  if (out) return { ...out, ...watchResume(user, type, tmdbId, season, episode), download: dl };
+  const dlNote = dl.state === 'started' ? ' Le téléchargement sur le serveur est lancé : il arrive bientôt.' : dl.state === 'already' ? ' Il est déjà en cours de téléchargement sur le serveur.' : dl.reason ? ` Téléchargement impossible : ${dl.reason}` : '';
   throw new HttpError(404, `Pas encore disponible en streaming${tried.length ? ` (${tried.slice(0, 2).join(' ; ')})` : ''}.${dlNote}`);
 }
-/** En arrière-plan : une demande normale (Lumio Auto). Sans doublon. streamed : le streaming a marché, la demande d'un
- *  membre est alors validée toute seule (sinon elle attend l'admin, comme « Demander »). */
-async function watchDownload(user, b, type, tmdbId, season, streamed) {
+/** En arrière-plan : le titre part en téléchargement (Lumio Auto), pour tout le monde, sans validation ni quota : c'est le
+ *  bouton « Lire ». Sans doublon. */
+async function watchDownload(user, b, type, tmdbId, season) {
+  const streamed = true;
   if (config.watchNowDownload === false) return { state: 'off' };
   const had = requests.find((x) => x.type === type && x.tmdbId === tmdbId && activeReq(x) && (type === 'movie' || (x.seasons || []).includes(season)));
   if (had && had.status === RequestStatus.PENDING && streamed) {
@@ -2849,11 +2857,11 @@ async function watchDownload(user, b, type, tmdbId, season, streamed) {
   }
   if (had) return { state: 'already', requestId: had.id };
   try {
-    const r = await createRequest(user, { type, tmdbId, title: b.title, year: b.year, poster: b.poster, backdrop: b.backdrop, seasons: type === 'tv' ? [season] : undefined });
+    const r = await createRequest(user, { type, tmdbId, title: b.title, year: b.year, poster: b.poster, backdrop: b.backdrop, seasons: type === 'tv' ? [season] : undefined }, { noQuota: true });
     if (r.status === RequestStatus.PENDING && streamed) await approveRequest({ id: 'lumio', name: 'Streaming' }, r, {}).catch(() => {});
     return { state: r.status === RequestStatus.APPROVED ? 'started' : r.status === RequestStatus.PENDING ? 'pending' : 'skipped', requestId: r.id, reason: r.error };
   } catch (e) {
-    // 409 : déjà disponible ou déjà demandé ; 429 : quota du membre atteint (le streaming reste possible)
+    // 409 : déjà disponible ou déjà demandé
     return { state: e && e.status === 409 ? 'already' : 'skipped', reason: String((e && e.message) || e) };
   }
 }
@@ -7683,7 +7691,7 @@ function posterOf(item) {
 }
 
 /** Crée une demande (POST /api/requests), avec les mêmes règles que Seerr. */
-async function createRequest(user, b) {
+async function createRequest(user, b, opts = {}) {
   const type = b.type === 'tv' ? 'tv' : 'movie';
   if (!autoOn() && !arrConfig(kindOf(type))) throw new HttpError(503, `${label(kindOf(type))} n'est pas configuré sur le serveur Lumio`);
   const ids = await resolveIds(type, b);
@@ -7707,7 +7715,7 @@ async function createRequest(user, b) {
     const m = lib.movies.get(tmdbId);
     if ((m && m.hasFile) || (lib.jf && lib.jf.movies.has(tmdbId))) throw new HttpError(409, 'Ce film est déjà disponible dans Jellyfin.');
     if (existing.length) throw new HttpError(409, 'Ce film a déjà été demandé.');
-    if (quota.movie.remaining === 0) throw new HttpError(429, `Quota atteint : ${quota.movie.limit} film(s) tous les ${quota.movie.days} jours, pour protéger le ratio. Réessaie plus tard ou demande à l’admin.`);
+    if (!opts.noQuota && quota.movie.remaining === 0) throw new HttpError(429, `Quota atteint : ${quota.movie.limit} film(s) tous les ${quota.movie.days} jours, pour protéger le ratio. Réessaie plus tard ou demande à l’admin.`);
   } else {
     if (!Number(b.tvdbId) && !autoOn()) throw new HttpError(400, 'Pas d’identifiant TVDB : Sonarr ne peut pas ajouter cette série.');
     const wanted = (Array.isArray(b.seasons) ? b.seasons : []).map(Number).filter((n) => n > 0);
@@ -7717,9 +7725,9 @@ async function createRequest(user, b) {
     seasons = st.seasons.filter((s) => s.status === MediaStatus.UNKNOWN).map((s) => s.seasonNumber);
     if (!seasons.length) throw new HttpError(409, 'Ces saisons sont déjà disponibles ou demandées.');
     // Quota en séries : une demande = une série, quel que soit le nombre de saisons (sauf une série déjà demandée par lui)
-    if (tvBySeries() && quota.tv.remaining === 0 && !requests.some((r) => r.type === 'tv' && r.tmdbId === tmdbId && r.requestedBy.id === user.id))
+    if (!opts.noQuota && tvBySeries() && quota.tv.remaining === 0 && !requests.some((r) => r.type === 'tv' && r.tmdbId === tmdbId && r.requestedBy.id === user.id))
       throw new HttpError(429, `Quota atteint : ${quota.tv.limit} série(s) tous les ${quota.tv.days} jours, pour protéger le ratio. Réessaie plus tard ou demande à l’admin.`);
-    if (!tvBySeries() && quota.tv.remaining != null && seasons.length > quota.tv.remaining)
+    if (!opts.noQuota && !tvBySeries() && quota.tv.remaining != null && seasons.length > quota.tv.remaining)
       throw new HttpError(429, `Quota atteint : il te reste ${quota.tv.remaining} saison(s) sur ${quota.tv.limit} tous les ${quota.tv.days} jours.`);
   }
 

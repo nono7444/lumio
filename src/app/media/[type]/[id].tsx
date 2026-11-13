@@ -96,7 +96,7 @@ export default function MediaScreen() {
   // Serveur Lumio : demandes façon Seerr pour tout le monde (admin compris)
   const serverReq = useServerRequests();
   useEffect(() => {
-    if (!settings.chatUrl || settings.jellyfin?.isAdmin !== true) return;
+    if (!settings.chatUrl) return;
     requestsApi
       .media(settings, isTv ? 'tv' : 'movie', Number(id))
       .then((m) => setMediaStatus(m.status))
@@ -382,9 +382,9 @@ export default function MediaScreen() {
                   style={{ flex: 1 }}
                 />
               ) : canWatchNow ? (
-                // Pas encore sur le serveur : « Regarder » en streaming (cache TorBox), le titre se télécharge en arrière-plan
+                // Pas encore sur le serveur : le même bouton « Lire », en streaming (cache TorBox) ; le titre se télécharge en arrière-plan
                 <Button
-                  title="Regarder"
+                  title="Lire"
                   icon="play"
                   small
                   onPress={() => router.push({ pathname: '/watch', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title } })}
@@ -406,7 +406,8 @@ export default function MediaScreen() {
           ) : null}
 
           {/* ——— Demande façon Seerr (serveur Lumio) ——— */}
-          {serverReq && !Platform.isTV ? (
+          {/* Film absent avec « Lire » en streaming : un seul bouton, pas de « Demander » (le suivi revient dès que le téléchargement est lancé) */}
+          {serverReq && !Platform.isTV && !(canWatchNow && !jfItem && details.kind === 'movie' && (mediaStatus == null || mediaStatus === MediaStatus.UNKNOWN)) ? (
             <RequestSection
               inJellyfin={Boolean(jfItem)}
               onAvailable={refreshJf}
