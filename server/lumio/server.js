@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.98.2';
+const VERSION = '3.99.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2710,6 +2710,195 @@ async function sendOrSecour(r) {
   }
 }
 
+// ——— « Regarder » un titre absent du serveur (tout le monde) ———
+// 1. Streaming : le torrent du site (C411) est cherché, par son empreinte seulement, dans le cache TorBox. S'il y est,
+//    TorBox donne un lien de lecture tout de suite. Le site ne voit rien : aucune clé du site ne part chez TorBox.
+// 2. En arrière-plan, le titre est demandé et part en téléchargement (cache AllDebrid / TorBox sous 1,20 de ratio,
+//    sinon torrent C411). Pour un membre, la demande est validée toute seule seulement si le streaming a marché.
+// 3. La position de lecture est gardée ici, puis recopiée dans Jellyfin quand le fichier arrive : on reprend au même endroit.
+const watchNowOn = () => config.watchNow !== false && Boolean(torboxKey()) && autoOn();
+const watchNowView = () => ({ enabled: watchNowOn(), on: config.watchNow !== false, torbox: Boolean(torboxKey()), alldebrid: Boolean(secourDebridKey()), download: config.watchNowDownload !== false });
+const watchCache = new Map(); // « type:tmdb:s:e » → { at, out } : un second appareil reprend le même lien pendant 20 min
+const WATCH_POS_FILE = path.join(DATA_DIR, 'watch-positions.json');
+let watchPos = {};
+try {
+  watchPos = JSON.parse(fs.readFileSync(WATCH_POS_FILE, 'utf8')) || {};
+} catch {
+  watchPos = {};
+}
+const saveWatchPos = () => fs.promises.writeFile(WATCH_POS_FILE, JSON.stringify(watchPos)).catch(() => {});
+const watchKey = (type, tmdbId, season, episode) => (type === 'tv' ? `tv:${tmdbId}:${season || 1}:${episode || 1}` : `movie:${tmdbId}`);
+/** Position gardée (secondes) pour reprendre : rien si le titre était presque fini. */
+function watchPosition(user, type, tmdbId, season, episode) {
+  const e = (watchPos[user.id] || {})[watchKey(type, tmdbId, season, episode)];
+  if (!e || !(e.pos > 30) || (e.dur > 0 && e.pos / e.dur > 0.93)) return 0;
+  return Math.floor(e.pos);
+}
+function watchProgress(user, b) {
+  const type = b.type === 'tv' || b.type === 'series' ? 'tv' : 'movie';
+  const tmdbId = Number(b.tmdbId);
+  const pos = Number(b.position);
+  if (!tmdbId || !(pos >= 0)) throw new HttpError(400, 'Position invalide');
+  const season = type === 'tv' ? Number(b.season) || 1 : null;
+  const episode = type === 'tv' ? Number(b.episode) || 1 : null;
+  const mine = (watchPos[user.id] = watchPos[user.id] || {});
+  mine[watchKey(type, tmdbId, season, episode)] = { type, tmdbId, season, episode, title: String(b.title || '').slice(0, 200), pos, dur: Number(b.duration) || 0, at: Date.now() };
+  // 200 titres par personne au plus
+  const keys = Object.keys(mine);
+  if (keys.length > 200) for (const k of keys.sort((x, y) => mine[x].at - mine[y].at).slice(0, keys.length - 200)) delete mine[k];
+  saveWatchPos();
+  return { ok: true };
+}
+/** Cherche les versions du site pour ce titre et renvoie la première qui est dans le cache TorBox : { rel, hash } ou null. */
+async function watchFind(type, tmdbId, season, episode, title, tried) {
+  let item = findItem(type, tmdbId);
+  if (!item) {
+    // Titre pas encore suivi : fiche provisoire, juste pour la recherche (rien n'est enregistré)
+    item = { id: 'watch', type, tmdbId, title: title || `#${tmdbId}`, seasons: type === 'tv' ? [season] : [], requestIds: [] };
+    await autoMeta(item, true);
+  }
+  const want = type === 'movie' ? { kind: 'movie' } : { kind: 'episode', season, episode };
+  const { results } = await autoSearch(item, want);
+  // Pour lire un épisode, un pack de la bonne saison convient aussi (le bon fichier est choisi dedans)
+  const packOk = (r) => type === 'tv' && r.reasons.length === 1 && /^pack de saison/.test(r.reasons[0]) && ((r.parsed.pack && r.parsed.season === season) || (r.parsed.seasons || []).includes(season));
+  const ok = results.filter((r) => !r.rejected || packOk(r)).slice(0, 8);
+  if (!ok.length) {
+    tried.push(results.length ? 'aucune version correcte sur le site' : 'rien trouvé sur le site');
+    return null;
+  }
+  const cands = [];
+  let fetched = 0;
+  for (const rel of ok) {
+    let hash = rel.hash || null;
+    if (!hash && fetched < 4) {
+      fetched++;
+      const t = await fetchTorrent(rel).catch(() => null);
+      hash = t ? (t.buf ? torrentHash(t.buf) : magnetHash(t.magnet)) : null;
+    }
+    if (hash) cands.push({ rel, hash: hash.toLowerCase() });
+  }
+  if (!cands.length) {
+    tried.push('empreinte des torrents illisible');
+    return null;
+  }
+  const d = await tb('/torrents/checkcached', { query: { hash: cands.map((c) => c.hash).join(','), format: 'list', list_files: 'false' } });
+  const cached = new Set((Array.isArray(d) ? d.map((x) => x && x.hash) : Object.keys(d || {})).map((h) => String(h || '').toLowerCase()));
+  const hit = cands.find((c) => cached.has(c.hash));
+  if (!hit) tried.push(`${cands.length} version(s) du site, aucune dans le cache TorBox`);
+  return hit || null;
+}
+async function watchNow(user, b) {
+  if (!watchNowOn()) throw new HttpError(400, 'Le streaming n’est pas prêt (clé TorBox et Lumio Auto)');
+  const type = b.type === 'tv' || b.type === 'series' ? 'tv' : 'movie';
+  const tmdbId = Number(b.tmdbId);
+  if (!tmdbId) throw new HttpError(400, 'Identifiant TMDB manquant');
+  const season = type === 'tv' ? Number(b.season) || 1 : null;
+  const episode = type === 'tv' ? Number(b.episode) || 1 : null;
+  const ck = `${type}:${tmdbId}:${season}:${episode}`;
+  const cachedOut = watchCache.get(ck);
+  if (cachedOut && Date.now() - cachedOut.at < 20 * 60e3) return { ...cachedOut.out, position: watchPosition(user, type, tmdbId, season, episode), download: await watchDownload(user, b, type, tmdbId, season, true) };
+  const tried = [];
+  let out = null;
+  try {
+    const hit = await watchFind(type, tmdbId, season, episode, b.title, tried);
+    if (hit) {
+      const c = await tb('/torrents/createtorrent', { method: 'POST', form: { magnet: `magnet:?xt=urn:btih:${hit.hash}`, seed: 3, allow_zip: 'false' } });
+      const id = c && c.torrent_id;
+      if (!id) throw new Error('TorBox n’a pas pris le torrent');
+      let t = null;
+      for (let i = 0; i < 10; i++) {
+        const l = await tb('/torrents/mylist', { query: { id, bypass_cache: 'true' } });
+        t = Array.isArray(l) ? l.find((x) => String(x.id) === String(id)) : l;
+        if (t && t.download_finished && Array.isArray(t.files) && t.files.length) break;
+        await sleep(2000);
+      }
+      const videos = ((t && t.files) || []).filter((f) => VIDEO_EXT.test(f.name || f.short_name || '') && !/\bsample\b/i.test(f.short_name || f.name || '')).sort((x, y) => (y.size || 0) - (x.size || 0));
+      let file = videos[0] || null;
+      if (type === 'tv' && videos.length > 1) {
+        file = videos.find((f) => {
+          const pz = autoParse(String(f.short_name || f.name || '').split('/').pop());
+          return pz.episode != null && (pz.season == null || pz.season === season) && episode >= pz.episode && episode <= (pz.episodeEnd || pz.episode);
+        }) || null;
+      }
+      if (!file) throw new Error('fichier vidéo introuvable dans le torrent');
+      const url = await tb('/torrents/requestdl', { query: { token: torboxKey(), torrent_id: id, file_id: file.id } });
+      if (typeof url !== 'string' || !/^https?:\/\//.test(url)) throw new Error('TorBox n’a pas donné de lien');
+      const pz = autoParse(hit.rel.title);
+      out = { url, service: 'torbox', source: hit.rel.indexer || null, hoster: null, name: hit.rel.title, quality: pz.resolution ? `${pz.resolution}p` : null, language: null, sizeBytes: Number(file.size) || 0 };
+      watchCache.set(ck, { at: Date.now(), out });
+      if (watchCache.size > 200) watchCache.delete(watchCache.keys().next().value);
+      console.log(`Regarder en streaming : « ${b.title || tmdbId} » pour ${user.name} (cache TorBox, ${hit.rel.title})`);
+    }
+  } catch (e) {
+    tried.push(String((e && e.message) || e));
+  }
+  // Le fichier part en téléchargement : toujours pour l'admin ; pour un membre, seulement si le streaming a marché
+  const dl = out || user.admin ? await watchDownload(user, b, type, tmdbId, season, Boolean(out)) : { state: 'skipped' };
+  if (out) return { ...out, position: watchPosition(user, type, tmdbId, season, episode), download: dl };
+  const dlNote = dl.state === 'started' ? ' Le téléchargement sur le serveur est lancé.' : dl.state === 'already' ? ' Le titre est déjà en cours de téléchargement sur le serveur.' : user.admin ? '' : ' Tu peux le demander avec « Demander ».';
+  throw new HttpError(404, `Pas encore disponible en streaming${tried.length ? ` (${tried.slice(0, 2).join(' ; ')})` : ''}.${dlNote}`);
+}
+/** En arrière-plan : une demande normale (Lumio Auto). Sans doublon. streamed : le streaming a marché, la demande d'un
+ *  membre est alors validée toute seule (sinon elle attend l'admin, comme « Demander »). */
+async function watchDownload(user, b, type, tmdbId, season, streamed) {
+  if (config.watchNowDownload === false) return { state: 'off' };
+  const had = requests.find((x) => x.type === type && x.tmdbId === tmdbId && activeReq(x) && (type === 'movie' || (x.seasons || []).includes(season)));
+  if (had && had.status === RequestStatus.PENDING && streamed) {
+    await approveRequest({ id: 'lumio', name: 'Streaming' }, had, {}).catch(() => {});
+    return { state: had.status === RequestStatus.APPROVED ? 'started' : 'skipped', requestId: had.id };
+  }
+  if (had) return { state: 'already', requestId: had.id };
+  try {
+    const r = await createRequest(user, { type, tmdbId, title: b.title, year: b.year, poster: b.poster, backdrop: b.backdrop, seasons: type === 'tv' ? [season] : undefined });
+    if (r.status === RequestStatus.PENDING && streamed) await approveRequest({ id: 'lumio', name: 'Streaming' }, r, {}).catch(() => {});
+    return { state: r.status === RequestStatus.APPROVED ? 'started' : r.status === RequestStatus.PENDING ? 'pending' : 'skipped', requestId: r.id, reason: r.error };
+  } catch (e) {
+    // 409 : déjà disponible ou déjà demandé ; 429 : quota du membre atteint (le streaming reste possible)
+    return { state: e && e.status === 409 ? 'already' : 'skipped', reason: String((e && e.message) || e) };
+  }
+}
+/** Le fichier est arrivé dans Jellyfin : la position gardée pendant le streaming y est recopiée (toutes les 2 min). */
+async function watchApplyPositions() {
+  const token = process.env.JELLYFIN_API_KEY || jfAdminToken;
+  if (!token) return;
+  let changed = false;
+  for (const [userId, mine] of Object.entries(watchPos)) {
+    for (const e of Object.values(mine)) {
+      if (e.applied || !(e.pos > 30) || Date.now() - e.at > 30 * 86400e3) continue;
+      try {
+        const find = async (types, extra = {}) => {
+          const q = new URLSearchParams({ Recursive: 'true', IncludeItemTypes: types, Fields: 'ProviderIds', EnableImages: 'false', searchTerm: e.title || '', Limit: '30', ...extra });
+          const r = await fetch(`${JELLYFIN_URL}/Items?${q}`, { headers: jfHeaders(token) });
+          return r.ok ? ((await r.json()).Items || []).find((i) => String((i.ProviderIds || {}).Tmdb || '') === String(e.tmdbId)) : null;
+        };
+        let itemId = null;
+        if (e.type === 'movie') itemId = ((await find('Movie')) || {}).Id || null;
+        else {
+          const show = await find('Series');
+          if (show) {
+            const r = await fetch(`${JELLYFIN_URL}/Shows/${show.Id}/Episodes?season=${e.season}&Fields=ProviderIds`, { headers: jfHeaders(token) });
+            const ep = r.ok ? ((await r.json()).Items || []).find((i) => i.IndexNumber === e.episode && i.ParentIndexNumber === e.season) : null;
+            itemId = ep ? ep.Id : null;
+          }
+        }
+        if (!itemId) continue;
+        const body = JSON.stringify({ PlaybackPositionTicks: Math.floor(e.pos * 1e7), Played: false });
+        let r = await fetch(`${JELLYFIN_URL}/UserItems/${itemId}/UserData?userId=${userId}`, { method: 'POST', headers: { ...jfHeaders(token), 'Content-Type': 'application/json' }, body });
+        if (!r.ok) r = await fetch(`${JELLYFIN_URL}/Users/${userId}/Items/${itemId}/UserData`, { method: 'POST', headers: { ...jfHeaders(token), 'Content-Type': 'application/json' }, body });
+        if (r.ok) {
+          e.applied = true;
+          changed = true;
+          console.log(`Lire en streaming : position de « ${e.title} » recopiée dans Jellyfin (${Math.round(e.pos / 60)} min)`);
+        }
+      } catch {
+        // Jellyfin injoignable : prochain passage
+      }
+    }
+  }
+  if (changed) saveWatchPos();
+}
+setInterval(() => watchApplyPositions().catch(() => {}), 2 * 60_000);
+
 const secourQueue = [];
 // Demande refusée ou supprimée pendant le travail : on s'arrête
 const secourStopped = (r) => !requests.includes(r) || r.status === RequestStatus.DECLINED || !r.secour || r.secour.state === 'cancelled';
@@ -2997,8 +3186,28 @@ async function runDownload(job) {
     } else if (/^magnet:\?/i.test(job.link) || /^[a-f0-9]{40}$/i.test(job.link) || /^adid:\d+$/.test(job.link)) {
       job.status = 'debrid';
       files = await magnetFiles(job.link, job);
+    } else if (/^tbid:\d+$/.test(job.link)) {
+      job.status = 'debrid';
+      job.via = 'torbox';
+      files = await torboxFiles(job.link.slice(5), job);
     } else {
       files = [{ rel: null, link: job.link }];
+    }
+    // Fichier pris dans le cache pour un torrent du site : mêmes chemins que dans le torrent (qBittorrent le retrouvera)
+    if (job.layout) {
+      const base = (x) => String(x || '').split('/').pop();
+      const placed = [];
+      for (const want of job.layout) {
+        const same = files.filter((f) => Number(f.size) === want.size);
+        const f = same.find((x) => base(x.rel) === base(want.rel)) || (same.length === 1 ? same[0] : null) || files.find((x) => base(x.rel) === base(want.rel) && !Number(x.size));
+        if (!f) {
+          // Petit fichier annexe absent du cache (.nfo, sous-titre…) : qBittorrent le prendra, quelques Ko
+          if (want.size < 20e6 && !/\.(mkv|mp4|avi|m4v|ts|mov|wmv)$/i.test(want.rel)) continue;
+          throw new Error('le cache ne contient pas les mêmes fichiers que le torrent');
+        }
+        placed.push({ ...f, rel: want.rel });
+      }
+      files = placed;
     }
     job.status = 'downloading';
     job.done = 0;
@@ -4536,10 +4745,261 @@ async function fetchTorrent(rel) {
   return { buf };
 }
 
+// ——— Garde du ratio : sous le seuil (1,20), le torrent du site est d'abord cherché dans le cache AllDebrid / TorBox ———
+// Seule l'empreinte du torrent est envoyée (jamais le .torrent, qui porte la clé du compte) : en cache → fichier reçu sans
+// rien compter sur le site ; pas en cache → torrent normal dans qBittorrent. Le fichier du cache est exactement celui du
+// site : le torrent est ensuite ajouté par-dessus dans qBittorrent, vérifié, et il partage sans avoir rien téléchargé.
+const autoGuard = () => ({ enabled: true, ratio: 1.2, ...(autoCfg().guard || {}) });
+function autoGuardLow(rel) {
+  const g = autoGuard();
+  const ixId = rel.indexerId || (autoIndexers().find((x) => x.name === rel.indexer) || {}).id;
+  if (!g.enabled || !ixId || rel.freeleech || autoSiteFree(ixId)) return false;
+  const ratio = autoSiteRatio(ixId);
+  return ratio != null && ratio < g.ratio;
+}
+/** Lecture d'un .torrent (bencode) → nom et fichiers (chemins et tailles), comme qBittorrent les attend sur le disque. */
+function torrentLayout(buf) {
+  try {
+    let i = 0;
+    const next = () => {
+      const c = buf[i];
+      if (c === 0x69) {
+        const e = buf.indexOf(0x65, i);
+        const n = Number(buf.slice(i + 1, e).toString());
+        i = e + 1;
+        return n;
+      }
+      if (c === 0x6c) {
+        i++;
+        const a = [];
+        while (buf[i] !== 0x65) a.push(next());
+        i++;
+        return a;
+      }
+      if (c === 0x64) {
+        i++;
+        const o = {};
+        while (buf[i] !== 0x65) {
+          const k = next().toString();
+          o[k] = next();
+        }
+        i++;
+        return o;
+      }
+      const colon = buf.indexOf(0x3a, i);
+      const len = Number(buf.slice(i, colon).toString());
+      if (colon < 0 || !Number.isFinite(len)) throw new Error('bencode');
+      i = colon + 1 + len;
+      return buf.slice(colon + 1, i);
+    };
+    const info = next().info;
+    if (!info || info['file tree']) return null; // torrents v2 : non gérés
+    const clean = (b) => String(b).replace(/\.\.+/g, '_');
+    const name = clean(info['name.utf-8'] || info.name || '');
+    if (!name || /[\\/]/.test(name)) return null;
+    if (!Array.isArray(info.files)) return { name, files: [{ rel: name, size: Number(info.length) || 0 }] };
+    const files = info.files
+      .filter((f) => !/p/.test(String(f.attr || '')) && Array.isArray(f['path.utf-8'] || f.path))
+      .map((f) => ({ rel: [name, ...(f['path.utf-8'] || f.path).map(clean)].join('/'), size: Number(f.length) || 0 }))
+      .filter((f) => !/(^|\/)\.pad\//.test(f.rel) && !/_____padding_file/.test(f.rel));
+    return files.length ? { name, files } : null;
+  } catch {
+    return null;
+  }
+}
+const TB_API = 'https://api.torbox.app/v1/api';
+async function tb(pathname, { method = 'GET', query = {}, form = null, json = null } = {}) {
+  const key = torboxKey();
+  if (!key) throw new Error('clé TorBox non configurée');
+  const qs = new URLSearchParams(query).toString();
+  const init = { method, headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(30000) };
+  if (form) {
+    init.body = new FormData();
+    for (const [k, v] of Object.entries(form)) init.body.append(k, String(v));
+  } else if (json) {
+    init.headers['Content-Type'] = 'application/json';
+    init.body = JSON.stringify(json);
+  }
+  const r = await fetch(`${TB_API}${pathname}${qs ? `?${qs}` : ''}`, init);
+  const j = await r.json().catch(() => null);
+  if (!j || j.success === false) throw new Error(`TorBox : ${(j && (j.detail || j.error)) || `HTTP ${r.status}`}`);
+  return j.data;
+}
+/** Fichiers d'un torrent TorBox (« tbid:<id> ») avec un lien direct chacun. */
+async function torboxFiles(id, job) {
+  let t = null;
+  for (let i = 0; i < 40 && !job.cancelled; i++) {
+    const d = await tb('/torrents/mylist', { query: { id, bypass_cache: 'true' } });
+    t = Array.isArray(d) ? d.find((x) => String(x.id) === String(id)) : d;
+    if (t && t.download_finished && Array.isArray(t.files) && t.files.length) break;
+    await sleep(3000);
+  }
+  if (!t || !t.download_finished) throw new Error('TorBox : le torrent n’est pas prêt');
+  const out = [];
+  for (const f of t.files) {
+    const url = await tb('/torrents/requestdl', { query: { token: torboxKey(), torrent_id: id, file_id: f.id } });
+    if (typeof url === 'string') out.push({ rel: f.name || f.short_name, direct: url, size: Number(f.size) || 0 });
+  }
+  return out;
+}
+/** Empreinte en cache ? Renvoie { via, link } (lien de téléchargement interne) ou null. Jamais d'erreur : sans cache, torrent normal. */
+async function cacheByHash(hash) {
+  if (secourDebridKey()) {
+    try {
+      const u = await ad('/v4/magnet/upload', { magnets: [`magnet:?xt=urn:btih:${hash}`] });
+      const m = u.magnets && u.magnets[0];
+      if (m && !m.error && m.ready) return { via: 'alldebrid', link: `adid:${m.id}` };
+      if (m && m.id) await ad('/v4/magnet/delete', { id: m.id }).catch(() => {});
+    } catch (e) {
+      autoLog(`cache AllDebrid : ${e.message}`, 'warn');
+    }
+  }
+  if (torboxKey()) {
+    try {
+      const d = await tb('/torrents/checkcached', { query: { hash, format: 'list', list_files: 'false' } });
+      const hit = Array.isArray(d) ? d.some((x) => String(x.hash || '').toLowerCase() === hash) : Boolean(d && d[hash]);
+      if (hit) {
+        const c = await tb('/torrents/createtorrent', { method: 'POST', form: { magnet: `magnet:?xt=urn:btih:${hash}`, seed: 3, allow_zip: 'false' } });
+        if (c && c.torrent_id) return { via: 'torbox', link: `tbid:${c.torrent_id}` };
+      }
+    } catch (e) {
+      autoLog(`cache TorBox : ${e.message}`, 'warn');
+    }
+  }
+  return null;
+}
+const OVER_DIR = path.join(DATA_DIR, 'seed-over');
+const qbitLocalFolder = () => (autoCfg().qbit || {}).localFolder || 'downloads/qbit';
+/** Fichier arrivé par le cache : le torrent du site est ajouté par-dessus dans qBittorrent (à l'arrêt, débit de réception
+ *  bridé), vérifié, puis lancé seulement s'il est complet à 100 %. Renvoie 'wait', 'ok' (qBittorrent partage) ou 'plain'
+ *  (fichier différent : torrent retiré, le fichier est rangé normalement, sans partage). */
+async function seedOverStep(g) {
+  const o = g.over;
+  const drop = async (why) => {
+    await qbitFetch('/api/v2/torrents/delete', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ hashes: o.hash, deleteFiles: 'false' }) }).catch(() => {});
+    await fs.promises.unlink(o.torrent).catch(() => {});
+    o.stage = 'plain';
+    o.note = why;
+    autoLog(`${g.title} : pas de partage par-dessus le cache (${why})`, 'warn');
+    return 'plain';
+  };
+  const post = (p2, hashes, extra = {}) => qbitFetch(p2, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ hashes, ...extra }) });
+  try {
+    if (!o.stage) {
+      const qc = autoCfg().qbit || {};
+      const fd = new FormData();
+      fd.append('torrents', new Blob([await fs.promises.readFile(o.torrent)], { type: 'application/x-bittorrent' }), `${cleanName(g.release.title)}.torrent`);
+      fd.append('category', qbitCategory());
+      fd.append('savepath', `${String(qc.remotePath || '/downloads').replace(/\/+$/, '')}/${o.root}`);
+      fd.append('paused', 'true');
+      fd.append('stopped', 'true');
+      fd.append('dlLimit', '1024');
+      fd.append('skip_checking', 'false');
+      fd.append('contentLayout', 'Original');
+      fd.append('root_folder', 'true');
+      const r = await qbitFetch('/api/v2/torrents/add', { method: 'POST', body: fd });
+      if (/fail/i.test(await r.text())) return drop('refusé par qBittorrent');
+      o.stage = 'check';
+      o.at = Date.now();
+      return 'wait';
+    }
+    const list = await (await qbitFetch(`/api/v2/torrents/info?hashes=${o.hash}`)).json();
+    const t = list[0];
+    if (!t) return Date.now() - o.at > 3 * 60e3 ? drop('torrent absent de qBittorrent') : 'wait';
+    const prog = Number(t.progress) || 0;
+    if (/checking|moving|allocating/i.test(t.state || '')) return 'wait';
+    if (!o.rechecked) {
+      await post('/api/v2/torrents/recheck', o.hash);
+      o.rechecked = Date.now();
+      return 'wait';
+    }
+    if (Date.now() - o.rechecked < 20e3) return 'wait';
+    if (prog >= 1 || (prog >= 0.99 && Number(t.amount_left) < 50e6)) {
+      await post('/api/v2/torrents/setDownloadLimit', o.hash, { limit: '0' }).catch(() => {});
+      await post('/api/v2/torrents/start', o.hash).catch(() => post('/api/v2/torrents/resume', o.hash).catch(() => {}));
+      await fs.promises.unlink(o.torrent).catch(() => {});
+      o.stage = 'seeding';
+      return 'ok';
+    }
+    if (Date.now() - o.rechecked > 20 * 60e3 || /^(paused|stopped)DL$|missing|error/i.test(t.state || '')) return drop(`fichier vérifié à ${Math.round(prog * 100)} %`);
+    return 'wait';
+  } catch (e) {
+    return Date.now() - (o.at || Date.now()) > 30 * 60e3 ? drop(`qBittorrent : ${e.message}`) : 'wait';
+  }
+}
+
+/** Le téléchargement depuis le cache a échoué : le même torrent part normalement dans qBittorrent (rien n'est mis en liste noire). */
+async function overFallback(g, why) {
+  const o = g.over;
+  const qc = autoCfg().qbit || {};
+  const fd = new FormData();
+  fd.append('torrents', new Blob([await fs.promises.readFile(o.torrent)], { type: 'application/x-bittorrent' }), `${cleanName(g.release.title)}.torrent`);
+  fd.append('category', qbitCategory());
+  fd.append('savepath', `${String(qc.remotePath || '/downloads').replace(/\/+$/, '')}/${o.root}`);
+  const r = await qbitFetch('/api/v2/torrents/add', { method: 'POST', body: fd });
+  if (/fail/i.test(await r.text())) throw new Error('refusé par qBittorrent');
+  await fs.promises.unlink(o.torrent).catch(() => {});
+  g.client = 'qbit';
+  g.hash = o.hash;
+  g.route = { ...(g.route || {}), via: 'torrent', note: `cache en échec : ${why}` };
+  delete g.over;
+  delete g.jobId;
+  g.lastMoveAt = Date.now();
+  if (!g.release.freeleech && g.release.indexerId) {
+    const day = new Date().toISOString().slice(0, 10);
+    const st0 = (auto.dlStats[g.release.indexerId] = auto.dlStats[g.release.indexerId] || {});
+    st0[day] = (st0[day] || 0) + (g.release.size || 0);
+  }
+  autoLog(`${g.title} : le cache a échoué (${why}), torrent normal envoyé à qBittorrent`, 'warn');
+}
+
 /** Envoie la release au client choisi ; renvoie les infos de suivi. */
 async function autoSend(rel, item, grab) {
   const t = await fetchTorrent(rel);
   const client = autoDebridOnly() ? 'alldebrid' : autoClientFor(rel);
+  if (client === 'qbit' && autoGuardLow(rel)) {
+    grab.route = { low: true, ratio: Math.round((autoSiteRatio(rel.indexerId) || 0) * 100) / 100, via: 'torrent' };
+    const qc0 = autoCfg().qbit || {};
+    const dest0 = autoResolveFolder(item.type === 'movie' ? 'radarr' : 'sonarr', item.folderPath);
+    const hash0 = t.buf ? torrentHash(t.buf) : null;
+    const layout = t.buf ? torrentLayout(t.buf) : null;
+    let known = false;
+    if (hash0) known = (await (await qbitFetch(`/api/v2/torrents/info?hashes=${hash0}`)).json().catch(() => [])).length > 0;
+    if (hash0 && layout && dest0 && qc0.perDisk !== false && !known) {
+      const hit = await cacheByHash(hash0);
+      if (hit) {
+        await fs.promises.mkdir(OVER_DIR, { recursive: true });
+        const tf = path.join(OVER_DIR, `${grab.id}.torrent`);
+        await fs.promises.writeFile(tf, t.buf);
+        const job = {
+          id: crypto.randomBytes(5).toString('hex'),
+          link: hit.link,
+          root: dest0.root,
+          folder: qbitLocalFolder(),
+          layout: layout.files,
+          status: 'queued',
+          quiet: true,
+          auto: true,
+          name: rel.title,
+          size: 0,
+          done: 0,
+          speed: 0,
+          token: null,
+          createdAt: new Date().toISOString(),
+          by: 'Lumio Auto',
+        };
+        downloads.push(job);
+        runDownload(job);
+        grab.client = 'alldebrid';
+        grab.jobId = job.id;
+        grab.over = { via: hit.via, hash: hash0, name: layout.name, root: dest0.root, folder: job.folder, torrent: tf };
+        grab.route.via = hit.via;
+        autoLog(`${item.title} : en cache ${hit.via === 'torbox' ? 'TorBox' : 'AllDebrid'} (ratio ${grab.route.ratio} sous ${autoGuard().ratio}), rien de compté sur ${rel.indexer}`);
+        return;
+      }
+      autoLog(`${item.title} : pas en cache (ratio ${grab.route.ratio} sous ${autoGuard().ratio}), torrent ${rel.indexer} normal`);
+    }
+  }
   if (client === 'rdt' || client === 'qbit') {
     const fd = new FormData();
     if (t.buf) fd.append('torrents', new Blob([t.buf], { type: 'application/x-bittorrent' }), `${cleanName(rel.title)}.torrent`);
@@ -4844,6 +5304,10 @@ async function autoCleanup(grab, srcPath) {
   } catch {}
   try {
     if (['alldebrid', 'movix'].includes(grab.client) && srcPath && srcPath.includes(`${path.sep}.lumio-auto${path.sep}`)) await fs.promises.rm(srcPath, { recursive: true, force: true });
+    if (grab.client === 'alldebrid' && grab.over) {
+      await fs.promises.rm(path.join(safePath(grab.over.root, grab.over.folder).full, grab.over.name), { recursive: true, force: true });
+      await fs.promises.unlink(grab.over.torrent).catch(() => {});
+    }
   } catch {}
 }
 
@@ -4926,11 +5390,36 @@ async function autoProgressTick() {
           g.downloaded = job.done || 0;
           g.eta = g.speed > 0 && job.size ? Math.round((job.size - job.done) / g.speed) : null;
           g.clientState = job.status;
-          g.statusText = { queued: 'en file d’attente', debrid: 'débridage AllDebrid', downloading: 'téléchargement' }[job.status] || job.status;
+          g.statusText = { queued: 'en file d’attente', debrid: job.via === 'torbox' ? 'préparation TorBox' : 'débridage AllDebrid', downloading: g.over ? 'téléchargement depuis le cache' : 'téléchargement' }[job.status] || job.status;
+          if (job.status === 'done' && g.over && g.over.stage !== 'plain') {
+            g.statusText = 'vérification avant le partage';
+            g.progress = 100;
+            const step = await seedOverStep(g);
+            if (step === 'ok') {
+              // qBittorrent prend la suite : import par lien dur au prochain passage, puis partage
+              g.client = 'qbit';
+              g.hash = g.over.hash;
+              g.lastMoveAt = Date.now();
+              autoLog(`${g.title} : fichier du cache vérifié à 100 %, partage lancé sans téléchargement`);
+              continue;
+            }
+            if (step === 'wait') {
+              g.lastMoveAt = Date.now();
+              continue;
+            }
+          }
           if (job.status === 'done') {
             finished = true;
-            src = safePath(job.root, job.folder).full;
+            src = g.over ? path.join(safePath(job.root, job.folder).full, g.over.name) : safePath(job.root, job.folder).full;
           } else if (['error', 'cancelled'].includes(job.status)) failed = job.error || 'échec AllDebrid';
+        }
+        if (failed && g.over && job && job.status !== 'cancelled') {
+          try {
+            await overFallback(g, failed);
+            continue;
+          } catch (e) {
+            failed = `${failed} ; torrent normal impossible (${e.message})`;
+          }
         }
       }
       // Bloqué trop longtemps sans avancer : on abandonne et on cherche une autre version
@@ -5215,6 +5704,12 @@ setInterval(() => autoProgressTick().catch(() => {}), 10_000);
 
 // ——— Partage (seed) qBittorrent : jusqu'au ratio ou à la durée voulus, puis le torrent est retiré ———
 // (le fichier de la bibliothèque est un lien dur : il reste quand le torrent et sa copie sont supprimés)
+if (!Array.isArray(auto.cleanLog)) auto.cleanLog = [];
+/** Journal court des torrents retirés tout seuls (onglet Seed). */
+function cleanNote(title, why, ratio, uploaded, boost) {
+  auto.cleanLog.unshift({ title, why, ratio: ratio || 0, uploaded: uploaded || 0, boost: Boolean(boost), at: new Date().toISOString() });
+  if (auto.cleanLog.length > 40) auto.cleanLog.length = 40;
+}
 let autoSeedBusy = false;
 async function autoSeedTick() {
   if (autoSeedBusy) return;
@@ -5253,8 +5748,11 @@ async function autoSeedTick() {
         // Partage intelligent : durée minimum passée et plus personne ne le demande depuis 14 jours → place libérée
         why = `plus demandé depuis 14 j (ratio ${g.ratio})`;
       } else g.seedNote = null;
+      // Après 72 h de partage : un torrent resté à 1 de ratio ou moins ne rapporte pas, il est retiré (le fichier de la bibliothèque reste)
+      if (!why && g.seedTime >= HR_SEED_S && g.ratio <= 1) why = `72 h de partage, ratio ${g.ratio}`;
       if (why && !hrSafe(g.seedTime, g.ratio)) why = null; // règle C411 : 72 h ou ratio 1 avant tout retrait
       if (why) {
+        cleanNote(g.title, why, g.ratio, g.uploaded, false);
         await qbitFetch('/api/v2/torrents/delete', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ hashes: g.hash, deleteFiles: 'true' }) }).catch(() => {});
         g.seeding = false;
         g.seedEnd = why;
@@ -5386,7 +5884,14 @@ setInterval(() => autoProfileTick().catch(() => {}), 30 * 60_000);
 // Freeleech = le téléchargement ne compte pas, l'envoi compte : le ratio ne peut que monter.
 // Rangés sur un seul disque (jellyfin3 par défaut), dans un budget de place ; jamais dans Jellyfin.
 // paid : prendre aussi des torrents payants très rentables (éteint par défaut), au plus paidGb par semaine
-const autoBoostCfg = () => ({ enabled: true, gb: 200, disk: 'jellyfin3', perWeek: 6, paid: false, paidGb: 10, ...(autoCfg().boost || {}) });
+// Automatique : un passage par heure, 3 torrents au plus par passage. Payants seulement quand le ratio du site est au-dessus
+// du seuil de la garde (1,20), et 30 Go par semaine au plus ; en dessous, freeleech uniquement.
+const autoBoostCfg = () => ({ enabled: true, gb: 200, disk: 'jellyfin3', perRun: 3, paidGb: 30, ...(autoCfg().boost || {}), paid: true });
+const BOOST_EVERY = 3600e3;
+function boostPaidOk(r) {
+  const ratio = r.indexerId ? autoSiteRatio(r.indexerId) : null;
+  return ratio != null && ratio >= autoGuard().ratio;
+}
 const BOOST_CATEGORY = 'lumio-boost';
 const boostActive = () => auto.boost.filter((b) => b.state !== 'removed');
 const boostUsed = () => boostActive().reduce((n, b) => n + (b.size || 0), 0);
@@ -5403,7 +5908,8 @@ function autoBoostView() {
     used: boostUsed(),
     budget: cfg.gb * 1e9,
     lastRun: auto.boostLastRun || null,
-    nextRun: auto.boostRetryAt || (auto.boostLastRun ? new Date(Date.parse(auto.boostLastRun) + 7 * 86400e3).toISOString() : null),
+    nextRun: auto.boostLastRun ? new Date(Date.parse(auto.boostLastRun) + BOOST_EVERY).toISOString() : null,
+    paidAllowed: autoIndexers().some((x) => x.enabled !== false && boostPaidOk({ indexerId: x.id })),
     lastNote: auto.boostNote || null,
     paidWeek: boostPaidWeek(),
     torrents: boostActive().map((b) => ({ id: b.id, title: b.title, size: b.size, indexer: b.indexer, addedAt: b.addedAt, state: b.state, free: b.free !== false, progress: b.progress || 0, ratio: b.ratio || 0, uploaded: b.uploaded || 0, upSpeed: b.upSpeed || 0, leechers: b.leechers ?? null, seeders: b.seeders ?? null, hoursLeft: b.state === 'seeding' ? hrLeft(b.seedTime) : null })),
@@ -5415,6 +5921,7 @@ async function boostRemove(b, why) {
   b.removedAt = new Date().toISOString();
   b.removedWhy = why;
   autoLog(`booster : ${b.title} retiré (${why}, ratio ${b.ratio || 0})`);
+  cleanNote(b.title, why, b.ratio, b.uploaded, true);
 }
 /** Suivi des torrents du booster (toutes les 5 min) : avancement, envoi, personnes qui téléchargent. */
 let boostBusy = false;
@@ -5441,6 +5948,8 @@ async function autoBoostTick() {
       b.state = Number(t.progress) >= 1 ? 'seeding' : 'downloading';
       // Jamais fini au bout de 3 jours (plus de source) : place rendue, rien n'a été compté (freeleech)
       if (b.state === 'downloading' && Date.now() - Date.parse(b.addedAt) > 3 * 86400e3 && b.progress < 100) await boostRemove(b, 'téléchargement bloqué').catch(() => {});
+      // 72 h de partage passées et toujours à 1 de ratio ou moins : il ne rapporte pas, la place est rendue
+      else if (b.state === 'seeding' && b.seedTime >= HR_SEED_S && b.ratio <= 1) await boostRemove(b, '72 h de partage, ratio 1 ou moins').catch(() => {});
     }
     // Disque presque plein : les vrais téléchargements passent avant le booster. On rend de la place
     // (torrents pas finis d'abord, puis ceux qui ont leurs 72 h ou ratio 1), un par passage.
@@ -5559,7 +6068,7 @@ async function autoBoostRun(manual = false) {
     auto.boostLastRun = new Date().toISOString();
     auto.boostRetryAt = null;
     // Rien pris : nouvel essai le lendemain (la date de la dernière sélection reste la vraie)
-    const retryTomorrow = () => (auto.boostRetryAt = new Date(Date.now() + 86400e3).toISOString());
+    const retryTomorrow = () => {};
     const { list, seen } = await boostCandidates(true);
     const budget = cfg.gb * 1e9;
     // 1. Choix : les gratuits (meilleur gain d'abord), puis, si l'option est allumée, les payants rentables dans la limite de la semaine
@@ -5567,10 +6076,10 @@ async function autoBoostRun(manual = false) {
     let need = 0;
     let paid = boostPaidWeek();
     for (const r of list) {
-      if (picks.length >= cfg.perWeek) break;
+      if (picks.length >= (cfg.perRun || 3)) break;
       if (need + r.size > budget) continue;
       if (!r.freeleech) {
-        if (!cfg.paid || !boostWorthPaying(r) || paid + r.size > cfg.paidGb * 1e9) continue;
+        if (!boostWorthPaying(r) || !boostPaidOk(r) || paid + r.size > cfg.paidGb * 1e9) continue;
         paid += r.size;
       }
       picks.push(r);
@@ -5581,8 +6090,8 @@ async function autoBoostRun(manual = false) {
       const noProfile = autoIndexers().filter((x) => x.enabled !== false && (auto.siteProfile[x.id] || {}).error).map((x) => x.name);
       const hint = noProfile.length ? ` Pour voir les périodes freeleech du compte et ton vrai ratio, donne le droit « Profil (lecture) » à ta clé API ${noProfile.join(', ')} (page Intégrations du site).` : '';
       const worth = list.filter(boostWorthPaying).length;
-      if (!seen) return say('les sites n’ont rien renvoyé : nouvel essai demain');
-      return say(`pas de freeleech en ce moment (ni sur le compte, ni parmi les ${seen} dernières sorties) : rien n’est pris, nouvel essai demain.${worth ? ` ${worth} torrent(s) payant(s) très demandé(s) repéré(s) : regarde « Meilleurs torrents ».` : ''}${hint}`);
+      if (!seen) return say('les sites n’ont rien renvoyé : nouvel essai dans une heure');
+      return say(`${seen} sorties regardées, rien qui vaille le coup pour l’instant (pas de freeleech${worth ? `, ${worth} payant(s) intéressant(s) mais ratio sous ${autoGuard().ratio} ou limite de la semaine atteinte` : ', pas de payant assez demandé'}) : nouvel essai dans une heure.${hint}`);
     }
     // 2. Place : on retire d'abord les anciens que plus personne ne télécharge, puis ce qu'il faut (toujours après 72 h ou ratio 1)
     const removable = boostActive()
@@ -5592,7 +6101,7 @@ async function autoBoostRun(manual = false) {
       const over = boostUsed() + need > budget;
       const dead = (b.leechers || 0) < 2 && Date.now() - Date.parse(b.addedAt) >= 7 * 86400e3;
       if (!over && !dead) continue;
-      await boostRemove(b, over ? 'place pour la sélection de la semaine' : 'plus demandé').catch(() => {});
+      await boostRemove(b, over ? 'place pour de nouveaux torrents' : 'plus demandé').catch(() => {});
     }
     // 3. Envoi à qBittorrent (catégorie à part, partage sans limite)
     const added = [];
@@ -5605,7 +6114,7 @@ async function autoBoostRun(manual = false) {
     }
     const gb = (added.reduce((n, b) => n + b.size, 0) / 1e9).toFixed(1).replace('.', ',');
     const nPaid = added.filter((b) => !b.free).length;
-    if (added.length) notify({ title: '🚀 Lumio Auto · booster de seed', message: `${added.length} torrent${added.length > 1 ? 's' : ''} ajouté${added.length > 1 ? 's' : ''} (${gb} Go${nPaid ? `, dont ${nPaid} payant${nPaid > 1 ? 's' : ''}` : ', freeleech'}) pour remonter le ratio`, tags: ['rocket'], click: 'lumio://auto' }).catch(() => {});
+    if (added.length && Date.now() - (auto.boostNotifiedAt || 0) > 12 * 3600e3 && (auto.boostNotifiedAt = Date.now())) notify({ title: '🚀 Lumio Auto · booster de seed', message: `${added.length} torrent${added.length > 1 ? 's' : ''} ajouté${added.length > 1 ? 's' : ''} (${gb} Go${nPaid ? `, dont ${nPaid} payant${nPaid > 1 ? 's' : ''}` : ', freeleech'}) pour remonter le ratio`, tags: ['rocket'], click: 'lumio://auto' }).catch(() => {});
     if (!added.length) retryTomorrow();
     return say(added.length ? `${added.length} torrent(s) ajouté(s), ${gb} Go${nPaid ? ` (dont ${nPaid} payant(s))` : ' en freeleech'} · ${(boostUsed() / 1e9).toFixed(0)} / ${cfg.gb} Go utilisés` : 'torrents trouvés, mais pas de place (budget ou disque plein)');
   } catch (e) {
@@ -5615,14 +6124,141 @@ async function autoBoostRun(manual = false) {
   }
 }
 setInterval(() => autoBoostTick().catch(() => {}), 5 * 60_000);
-// Une fois par semaine (premier passage quelques minutes après la mise à jour du serveur)
+// Toutes les heures (premier passage quelques minutes après la mise à jour du serveur)
 setInterval(() => {
   if (!autoBoostCfg().enabled || !autoOn()) return;
-  const due = auto.boostRetryAt ? Date.parse(auto.boostRetryAt) : auto.boostLastRun ? Date.parse(auto.boostLastRun) + 7 * 86400e3 : 0;
+  const due = auto.boostLastRun ? Date.parse(auto.boostLastRun) + BOOST_EVERY : 0;
   if (Date.now() < due) return;
   autoBoostRun().catch(() => {});
 }, 10 * 60_000);
 
+
+// ——— Vérifications automatiques (toutes les 15 min) : tout ce qui peut empêcher le partage de tourner tout seul ———
+// Ce qui peut l'être est réparé sur place (torrent arrêté relancé, torrent du booster cassé retiré) ; le reste est affiché
+// dans l'onglet Seed, avec une notification quand un vrai problème apparaît.
+let healthBusy = false;
+async function autoHealthTick() {
+  if (healthBusy || !autoOn()) return;
+  healthBusy = true;
+  const checks = [];
+  const add = (id, label, level, note) => checks.push({ id, label, level, note: note || null });
+  try {
+    const qc = autoCfg().qbit || {};
+    if (!qc.url) add('qbit', 'qBittorrent', 'bad', 'pas configuré : aucun partage possible');
+    else {
+      try {
+        const ti = await (await qbitFetch('/api/v2/transfer/info')).json();
+        add('qbit', 'qBittorrent', 'ok', 'joignable');
+        const cs = String(ti.connection_status || '');
+        if (cs === 'connected') add('port', 'Port de partage', 'ok', 'ouvert : les autres peuvent se connecter');
+        else if (cs === 'firewalled') add('port', 'Port de partage', 'warn', 'fermé : les autres ne peuvent pas se connecter à toi, l’envoi est ralenti (ouvre le port de qBittorrent sur le VPN ou la box)');
+        else add('port', 'Port de partage', 'bad', 'qBittorrent n’a pas de connexion (VPN coupé ?)');
+        // Torrents suivis par Lumio : arrêtés → relancés ; en erreur → comptés (ceux du booster sont retirés)
+        const mine = new Map([...auto.grabs.filter((g) => g.seeding && g.client === 'qbit' && g.hash).map((g) => [g.hash, { g }]), ...boostActive().map((b) => [b.hash, { b }])]);
+        const list = mine.size ? await (await qbitFetch(`/api/v2/torrents/info?hashes=${[...mine.keys()].join('|')}`)).json() : [];
+        let restarted = 0;
+        let broken = 0;
+        for (const t of list) {
+          const who = mine.get(String(t.hash || '').toLowerCase());
+          if (!who) continue;
+          if (/^(paused|stopped)UP$/i.test(t.state || '')) {
+            const body = new URLSearchParams({ hashes: t.hash });
+            const h = { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body };
+            await qbitFetch('/api/v2/torrents/start', h).catch(() => qbitFetch('/api/v2/torrents/resume', { ...h, body: new URLSearchParams({ hashes: t.hash }) }).catch(() => {}));
+            restarted++;
+          } else if (/error|missingFiles/i.test(t.state || '')) {
+            broken++;
+            if (who.b) await boostRemove(who.b, `torrent cassé (${t.state})`).catch(() => {});
+            else {
+              // Fichier disparu (déplacé, supprimé) : le partage ne peut plus continuer, le torrent est retiré proprement
+              await qbitFetch('/api/v2/torrents/delete', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ hashes: t.hash, deleteFiles: 'false' }) }).catch(() => {});
+              who.g.seeding = false;
+              who.g.seedEnd = `torrent cassé (${t.state})`;
+              cleanNote(who.g.title, who.g.seedEnd, who.g.ratio, who.g.uploaded, false);
+            }
+          }
+        }
+        add('torrents', 'Torrents en partage', broken ? 'warn' : 'ok', `${list.length} suivis${restarted ? `, ${restarted} relancé(s)` : ''}${broken ? `, ${broken} cassé(s) retiré(s)` : ''}`);
+      } catch (e) {
+        add('qbit', 'qBittorrent', 'bad', `injoignable (${e.message})`);
+      }
+    }
+    for (const ix of autoIndexers().filter((x) => x.enabled !== false && (x.type === 'c411' || /c411/i.test(x.url || '')))) {
+      const prof = auto.siteProfile[ix.id] || {};
+      const ratio = autoSiteRatio(ix.id);
+      if (prof.error) add(`site-${ix.id}`, `Ratio ${ix.name}`, 'warn', `estimé seulement${ratio != null ? ` (${ratio.toFixed(2)})` : ''} : ${prof.error}. Donne le droit « Profil (lecture) » à la clé API pour le vrai ratio et les périodes freeleech`);
+      else if (ratio == null) add(`site-${ix.id}`, `Ratio ${ix.name}`, 'warn', 'inconnu pour l’instant : la garde du ratio attend');
+      else add(`site-${ix.id}`, `Ratio ${ix.name}`, 'ok', `${ratio.toFixed(2)}${prof.allowed === false ? ' · téléchargement bloqué par le site' : ''}`);
+      if (prof.allowed === false) add(`site-dl-${ix.id}`, `Compte ${ix.name}`, 'bad', 'le site bloque les téléchargements (ratio trop bas)');
+    }
+    add('cache', 'Cache AllDebrid / TorBox', secourDebridKey() || torboxKey() ? 'ok' : 'warn', [secourDebridKey() ? 'AllDebrid' : null, torboxKey() ? 'TorBox' : null].filter(Boolean).join(' + ') || 'aucune clé : sous le seuil, tout passera par le torrent du site');
+    const bd = boostDisk();
+    if (autoBoostCfg().enabled) {
+      if (!bd) add('boost', 'Disque du booster', 'bad', `« ${autoBoostCfg().disk} » introuvable`);
+      else {
+        const di = await diskInfo(bd).catch(() => null);
+        const free = di && di.free != null ? di.free : null;
+        add('boost', 'Disque du booster', free != null && free < 25e9 ? 'warn' : 'ok', free != null ? `${(free / 1e9).toFixed(0)} Go libres sur ${bd.name}${free < 25e9 ? ' : le booster rend de la place tout seul' : ''}` : bd.name);
+      }
+      const late = auto.boostLastRun && Date.now() - Date.parse(auto.boostLastRun) > 3 * BOOST_EVERY;
+      add('boost-run', 'Booster de seed', late ? 'warn' : 'ok', auto.boostLastRun ? `dernier passage ${late ? 'il y a plus de 3 h' : 'il y a moins de 3 h'}` : 'premier passage à venir');
+      if (late) autoBoostRun().catch(() => {});
+    }
+    const prevBad = new Set(((auto.health && auto.health.checks) || []).filter((c) => c.level === 'bad').map((c) => c.id));
+    const newBad = checks.filter((c) => c.level === 'bad' && !prevBad.has(c.id));
+    auto.health = { at: new Date().toISOString(), checks };
+    autoSave();
+    if (newBad.length) notify({ title: '⚠️ Lumio Auto · partage', message: newBad.map((c) => `${c.label} : ${c.note}`).join(' · ').slice(0, 300), tags: ['warning'], click: 'lumio://auto' }).catch(() => {});
+  } finally {
+    healthBusy = false;
+  }
+}
+setTimeout(() => autoHealthTick().catch(() => {}), 90_000);
+setInterval(() => autoHealthTick().catch(() => {}), 15 * 60_000);
+
+/** Onglet Seed de Lumio Auto : tout ce que le serveur fait tout seul pour le ratio (aucun réglage, aucun bouton). */
+function autoSeedView() {
+  const g0 = autoGuard();
+  const sites = autoIndexers()
+    .filter((x) => x.enabled !== false && x.type !== 'prowlarr')
+    .map((ix) => {
+      const ratio = autoSiteRatio(ix.id);
+      const free = autoSiteFree(ix.id);
+      return { id: ix.id, name: ix.name, ratio: ratio != null ? Math.round(ratio * 100) / 100 : null, real: Boolean(autoSiteProfile(ix.id)), freeleech: free, low: Boolean(g0.enabled && ratio != null && ratio < g0.ratio && !free) };
+    });
+  const seeding = auto.grabs.filter((g) => g.seeding);
+  const routes = auto.grabs
+    .filter((g) => g.client === 'qbit' || g.over)
+    .slice(0, 25)
+    .map((g) => ({
+      id: g.id,
+      title: g.title,
+      release: g.release.title,
+      size: g.size || g.release.size || 0,
+      at: g.startedAt,
+      via: g.over ? g.over.via : 'torrent',
+      shared: g.over ? g.over.stage === 'seeding' : true,
+      note: g.over && g.over.note ? g.over.note : null,
+      low: Boolean(g.route && g.route.low),
+      free: Boolean(g.release.freeleech),
+      state: g.state,
+      seeding: Boolean(g.seeding),
+      ratio: g.ratio || 0,
+      uploaded: g.uploaded || 0,
+      upSpeed: g.seeding ? g.upSpeed || 0 : 0,
+      hoursLeft: g.seeding ? hrLeft(g.seedTime) : null,
+      seedEnd: g.seedEnd || null,
+    }));
+  return {
+    guard: { enabled: g0.enabled, ratio: g0.ratio, sites },
+    seeding: { count: seeding.length, upSpeed: seeding.reduce((n, g) => n + (g.upSpeed || 0), 0) + boostActive().reduce((n, b) => n + (b.upSpeed || 0), 0), uploaded: seeding.reduce((n, g) => n + (g.uploaded || 0), 0) },
+    routes,
+    boost: autoBoostView(),
+    cleaned: auto.cleanLog.slice(0, 25),
+    health: auto.health || null,
+    at: new Date().toISOString(),
+  };
+}
 
 async function autoRatioReport() {
   await autoRatioTick().catch(() => {});
@@ -6229,13 +6865,16 @@ async function autoRoutes(req, res, p, q, user) {
       c.profile = pf;
     }
     if (b.folders && typeof b.folders === 'object') c.folders = { movie: b.folders.movie || null, tv: b.folders.tv || null };
+    if (b.guard && typeof b.guard === 'object') {
+      c.guard = { ...autoGuard() };
+      if (typeof b.guard.enabled === 'boolean') c.guard.enabled = b.guard.enabled;
+      if (Number(b.guard.ratio) > 0) c.guard.ratio = Math.min(5, Number(b.guard.ratio));
+    }
     if (b.boost && typeof b.boost === 'object') {
       c.boost = { ...autoBoostCfg() };
       if (typeof b.boost.enabled === 'boolean') c.boost.enabled = b.boost.enabled;
       if (Number(b.boost.gb) > 0) c.boost.gb = Number(b.boost.gb);
-      if (Number(b.boost.perWeek) > 0) c.boost.perWeek = Math.min(20, Number(b.boost.perWeek));
       if (typeof b.boost.disk === 'string' && b.boost.disk.trim()) c.boost.disk = b.boost.disk.trim();
-      if (typeof b.boost.paid === 'boolean') c.boost.paid = b.boost.paid;
       if (Number(b.boost.paidGb) > 0) c.boost.paidGb = Math.min(100, Number(b.boost.paidGb));
     }
     saveConfig();
@@ -6270,6 +6909,10 @@ async function autoRoutes(req, res, p, q, user) {
     } catch (e) {
       throw new HttpError(400, e.message);
     }
+    return true;
+  }
+  if (req.method === 'GET' && p === '/api/auto/seed') {
+    send(res, 200, autoSeedView());
     return true;
   }
   if (req.method === 'POST' && p === '/api/auto/boost/run') {
@@ -8357,6 +9000,24 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       }
     }
 
+    // ——— « Lire » un titre absent (admin) : lien de streaming TorBox + téléchargement en arrière-plan + reprise ———
+    if (req.method === 'GET' && p === '/api/watch/now') return send(res, 200, watchNowView());
+    if (req.method === 'POST' && p === '/api/watch/now') return send(res, 200, await watchNow(user, await readBody(req)));
+    if (req.method === 'POST' && p === '/api/watch/progress') return send(res, 200, watchProgress(user, await readBody(req)));
+    if (req.method === 'GET' && p === '/api/watch/progress') {
+      const type = q.get('type') === 'tv' ? 'tv' : 'movie';
+      return send(res, 200, { position: watchPosition(user, type, Number(q.get('tmdbId')), Number(q.get('season')) || null, Number(q.get('episode')) || null) });
+    }
+    // Admin : interrupteurs du streaming (la clé TorBox se règle dans Lumio Auto → Serveur)
+    if (req.method === 'PUT' && p === '/api/watch/now') {
+      requireAdmin(user);
+      const b = await readBody(req);
+      if (typeof b.enabled === 'boolean') config.watchNow = b.enabled;
+      if (typeof b.download === 'boolean') config.watchNowDownload = b.download;
+      saveConfig();
+      watchCache.clear();
+      return send(res, 200, watchNowView());
+    }
     // ——— Admin : Lumio Secour (liens d'hébergeurs → AllDebrid → disques) ———
     if (p === '/api/secour' || p.startsWith('/api/secour/')) {
       requireAdmin(user);

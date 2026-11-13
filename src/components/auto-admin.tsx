@@ -12,7 +12,7 @@ import { Picker, Toggle } from '@/components/arr-section';
 import { toast } from '@/components/toast';
 import { Button, Field, ScreenTitle, Section, SectionCollapse, SegChip } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
-import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoBoost, type AutoBoostCandidate, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
+import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoBoost, type AutoSeedView, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
 import { useSettings } from '@/lib/settings';
 import { IS_AUTO } from '@/lib/variant';
 import { ServerRequests } from '@/components/server-requests';
@@ -563,45 +563,8 @@ function RatioTab() {
 
 const fmtWhen = (iso?: string | null) => (iso ? new Date(iso).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
 
-/** Booster de seed : torrents freeleech pris une fois par semaine, seulement pour partager. */
-function BoostCard({ b, reload }: { b: AutoBoost; reload: () => void }) {
-  const { settings } = useSettings();
-  const [busy, setBusy] = useState(false);
-  const [cands, setCands] = useState<{ seen: number; list: AutoBoostCandidate[] } | null>(null);
-  const [candBusy, setCandBusy] = useState(false);
-  const loadCands = (refresh = false) => {
-    setCandBusy(true);
-    autoApi
-      .boostCandidates(settings, refresh)
-      .then((r) => setCands({ seen: r.seen, list: r.candidates }))
-      .catch((e) => Alert.alert('Booster de seed', /404|inconnue/.test(e?.message ?? '') ? 'Mets le serveur à jour (3.93.0).' : (e?.message ?? String(e))))
-      .finally(() => setCandBusy(false));
-  };
-  const take = (c: AutoBoostCandidate) => {
-    const go = () =>
-      autoApi
-        .boostTake(settings, c.guid)
-        .then((r) => (toast(r.message), setCands((o) => (o ? { ...o, list: o.list.filter((x) => x.guid !== c.guid) } : o)), reload()))
-        .catch((e) => Alert.alert('Booster de seed', e?.message ?? String(e)));
-    if (c.free) return go();
-    Alert.alert('Torrent payant', `${c.title}\n\nLe téléchargement (${gb(c.size)}) compte dans ton ratio. Envoi espéré : environ ${gb(c.expected)} (estimation, pas une garantie).`, [
-      { text: 'Annuler', style: 'cancel' },
-      { text: 'Prendre', onPress: go },
-    ]);
-  };
-  const set = (x: { enabled?: boolean; gb?: number; paid?: boolean; paidGb?: number }) =>
-    autoApi
-      .save(settings, { boost: x })
-      .then(reload)
-      .catch((e) => Alert.alert('Booster de seed', e?.message ?? String(e)));
-  const run = () => {
-    setBusy(true);
-    autoApi
-      .boostRun(settings)
-      .then((r) => toast(r.note))
-      .catch((e) => Alert.alert('Booster de seed', e?.message ?? String(e)))
-      .finally(() => (setBusy(false), reload()));
-  };
+/** Booster de seed : tout est automatique (un passage par heure), la carte ne fait qu'afficher. */
+function BoostCard({ b }: { b: AutoBoost; reload?: () => void }) {
   const pct = b.budget > 0 ? Math.min(100, (b.used / b.budget) * 100) : 0;
   const up = b.torrents.reduce((n, t) => n + (t.uploaded || 0), 0);
   const speed = b.torrents.reduce((n, t) => n + (t.upSpeed || 0), 0);
@@ -609,9 +572,12 @@ function BoostCard({ b, reload }: { b: AutoBoost; reload: () => void }) {
     <View style={styles.ratioCard}>
       <View style={styles.rowBetween}>
         <Text style={styles.ratioLabel}>Booster de seed</Text>
-        <Switch value={b.enabled} onValueChange={(v) => set({ enabled: v })} trackColor={{ true: C.success, false: C.border }} />
+        <Text style={[styles.small, { color: b.enabled ? C.success : C.textDim, fontWeight: '800' }]}>{b.enabled ? 'Automatique' : 'Éteint'}</Text>
       </View>
-      <Text style={styles.small}>Une fois par semaine, {b.perWeek} torrents freeleech très demandés au plus, pris seulement pour partager. Ils ne vont pas dans Jellyfin.</Text>
+      <Text style={styles.small}>
+        Toutes les heures, le serveur regarde les dernières sorties du site et prend tout seul les torrents qui valent le coup, seulement pour partager. Freeleech tout le temps
+        {b.paidAllowed ? ' ; payants très demandés aussi en ce moment (ratio au-dessus du seuil).' : ' ; pas de payant tant que le ratio est sous le seuil.'} Ils ne vont pas dans Jellyfin.
+      </Text>
       {!b.diskFound ? (
         <View style={styles.ratioAlert}>
           <Ionicons name="warning" size={14} color={C.warning} />
@@ -632,18 +598,8 @@ function BoostCard({ b, reload }: { b: AutoBoost; reload: () => void }) {
       <View style={styles.svcBar}>
         <View style={{ width: `${pct}%`, height: 8, backgroundColor: pct > 90 ? C.warning : C.success }} />
       </View>
-      {b.diskFree != null ? (
-        <Text style={[styles.small, b.diskFree < 40e9 ? { color: C.warning } : null]}>
-          {gb(b.diskFree)} libres sur {b.disk}. Le booster laisse toujours 20 Go libres : s’il manque de place il ne prend rien, et il rend sa place si le disque se remplit.
-        </Text>
-      ) : null}
-      <View style={[styles.ratioRow, { flexWrap: 'wrap' }]}>
-        {[50, 100, 200, 300].map((g) => (
-          <SegChip key={g} label={`${g} Go`} on={b.gb === g} onPress={() => set({ gb: g })} />
-        ))}
-      </View>
       <Text style={styles.small}>
-        Dernière sélection : {fmtWhen(b.lastRun)} · prochaine : {fmtWhen(b.nextRun)}
+        Dernier passage : {fmtWhen(b.lastRun)} · prochain : {fmtWhen(b.nextRun)}
         {b.lastNote ? `\n${b.lastNote}` : ''}
       </Text>
       {b.torrents.map((t) => (
@@ -660,54 +616,111 @@ function BoostCard({ b, reload }: { b: AutoBoost; reload: () => void }) {
           </Text>
         </View>
       ))}
-      <Button title="Lancer une sélection maintenant" icon="rocket" variant="secondary" loading={busy} onPress={run} />
-      <Toggle label="Prendre aussi des torrents payants très demandés" value={!!b.paid} onChange={(v) => set({ paid: v })} />
-      {b.paid ? (
-        <>
-          <View style={[styles.ratioRow, { flexWrap: 'wrap' }]}>
-            {[5, 10, 20, 50].map((g) => (
-              <SegChip key={g} label={`${g} Go / semaine`} on={b.paidGb === g} onPress={() => set({ paidGb: g })} />
-            ))}
+    </View>
+  );
+}
+
+const VIA_LABEL: Record<string, string> = { alldebrid: 'Cache AllDebrid', torbox: 'Cache TorBox', torrent: 'Torrent du site' };
+const LEVEL_COLOR = { ok: C.success, warn: C.warning, bad: C.danger } as const;
+const LEVEL_ICON = { ok: 'checkmark-circle', warn: 'alert-circle', bad: 'close-circle' } as const;
+
+/** Onglet Seed : ce que le serveur fait tout seul pour le ratio (garde à 1,20, chemin de chaque titre, nettoyage, vérifications). Aucun bouton. */
+function SeedAutoCards() {
+  const { settings } = useSettings();
+  const [d, setD] = useState<AutoSeedView | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const load = useCallback(
+    () =>
+      autoApi
+        .seed(settings)
+        .then((x) => (setD(x), setErr(null)))
+        .catch((e) => setErr(e?.message ?? String(e))),
+    [settings]
+  );
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 30000);
+    return () => clearInterval(t);
+  }, [load]);
+  if (!d) return err ? <Text style={styles.dim}>{/404|inconnue/.test(err) ? 'Mets le serveur à jour (3.99.0) : onglet Serveur → Mettre à jour.' : err}</Text> : null;
+  const bad = d.health?.checks.filter((c) => c.level !== 'ok') ?? [];
+  return (
+    <>
+      <View style={styles.ratioCard}>
+        <View style={styles.rowBetween}>
+          <Text style={styles.ratioLabel}>Garde du ratio</Text>
+          <Text style={[styles.small, { color: C.text, fontWeight: '800' }]}>seuil {fmtRatio(d.guard.ratio)}</Text>
+        </View>
+        {d.guard.sites.map((x) => (
+          <View key={x.id} style={styles.rowBetween}>
+            <Text style={[styles.small, { color: C.text, fontWeight: '700' }]}>
+              {x.name} · <Text style={{ color: ratioColor(x.ratio) }}>{fmtRatio(x.ratio)}</Text>
+              {x.real ? '' : ' (estimé)'}
+            </Text>
+            <Text style={[styles.small, { color: x.freeleech ? C.success : x.low ? C.warning : C.success, fontWeight: '800' }]}>{x.freeleech ? 'Freeleech' : x.low ? 'Cache d’abord' : 'Torrent direct'}</Text>
           </View>
-          <Text style={styles.small}>
-            Seulement les torrents de 5 Go au plus avec au moins 3 téléchargeurs et deux fois plus de téléchargeurs que de partageurs. Le téléchargement compte dans le ratio : {gb(b.paidWeek ?? 0)} pris sur les 7 derniers jours.
-          </Text>
-        </>
-      ) : (
-        <Text style={styles.small}>Éteint : le booster ne prend que du freeleech, ton ratio ne peut pas baisser.</Text>
-      )}
-      <Text style={styles.ratioLabel}>Meilleurs torrents en ce moment</Text>
-      {!cands ? (
-        <Button title="Voir les meilleurs torrents" icon="trophy-outline" variant="secondary" loading={candBusy} onPress={() => loadCands()} />
-      ) : (
-        <>
-          <Text style={styles.small}>
-            Classés d’après les chiffres du site ({cands.seen} dernières sorties) : gratuits d’abord, puis le meilleur gain estimé (envoi espéré moins le téléchargement).
-          </Text>
-          {!cands.list.length ? <Text style={styles.small}>Aucun torrent demandé pour l’instant.</Text> : null}
-          {cands.list.slice(0, 15).map((c) => (
-            <View key={c.guid} style={[styles.watchRow, { alignItems: 'flex-start' }]}>
-              <View style={{ flex: 1, gap: 2 }}>
-                <Text style={[styles.small, { color: C.text, fontWeight: '700' }]} numberOfLines={2}>
-                  {c.title}
-                </Text>
-                <Text style={styles.small}>
-                  <Text style={{ color: c.free ? C.success : c.worth ? C.warning : C.textDim, fontWeight: '800' }}>{c.free ? 'Gratuit' : c.worth ? 'Payant rentable' : 'Payant'}</Text> · {gb(c.size)} · {c.leechers ?? '?'} téléchargent / {c.seeders ?? '?'} partagent
-                </Text>
-                <Text style={[styles.small, { color: c.gain > 0 ? C.success : C.danger }]}>
-                  Gain estimé : {c.gain > 0 ? '+' : '−'}
-                  {gb(Math.abs(c.gain))}
-                </Text>
-              </View>
-              <Pressable onPress={() => take(c)} hitSlop={8} style={[styles.pill, { paddingVertical: 8 }]}>
-                <Text style={styles.pillTxt}>Prendre</Text>
-              </Pressable>
+        ))}
+        <Text style={styles.small}>
+          Sous le seuil, chaque titre est d’abord cherché dans le cache AllDebrid / TorBox (rien de compté sur le site), puis remis en partage par-dessus. Pas en cache : torrent du site, puis partage. Au-dessus du seuil ou en
+          freeleech : torrent du site directement.
+        </Text>
+      </View>
+      {d.health ? (
+        <View style={styles.ratioCard}>
+          <View style={styles.rowBetween}>
+            <Text style={styles.ratioLabel}>Vérifications automatiques</Text>
+            <Text style={[styles.small, { color: bad.length ? C.warning : C.success, fontWeight: '800' }]}>{bad.length ? `${bad.length} à voir` : 'Tout roule'}</Text>
+          </View>
+          {d.health.checks.map((c) => (
+            <View key={c.id} style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start' }}>
+              <Ionicons name={LEVEL_ICON[c.level]} size={15} color={LEVEL_COLOR[c.level]} style={{ marginTop: 1 }} />
+              <Text style={[styles.small, { flex: 1 }]}>
+                <Text style={{ color: C.text, fontWeight: '700' }}>{c.label}</Text>
+                {c.note ? ` · ${c.note}` : ''}
+              </Text>
             </View>
           ))}
-          <Button title="Actualiser la liste" icon="refresh" variant="secondary" small loading={candBusy} onPress={() => loadCands(true)} />
-        </>
-      )}
-    </View>
+          <Text style={styles.small}>Refait toutes les 15 min · dernière fois : {fmtWhen(d.health.at)}</Text>
+        </View>
+      ) : null}
+      <Fold id="seed-routes" title="Chemin des derniers titres" count={d.routes.length}>
+        {!d.routes.length ? <Text style={styles.help}>Rien pour le moment.</Text> : null}
+        {d.routes.map((r) => (
+          <View key={r.id} style={styles.card}>
+            <View style={{ flex: 1, gap: 3 }}>
+              <View style={styles.rowBetween}>
+                <Text style={[styles.title, { flex: 1 }]} numberOfLines={1}>
+                  {r.title}
+                </Text>
+                <Text style={[styles.small, { color: r.via === 'torrent' ? (r.free ? C.success : C.accent) : C.success, fontWeight: '800' }]}>{r.via === 'torrent' && r.free ? 'Freeleech' : VIA_LABEL[r.via]}</Text>
+              </View>
+              <Text style={styles.small}>
+                {fmtWhen(r.at)} · {gb(r.size)}
+                {r.via !== 'torrent' ? ' · 0 Go compté' : r.low ? ' · pas en cache' : ''}
+                {r.seeding ? ` · en partage, ratio ${fmtRatio(r.ratio)}${r.hoursLeft ? `, encore ${r.hoursLeft} h` : ''}` : r.seedEnd ? ` · ${r.seedEnd}` : r.state === 'done' ? '' : ` · ${r.state === 'failed' ? 'échec' : 'en cours'}`}
+                {r.note ? ` · ${r.note}` : ''}
+              </Text>
+            </View>
+          </View>
+        ))}
+      </Fold>
+      <Fold id="seed-cleaned" title="Retirés automatiquement" count={d.cleaned.length} defaultOpen={false}>
+        <Text style={styles.help}>Après 72 h de partage, un torrent resté à 1 de ratio ou moins est retiré tout seul. Les fichiers de Jellyfin ne bougent pas.</Text>
+        {d.cleaned.map((c, i) => (
+          <View key={`${c.at}-${i}`} style={styles.card}>
+            <View style={{ flex: 1, gap: 3 }}>
+              <Text style={styles.title} numberOfLines={1}>
+                {c.title}
+              </Text>
+              <Text style={styles.small}>
+                {fmtWhen(c.at)} · {c.boost ? 'booster · ' : ''}
+                {c.why} · {gb(c.uploaded)} envoyés
+              </Text>
+            </View>
+          </View>
+        ))}
+      </Fold>
+    </>
   );
 }
 
@@ -2504,6 +2517,7 @@ export function AutoSeedScreen() {
         contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: TAB_SPACE + 20, gap: 14 }}
         refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
         <AutoHeader title="Seed" sub={st ? `${seeding.length} en partage · ↑ ${fmtSpeed2(up)}` : null} color={seeding.length ? C.success : C.textFaint} />
+        <SeedAutoCards />
         <RatioTab />
         {st ? (
           <Fold id="seed-list" title="En partage" count={seeding.length} color={seeding.length ? C.success : undefined}>

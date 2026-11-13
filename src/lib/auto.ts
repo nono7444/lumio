@@ -216,6 +216,8 @@ export const autoApi = {
   missingHide: (s: Settings, tmdbId: number, show = false) => serverCall<{ ok: boolean }>(s, '/api/auto/missing/hide', { method: 'POST', body: JSON.stringify({ tmdbId, show }) }),
   missingReset: (s: Settings) => serverCall<{ ok: boolean }>(s, '/api/auto/missing/hide', { method: 'POST', body: JSON.stringify({ reset: true }) }),
   ratio: (s: Settings) => serverCall<AutoRatio>(s, '/api/auto/ratio'),
+  /** Onglet Seed : garde du ratio, chemin de chaque titre, nettoyage, vérifications (tout est automatique) */
+  seed: (s: Settings) => serverCall<AutoSeedView>(s, '/api/auto/seed'),
   boostCandidates: (s: Settings, refresh = false) => serverCall<{ at: string; seen: number; total: number; candidates: AutoBoostCandidate[] }>(s, `/api/auto/boost/candidates${refresh ? '?refresh=1' : ''}`),
   boostTake: (s: Settings, guid: string) => serverCall<{ ok: boolean; message: string }>(s, '/api/auto/boost/take', { method: 'POST', body: JSON.stringify({ guid }) }),
   boostRun: (s: Settings) => serverCall<{ ok: boolean; note: string }>(s, '/api/auto/boost/run', { method: 'POST' }),
@@ -278,7 +280,7 @@ export type AutoBoostTorrent = { id: string; title: string; size: number; indexe
 /** Booster de seed : torrents freeleech pris seulement pour partager */
 /** Torrent proposé au booster, classé d'après les chiffres du site (gain estimé = envoi espéré − coût du téléchargement) */
 export type AutoBoostCandidate = { guid: string; title: string; size: number; seeders: number | null; leechers: number | null; grabs: number | null; free: boolean; demand: number; expected: number; gain: number; indexer: string; pub: string | null; worth: boolean };
-export type AutoBoost = { enabled: boolean; gb: number; disk: string; perWeek: number; paid?: boolean; paidGb?: number; paidWeek?: number; diskFound: boolean; diskFree?: number | null; used: number; budget: number; lastRun: string | null; nextRun: string | null; lastNote: string | null; torrents: AutoBoostTorrent[] };
+export type AutoBoost = { enabled: boolean; gb: number; disk: string; perWeek?: number; paidAllowed?: boolean; paid?: boolean; paidGb?: number; paidWeek?: number; diskFound: boolean; diskFree?: number | null; used: number; budget: number; lastRun: string | null; nextRun: string | null; lastNote: string | null; torrents: AutoBoostTorrent[] };
 /** Par où passent les demandes en ce moment */
 export type AutoService = {
   auto: boolean;
@@ -297,5 +299,34 @@ export type AutoRatio = {
   guard?: { enabled: boolean; min: number; margin: number };
   service?: AutoService;
   boost?: AutoBoost;
+  at: string;
+};
+
+/** Onglet Seed de Lumio Auto (serveur 3.99.0) */
+export type AutoSeedView = {
+  guard: { enabled: boolean; ratio: number; sites: { id: string; name: string; ratio: number | null; real: boolean; freeleech: boolean; low: boolean }[] };
+  seeding: { count: number; upSpeed: number; uploaded: number };
+  routes: {
+    id: string;
+    title: string;
+    release: string;
+    size: number;
+    at: string;
+    via: 'alldebrid' | 'torbox' | 'torrent';
+    shared: boolean;
+    note: string | null;
+    low: boolean;
+    free: boolean;
+    state: string;
+    seeding: boolean;
+    ratio: number;
+    uploaded: number;
+    upSpeed: number;
+    hoursLeft: number | null;
+    seedEnd: string | null;
+  }[];
+  boost: AutoBoost;
+  cleaned: { title: string; why: string; ratio: number; uploaded: number; boost: boolean; at: string }[];
+  health: { at: string; checks: { id: string; label: string; level: 'ok' | 'warn' | 'bad'; note: string | null }[] } | null;
   at: string;
 };

@@ -6,6 +6,13 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- « Regarder » sur un titre absent du serveur (tout le monde) : si son torrent est dans le cache TorBox, la lecture démarre tout de suite en streaming et le fichier se télécharge sur le serveur en arrière-plan. Pas en cache : « Demander » comme avant. Demande le serveur 3.99.0.
+- Le bouton « Movix » est retiré : le serveur choisit tout seul le bon chemin.
+- Serveur 3.99.0, garde du ratio à 1,20 : sous le seuil, chaque titre est d'abord cherché dans le cache AllDebrid / TorBox (rien de compté sur le site), puis remis en partage par-dessus dans qBittorrent ; pas en cache, torrent du site puis partage.
+- Serveur 3.99.0, booster de seed automatique : un passage par heure, freeleech tout le temps, torrents payants très demandés seulement au-dessus de 1,20.
+- Serveur 3.99.0 : après 72 h de partage, les torrents restés à 1 de ratio ou moins sont retirés tout seuls (les fichiers de Jellyfin ne bougent pas).
+- Lumio Auto, onglet Seed : garde du ratio, vérifications automatiques (qBittorrent, port de partage, torrents cassés, disque du booster), chemin de chaque titre et torrents retirés. Plus aucun bouton pour le booster.
+
 ## 1.0.159 — 12 novembre 2026
 
 - Lumio Auto : le quota par jour des sites est retiré (plus de « quota du jour atteint », plus de réglage « Volume maximum par jour »). Demande le serveur 3.98.2.

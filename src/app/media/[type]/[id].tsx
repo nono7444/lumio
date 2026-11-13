@@ -26,6 +26,7 @@ import { RequestSection } from '@/components/request-section';
 import { TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { grab, mediaFlavor } from '@/lib/grab';
 import { MediaStatus, requestsApi, useServerRequests } from '@/lib/requests';
+import { watchNowApi } from '@/lib/watch-now';
 import { SeasonRequests } from '@/components/season-requests';
 import { WatchlistButton } from '@/components/watchlist-button';
 import { chat } from '@/lib/chat';
@@ -60,6 +61,16 @@ export default function MediaScreen() {
   const [fullOverview, setFullOverview] = useState(false);
   // Statut sur le serveur Lumio (disponible, partiel…) : le bouton « DL » ne s'affiche que si le titre manque
   const [mediaStatus, setMediaStatus] = useState<number | null>(null);
+  // « Regarder » : le serveur sait lire tout de suite un titre absent quand son torrent est dans le cache TorBox
+  const [canWatchNow, setCanWatchNow] = useState(false);
+  useEffect(() => {
+    if (!settings.chatUrl) return;
+    watchNowApi
+      .status(settings)
+      .then((st) => setCanWatchNow(st.enabled))
+      .catch(() => setCanWatchNow(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.chatUrl]);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -172,10 +183,6 @@ export default function MediaScreen() {
 
 
   // Proposer le titre dans le chat famille (petit mot facultatif)
-  // « Movix » (admin) : seulement si le titre n'est pas (entièrement) disponible sur le serveur
-  // Dans Lumio comme dans Lumio Auto : c'est le seul bouton admin gardé dans l'appli Lumio (les réglages restent dans Lumio Auto)
-  const canMovix = Boolean(settings.chatUrl) && settings.jellyfin?.isAdmin === true && !(details.kind === 'movie' && jfItem) && mediaStatus !== MediaStatus.AVAILABLE;
-  const openMovix = () => router.push({ pathname: '/secour', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title } });
   const propose = () => {
     const share = (msg: string) =>
       chat
@@ -363,7 +370,7 @@ export default function MediaScreen() {
         </View>
 
         <View style={[{ paddingHorizontal: 16, gap: 20, marginTop: 4 }, Platform.isTV && { width: '100%', maxWidth: 1100, alignSelf: 'flex-start', paddingLeft: 48 }]}>
-          {/* ——— Barre d'actions : Lire (ou « Movix » pour l'admin, ou « À voir »), puis Proposer ——— */}
+          {/* ——— Barre d'actions : Lire (ou « Regarder » en streaming, ou « À voir »), puis Proposer ——— */}
           {!Platform.isTV ? (
             <View style={styles.actionBar}>
               {jfItem ? (
@@ -374,13 +381,19 @@ export default function MediaScreen() {
                   onPress={() => router.push({ pathname: '/watch', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title } })}
                   style={{ flex: 1 }}
                 />
-              ) : canMovix ? (
-                // Admin, titre absent : « Movix » ouvre le choix des fichiers (téléchargement direct, sans toucher au ratio)
-                <Button title="Movix" icon="cloud-download" small onPress={openMovix} style={{ flex: 1 }} />
+              ) : canWatchNow ? (
+                // Pas encore sur le serveur : « Regarder » en streaming (cache TorBox), le titre se télécharge en arrière-plan
+                <Button
+                  title="Regarder"
+                  icon="play"
+                  small
+                  onPress={() => router.push({ pathname: '/watch', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title } })}
+                  style={{ flex: 1 }}
+                />
               ) : (
                 <WatchlistButton item={wlItem} variant="pill" />
               )}
-              {jfItem || canMovix ? <WatchlistButton item={wlItem} variant="icon" /> : <View style={{ flex: 1 }} />}
+              {jfItem || canWatchNow ? <WatchlistButton item={wlItem} variant="icon" /> : <View style={{ flex: 1 }} />}
               {/* Proposer dans le chat famille : seulement pour un titre pas encore sur le serveur */}
               {settings.chatUrl && settings.jellyfin && !jfItem ? (
                 <Button title="" icon="chatbubbles-outline" variant="glass" small onPress={propose} style={{ width: 46, paddingHorizontal: 0 }} />
@@ -389,8 +402,6 @@ export default function MediaScreen() {
               {settings.chatUrl && adminUI(settings) && jfItem?.Path ? (
                 <MoveButton path={jfItem!.Path!} title={title} />
               ) : null}
-              {/* Série déjà en partie sur le serveur : « Movix » en petit, à côté de « Lire » */}
-              {canMovix && jfItem ? <Button title="Movix" icon="cloud-download" variant="glass" small onPress={openMovix} /> : null}
             </View>
           ) : null}
 
