@@ -12,7 +12,7 @@ import { Picker, Toggle } from '@/components/arr-section';
 import { toast } from '@/components/toast';
 import { Button, Field, ScreenTitle, Section, SectionCollapse, SegChip } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
-import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoBoost, type AutoSeedView, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
+import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoBoost, type AutoBoostCandidate, type AutoSeedView, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
 import { useSettings } from '@/lib/settings';
 import { IS_AUTO } from '@/lib/variant';
 import { ServerRequests } from '@/components/server-requests';
@@ -572,11 +572,12 @@ function BoostCard({ b }: { b: AutoBoost; reload?: () => void }) {
     <View style={styles.ratioCard}>
       <View style={styles.rowBetween}>
         <Text style={styles.ratioLabel}>Booster de seed</Text>
-        <Text style={[styles.small, { color: b.enabled ? C.success : C.textDim, fontWeight: '800' }]}>{b.enabled ? 'Automatique' : 'Éteint'}</Text>
+        <Text style={[styles.small, { color: b.enabled ? C.success : C.textDim, fontWeight: '800' }]}>{b.enabled ? 'Automatique' : 'À la main'}</Text>
       </View>
       <Text style={styles.small}>
-        Toutes les heures, le serveur regarde les dernières sorties du site et prend tout seul les torrents qui valent le coup, seulement pour partager. Freeleech tout le temps
-        {b.paidAllowed ? ' ; payants très demandés aussi en ce moment (ratio au-dessus du seuil).' : ' ; pas de payant tant que le ratio est sous le seuil.'} Ils ne vont pas dans Jellyfin.
+        {b.enabled
+          ? 'Toutes les heures, le serveur prend tout seul les torrents qui valent le coup, seulement pour partager. Ils ne vont pas dans Jellyfin.'
+          : 'Le serveur ne prend plus aucun torrent tout seul. Tu en ajoutes toi-même dans l’onglet qBittorrent → « Ajouter un torrent ». Ils servent seulement à partager et ne vont pas dans Jellyfin.'}
       </Text>
       {!b.diskFound ? (
         <View style={styles.ratioAlert}>
@@ -598,17 +599,19 @@ function BoostCard({ b }: { b: AutoBoost; reload?: () => void }) {
       <View style={styles.svcBar}>
         <View style={{ width: `${pct}%`, height: 8, backgroundColor: pct > 90 ? C.warning : C.success }} />
       </View>
-      <Text style={styles.small}>
-        Dernier passage : {fmtWhen(b.lastRun)} · prochain : {fmtWhen(b.nextRun)}
-        {b.lastNote ? `\n${b.lastNote}` : ''}
-      </Text>
+      {b.enabled ? (
+        <Text style={styles.small}>
+          Dernier passage : {fmtWhen(b.lastRun)} · prochain : {fmtWhen(b.nextRun)}
+          {b.lastNote ? `\n${b.lastNote}` : ''}
+        </Text>
+      ) : null}
       {b.torrents.map((t) => (
         <View key={t.id} style={{ gap: 2 }}>
           <Text style={[styles.small, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
             {t.title}
           </Text>
           <Text style={styles.small}>
-            {t.free === false ? 'payant · ' : ''}
+            {t.free === false ? 'compté · ' : ''}
             {t.state === 'downloading' ? `arrive · ${t.progress}%` : `ratio ${fmtRatio(t.ratio)} · ${gb(t.uploaded)} envoyés`}
             {t.upSpeed ? ` · ↑ ${fmtSpeed(t.upSpeed)}` : ''} · {gb(t.size)}
             {t.leechers != null ? ` · ${t.leechers} le téléchargent` : ''}
@@ -617,6 +620,81 @@ function BoostCard({ b }: { b: AutoBoost; reload?: () => void }) {
         </View>
       ))}
     </View>
+  );
+}
+
+/** qBittorrent → « Ajouter un torrent » : un torrent choisi à la main, seulement pour le partage (dossier du booster, pas dans Jellyfin). */
+function AddTorrentCard() {
+  const { settings } = useSettings();
+  const [q, setQ] = useState('');
+  const [link, setLink] = useState('');
+  const [busy, setBusy] = useState<'search' | 'link' | null>(null);
+  const [list, setList] = useState<AutoBoostCandidate[] | null>(null);
+  const oops = (e: any) => Alert.alert('Ajouter un torrent', /404|inconnue/.test(e?.message ?? '') ? 'Mets le serveur à jour (3.100.1) : onglet Serveur → Mettre à jour.' : (e?.message ?? String(e)));
+  const search = () => {
+    if (q.trim().length < 2) return;
+    setBusy('search');
+    autoApi
+      .boostSearch(settings, q.trim())
+      .then((r) => setList(r.candidates))
+      .catch(oops)
+      .finally(() => setBusy(null));
+  };
+  const take = (c: AutoBoostCandidate) => {
+    const go = () =>
+      autoApi
+        .boostTake(settings, c.guid)
+        .then((r) => (toast(r.message), setList((o) => (o ? o.filter((x) => x.guid !== c.guid) : o))))
+        .catch(oops);
+    if (c.free) return go();
+    Alert.alert('Compté dans ton ratio', `${c.title}\n\nCe torrent n’est pas en freeleech : son téléchargement (${gb(c.size)}) compte sur le site. ${c.leechers ?? 0} personne(s) le téléchargent en ce moment.`, [
+      { text: 'Annuler', style: 'cancel' },
+      { text: 'Ajouter', onPress: go },
+    ]);
+  };
+  const addLink = () => {
+    if (!link.trim()) return;
+    setBusy('link');
+    autoApi
+      .boostAddLink(settings, link.trim())
+      .then((r) => (toast(r.message), setLink('')))
+      .catch(oops)
+      .finally(() => setBusy(null));
+  };
+  return (
+    <Fold id="qb-add" title="Ajouter un torrent" defaultOpen={false}>
+      <Text style={styles.help}>Pour le partage seulement : le torrent va dans le dossier du booster (pas dans Jellyfin) et il est retiré tout seul après 72 h s’il reste à 1 de ratio ou moins.</Text>
+      <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+        <View style={[styles.searchBox, { flex: 1 }]}>
+          <Ionicons name="search" size={18} color={C.textDim} />
+          <TextInput value={q} onChangeText={setQ} onSubmitEditing={search} placeholder="Chercher sur le site (nom)" placeholderTextColor={C.textFaint} style={styles.searchInput} autoCorrect={false} returnKeyType="search" clearButtonMode="while-editing" />
+        </View>
+        <Button title="Chercher" small loading={busy === 'search'} onPress={search} />
+      </View>
+      {list && !list.length ? <Text style={styles.small}>Rien trouvé.</Text> : null}
+      {(list ?? []).slice(0, 25).map((c) => (
+        <View key={c.guid} style={[styles.watchRow, { alignItems: 'flex-start' }]}>
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={[styles.small, { color: C.text, fontWeight: '700' }]} numberOfLines={2}>
+              {c.title}
+            </Text>
+            <Text style={styles.small}>
+              <Text style={{ color: c.free ? C.success : C.warning, fontWeight: '800' }}>{c.free ? 'Freeleech' : 'Compté'}</Text> · {gb(c.size)} · {c.leechers ?? '?'} téléchargent · {c.seeders ?? '?'} partagent
+            </Text>
+          </View>
+          <Pressable onPress={() => take(c)} hitSlop={8} style={[styles.pill, { paddingVertical: 8 }]}>
+            <Text style={styles.pillTxt}>Ajouter</Text>
+          </Pressable>
+        </View>
+      ))}
+      <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+        <View style={[styles.searchBox, { flex: 1 }]}>
+          <Ionicons name="link" size={18} color={C.textDim} />
+          <TextInput value={link} onChangeText={setLink} placeholder="Ou colle un lien magnet / .torrent" placeholderTextColor={C.textFaint} style={styles.searchInput} autoCapitalize="none" autoCorrect={false} clearButtonMode="while-editing" />
+        </View>
+        <Button title="Ajouter" small variant="secondary" loading={busy === 'link'} onPress={addLink} />
+      </View>
+    </Fold>
   );
 }
 
@@ -2573,6 +2651,7 @@ export function AutoQbitScreen() {
             <>
               <Switches st={st} save={save} running={running.length} toChoose={st.items.filter((i) => i.needsChoice).length} />
               <Telechargements st={st} reload={load} onItem={(id) => setItemOpen(id)} hideSeed />
+              <AddTorrentCard />
               <Fold id="qb-all" title="Tous les torrents" defaultOpen={false}>
                 <QbitTab noPrefs />
               </Fold>

@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Lumio Auto : le serveur ne prend plus aucun torrent de partage tout seul (booster automatique arrêté). Onglet qBittorrent → « Ajouter un torrent » : recherche sur le site ou lien magnet / .torrent, pour le partage seulement. Demande le serveur 3.100.1.
+
 ## 1.0.162 — 13 novembre 2026
 
 - « Lire » sur un titre absent ne lance plus le téléchargement : le streaming démarre si possible, et une demande en attente est envoyée à l'admin (pour tout le monde, admin compris). Demande le serveur 3.100.0.
