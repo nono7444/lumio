@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.161 — 13 novembre 2026
+
 - Titre absent du serveur : un seul bouton « Lire », pour tout le monde. Il lance le streaming (cache TorBox) et le téléchargement sur le serveur en arrière-plan, sans validation ni quota ; le bouton « Demander » disparaît pour les films. Demande le serveur 3.99.1.
 - Streaming commencé sur un appareil et repris sur un autre (téléphone puis TV) : même lien pendant une heure, à la même position.
 
