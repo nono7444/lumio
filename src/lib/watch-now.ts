@@ -5,7 +5,7 @@ import { serverCall } from './chat';
 import type { Settings } from './settings';
 
 /** enabled : prêt à servir (interrupteur allumé + moteur + une clé) ; on : l'interrupteur seul */
-export type WatchNowStatus = { enabled: boolean; streaming?: boolean; on?: boolean; torbox: boolean; alldebrid: boolean; download: boolean };
+export type WatchNowStatus = { enabled: boolean; streaming?: boolean; health?: { ok: boolean; torbox: boolean | null; alldebrid: boolean | null; wawacity: boolean | null; at: string } | null; on?: boolean; torbox: boolean; alldebrid: boolean; download: boolean };
 export type WatchNowResult = {
   url: string;
   service: 'torbox' | 'alldebrid';

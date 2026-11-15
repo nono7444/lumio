@@ -65,11 +65,12 @@ export default function MediaScreen() {
   const [mediaStatus, setMediaStatus] = useState<number | null>(null);
   // « Regarder » : le serveur sait lire tout de suite un titre absent quand son torrent est dans le cache TorBox
   const [canWatchNow, setCanWatchNow] = useState(false);
+  const [streamOk, setStreamOk] = useState<boolean | null>(null);
   useEffect(() => {
     if (!settings.chatUrl) return;
     watchNowApi
       .status(settings)
-      .then((st) => setCanWatchNow(Boolean(st.streaming)))
+      .then((st) => (setCanWatchNow(Boolean(st.streaming)), setStreamOk(st.health ? st.health.ok : null)))
       .catch(() => setCanWatchNow(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.chatUrl]);
@@ -387,7 +388,7 @@ export default function MediaScreen() {
                 <WatchlistButton item={wlItem} variant="pill" />
               )}
               {/* Admin : « Streaming » (cache TorBox / AllDebrid, puis Wawacity), avec le choix de la qualité */}
-              {canWatchNow ? <StreamingButton type={details.kind} tmdbId={tmdbId} title={title} imdb={imdbId ?? undefined} label={!jfItem} style={jfItem ? undefined : { flex: 1 }} /> : null}
+              {canWatchNow ? <StreamingButton type={details.kind} tmdbId={tmdbId} title={title} imdb={imdbId ?? undefined} label={!jfItem} style={jfItem ? undefined : { flex: 1 }} ok={streamOk} /> : null}
               {jfItem || canWatchNow ? <WatchlistButton item={wlItem} variant="icon" /> : <View style={{ flex: 1 }} />}
               {/* Proposer dans le chat famille : seulement pour un titre pas encore sur le serveur */}
               {settings.chatUrl && settings.jellyfin && !jfItem ? (

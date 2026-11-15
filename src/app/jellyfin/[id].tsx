@@ -30,7 +30,7 @@ import { WatchlistButton } from '@/components/watchlist-button';
 import { TvActionRow, TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { MetadataEditor } from '@/components/metadata-editor';
 import { MoveFolder } from '@/components/move-folder';
-import { StreamingButton, useCanStream } from '@/components/quality-menu';
+import { StreamingButton, useStreamStatus } from '@/components/quality-menu';
 import { ReportProblemButton } from '@/components/report-problem';
 import { useServerRequests } from '@/lib/requests';
 import { hasTmdb, useSettings } from '@/lib/settings';
@@ -218,7 +218,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
   const insets = useSafeAreaInsets();
   const [similar, setSimilar] = useState<JfItem[]>([]);
   const [fav, setFav] = useState(Boolean(item.UserData?.IsFavorite));
-  const canStream = useCanStream(settings);
+  const { can: canStream, ok: streamOk } = useStreamStatus(settings);
 
   useEffect(() => {
     // TV : pas de rangée « Dans le même genre » (elle était coupée en bas de l'écran)
@@ -399,7 +399,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                 />
                 <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" small onPress={toggleFav} style={styles.iconBtn} />
                 {wlItem ? <WatchlistButton item={wlItem} variant="icon" /> : null}
-                {canStream && tmdbId ? <StreamingButton type="movie" tmdbId={tmdbId} title={item.Name} /> : null}
+                {canStream && tmdbId ? <StreamingButton type="movie" tmdbId={tmdbId} title={item.Name} ok={streamOk} /> : null}
                 {serverReq && tmdbId ? <ReportProblemButton icon type="movie" tmdbId={tmdbId} title={item.Name} poster={jfPoster(settings, item, 342)} /> : null}
               </View>
             </View>
@@ -420,7 +420,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                 <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" small onPress={toggleFav} style={styles.iconBtn} />
                 {wlItem ? <WatchlistButton item={wlItem} variant="icon" /> : null}
                 {canStream && tmdbId ? (
-                  <StreamingButton type="tv" tmdbId={tmdbId} title={item.Name} season={nextEpisode?.ParentIndexNumber ?? 1} episode={nextEpisode?.IndexNumber ?? 1} />
+                  <StreamingButton type="tv" tmdbId={tmdbId} title={item.Name} season={nextEpisode?.ParentIndexNumber ?? 1} episode={nextEpisode?.IndexNumber ?? 1} ok={streamOk} />
                 ) : null}
                 {serverReq && tmdbId ? <ReportProblemButton icon type="tv" tmdbId={tmdbId} title={item.Name} poster={jfPoster(settings, item, 342)} /> : null}
               </View>
