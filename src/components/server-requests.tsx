@@ -54,11 +54,12 @@ function statusOf(r: Req): { text: string; color: string; progress?: number } {
 function PendingCard({ r, meId, onChanged }: { r: Req; meId?: string; onChanged: () => void }) {
   const { settings } = useSettings();
   const [busy, setBusy] = useState<'approve' | 'decline' | null>(null);
+  const [uhd, setUhd] = useState(Boolean(r.uhd));
   const mine = r.requestedBy.id === meId;
   const run = async (kind: 'approve' | 'decline', reason?: string) => {
     setBusy(kind);
     try {
-      if (kind === 'approve') await requestsApi.approve(settings, r.id);
+      if (kind === 'approve') await requestsApi.approve(settings, r.id, { uhd });
       else await requestsApi.decline(settings, r.id, reason);
       toast(kind === 'approve' ? `« ${r.title} » validé : le téléchargement est lancé.` : `Demande de ${mine ? 'toi' : r.requestedBy.name} refusée.`);
       onChanged();
@@ -87,6 +88,13 @@ function PendingCard({ r, meId, onChanged }: { r: Req; meId?: string; onChanged:
           </Text>
         </View>
       </Pressable>
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        {[false, true].map((on) => (
+          <Pressable key={String(on)} onPress={() => setUhd(on)} style={[styles.profile, uhd === on && styles.profileOn]}>
+            <Text style={[styles.profileTxt, uhd === on && { color: '#000' }]}>{on ? '4K H.265' : '1080p'}</Text>
+          </Pressable>
+        ))}
+      </View>
       <View style={{ flexDirection: 'row', gap: 10 }}>
         <Button title="Refuser" icon="close" variant="secondary" small loading={busy === 'decline'} onPress={decline} style={{ flex: 1 }} />
         <Button title="Valider" icon="checkmark" small loading={busy === 'approve'} onPress={() => run('approve')} style={{ flex: 1 }} />
@@ -370,6 +378,9 @@ export function ServerRequests({ header }: { header: React.ReactNode }) {
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
+  profile: { paddingVertical: 7, paddingHorizontal: 14, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.08)' },
+  profileOn: { backgroundColor: '#fff' },
+  profileTxt: { color: C.text, fontSize: 13, fontWeight: '700' },
   pending: { gap: 12, padding: 14, borderRadius: 20, backgroundColor: C.surface, borderWidth: 1, borderColor: 'rgba(255,159,10,0.35)' },
   sectionTitle: { color: '#FF9F0A', fontSize: 13, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 },
   sep: { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.08)', marginLeft: 56 },

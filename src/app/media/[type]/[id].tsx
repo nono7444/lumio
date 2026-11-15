@@ -20,7 +20,7 @@ import { jf, type JfItem } from '@/lib/jellyfin';
 import { askFolder } from '@/components/folder-picker';
 import { TvBackdropLayer } from '@/components/tv-backdrop';
 import { JfEpisodes } from '@/components/jf-episodes';
-import { FamilyRating } from '@/components/family-rating';
+import { StreamingButton } from '@/components/quality-menu';
 import { ReportProblemButton } from '@/components/report-problem';
 import { RequestSection } from '@/components/request-section';
 import { TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
@@ -69,7 +69,7 @@ export default function MediaScreen() {
     if (!settings.chatUrl) return;
     watchNowApi
       .status(settings)
-      .then((st) => setCanWatchNow(st.enabled))
+      .then((st) => setCanWatchNow(Boolean(st.streaming)))
       .catch(() => setCanWatchNow(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.chatUrl]);
@@ -383,25 +383,16 @@ export default function MediaScreen() {
                   onPress={() => router.push({ pathname: '/watch', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title } })}
                   style={{ flex: 1 }}
                 />
-              ) : canWatchNow ? (
-                // Pas encore sur le serveur : le même bouton « Lire », en streaming (cache TorBox) ; le titre se télécharge en arrière-plan
-                <Button
-                  title="Lire"
-                  icon="play"
-                  small
-                  onPress={() => router.push({ pathname: '/watch', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title } })}
-                  style={{ flex: 1 }}
-                />
-              ) : (
+              ) : canWatchNow ? null : (
                 <WatchlistButton item={wlItem} variant="pill" />
               )}
+              {/* Admin : « Streaming » (cache TorBox / AllDebrid, puis Wawacity), avec le choix de la qualité */}
+              {canWatchNow ? <StreamingButton type={details.kind} tmdbId={tmdbId} title={title} imdb={imdbId ?? undefined} label={!jfItem} style={jfItem ? undefined : { flex: 1 }} /> : null}
               {jfItem || canWatchNow ? <WatchlistButton item={wlItem} variant="icon" /> : <View style={{ flex: 1 }} />}
               {/* Proposer dans le chat famille : seulement pour un titre pas encore sur le serveur */}
               {settings.chatUrl && settings.jellyfin && !jfItem ? (
                 <Button title="" icon="chatbubbles-outline" variant="glass" small onPress={propose} style={{ width: 46, paddingHorizontal: 0 }} />
               ) : null}
-              {/* 4K H.265 (admin) : interrupteur par titre, le 1080p déjà là reste */}
-              {settings.chatUrl && settings.jellyfin?.isAdmin === true ? <UhdButton kind={details.kind} tmdbId={tmdbId} title={title} /> : null}
               {/* Déplacer (admin) : titre rangé dans le mauvais dossier → Radarr / Sonarr le déplacent */}
               {settings.chatUrl && adminUI(settings) && jfItem?.Path ? (
                 <MoveButton path={jfItem!.Path!} title={title} />
@@ -412,7 +403,7 @@ export default function MediaScreen() {
           {/* ——— Demande façon Seerr (serveur Lumio) ——— */}
           {/* Film absent avec « Lire » en streaming : un seul bouton, pas de « Demander » (le suivi revient dès que le téléchargement est lancé) */}
           {/* Titre absent : un seul bouton, « Lire » (streaming ou demande) ; la section des demandes ne reste que pour une série déjà en partie sur le serveur (saisons manquantes) */}
-          {serverReq && !Platform.isTV && !(canWatchNow && !jfItem) ? (
+          {serverReq && !Platform.isTV ? (
             <RequestSection
               inJellyfin={Boolean(jfItem)}
               onAvailable={refreshJf}
@@ -537,17 +528,8 @@ export default function MediaScreen() {
             </View>
           )}
 
-          {/* ——— Notes de la famille + signalement d'un problème ——— */}
-          {serverReq && Platform.isTV ? (
-            showRate ? <FamilyRating type={details.kind} tmdbId={tmdbId} title={title} poster={tmdbImg(d.poster_path, 'w342')} /> : null
-          ) : serverReq ? (
-            <View style={{ gap: 6 }}>
-              <FamilyRating type={details.kind} tmdbId={tmdbId} title={title} poster={tmdbImg(d.poster_path, 'w342')} />
-              {jfItem ? (
-                <ReportProblemButton type={details.kind} tmdbId={tmdbId} title={title} poster={tmdbImg(d.poster_path, 'w342')} />
-              ) : null}
-            </View>
-          ) : null}
+          {/* ——— Signalement d'un problème (titre sur le serveur) ——— */}
+          {serverReq && !Platform.isTV && jfItem ? <ReportProblemButton type={details.kind} tmdbId={tmdbId} title={title} poster={tmdbImg(d.poster_path, 'w342')} /> : null}
 
           {/* ——— Casting ——— */}
           {cast.length > 0 && (
@@ -677,33 +659,4 @@ const styles = StyleSheet.create({
   },
 });
 
-/** Admin : « 4K » allumé = Lumio Auto cherche ce titre en 2160p H.265 (HDR10 accepté, Dolby Vision seul refusé) et l'ajoute à côté du 1080p. */
-function UhdButton({ kind, tmdbId, title }: { kind: 'movie' | 'tv'; tmdbId: number; title: string }) {
-  const { settings } = useSettings();
-  const [on, setOn] = useState<boolean | null>(null);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    autoApi
-      .uhd(settings, kind, tmdbId)
-      .then((r) => setOn(r.on))
-      .catch(() => setOn(null));
-  }, [settings, kind, tmdbId]);
-  if (on == null) return null;
-  const flip = () => {
-    const next = !on;
-    const go = () => {
-      setBusy(true);
-      autoApi
-        .setUhd(settings, { type: kind, tmdbId, on: next, title })
-        .then((r) => (setOn(r.on), toast(r.message)))
-        .catch((e) => Alert.alert('4K', e?.message ?? String(e)))
-        .finally(() => setBusy(false));
-    };
-    if (!next) return go();
-    Alert.alert('Passer en 4K H.265 ?', `${title}\n\nLumio Auto va chercher une version 4K H.265 (HDR10 accepté, pas de Dolby Vision seul) et l’ajouter à côté du 1080p. S’il n’y en a pas encore, il attend qu’elle sorte.${kind === 'tv' ? '\n\nToute la série sera cherchée en 4K.' : ''}`, [
-      { text: 'Annuler', style: 'cancel' },
-      { text: 'Activer la 4K', onPress: go },
-    ]);
-  };
-  return <Button title="4K" variant={on ? 'primary' : 'glass'} small loading={busy} onPress={flip} style={{ paddingHorizontal: 12 }} />;
-}
+

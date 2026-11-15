@@ -22,6 +22,9 @@ type Params = {
   title: string;
   season?: string;
   episode?: string;
+  /** « Streaming » (admin) : lecture en streaming même si le titre est sur Jellyfin, dans la qualité choisie */
+  stream?: string;
+  quality?: string;
 };
 
 /**
@@ -58,8 +61,9 @@ export default function Watch() {
         });
         if (cancelled.current) return;
 
-        // ——— Disponible sur Jellyfin ———
-        if (res.kind === 'jellyfin') {
+        const forceStream = p.stream === '1';
+        // ——— Disponible sur Jellyfin (bouton « Lire ») ———
+        if (res.kind === 'jellyfin' && !forceStream) {
           const it = res.item;
           // Commencé en streaming avant l'arrivée du fichier : on reprend à la position gardée par le serveur
           let streamPos = 0;
@@ -84,11 +88,12 @@ export default function Watch() {
         }
 
         // ——— Pas (encore) sur Jellyfin : « Regarder maintenant » (lien direct par TorBox / AllDebrid) ———
-        const season = type === 'tv' ? (res.season ?? (p.season ? Number(p.season) : 1)) : undefined;
-        const episode = type === 'tv' ? (res.episode ?? (p.episode ? Number(p.episode) : 1)) : undefined;
-        const can = settings.chatUrl ? await watchNowApi.status(settings).catch(() => null) : null;
-        if (can?.enabled) {
-          setStep('Pas encore sur ton serveur : préparation du streaming…');
+        const jfEp = res.kind === 'jellyfin' && res.item.Type === 'Episode' ? res.item : null;
+        const season = type === 'tv' ? (jfEp?.ParentIndexNumber ?? (res as any).season ?? (p.season ? Number(p.season) : 1)) : undefined;
+        const episode = type === 'tv' ? (jfEp?.IndexNumber ?? (res as any).episode ?? (p.episode ? Number(p.episode) : 1)) : undefined;
+        if (forceStream && settings.chatUrl) {
+          const ql = p.quality === '2160' ? '4K' : p.quality ? `${p.quality}p` : '';
+          setStep(`Recherche d’un streaming${ql ? ` en ${ql}` : ''}…`);
           const date = type === 'movie' ? (details as any).release_date : (details as any).first_air_date;
           const w = await watchNowApi.start(settings, {
             type,
@@ -96,6 +101,7 @@ export default function Watch() {
             season,
             episode,
             title: p.title,
+            quality: p.quality ? Number(p.quality) : undefined,
             year: date ? String(date).slice(0, 4) : undefined,
             poster: tmdbImg(details.poster_path, 'w342') ?? undefined,
             backdrop: tmdbImg(details.backdrop_path, 'w1280') ?? undefined,
@@ -120,8 +126,8 @@ export default function Watch() {
           return;
         }
         throw new Error(
-          type === 'tv' && res.season != null
-            ? `L’épisode S${res.season}E${res.episode} n’est pas encore sur ton serveur. Demande-le depuis la fiche.`
+          type === 'tv' && (res as any).season != null
+            ? `L’épisode S${(res as any).season}E${(res as any).episode} n’est pas encore sur ton serveur. Demande-le depuis la fiche.`
             : 'Pas encore sur ton serveur. Demande-le depuis la fiche.'
         );
       } catch (e: any) {

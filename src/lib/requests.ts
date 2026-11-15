@@ -24,6 +24,8 @@ export type Req = {
   /** 'lire' : demande née du bouton « Lire » (streaming) ; streamed : le streaming a démarré */
   from?: string;
   streamed?: boolean;
+  /** Profil 4K H.265 demandé */
+  uhd?: boolean;
   status: number;
   requestedBy: { id: string; name: string };
   createdAt: string;
@@ -129,9 +131,11 @@ export const requestsApi = {
       backdrop?: string;
       rootFolderPath?: string;
       qualityProfileId?: number;
+      /** Profil 4K H.265 (Lumio Auto) */
+      uhd?: boolean;
     }
   ) => serverCall<Req>(s, '/api/requests', { method: 'POST', body: JSON.stringify(body) }),
-  approve: (s: Settings, id: string, opts: { rootFolderPath?: string; qualityProfileId?: number } = {}) =>
+  approve: (s: Settings, id: string, opts: { rootFolderPath?: string; qualityProfileId?: number; uhd?: boolean } = {}) =>
     serverCall<Req>(s, `/api/requests/${id}/approve`, { method: 'POST', body: JSON.stringify(opts) }),
   retry: (s: Settings, id: string) => serverCall<Req>(s, `/api/requests/${id}/retry`, { method: 'POST', body: '{}' }),
   /** Relance la recherche Radarr / Sonarr d'une demande en cours et dit si une version a été trouvée */

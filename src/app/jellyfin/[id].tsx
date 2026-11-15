@@ -30,7 +30,7 @@ import { WatchlistButton } from '@/components/watchlist-button';
 import { TvActionRow, TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { MetadataEditor } from '@/components/metadata-editor';
 import { MoveFolder } from '@/components/move-folder';
-import { FamilyRating } from '@/components/family-rating';
+import { StreamingButton, useCanStream } from '@/components/quality-menu';
 import { ReportProblemButton } from '@/components/report-problem';
 import { useServerRequests } from '@/lib/requests';
 import { hasTmdb, useSettings } from '@/lib/settings';
@@ -218,7 +218,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
   const insets = useSafeAreaInsets();
   const [similar, setSimilar] = useState<JfItem[]>([]);
   const [fav, setFav] = useState(Boolean(item.UserData?.IsFavorite));
-  const [showRate, setShowRate] = useState(false);
+  const canStream = useCanStream(settings);
 
   useEffect(() => {
     // TV : pas de rangée « Dans le même genre » (elle était coupée en bas de l'écran)
@@ -330,7 +330,6 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                       reload();
                     }}
                   />
-                  {serverReq && tmdbId ? <TvRound icon="star-outline" iconOn="star" on={showRate} color={TV_GOLD} label="Noter" onPress={() => setShowRate((v) => !v)} /> : null}
                   <TvRound icon="heart-outline" iconOn="heart" on={fav} color="#FF375F" label="J'aime" onPress={toggleFav} />
                 </TvActionRow>
               {director ? <Text style={styles.tvLine}>{isSeries ? 'Créée par' : 'Réalisateur'} : {director}</Text> : null}
@@ -340,7 +339,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                 </Text>
               ) : null}
               <Text style={styles.tvLine}>
-                {[item.Genres?.slice(0, 2).join(' • '), item.PremiereDate ? new Date(item.PremiereDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) : item.ProductionYear ? String(item.ProductionYear) : null, item.CommunityRating ? `Note ${item.CommunityRating.toFixed(1)}` : null]
+                {[item.Genres?.slice(0, 2).join(' • '), item.PremiereDate ? new Date(item.PremiereDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) : item.ProductionYear ? String(item.ProductionYear) : null]
                   .filter(Boolean)
                   .join('   •   ')}
               </Text>
@@ -362,14 +361,11 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
               ) : (
                 <Text style={[styles.title, Platform.isTV && { textAlign: 'left' }]}>{item.Name}</Text>
               )}
-              <View style={[styles.pills, Platform.isTV && { justifyContent: 'flex-start' }]}>
-                {item.ProductionYear ? <Pill>{String(item.ProductionYear)}</Pill> : null}
-                {item.RunTimeTicks && !isSeries ? <Pill icon="time-outline">{formatRuntime(item.RunTimeTicks)}</Pill> : null}
-                {item.OfficialRating ? <Pill>{item.OfficialRating}</Pill> : null}
-                {item.CommunityRating ? <Pill icon="star">{item.CommunityRating.toFixed(1)}</Pill> : null}
-                {isSeries && item.ChildCount ? <Pill>{`${item.ChildCount} saisons`}</Pill> : null}
-              </View>
-              {item.Genres?.length ? <Text style={styles.genres}>{item.Genres.slice(0, 3).join('  •  ')}</Text> : null}
+              <Text style={[styles.genres, Platform.isTV && { textAlign: 'left' }]}>
+                {[item.ProductionYear ? String(item.ProductionYear) : null, item.RunTimeTicks && !isSeries ? formatRuntime(item.RunTimeTicks) : null, isSeries && item.ChildCount ? `${item.ChildCount} saison${item.ChildCount > 1 ? 's' : ''}` : null, item.Genres?.slice(0, 2).join(', ')]
+                  .filter(Boolean)
+                  .join('  ·  ')}
+              </Text>
             </View>
           )}
         </View>
@@ -386,23 +382,25 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                   style={{ flex: 1.3 }}
                 />
               </View>
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                {resumeAt > 30 && (
-                  <Button title="Depuis le début" icon="refresh" variant="glass" small onPress={() => playJellyfin(item, true)} style={{ flex: 1 }} />
-                )}
-                <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" small onPress={toggleFav} style={{ width: 46, paddingHorizontal: 0 }} />
-                {wlItem ? <WatchlistButton item={wlItem} variant="icon" /> : null}
+              {/* Une seule ligne d'icônes : depuis le début, vu, favori, à voir, streaming (admin), signaler */}
+              <View style={styles.iconRow}>
+                {resumeAt > 30 ? <Button title="" icon="refresh" variant="glass" small onPress={() => playJellyfin(item, true)} style={styles.iconBtn} accessibilityLabel="Depuis le début" /> : null}
                 <Button
                   small
-                  title={item.UserData?.Played ? 'Vu' : 'Marquer vu'}
+                  title=""
                   icon={item.UserData?.Played ? 'checkmark-circle' : 'checkmark-circle-outline'}
                   variant="glass"
+                  accessibilityLabel={item.UserData?.Played ? 'Vu' : 'Marquer vu'}
                   onPress={async () => {
                     await jf.setPlayed(settings, item.Id, !item.UserData?.Played).catch(() => {});
                     reload();
                   }}
-                  style={{ flex: 1 }}
+                  style={styles.iconBtn}
                 />
+                <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" small onPress={toggleFav} style={styles.iconBtn} />
+                {wlItem ? <WatchlistButton item={wlItem} variant="icon" /> : null}
+                {canStream && tmdbId ? <StreamingButton type="movie" tmdbId={tmdbId} title={item.Name} /> : null}
+                {serverReq && tmdbId ? <ReportProblemButton icon type="movie" tmdbId={tmdbId} title={item.Name} poster={jfPoster(settings, item, 342)} /> : null}
               </View>
             </View>
           ) : (
@@ -417,8 +415,14 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                     style={{ flex: 1.3 }}
                   />
                 ) : null}
-                <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" small onPress={toggleFav} style={{ width: 46, paddingHorizontal: 0 }} />
+              </View>
+              <View style={styles.iconRow}>
+                <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" small onPress={toggleFav} style={styles.iconBtn} />
                 {wlItem ? <WatchlistButton item={wlItem} variant="icon" /> : null}
+                {canStream && tmdbId ? (
+                  <StreamingButton type="tv" tmdbId={tmdbId} title={item.Name} season={nextEpisode?.ParentIndexNumber ?? 1} episode={nextEpisode?.IndexNumber ?? 1} />
+                ) : null}
+                {serverReq && tmdbId ? <ReportProblemButton icon type="tv" tmdbId={tmdbId} title={item.Name} poster={jfPoster(settings, item, 342)} /> : null}
               </View>
             </View>
           )}
@@ -427,15 +431,6 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
           {/* Admin : voir le fichier dans la gestion des disques, ou supprimer le titre */}
           {adminUI(settings) && !Platform.isTV ? <AdminItemActions item={item} reload={reload} /> : null}
 
-          {/* Notes de la famille et signalement d'un problème (serveur Lumio) */}
-          {serverReq && tmdbId && Platform.isTV ? (
-            showRate ? <FamilyRating type={isSeries ? 'tv' : 'movie'} tmdbId={tmdbId} title={item.Name} poster={jfPoster(settings, item, 342)} /> : null
-          ) : serverReq && tmdbId ? (
-            <View style={{ gap: 6 }}>
-              <FamilyRating type={isSeries ? 'tv' : 'movie'} tmdbId={tmdbId} title={item.Name} poster={jfPoster(settings, item, 342)} />
-              <ReportProblemButton type={isSeries ? 'tv' : 'movie'} tmdbId={tmdbId} title={item.Name} poster={jfPoster(settings, item, 342)} />
-            </View>
-          ) : null}
 
           {item.Overview && !Platform.isTV ? <Text style={styles.overview}>{item.Overview}</Text> : null}
 
@@ -593,6 +588,8 @@ export default function JellyfinItemScreen() {
 }
 
 const styles = StyleSheet.create({
+  iconRow: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
+  iconBtn: { width: 46, paddingHorizontal: 0 },
   // TV : colonne alignée à gauche sous les infos (boutons Lire / Vu compacts), comme Nuvio
   tvColumn: { width: '100%', maxWidth: 1100, alignSelf: 'flex-start', paddingLeft: 48 },
   heroContentTv: { position: 'absolute', left: 48, bottom: 36, width: '48%', alignItems: 'flex-start', gap: 10 },

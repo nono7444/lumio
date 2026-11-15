@@ -135,7 +135,6 @@ export function PosterCard({ item, width = POSTER_W }: { item: PosterItem; width
           </View>
         )}
         {item.badge && <StatusBadge badge={item.badge} />}
-        <FamilyStarBadge type={item.ids?.type === 'tv' ? 'tv' : item.ids?.type === 'movie' ? 'movie' : undefined} tmdbId={item.ids?.tmdb} />
         <SwarmBadge type={item.ids?.type === 'tv' ? 'tv' : item.ids?.type === 'movie' ? 'movie' : undefined} tmdbId={item.ids?.tmdb} />
         {busy && (
           <View style={styles.posterBusy}>
@@ -248,6 +247,7 @@ export function Button({
   disabled,
   style,
   small,
+  accessibilityLabel,
 }: {
   title: string;
   /** Version compacte (fiches : Lire, Bande-annonce) */
@@ -259,6 +259,8 @@ export function Button({
   loading?: boolean;
   disabled?: boolean;
   style?: ViewStyle;
+  /** Nom lu par VoiceOver (utile pour un bouton icône seule) */
+  accessibilityLabel?: string;
 }) {
   const bg =
     variant === 'primary'
@@ -272,6 +274,8 @@ export function Button({
   return (
     <Pressable
       disabled={disabled || loading}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? (title || undefined)}
       onPress={() => {
         tap();
         onPress();

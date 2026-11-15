@@ -12,7 +12,7 @@ import { useSettings } from '@/lib/settings';
 
 const CATEGORIES = ['Vidéo', 'Son', 'Sous-titres', 'Mauvais film / épisode', 'Épisode manquant', 'Autre'];
 
-export function ReportProblemButton({ type, tmdbId, title, poster }: { type: 'movie' | 'tv'; tmdbId: number; title: string; poster?: string }) {
+export function ReportProblemButton({ type, tmdbId, title, poster, icon = false }: { type: 'movie' | 'tv'; tmdbId: number; title: string; poster?: string; icon?: boolean }) {
   const { settings } = useSettings();
   const [open, setOpen] = useState(false);
   const [cat, setCat] = useState(CATEGORIES[0]);
@@ -41,10 +41,14 @@ export function ReportProblemButton({ type, tmdbId, title, poster }: { type: 'mo
 
   return (
     <>
-      <Pressable onPress={() => setOpen(true)} style={styles.link} hitSlop={8}>
-        <Ionicons name="warning" size={16} color={C.warning} />
-        <Text style={styles.linkText}>Signaler un problème</Text>
-      </Pressable>
+      {icon ? (
+        <Button title="" icon="flag-outline" variant="glass" small onPress={() => setOpen(true)} style={{ width: 46, paddingHorizontal: 0 }} accessibilityLabel="Signaler un problème" />
+      ) : (
+        <Pressable onPress={() => setOpen(true)} style={styles.quiet} hitSlop={8}>
+          <Ionicons name="flag-outline" size={14} color={C.textDim} />
+          <Text style={styles.quietText}>Signaler un problème</Text>
+        </Pressable>
+      )}
       <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.backdrop}>
           <Pressable style={{ flex: 1 }} onPress={() => setOpen(false)} />
@@ -76,6 +80,8 @@ export function ReportProblemButton({ type, tmdbId, title, poster }: { type: 'mo
 }
 
 const styles = StyleSheet.create({
+  quiet: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingVertical: 4 },
+  quietText: { color: C.textDim, fontSize: 13, fontWeight: '600' },
   link: {
     flexDirection: 'row',
     alignItems: 'center',

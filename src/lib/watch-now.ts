@@ -5,7 +5,7 @@ import { serverCall } from './chat';
 import type { Settings } from './settings';
 
 /** enabled : prêt à servir (interrupteur allumé + moteur + une clé) ; on : l'interrupteur seul */
-export type WatchNowStatus = { enabled: boolean; on?: boolean; torbox: boolean; alldebrid: boolean; download: boolean };
+export type WatchNowStatus = { enabled: boolean; streaming?: boolean; on?: boolean; torbox: boolean; alldebrid: boolean; download: boolean };
 export type WatchNowResult = {
   url: string;
   service: 'torbox' | 'alldebrid';
@@ -22,7 +22,7 @@ export type WatchNowResult = {
 
 export const watchNowApi = {
   status: (s: Settings) => serverCall<WatchNowStatus>(s, '/api/watch/now'),
-  start: (s: Settings, body: { type: 'movie' | 'tv'; tmdbId: number; season?: number; episode?: number; title?: string; year?: string; poster?: string; backdrop?: string }) =>
+  start: (s: Settings, body: { type: 'movie' | 'tv'; tmdbId: number; quality?: number; season?: number; episode?: number; title?: string; year?: string; poster?: string; backdrop?: string }) =>
     serverCall<WatchNowResult>(s, '/api/watch/now', { method: 'POST', body: JSON.stringify(body) }),
   /** Position de lecture d'un streaming (gardée sur le serveur, recopiée dans Jellyfin quand le fichier arrive) */
   progress: (s: Settings, body: { type: 'movie' | 'tv'; tmdbId: number; season?: number; episode?: number; position: number; duration?: number; title?: string }) =>

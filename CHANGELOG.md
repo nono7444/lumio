@@ -6,6 +6,13 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- 4K : le bouton « 4K » de la fiche est remplacé par un choix « Profil : 1080p / 4K H.265 » au moment de « Demander », et au moment de valider dans Lumio Auto. Demande le serveur 3.105.0.
+
+- « Lire » ne sert plus qu'à Jellyfin. Titre absent : « Demander » revient, pour tout le monde.
+- Admin : bouton « Streaming » sur chaque fiche (même quand le titre est sur Jellyfin), avec le choix de la qualité (4K, 1080p, 720p). Le serveur cherche dans le cache TorBox / AllDebrid puis sur Wawacity ; un titre absent se télécharge aussi en arrière-plan. Demande le serveur 3.104.0.
+- Fiche plus sobre : une seule ligne d'icônes (depuis le début, vu, favori, à voir, streaming, signaler), année · durée · genres sur une ligne.
+- Notes de la famille retirées (fiches, affiches, Lumio TV).
+
 ## 1.0.166 — 15 novembre 2026
 
 - 4K H.265 sur certains titres (admin) : bouton « 4K » sur la fiche d'un film ou d'une série, et interrupteur dans Lumio Auto. Lumio Auto cherche alors une version 2160p H.265 (HDR10 accepté, Dolby Vision seul refusé), attend qu'elle existe, et la range à côté du 1080p (deux versions dans Jellyfin). Demande le serveur 3.103.0.

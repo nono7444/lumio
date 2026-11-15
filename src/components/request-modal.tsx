@@ -48,6 +48,8 @@ export function RequestModal({
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [folder, setFolder] = useState<string | null>(null);
   const [profile, setProfile] = useState<number | null>(null);
+  // Profil de téléchargement : 1080p (normal) ou 4K H.265
+  const [uhd, setUhd] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const isTv = target.type === 'tv';
@@ -89,6 +91,7 @@ export function RequestModal({
         backdrop: target.backdrop,
         rootFolderPath: folder ?? undefined,
         qualityProfileId: me?.admin && profile ? profile : undefined,
+        uhd: uhd || undefined,
       });
       const what = isTv ? (r.seasons && r.seasons.length > 1 ? `${r.seasons.length} saisons` : `la saison ${r.seasons?.[0]}`) : 'le film';
       onDone(
@@ -197,6 +200,28 @@ export function RequestModal({
           ) : !opts ? (
             <ActivityIndicator color={C.textDim} />
           ) : null}
+
+          {/* Profil de téléchargement */}
+          <View>
+            <Text style={styles.label}>Profil</Text>
+            <View style={styles.hpills}>
+              {[
+                { on: false, label: '1080p', sub: 'normal' },
+                { on: true, label: '4K H.265', sub: 'plus lourd' },
+              ].map((o) => (
+                <Pressable
+                  key={o.label}
+                  onPress={() => {
+                    tap();
+                    setUhd(o.on);
+                  }}
+                  style={[styles.chip, uhd === o.on && styles.chipOn]}>
+                  <Text style={[styles.chipText, uhd === o.on && { color: '#000' }]}>{o.label}</Text>
+                  <Text style={[styles.chipSub, uhd === o.on && { color: '#555' }]}>{o.sub}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
 
           {/* Qualité (admin) */}
           {showProfiles ? (
