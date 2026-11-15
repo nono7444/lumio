@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.173 — 15 novembre 2026
+
 - Le bouton « Streaming » n'apparaît plus quand le fichier est déjà sur le serveur (« Lire » suffit).
 
 - Lumio Auto : un film pas encore sorti, ou sans aucune version sur les sites, n'apparaît plus dans « Version à choisir » (il attend dans « En attente de sortie »). Serveur 3.109.1.
