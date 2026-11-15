@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- « Demander » : choisir le profil 1080p retire maintenant la 4K du titre (avant, un titre déjà marqué 4K restait en 4K). Demande le serveur 3.108.1.
+
 ## 1.0.170 — 15 novembre 2026
 
 - « Demander » en profil 4K (admin) : les fichiers 4K de Wawacity sont proposés d'abord (un fichier pour un film, une version par saison pour une série) ; rien de choisi ou rien de trouvé → C411 en 4K. Les demandes 4K de la famille passent aussi par Wawacity d'abord. Demande le serveur 3.108.0.

@@ -120,7 +120,7 @@ export function RequestModal({
         backdrop: target.backdrop,
         rootFolderPath: folder ?? undefined,
         qualityProfileId: me?.admin && profile ? profile : undefined,
-        uhd: uhd || undefined,
+        uhd,
         ...(uhd && me?.admin && !isTv && moviePick ? { secourPick: moviePick } : {}),
         ...(uhd && me?.admin && isTv && Object.values(tpl).some(Boolean)
           ? { secourTemplates: Object.fromEntries(Object.entries(tpl).filter(([n, l]) => l && selected.has(Number(n))).map(([n, l]) => [n, { quality: l!.quality, language: l!.language, hoster: l!.hoster }])) }
