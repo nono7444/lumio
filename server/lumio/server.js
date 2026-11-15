@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.103.1';
+const VERSION = '3.104.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2718,7 +2718,8 @@ async function sendOrSecour(r) {
 // 3. La position de lecture est gardée ici, puis recopiée dans Jellyfin quand le fichier arrive : on reprend au même endroit.
 const watchNowOn = () => config.watchNow !== false && Boolean(torboxKey() || secourDebridKey()) && autoOn();
 // enabled : le bouton « Lire » s'affiche sur un titre absent, même sans TorBox (il envoie alors seulement la demande)
-const watchNowView = () => ({ enabled: config.watchNow !== false, streaming: watchNowOn(), on: config.watchNow !== false, torbox: Boolean(torboxKey()), alldebrid: Boolean(secourDebridKey()), download: config.watchNowDownload !== false });
+// streaming : bouton « Streaming » de l'admin (cache TorBox / AllDebrid, puis Wawacity)
+const watchNowView = (user) => ({ enabled: config.watchNow !== false, streaming: Boolean(user && user.admin) && watchNowOn(), on: config.watchNow !== false, torbox: Boolean(torboxKey()), alldebrid: Boolean(secourDebridKey()), download: config.watchNowDownload !== false });
 const watchCache = new Map(); // « type:tmdb:s:e » → { at, out } : un second appareil reprend le même lien pendant 20 min
 const WATCH_POS_FILE = path.join(DATA_DIR, 'watch-positions.json');
 let watchPos = {};
@@ -2768,20 +2769,22 @@ function streamToken(url, who, name) {
 }
 /** Versions du site pour ce titre : la mieux classée qui est en cache TorBox (lien direct) ou AllDebrid (relayé) → { rel, hash, via, adId } ou null.
  *  Seule l'empreinte part chez TorBox / AllDebrid, jamais le .torrent ni la clé du site. */
-async function watchFind(type, tmdbId, season, episode, title, tried) {
+async function watchFind(type, tmdbId, season, episode, title, tried, quality = null) {
   let item = findItem(type, tmdbId);
   if (!item) {
     // Titre pas encore suivi : fiche provisoire, juste pour la recherche (rien n'est enregistré)
     item = { id: 'watch', type, tmdbId, title: title || `#${tmdbId}`, seasons: type === 'tv' ? [season] : [], requestIds: [] };
     await autoMeta(item, true);
   }
+  // Qualité choisie : copie du titre avec sa propre résolution (le suivi de Lumio Auto n'est pas touché)
+  if (quality) item = { ...item, _res: quality };
   const want = type === 'movie' ? { kind: 'movie' } : { kind: 'episode', season, episode };
   const { results } = await autoSearch(item, want);
   // Pour lire un épisode, un pack de la bonne saison convient aussi (le bon fichier est choisi dedans)
   const packOk = (r) => type === 'tv' && r.reasons.length === 1 && /^pack de saison/.test(r.reasons[0]) && ((r.parsed.pack && r.parsed.season === season) || (r.parsed.seasons || []).includes(season));
   const ok = results.filter((r) => !r.rejected || packOk(r)).slice(0, 8);
   if (!ok.length) {
-    tried.push(results.length ? 'aucune version correcte sur le site' : 'rien trouvé sur le site');
+    tried.push(results.length ? `aucune version${quality ? ` ${quality === 2160 ? '4K' : `${quality}p`}` : ''} correcte sur le site` : 'rien trouvé sur le site');
     return null;
   }
   const cands = [];
@@ -2863,14 +2866,17 @@ async function familyCacheCheck(r) {
 /** Titre demandé par un membre de la famille : toujours le cache d'abord (quel que soit le ratio), sinon torrent normal. */
 const itemFamily = (item) => (item.requestIds || []).some((id) => (requests.find((x) => x.id === id) || {}).family);
 /** Streaming en dernier recours : liens Wawacity (Lumio Secour), le premier qu'AllDebrid arrive à ouvrir (3 essais au plus). */
-async function watchWawacity(type, tmdbId, season, episode) {
+async function watchWawacity(type, tmdbId, season, episode, quality = null) {
   const kind = type === 'movie' ? 'movie' : 'tv';
   const ext = await tmdbGet(`/${kind}/${tmdbId}/external_ids`).catch(() => null);
   const imdb = ext && ext.imdb_id;
   if (!imdb) throw new Error('identifiant IMDb introuvable');
   const query = type === 'movie' ? { imdb, type: 'movie' } : { imdb, type: 'series', season: String(season), episode: String(episode) };
   const found = await secour(`/lumio/links?${new URLSearchParams(query)}`, { timeout: 90000 });
-  const links = rankSecourLinks(((found && found.links) || []).filter((l) => /wawa/i.test(String(l.source || '')))).filter((l) => !/2160|4k|uhd/i.test(String(l.quality || ''))).slice(0, 3);
+  const resOf = (l) => (/2160|4k|uhd/i.test(String(l.quality || '')) ? 2160 : /1080/.test(String(l.quality || '')) ? 1080 : /720/.test(String(l.quality || '')) ? 720 : 0);
+  const links = rankSecourLinks(((found && found.links) || []).filter((l) => /wawa/i.test(String(l.source || ''))))
+    .filter((l) => (quality ? resOf(l) === quality : resOf(l) !== 2160))
+    .slice(0, 3);
   for (const l of links) {
     try {
       const r = await secour('/lumio/resolve', { method: 'POST', body: { link: l.link, hoster: l.hoster, source: l.source, season: l.season, episode: l.episode, type: query.type }, timeout: 120000 });
@@ -2880,6 +2886,13 @@ async function watchWawacity(type, tmdbId, season, episode) {
     }
   }
   return null;
+}
+/** Le film / l'épisode est-il déjà sur Jellyfin ? */
+async function watchPresent(type, tmdbId, season, episode) {
+  const item = findItem(type, tmdbId) || { type, tmdbId };
+  if (type === 'movie') return movieInJellyfin(item);
+  const { have } = await jfSeriesEpisodes(item);
+  return have.has(`${season}:${episode}`);
 }
 // Version regardée en streaming : Lumio Auto prend ensuite exactement ce torrent, par le cache (rien de compté), puis le partage
 const watchPrefer = new Map();
@@ -2894,21 +2907,22 @@ async function watchNow(user, b) {
   if (!tmdbId) throw new HttpError(400, 'Identifiant TMDB manquant');
   const season = type === 'tv' ? Number(b.season) || 1 : null;
   const episode = type === 'tv' ? Number(b.episode) || 1 : null;
-  // Membres : pas de streaming (les comptes AllDebrid / TorBox restent à l'admin), juste la demande
-  if (!user.admin) {
-    const dl = await watchDownload(user, b, type, tmdbId, season, false);
-    const why = dl.state === 'pending' ? 'ta demande est envoyée à l’admin' : dl.state === 'already' || dl.state === 'started' ? 'il est déjà en cours de téléchargement' : dl.state === 'declined' ? 'la demande a été refusée par l’admin' : dl.reason ? `demande impossible : ${dl.reason}` : 'demande impossible';
-    throw new HttpError(404, `Pas encore sur le serveur : ${why}.`);
-  }
-  const ck = `${type}:${tmdbId}:${season}:${episode}`;
+  // Streaming réservé à l'admin (comptes TorBox / AllDebrid) ; les membres passent par « Demander »
+  if (!user.admin) throw new HttpError(403, 'Le streaming est réservé à l’admin : utilise « Demander ».');
+  const quality = [2160, 1080, 720].includes(Number(b.quality)) ? Number(b.quality) : null;
+  const qLabel = quality ? (quality === 2160 ? '4K' : `${quality}p`) : null;
+  // Déjà sur Jellyfin (streaming choisi pour une autre qualité) : rien à télécharger en arrière-plan
+  const present = await watchPresent(type, tmdbId, season, episode).catch(() => false);
+  const dlOf = (streamed) => (present ? Promise.resolve({ state: 'already' }) : watchDownload(user, b, type, tmdbId, season, streamed));
+  const ck = `${type}:${tmdbId}:${season}:${episode}:${quality || ''}`;
   const cachedOut = watchCache.get(ck);
   // Même titre relancé depuis un autre appareil (téléphone puis TV) : même lien pendant 1 h, à la position gardée
-  if (cachedOut && Date.now() - cachedOut.at < 60 * 60e3) return { ...cachedOut.out, ...watchResume(user, type, tmdbId, season, episode), download: await watchDownload(user, b, type, tmdbId, season, true) };
+  if (cachedOut && Date.now() - cachedOut.at < 60 * 60e3) return { ...cachedOut.out, ...watchResume(user, type, tmdbId, season, episode), download: await dlOf(true) };
   const tried = [];
   let out = null;
   try {
     if (!watchNowOn()) throw new Error('streaming pas configuré sur le serveur (clé TorBox ou AllDebrid)');
-    const hit = await watchFind(type, tmdbId, season, episode, b.title, tried);
+    const hit = await watchFind(type, tmdbId, season, episode, b.title, tried, quality);
     if (hit && hit.via === 'torbox') {
       const c = await tb('/torrents/createtorrent', { method: 'POST', form: { magnet: `magnet:?xt=urn:btih:${hit.hash}`, seed: 3, allow_zip: 'false' } });
       const id = c && c.torrent_id;
@@ -2937,13 +2951,13 @@ async function watchNow(user, b) {
     // Dernier recours : Wawacity (Lumio Secour), lien ouvert par AllDebrid et relayé par le serveur
     if (!out && !hit && secourUrl() && secourKey() && secourDebridKey()) {
       try {
-        const w = await watchWawacity(type, tmdbId, season, episode);
+        const w = await watchWawacity(type, tmdbId, season, episode, quality);
         if (w) {
           if (!b._base) throw new Error('adresse du serveur inconnue');
           out = { url: `${b._base}/watch/s/${streamToken(w.url, user.name, w.name)}`, service: 'alldebrid', sizeBytes: w.size || 0, source: 'wawacity', hoster: w.hoster || null, name: w.name, quality: w.quality || null, language: w.language || null };
           watchCache.set(ck, { at: Date.now(), out });
           console.log(`Lire en streaming : « ${b.title || tmdbId} » pour ${user.name} (Wawacity en dernier recours, ${w.hoster || '?'})`);
-        } else tried.push('rien sur Wawacity');
+        } else tried.push(`rien sur Wawacity${qLabel ? ` en ${qLabel}` : ''}`);
       } catch (e) {
         tried.push(`Wawacity : ${e.message.replace(/^Lumio Secour : /, '')}`);
       }
@@ -2953,17 +2967,17 @@ async function watchNow(user, b) {
       Object.assign(out, { source: hit.rel.indexer || null, hoster: null, name: hit.rel.title, quality: pz.resolution ? `${pz.resolution}p` : null, language: null });
       watchCache.set(ck, { at: Date.now(), out });
       if (watchCache.size > 200) watchCache.delete(watchCache.keys().next().value);
-      watchPrefer.set(`${type}:${tmdbId}`, { guid: hit.rel.guid, hash: hit.hash, at: Date.now() });
+      if (!present) watchPrefer.set(`${type}:${tmdbId}`, { guid: hit.rel.guid, hash: hit.hash, at: Date.now() });
       console.log(`Lire en streaming : « ${b.title || tmdbId} » pour ${user.name} (cache ${hit.via === 'torbox' ? 'TorBox' : 'AllDebrid, relayé par le serveur'}, ${hit.rel.title})`);
     }
   } catch (e) {
     tried.push(String((e && e.message) || e));
   }
-  // Admin : streaming lancé → le même torrent se télécharge tout seul (par le cache, puis partage) ; sinon une demande t'attend
-  const dl = await watchDownload(user, b, type, tmdbId, season, Boolean(out));
+  // Titre absent : streaming lancé → le même torrent se télécharge tout seul (par le cache, puis partage) ; sinon une demande t'attend
+  const dl = await dlOf(Boolean(out));
   if (out) return { ...out, ...watchResume(user, type, tmdbId, season, episode), download: dl };
   const dlNote = dl.state === 'pending' ? ' La demande t’attend dans Lumio Auto → Demandes.' : dl.state === 'already' || dl.state === 'started' ? ' Il est déjà en cours de téléchargement sur le serveur.' : dl.state === 'declined' ? ' La demande a été refusée.' : dl.reason ? ` Demande impossible : ${dl.reason}` : '';
-  throw new HttpError(404, `Pas encore disponible en streaming${tried.length ? ` (${tried.slice(0, 2).join(' ; ')})` : ''}.${dlNote}`);
+  throw new HttpError(404, `Pas de streaming${qLabel ? ` en ${qLabel}` : ''} pour l’instant${tried.length ? ` (${tried.slice(0, 2).join(' ; ')})` : ''}.${dlNote}`);
 }
 /** « Lire » ne télécharge rien tout seul : une demande en attente est créée (sans quota), pour tout le monde, admin compris.
  *  L'admin la valide ou la refuse dans Lumio Auto → Demandes ; c'est la validation qui lance le téléchargement. Sans doublon :
@@ -4081,6 +4095,8 @@ const autoProfile = () => {
 const isUhd = (item) => Boolean(item && auto.uhd[autoItemKey(item.type, item.tmdbId)]);
 function autoProfileFor(item) {
   const pf = autoProfile();
+  // Streaming de l'admin : qualité choisie dans le menu (2160 / 1080 / 720), tous codecs, fichiers plus gros acceptés
+  if (item && item._res) return { ...pf, resolution: item._res, allowLower: false, h265: 'preferred', maxMovieGb: item._res === 2160 ? 90 : 40, maxEpisodeGb: item._res === 2160 ? 25 : 8, uhd: item._res === 2160 };
   if (!isUhd(item)) return pf;
   return { ...pf, resolution: 2160, h265: 'required', allowLower: false, maxMovieGb: Math.max(pf.maxMovieGb, pf.uhdMaxMovieGb || 40), maxEpisodeGb: Math.max(pf.maxEpisodeGb, pf.uhdMaxEpisodeGb || 10), uhd: true };
 }
@@ -9325,7 +9341,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
     }
 
     // ——— « Lire » un titre absent (admin) : lien de streaming TorBox + téléchargement en arrière-plan + reprise ———
-    if (req.method === 'GET' && p === '/api/watch/now') return send(res, 200, watchNowView());
+    if (req.method === 'GET' && p === '/api/watch/now') return send(res, 200, watchNowView(user));
     if (req.method === 'POST' && p === '/api/watch/now') {
       const host = String(req.headers['x-forwarded-host'] || req.headers.host || '');
       const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || (/^(\d+\.\d+\.\d+\.\d+|localhost)(:\d+)?$/.test(host) ? 'http' : 'https');
@@ -9344,7 +9360,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       if (typeof b.download === 'boolean') config.watchNowDownload = b.download;
       saveConfig();
       watchCache.clear();
-      return send(res, 200, watchNowView());
+      return send(res, 200, watchNowView(user));
     }
     // ——— Admin : Lumio Secour (liens d'hébergeurs → AllDebrid → disques) ———
     if (p === '/api/secour' || p.startsWith('/api/secour/')) {
