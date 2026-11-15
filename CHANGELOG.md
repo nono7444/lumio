@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.169 — 15 novembre 2026
+
 - Streaming : la 4K est retirée du menu (1080p ou 720p). Pastille verte / rouge sur le bouton « Streaming » : vert si au moins un service (TorBox, AllDebrid, Wawacity) marche. Demande le serveur 3.107.0.
 
 - Streaming : l'origine du flux (Wawacity, TorBox ou AllDebrid) s'affiche au lancement de la lecture.
