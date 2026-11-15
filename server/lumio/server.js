@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.106.0';
+const VERSION = '3.107.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2719,8 +2719,37 @@ async function sendOrSecour(r) {
 const watchNowOn = () => config.watchNow !== false && Boolean(torboxKey() || secourDebridKey()) && autoOn();
 // enabled : le bouton « Lire » s'affiche sur un titre absent, même sans TorBox (il envoie alors seulement la demande)
 // streaming : bouton « Streaming » de l'admin (cache TorBox / AllDebrid, puis Wawacity)
+// État des services de streaming (pastille verte / rouge sur l'icône) : vérifié toutes les 5 min, jamais bloquant
+let watchHealthCache = null;
+let watchHealthBusy = null;
+function watchHealth() {
+  const fresh = watchHealthCache && Date.now() - watchHealthCache.at < 5 * 60e3;
+  if (!fresh && !watchHealthBusy) {
+    watchHealthBusy = (async () => {
+      const out = { at: Date.now(), torbox: null, alldebrid: null, wawacity: null };
+      await Promise.all([
+        torboxKey() ? tb('/user/me').then((u) => (out.torbox = Boolean(u))).catch(() => (out.torbox = false)) : null,
+        secourDebridKey() ? ad('/v4/user').then((r) => (out.alldebrid = Boolean(r && r.user && r.user.isPremium))).catch(() => (out.alldebrid = false)) : null,
+        secourUrl() && secourKey()
+          ? secour('/lumio/health', { timeout: 15000 })
+              .then((h) => {
+                const e = ((h && h.sources) || []).find((x) => /wawa/i.test(JSON.stringify([x.name, x.source, x.id])));
+                out.wawacity = Boolean(secourDebridKey()) && !(e && (e.ok === false || e.online === false || /down|error|fail|offline|\bko\b/i.test(String(e.status || ''))));
+              })
+              .catch(() => (out.wawacity = false))
+          : null,
+      ]);
+      out.ok = [out.torbox, out.alldebrid, out.wawacity].some((x) => x === true);
+      watchHealthCache = out;
+    })().finally(() => (watchHealthBusy = null));
+  }
+  return watchHealthCache ? { ok: watchHealthCache.ok, torbox: watchHealthCache.torbox, alldebrid: watchHealthCache.alldebrid, wawacity: watchHealthCache.wawacity, at: new Date(watchHealthCache.at).toISOString() } : null;
+}
+setInterval(() => {
+  if (watchNowOn()) watchHealth();
+}, 5 * 60e3);
 // Membres aussi (config.watchMembers) : Wawacity d'abord, puis TorBox, puis AllDebrid ; les liens AllDebrid passent par le serveur
-const watchNowView = (user) => ({ enabled: config.watchNow !== false, streaming: Boolean(user && (user.admin || config.watchMembers !== false)) && watchNowOn(), on: config.watchNow !== false, torbox: Boolean(torboxKey()), alldebrid: Boolean(secourDebridKey()), download: config.watchNowDownload !== false, members: config.watchMembers !== false });
+const watchNowView = (user) => ({ enabled: config.watchNow !== false, streaming: Boolean(user && (user.admin || config.watchMembers !== false)) && watchNowOn(), on: config.watchNow !== false, torbox: Boolean(torboxKey()), alldebrid: Boolean(secourDebridKey()), download: config.watchNowDownload !== false, members: config.watchMembers !== false, health: watchNowOn() ? watchHealth() : null });
 const watchCache = new Map(); // « type:tmdb:s:e » → { at, out } : un second appareil reprend le même lien pendant 20 min
 const WATCH_POS_FILE = path.join(DATA_DIR, 'watch-positions.json');
 let watchPos = {};
@@ -2911,7 +2940,8 @@ async function watchNow(user, b) {
   // Membres : streaming ouvert sauf si l'admin l'a coupé (config.watchMembers = false)
   if (!user.admin && config.watchMembers === false) throw new HttpError(403, 'Le streaming est réservé à l’admin : utilise « Demander ».');
   const member = !user.admin;
-  const quality = [2160, 1080, 720].includes(Number(b.quality)) ? Number(b.quality) : null;
+  // Streaming : 1080p ou 720p (la 4K est retirée, trop lourde à relayer)
+  const quality = [1080, 720].includes(Number(b.quality)) ? Number(b.quality) : Number(b.quality) === 2160 ? 1080 : null;
   const qLabel = quality ? (quality === 2160 ? '4K' : `${quality}p`) : null;
   // Déjà sur Jellyfin (streaming choisi pour une autre qualité) : rien à télécharger en arrière-plan
   const present = await watchPresent(type, tmdbId, season, episode).catch(() => false);
