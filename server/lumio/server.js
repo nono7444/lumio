@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.104.0';
+const VERSION = '3.105.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -6737,6 +6737,8 @@ async function autoAdd({ type, tmdbId, tvdbId, title, seasons, folderPath, futur
 /** Demandes validées avant l'activation de Lumio Auto, encore chez Radarr / Sonarr. */
 const autoAdoptable = () => requests.filter((r) => r.status === RequestStatus.APPROVED && r.via !== 'auto' && !(r.via === 'secour' && r.secour && ['queued', 'running'].includes(r.secour.state)));
 async function autoFromRequest(r) {
+  // Profil 4K H.265 choisi à la demande (ou à la validation) : le titre est suivi en 4K
+  if (r.uhd) auto.uhd[autoItemKey(r.type === 'tv' ? 'tv' : 'movie', r.tmdbId)] = true;
   await autoAdd({ type: r.type, tmdbId: r.tmdbId, tvdbId: r.tvdbId, title: r.title, seasons: r.seasons, folderPath: r.rootFolderPath, requestId: r.id });
   r.via = 'auto';
 }
@@ -8041,6 +8043,8 @@ async function createRequest(user, b, opts = {}) {
   // Demande née du bouton « Lire » : streamed = le streaming a démarré ; elle attend toujours la validation de l'admin
   if (opts.noApprove) r.from = 'lire';
   if (opts.streamed) r.streamed = true;
+  // Profil choisi à la demande : 4K H.265 (sinon le profil normal)
+  if (b.uhd === true) r.uhd = true;
   // Demande d'un membre de la famille : téléchargement par le cache AllDebrid / TorBox d'abord, puis partage
   if (!user.admin) r.family = true;
   if (perm.autoApprove && !opts.noApprove) {
@@ -8074,6 +8078,7 @@ async function approveRequest(admin, r, b) {
   if (r.status !== RequestStatus.PENDING && r.status !== RequestStatus.FAILED) throw new HttpError(409, 'Cette demande n’est pas en attente.');
   if (b.rootFolderPath) r.rootFolderPath = b.rootFolderPath;
   if (b.qualityProfileId) r.qualityProfileId = Number(b.qualityProfileId);
+  if (typeof b.uhd === 'boolean') r.uhd = b.uhd;
   r.modifiedBy = { id: admin.id, name: admin.name };
   r.modifiedAt = new Date().toISOString();
   try {
