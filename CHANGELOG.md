@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.172 — 15 novembre 2026
+
 - Plus d'interrupteur 4K : le profil (1080p ou 4K) se choisit seulement dans « Demander », et le serveur fait le reste.
 - Lumio Auto, onglet Demandes : une seule page simple (à valider, version à choisir, en cours, en échec ; le reste replié).
 - Lumio Auto, onglet Seed : le ratio du site en grand, seulement les problèmes s'il y en a, le reste replié.
