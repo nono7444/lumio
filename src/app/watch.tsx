@@ -6,7 +6,7 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Toasts } from '@/components/toast';
+import { toast, Toasts } from '@/components/toast';
 import { Button, Fade } from '@/components/ui';
 import { C } from '@/constants/theme';
 import { useSettings } from '@/lib/settings';
@@ -107,13 +107,14 @@ export default function Watch() {
             backdrop: tmdbImg(details.backdrop_path, 'w1280') ?? undefined,
           });
           if (cancelled.current) return;
+          toast(`Streaming depuis ${w.source === 'wawacity' ? 'Wawacity' : w.service === 'torbox' ? 'TorBox' : 'AllDebrid'}${w.quality ? ` · ${w.quality}` : ''}`);
           router.replace({
             pathname: '/player',
             params: {
               kind: 'url',
               uri: w.url,
               title: type === 'tv' ? `${p.title} · S${season}E${episode}` : p.title,
-              subtitle: [w.quality, w.language, w.download?.state === 'pending' ? 'demande envoyée à l’admin' : w.download?.state === 'started' ? 'téléchargement lancé sur le serveur' : null].filter(Boolean).join(' · '),
+              subtitle: [w.source === 'wawacity' ? 'Wawacity' : w.service === 'torbox' ? 'TorBox' : 'AllDebrid', w.quality, w.language, w.download?.state === 'pending' ? 'demande envoyée à l’admin' : w.download?.state === 'started' ? 'téléchargement lancé sur le serveur' : null].filter(Boolean).join(' · '),
               start: String(w.position ?? 0),
               stream: '1',
               tmdbId: String(tmdbId),
