@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.105.0';
+const VERSION = '3.106.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2719,7 +2719,8 @@ async function sendOrSecour(r) {
 const watchNowOn = () => config.watchNow !== false && Boolean(torboxKey() || secourDebridKey()) && autoOn();
 // enabled : le bouton « Lire » s'affiche sur un titre absent, même sans TorBox (il envoie alors seulement la demande)
 // streaming : bouton « Streaming » de l'admin (cache TorBox / AllDebrid, puis Wawacity)
-const watchNowView = (user) => ({ enabled: config.watchNow !== false, streaming: Boolean(user && user.admin) && watchNowOn(), on: config.watchNow !== false, torbox: Boolean(torboxKey()), alldebrid: Boolean(secourDebridKey()), download: config.watchNowDownload !== false });
+// Membres aussi (config.watchMembers) : Wawacity d'abord, puis TorBox, puis AllDebrid ; les liens AllDebrid passent par le serveur
+const watchNowView = (user) => ({ enabled: config.watchNow !== false, streaming: Boolean(user && (user.admin || config.watchMembers !== false)) && watchNowOn(), on: config.watchNow !== false, torbox: Boolean(torboxKey()), alldebrid: Boolean(secourDebridKey()), download: config.watchNowDownload !== false, members: config.watchMembers !== false });
 const watchCache = new Map(); // « type:tmdb:s:e » → { at, out } : un second appareil reprend le même lien pendant 20 min
 const WATCH_POS_FILE = path.join(DATA_DIR, 'watch-positions.json');
 let watchPos = {};
@@ -2907,8 +2908,9 @@ async function watchNow(user, b) {
   if (!tmdbId) throw new HttpError(400, 'Identifiant TMDB manquant');
   const season = type === 'tv' ? Number(b.season) || 1 : null;
   const episode = type === 'tv' ? Number(b.episode) || 1 : null;
-  // Streaming réservé à l'admin (comptes TorBox / AllDebrid) ; les membres passent par « Demander »
-  if (!user.admin) throw new HttpError(403, 'Le streaming est réservé à l’admin : utilise « Demander ».');
+  // Membres : streaming ouvert sauf si l'admin l'a coupé (config.watchMembers = false)
+  if (!user.admin && config.watchMembers === false) throw new HttpError(403, 'Le streaming est réservé à l’admin : utilise « Demander ».');
+  const member = !user.admin;
   const quality = [2160, 1080, 720].includes(Number(b.quality)) ? Number(b.quality) : null;
   const qLabel = quality ? (quality === 2160 ? '4K' : `${quality}p`) : null;
   // Déjà sur Jellyfin (streaming choisi pour une autre qualité) : rien à télécharger en arrière-plan
@@ -2922,7 +2924,21 @@ async function watchNow(user, b) {
   let out = null;
   try {
     if (!watchNowOn()) throw new Error('streaming pas configuré sur le serveur (clé TorBox ou AllDebrid)');
-    const hit = await watchFind(type, tmdbId, season, episode, b.title, tried, quality);
+    // Membres : Wawacity en premier (lien ouvert par AllDebrid, relayé par le serveur), puis les caches
+    if (member && secourUrl() && secourKey() && secourDebridKey()) {
+      try {
+        const w = await watchWawacity(type, tmdbId, season, episode, quality);
+        if (w) out = { url: `${b._base}/watch/s/${streamToken(w.url, user.name, w.name)}`, service: 'alldebrid', sizeBytes: w.size || 0, source: 'wawacity', hoster: w.hoster || null, name: w.name, quality: w.quality || null, language: w.language || null };
+        else tried.push(`rien sur Wawacity${qLabel ? ` en ${qLabel}` : ''}`);
+      } catch (e) {
+        tried.push(`Wawacity : ${e.message.replace(/^Lumio Secour : /, '')}`);
+      }
+      if (out) {
+        watchCache.set(ck, { at: Date.now(), out });
+        console.log(`Streaming : « ${b.title || tmdbId} » pour ${user.name} (Wawacity, ${out.hoster || '?'})`);
+      }
+    }
+    const hit = out ? null : await watchFind(type, tmdbId, season, episode, b.title, tried, quality);
     if (hit && hit.via === 'torbox') {
       const c = await tb('/torrents/createtorrent', { method: 'POST', form: { magnet: `magnet:?xt=urn:btih:${hit.hash}`, seed: 3, allow_zip: 'false' } });
       const id = c && c.torrent_id;
@@ -2949,7 +2965,7 @@ async function watchNow(user, b) {
       out = { url: `${b._base}/watch/s/${streamToken(direct.url, user.name, file.rel)}`, service: 'alldebrid', sizeBytes: Number(file.size) || 0 };
     }
     // Dernier recours : Wawacity (Lumio Secour), lien ouvert par AllDebrid et relayé par le serveur
-    if (!out && !hit && secourUrl() && secourKey() && secourDebridKey()) {
+    if (!out && !hit && !member && secourUrl() && secourKey() && secourDebridKey()) {
       try {
         const w = await watchWawacity(type, tmdbId, season, episode, quality);
         if (w) {
@@ -9363,6 +9379,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       const b = await readBody(req);
       if (typeof b.enabled === 'boolean') config.watchNow = b.enabled;
       if (typeof b.download === 'boolean') config.watchNowDownload = b.download;
+      if (typeof b.members === 'boolean') config.watchMembers = b.members;
       saveConfig();
       watchCache.clear();
       return send(res, 200, watchNowView(user));

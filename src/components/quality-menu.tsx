@@ -7,11 +7,11 @@ import { Button } from '@/components/ui';
 import type { Settings } from '@/lib/settings';
 import { watchNowApi } from '@/lib/watch-now';
 
-/** Le serveur permet-il le streaming à ce compte (admin, clé TorBox ou AllDebrid) ? */
+/** Le serveur permet-il le streaming à ce compte (admin, ou membre si l'admin l'a ouvert) ? */
 export function useCanStream(settings: Settings) {
   const [can, setCan] = useState(false);
   useEffect(() => {
-    if (!settings.chatUrl || settings.jellyfin?.isAdmin !== true) return setCan(false);
+    if (!settings.chatUrl) return setCan(false);
     watchNowApi
       .status(settings)
       .then((st) => setCan(Boolean(st.streaming)))
