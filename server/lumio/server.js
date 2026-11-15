@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.103.0';
+const VERSION = '3.103.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -5116,9 +5116,11 @@ async function autoSend(rel, item, grab) {
     const p0 = watchPreferOf(item);
     return Boolean(p0 && p0.guid === rel.guid);
   })();
-  if (client === 'qbit' && (autoGuardLow(rel) || prefHit || itemFamily(item))) {
+  // 4K : toujours le cache AllDebrid / TorBox d'abord (gros fichiers), puis le torrent du site
+  const uhdRel = autoParse(rel.title).resolution === 2160 || isUhd(item);
+  if (client === 'qbit' && (autoGuardLow(rel) || prefHit || itemFamily(item) || uhdRel)) {
     grab.route = { low: true, ratio: Math.round((autoSiteRatio(rel.indexerId) || 0) * 100) / 100, via: 'torrent' };
-    const why0 = itemFamily(item) ? 'demande de la famille' : prefHit ? 'regardé en streaming' : `ratio ${grab.route.ratio} sous ${autoGuard().ratio}`;
+    const why0 = uhdRel ? 'fichier 4K' : itemFamily(item) ? 'demande de la famille' : prefHit ? 'regardé en streaming' : `ratio ${grab.route.ratio} sous ${autoGuard().ratio}`;
     const qc0 = autoCfg().qbit || {};
     const dest0 = autoResolveFolder(item.type === 'movie' ? 'radarr' : 'sonarr', item.folderPath);
     const hash0 = t.buf ? torrentHash(t.buf) : null;
