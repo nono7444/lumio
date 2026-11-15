@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.108.1';
+const VERSION = '3.108.2';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3037,7 +3037,8 @@ async function watchDownload(user, b, type, tmdbId, season, streamed) {
   if (config.watchNowDownload === false) return { state: 'off' };
   const same = (x) => x.type === type && x.tmdbId === tmdbId && (type === 'movie' || (x.seasons || []).includes(season));
   const had = requests.find((x) => same(x) && activeReq(x));
-  const autoGo = Boolean(user.admin && streamed);
+  // Le streaming ne télécharge jamais rien tout seul, même pour l'admin : une demande en attente est créée
+  const autoGo = false;
   if (had) {
     if (streamed && !had.streamed) (had.streamed = true), saveRequests();
     if (autoGo && had.status === RequestStatus.PENDING) {
