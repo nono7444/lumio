@@ -698,11 +698,174 @@ function AddTorrentCard() {
   );
 }
 
+const ORIGIN_LABEL: Record<string, { label: string; color: string }> = {
+  lumio: { label: 'Film / série', color: C.accent },
+  cache: { label: 'Venu du cache', color: C.success },
+  boost: { label: 'Partage seul', color: C.warning },
+  other: { label: 'Autre', color: C.textDim },
+};
+
+/** qBittorrent → « En partage » : tous les torrents complets, lisibles d'un coup d'œil, chacun avec sa poubelle. */
+function SeedingList() {
+  const { settings } = useSettings();
+  const [d, setD] = useState<Awaited<ReturnType<typeof autoApi.qbit>> | null>(null);
+  const [sort, setSort] = useState<'ratio' | 'sent' | 'recent'>('recent');
+  const load = useCallback(() => {
+    autoApi
+      .qbit(settings)
+      .then(setD)
+      .catch((e) => setD({ ok: false, error: e?.message ?? String(e), torrents: [] }));
+  }, [settings]);
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 10000);
+    return () => clearInterval(t);
+  }, [load]);
+  const run = (action: 'delete' | 'deleteFiles', x: QbitTorrent, force = false) =>
+    autoApi
+      .qbitAction(settings, action, [x.hash], force)
+      .then(() => (toast(action === 'delete' ? 'Partage arrêté, le fichier reste' : 'Torrent et fichier supprimés'), load()))
+      .catch((e) =>
+        /^Règle C411/.test(e?.message ?? '')
+          ? Alert.alert('Attention : Hit & Run', e.message, [
+              { text: 'Garder en partage', style: 'cancel' },
+              { text: 'Supprimer quand même', style: 'destructive', onPress: () => run(action, x, true) },
+            ])
+          : Alert.alert('qBittorrent', e?.message ?? String(e))
+      );
+  const ask = (x: QbitTorrent) =>
+    Alert.alert(
+      x.lumio ?? x.name,
+      `${x.hrLeftH ? `⚠️ Encore ${x.hrLeftH} h de partage obligatoire (règle C411).\n\n` : ''}« Arrêter le seed » retire le torrent et garde le fichier.${
+        x.origin === 'lumio' || x.origin === 'cache' ? ' Le film reste dans Jellyfin.' : ''
+      }\n« Supprimer aussi le fichier » efface en plus le fichier téléchargé${x.origin === 'lumio' || x.origin === 'cache' ? ' (la copie rangée dans Jellyfin reste : pour l’effacer, passe par l’onglet Disques)' : ''}.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        { text: 'Arrêter le seed', onPress: () => run('delete', x) },
+        { text: 'Supprimer aussi le fichier', style: 'destructive', onPress: () => run('deleteFiles', x) },
+      ]
+    );
+  if (!d) return <ActivityIndicator color="#fff" style={{ marginTop: 10 }} />;
+  if (!d.ok) return <Text style={[styles.small, { color: C.danger }]}>qBittorrent injoignable : {d.error}</Text>;
+  const list = d.torrents
+    .filter((x) => x.progress >= 100)
+    .sort((a, b) => (sort === 'ratio' ? a.ratio - b.ratio : sort === 'sent' ? b.uploaded - a.uploaded : Date.parse(b.addedOn ?? '0') - Date.parse(a.addedOn ?? '0')));
+  const up = list.reduce((n, x) => n + (x.up || 0), 0);
+  const sent = list.reduce((n, x) => n + (x.uploaded || 0), 0);
+  return (
+    <Fold id="qb-seeding" title="En partage" count={list.length}>
+      <View style={styles.ratioRow}>
+        <RatioStat label="Torrents" value={String(list.length)} color={C.text} />
+        <RatioStat label="Envoyé" value={gb(sent)} color={C.success} icon="arrow-up" />
+        <RatioStat label="Maintenant" value={fmtSpeed(up)} color={C.accent} />
+      </View>
+      <View style={styles.metaRow}>
+        <SegChip label="Récents" on={sort === 'recent'} onPress={() => setSort('recent')} />
+        <SegChip label="Plus bas ratio" on={sort === 'ratio'} onPress={() => setSort('ratio')} />
+        <SegChip label="Plus envoyé" on={sort === 'sent'} onPress={() => setSort('sent')} />
+      </View>
+      {!list.length ? <Text style={styles.help}>Aucun torrent en partage.</Text> : null}
+      {list.map((x) => {
+        const o = ORIGIN_LABEL[x.origin ?? 'other'];
+        const paused = /paused|stopped/i.test(x.state);
+        return (
+          <View key={x.hash} style={[styles.card, { alignItems: 'center' }]}>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={styles.title} numberOfLines={2}>
+                {x.lumio ?? x.name}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <Text style={{ color: ratioColor(x.ratio), fontWeight: '800', fontSize: 15 }}>ratio {fmtRatio(x.ratio)}</Text>
+                <Text style={[styles.small, { color: o.color, fontWeight: '700' }]}>{o.label}</Text>
+                {paused ? <Text style={[styles.small, { color: C.warning, fontWeight: '700' }]}>en pause</Text> : null}
+              </View>
+              <Text style={styles.small} numberOfLines={2}>
+                {gb(x.uploaded)} envoyés · {gb(x.size)}
+                {x.up ? ` · ↑ ${fmtSpeed(x.up)}` : ''}
+                {x.swarmLeechers != null ? ` · ${x.swarmLeechers} le téléchargent` : ''}
+                {x.hrLeftH ? ` · 🔒 encore ${x.hrLeftH} h` : ''}
+              </Text>
+            </View>
+            <Pressable onPress={() => ask(x)} hitSlop={10} style={[styles.pill, { paddingHorizontal: 10 }]} accessibilityLabel={`Supprimer ${x.lumio ?? x.name}`}>
+              <Ionicons name="trash-outline" size={18} color={C.danger} />
+            </Pressable>
+          </View>
+        );
+      })}
+    </Fold>
+  );
+}
+
+/** Onglet Seed → torrents du site qui peuvent rapporter du partage (estimation prudente), à ajouter à la main. */
+function SeedCandidatesCard() {
+  const { settings } = useSettings();
+  const [d, setD] = useState<{ at: string; seen: number; candidates: AutoBoostCandidate[] } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const load = useCallback(
+    (refresh = false) => {
+      setBusy(true);
+      autoApi
+        .boostCandidates(settings, refresh)
+        .then((r) => (setD(r), setErr(null)))
+        .catch((e) => setErr(e?.message ?? String(e)))
+        .finally(() => setBusy(false));
+    },
+    [settings]
+  );
+  useEffect(() => load(false), [load]);
+  const take = (c: AutoBoostCandidate) => {
+    const go = () =>
+      autoApi
+        .boostTake(settings, c.guid)
+        .then((r) => (toast(r.message), setD((o) => (o ? { ...o, candidates: o.candidates.filter((x) => x.guid !== c.guid) } : o))))
+        .catch((e) => Alert.alert('Ajouter', e?.message ?? String(e)));
+    if (c.free) return go();
+    Alert.alert('Compté dans ton ratio', `${c.title}\n\nPas en freeleech : ses ${gb(c.size)} comptent en téléchargement sur le site. ${c.leechers ?? 0} personne(s) le téléchargent pour ${c.seeders ?? 0} qui le partagent.`, [
+      { text: 'Annuler', style: 'cancel' },
+      { text: 'Ajouter quand même', style: 'destructive', onPress: go },
+    ]);
+  };
+  const list = d?.candidates ?? [];
+  const free = list.filter((c) => c.free);
+  return (
+    <Fold id="seed-cands" title="Torrents qui peuvent rapporter" count={list.length}>
+      <Text style={styles.help}>
+        Les dernières sorties du site, triées : freeleech d’abord (rien de compté), puis la demande. Rien n’est pris tout seul : « Ajouter » les met dans qBittorrent pour le partage seulement (pas dans Jellyfin). Le gain est une estimation prudente.
+      </Text>
+      <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+        <Text style={[styles.small, { flex: 1 }]}>
+          {d ? `${d.seen} sorties regardées · ${free.length} en freeleech · ${fmtWhen(d.at)}` : err ? err : 'Chargement…'}
+        </Text>
+        <Button title="Actualiser" icon="refresh" variant="secondary" small loading={busy} onPress={() => load(true)} />
+      </View>
+      {list.slice(0, 25).map((c) => (
+        <View key={c.guid} style={[styles.card, { alignItems: 'center' }]}>
+          <View style={{ flex: 1, gap: 3 }}>
+            <Text style={styles.title} numberOfLines={2}>
+              {c.title}
+            </Text>
+            <Text style={styles.small}>
+              <Text style={{ color: c.free ? C.success : C.warning, fontWeight: '800' }}>{c.free ? 'Freeleech' : 'Compté'}</Text> · {gb(c.size)} · {c.leechers ?? '?'} téléchargent · {c.seeders ?? '?'} partagent
+            </Text>
+            <Text style={[styles.small, { color: c.gain > 0 ? C.success : C.textDim }]}>
+              {c.gain > 0 ? `gain estimé +${gb(c.gain)}` : c.free ? `envoi estimé ${gb(c.expected)}` : `perte possible ${gb(-c.gain)}`}
+            </Text>
+          </View>
+          <Pressable onPress={() => take(c)} hitSlop={8} style={[styles.pill, { paddingVertical: 8 }]}>
+            <Text style={styles.pillTxt}>Ajouter</Text>
+          </Pressable>
+        </View>
+      ))}
+    </Fold>
+  );
+}
+
 const VIA_LABEL: Record<string, string> = { alldebrid: 'Cache AllDebrid', torbox: 'Cache TorBox', torrent: 'Torrent du site' };
 const LEVEL_COLOR = { ok: C.success, warn: C.warning, bad: C.danger } as const;
 const LEVEL_ICON = { ok: 'checkmark-circle', warn: 'alert-circle', bad: 'close-circle' } as const;
 
-/** Onglet Seed : ce que le serveur fait tout seul pour le ratio (garde à 1,20, chemin de chaque titre, nettoyage, vérifications). Aucun bouton. */
+/** Onglet Seed : ce que le serveur fait tout seul pour le ratio (garde à 1,0, chemin de chaque titre, nettoyage, vérifications). Aucun bouton. */
 function SeedAutoCards() {
   const { settings } = useSettings();
   const [d, setD] = useState<AutoSeedView | null>(null);
@@ -2596,6 +2759,7 @@ export function AutoSeedScreen() {
         refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
         <AutoHeader title="Seed" sub={st ? `${seeding.length} en partage · ↑ ${fmtSpeed2(up)}` : null} color={seeding.length ? C.success : C.textFaint} />
         <SeedAutoCards />
+        <SeedCandidatesCard />
         <RatioTab />
         {st ? (
           <Fold id="seed-list" title="En partage" count={seeding.length} color={seeding.length ? C.success : undefined}>
@@ -2651,8 +2815,9 @@ export function AutoQbitScreen() {
             <>
               <Switches st={st} save={save} running={running.length} toChoose={st.items.filter((i) => i.needsChoice).length} />
               <Telechargements st={st} reload={load} onItem={(id) => setItemOpen(id)} hideSeed />
+              <SeedingList />
               <AddTorrentCard />
-              <Fold id="qb-all" title="Tous les torrents" defaultOpen={false}>
+              <Fold id="qb-all" title="Tous les torrents (détails)" defaultOpen={false}>
                 <QbitTab noPrefs />
               </Fold>
             </>

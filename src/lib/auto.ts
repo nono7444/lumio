@@ -58,6 +58,8 @@ export type QbitTorrent = {
   swarmSeeders?: number | null;
   tracker: string;
   lumio: string | null;
+  /** lumio : film / série de Lumio ; cache : arrivé par le cache AllDebrid / TorBox ; boost : ajouté pour le partage ; other : autre */
+  origin?: 'lumio' | 'cache' | 'boost' | 'other';
 };
 export type AutoSeed = { ratio: number; days: number; smart?: boolean; summary?: boolean };
 export type QbitPrefs = {

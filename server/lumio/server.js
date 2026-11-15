@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.100.2';
+const VERSION = '3.101.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2716,7 +2716,7 @@ async function sendOrSecour(r) {
 // 2. Rien ne se télécharge tout seul : une demande en attente est créée, l'admin la valide ou la refuse dans Lumio Auto.
 //    La validation lance le téléchargement (cache AllDebrid / TorBox sous 1,20 de ratio, sinon torrent C411).
 // 3. La position de lecture est gardée ici, puis recopiée dans Jellyfin quand le fichier arrive : on reprend au même endroit.
-const watchNowOn = () => config.watchNow !== false && Boolean(torboxKey()) && autoOn();
+const watchNowOn = () => config.watchNow !== false && Boolean(torboxKey() || secourDebridKey()) && autoOn();
 // enabled : le bouton « Lire » s'affiche sur un titre absent, même sans TorBox (il envoie alors seulement la demande)
 const watchNowView = () => ({ enabled: config.watchNow !== false, streaming: watchNowOn(), on: config.watchNow !== false, torbox: Boolean(torboxKey()), alldebrid: Boolean(secourDebridKey()), download: config.watchNowDownload !== false });
 const watchCache = new Map(); // « type:tmdb:s:e » → { at, out } : un second appareil reprend le même lien pendant 20 min
@@ -2756,7 +2756,18 @@ function watchProgress(user, b) {
   saveWatchPos();
   return { ok: true };
 }
-/** Cherche les versions du site pour ce titre et renvoie la première qui est dans le cache TorBox : { rel, hash } ou null. */
+// Liens AllDebrid relayés par le serveur : AllDebrid ne voit que l'adresse du serveur, quel que soit l'endroit où l'on regarde.
+// Jeton au hasard dans l'adresse (pas de clé), valable 12 h.
+const streamTokens = new Map();
+function streamToken(url, who, name) {
+  const t = crypto.randomBytes(18).toString('hex');
+  streamTokens.set(t, { url, who, at: Date.now() });
+  for (const [k, v] of streamTokens) if (Date.now() - v.at > 12 * 3600e3) streamTokens.delete(k);
+  const ext = (String(name || '').match(/\.(mkv|mp4|m4v|avi|ts|mov|webm)$/i) || [])[0] || '.mkv';
+  return `${t}/video${ext.toLowerCase()}`;
+}
+/** Versions du site pour ce titre : la mieux classée qui est en cache TorBox (lien direct) ou AllDebrid (relayé) → { rel, hash, via, adId } ou null.
+ *  Seule l'empreinte part chez TorBox / AllDebrid, jamais le .torrent ni la clé du site. */
 async function watchFind(type, tmdbId, season, episode, title, tried) {
   let item = findItem(type, tmdbId);
   if (!item) {
@@ -2788,12 +2799,54 @@ async function watchFind(type, tmdbId, season, episode, title, tried) {
     tried.push('empreinte des torrents illisible');
     return null;
   }
-  const d = await tb('/torrents/checkcached', { query: { hash: cands.map((c) => c.hash).join(','), format: 'list', list_files: 'false' } });
-  const cached = new Set((Array.isArray(d) ? d.map((x) => x && x.hash) : Object.keys(d || {})).map((h) => String(h || '').toLowerCase()));
-  const hit = cands.find((c) => cached.has(c.hash));
-  if (!hit) tried.push(`${cands.length} version(s) du site, aucune dans le cache TorBox`);
-  return hit || null;
+  // 1. TorBox : vérification sans rien créer, lien direct (le plus fluide)
+  if (torboxKey()) {
+    try {
+      const d = await tb('/torrents/checkcached', { query: { hash: cands.map((c) => c.hash).join(','), format: 'list', list_files: 'false' } });
+      const cached = new Set((Array.isArray(d) ? d.map((x) => x && x.hash) : Object.keys(d || {})).map((h) => String(h || '').toLowerCase()));
+      const hit = cands.find((c) => cached.has(c.hash));
+      if (hit) return { ...hit, via: 'torbox' };
+    } catch (e) {
+      tried.push(`TorBox : ${e.message}`);
+    }
+  }
+  // 2. AllDebrid : les empreintes sont proposées, celles qui ne sont pas prêtes tout de suite sont retirées aussitôt
+  if (secourDebridKey()) {
+    try {
+      const u = await ad('/v4/magnet/upload', { magnets: cands.map((c) => `magnet:?xt=urn:btih:${c.hash}`) });
+      const ms = (u && u.magnets) || [];
+      let hit = null;
+      for (let i = 0; i < cands.length; i++) {
+        const m = ms[i];
+        if (!m || m.error || !m.id) continue;
+        if (m.ready && !hit) hit = { ...cands[i], via: 'alldebrid', adId: m.id };
+        else await ad('/v4/magnet/delete', { id: m.id }).catch(() => {});
+      }
+      if (hit) return hit;
+    } catch (e) {
+      tried.push(`AllDebrid : ${e.message}`);
+    }
+  }
+  tried.push(`${cands.length} version(s) du site, aucune dans le cache ${[torboxKey() ? 'TorBox' : null, secourDebridKey() ? 'AllDebrid' : null].filter(Boolean).join(' ni ')}`);
+  return null;
 }
+/** Le bon fichier vidéo d'une liste (le plus gros ; pour une série, celui de l'épisode). */
+function watchPickVideo(files, type, season, episode, nameOf) {
+  const videos = files.filter((f) => VIDEO_EXT.test(nameOf(f)) && !/\bsample\b/i.test(nameOf(f))).sort((x, y) => (Number(y.size) || 0) - (Number(x.size) || 0));
+  if (type !== 'tv' || videos.length < 2) return videos[0] || null;
+  return (
+    videos.find((f) => {
+      const pz = autoParse(String(nameOf(f)).split('/').pop());
+      return pz.episode != null && (pz.season == null || pz.season === season) && episode >= pz.episode && episode <= (pz.episodeEnd || pz.episode);
+    }) || null
+  );
+}
+// Version regardée en streaming : Lumio Auto prend ensuite exactement ce torrent, par le cache (rien de compté), puis le partage
+const watchPrefer = new Map();
+const watchPreferOf = (item) => {
+  const p0 = watchPrefer.get(`${item.type}:${item.tmdbId}`);
+  return p0 && Date.now() - p0.at < 3 * 86400e3 ? p0 : null;
+};
 async function watchNow(user, b) {
   if (config.watchNow === false) throw new HttpError(400, 'Le bouton « Lire » des titres absents est coupé sur le serveur');
   const type = b.type === 'tv' || b.type === 'series' ? 'tv' : 'movie';
@@ -2801,6 +2854,12 @@ async function watchNow(user, b) {
   if (!tmdbId) throw new HttpError(400, 'Identifiant TMDB manquant');
   const season = type === 'tv' ? Number(b.season) || 1 : null;
   const episode = type === 'tv' ? Number(b.episode) || 1 : null;
+  // Membres : pas de streaming (les comptes AllDebrid / TorBox restent à l'admin), juste la demande
+  if (!user.admin) {
+    const dl = await watchDownload(user, b, type, tmdbId, season, false);
+    const why = dl.state === 'pending' ? 'ta demande est envoyée à l’admin' : dl.state === 'already' || dl.state === 'started' ? 'il est déjà en cours de téléchargement' : dl.state === 'declined' ? 'la demande a été refusée par l’admin' : dl.reason ? `demande impossible : ${dl.reason}` : 'demande impossible';
+    throw new HttpError(404, `Pas encore sur le serveur : ${why}.`);
+  }
   const ck = `${type}:${tmdbId}:${season}:${episode}`;
   const cachedOut = watchCache.get(ck);
   // Même titre relancé depuis un autre appareil (téléphone puis TV) : même lien pendant 1 h, à la position gardée
@@ -2808,9 +2867,9 @@ async function watchNow(user, b) {
   const tried = [];
   let out = null;
   try {
-    if (!watchNowOn()) throw new Error('streaming pas configuré sur le serveur');
+    if (!watchNowOn()) throw new Error('streaming pas configuré sur le serveur (clé TorBox ou AllDebrid)');
     const hit = await watchFind(type, tmdbId, season, episode, b.title, tried);
-    if (hit) {
+    if (hit && hit.via === 'torbox') {
       const c = await tb('/torrents/createtorrent', { method: 'POST', form: { magnet: `magnet:?xt=urn:btih:${hit.hash}`, seed: 3, allow_zip: 'false' } });
       const id = c && c.torrent_id;
       if (!id) throw new Error('TorBox n’a pas pris le torrent');
@@ -2821,30 +2880,35 @@ async function watchNow(user, b) {
         if (t && t.download_finished && Array.isArray(t.files) && t.files.length) break;
         await sleep(2000);
       }
-      const videos = ((t && t.files) || []).filter((f) => VIDEO_EXT.test(f.name || f.short_name || '') && !/\bsample\b/i.test(f.short_name || f.name || '')).sort((x, y) => (y.size || 0) - (x.size || 0));
-      let file = videos[0] || null;
-      if (type === 'tv' && videos.length > 1) {
-        file = videos.find((f) => {
-          const pz = autoParse(String(f.short_name || f.name || '').split('/').pop());
-          return pz.episode != null && (pz.season == null || pz.season === season) && episode >= pz.episode && episode <= (pz.episodeEnd || pz.episode);
-        }) || null;
-      }
+      const file = watchPickVideo((t && t.files) || [], type, season, episode, (f) => f.name || f.short_name || '');
       if (!file) throw new Error('fichier vidéo introuvable dans le torrent');
       const url = await tb('/torrents/requestdl', { query: { token: torboxKey(), torrent_id: id, file_id: file.id } });
       if (typeof url !== 'string' || !/^https?:\/\//.test(url)) throw new Error('TorBox n’a pas donné de lien');
+      out = { url, service: 'torbox', sizeBytes: Number(file.size) || 0 };
+    } else if (hit && hit.via === 'alldebrid') {
+      const f = await ad('/v4/magnet/files', { id: [hit.adId] });
+      const mm = f.magnets && f.magnets[0];
+      const file = watchPickVideo(flattenFiles(mm && mm.files), type, season, episode, (x) => x.rel || '');
+      if (!file) throw new Error('fichier vidéo introuvable dans le torrent');
+      const direct = await unlockLink(file.link, {});
+      if (!b._base) throw new Error('adresse du serveur inconnue');
+      out = { url: `${b._base}/watch/s/${streamToken(direct.url, user.name, file.rel)}`, service: 'alldebrid', sizeBytes: Number(file.size) || 0 };
+    }
+    if (out) {
       const pz = autoParse(hit.rel.title);
-      out = { url, service: 'torbox', source: hit.rel.indexer || null, hoster: null, name: hit.rel.title, quality: pz.resolution ? `${pz.resolution}p` : null, language: null, sizeBytes: Number(file.size) || 0 };
+      Object.assign(out, { source: hit.rel.indexer || null, hoster: null, name: hit.rel.title, quality: pz.resolution ? `${pz.resolution}p` : null, language: null });
       watchCache.set(ck, { at: Date.now(), out });
       if (watchCache.size > 200) watchCache.delete(watchCache.keys().next().value);
-      console.log(`Regarder en streaming : « ${b.title || tmdbId} » pour ${user.name} (cache TorBox, ${hit.rel.title})`);
+      watchPrefer.set(`${type}:${tmdbId}`, { guid: hit.rel.guid, hash: hit.hash, at: Date.now() });
+      console.log(`Lire en streaming : « ${b.title || tmdbId} » pour ${user.name} (cache ${hit.via === 'torbox' ? 'TorBox' : 'AllDebrid, relayé par le serveur'}, ${hit.rel.title})`);
     }
   } catch (e) {
     tried.push(String((e && e.message) || e));
   }
-  // Rien ne se télécharge tout seul : une demande part à l'admin, qui valide ou refuse dans Lumio Auto
+  // Admin : streaming lancé → le même torrent se télécharge tout seul (par le cache, puis partage) ; sinon une demande t'attend
   const dl = await watchDownload(user, b, type, tmdbId, season, Boolean(out));
   if (out) return { ...out, ...watchResume(user, type, tmdbId, season, episode), download: dl };
-  const dlNote = dl.state === 'pending' ? (user.admin ? ' La demande t’attend dans Lumio Auto → Demandes.' : ' Ta demande est envoyée à l’admin.') : dl.state === 'already' || dl.state === 'started' ? ' Il est déjà en cours de téléchargement sur le serveur.' : dl.state === 'declined' ? ' La demande a été refusée par l’admin.' : dl.reason ? ` Demande impossible : ${dl.reason}` : '';
+  const dlNote = dl.state === 'pending' ? ' La demande t’attend dans Lumio Auto → Demandes.' : dl.state === 'already' || dl.state === 'started' ? ' Il est déjà en cours de téléchargement sur le serveur.' : dl.state === 'declined' ? ' La demande a été refusée.' : dl.reason ? ` Demande impossible : ${dl.reason}` : '';
   throw new HttpError(404, `Pas encore disponible en streaming${tried.length ? ` (${tried.slice(0, 2).join(' ; ')})` : ''}.${dlNote}`);
 }
 /** « Lire » ne télécharge rien tout seul : une demande en attente est créée (sans quota), pour tout le monde, admin compris.
@@ -2854,13 +2918,18 @@ async function watchDownload(user, b, type, tmdbId, season, streamed) {
   if (config.watchNowDownload === false) return { state: 'off' };
   const same = (x) => x.type === type && x.tmdbId === tmdbId && (type === 'movie' || (x.seasons || []).includes(season));
   const had = requests.find((x) => same(x) && activeReq(x));
+  const autoGo = Boolean(user.admin && streamed);
   if (had) {
     if (streamed && !had.streamed) (had.streamed = true), saveRequests();
+    if (autoGo && had.status === RequestStatus.PENDING) {
+      await approveRequest(user, had, {}).catch(() => {});
+      return { state: had.status === RequestStatus.APPROVED ? 'started' : 'pending', requestId: had.id };
+    }
     return { state: had.status === RequestStatus.PENDING ? 'pending' : 'already', requestId: had.id };
   }
-  if (requests.some((x) => same(x) && x.status === RequestStatus.DECLINED && Date.now() - Date.parse(x.modifiedAt || x.createdAt) < 7 * 86400e3)) return { state: 'declined' };
+  if (!autoGo && requests.some((x) => same(x) && x.status === RequestStatus.DECLINED && Date.now() - Date.parse(x.modifiedAt || x.createdAt) < 7 * 86400e3)) return { state: 'declined' };
   try {
-    const r = await createRequest(user, { type, tmdbId, title: b.title, year: b.year, poster: b.poster, backdrop: b.backdrop, seasons: type === 'tv' ? [season] : undefined }, { noQuota: true, noApprove: true, streamed: Boolean(streamed) });
+    const r = await createRequest(user, { type, tmdbId, title: b.title, year: b.year, poster: b.poster, backdrop: b.backdrop, seasons: type === 'tv' ? [season] : undefined }, { noQuota: true, noApprove: !autoGo, streamed: Boolean(streamed) });
     return { state: r.status === RequestStatus.PENDING ? 'pending' : r.status === RequestStatus.APPROVED ? 'started' : 'skipped', requestId: r.id, reason: r.error };
   } catch (e) {
     // 409 : déjà disponible ou déjà demandé
@@ -4759,7 +4828,7 @@ async function fetchTorrent(rel) {
 // Seule l'empreinte du torrent est envoyée (jamais le .torrent, qui porte la clé du compte) : en cache → fichier reçu sans
 // rien compter sur le site ; pas en cache → torrent normal dans qBittorrent. Le fichier du cache est exactement celui du
 // site : le torrent est ensuite ajouté par-dessus dans qBittorrent, vérifié, et il partage sans avoir rien téléchargé.
-const autoGuard = () => ({ enabled: true, ratio: 1.2, ...(autoCfg().guard || {}) });
+const autoGuard = () => ({ enabled: true, ...(autoCfg().guard || {}), ratio: 1.0 });
 function autoGuardLow(rel) {
   const g = autoGuard();
   const ixId = rel.indexerId || (autoIndexers().find((x) => x.name === rel.indexer) || {}).id;
@@ -4967,7 +5036,11 @@ async function overFallback(g, why) {
 async function autoSend(rel, item, grab) {
   const t = await fetchTorrent(rel);
   const client = autoDebridOnly() ? 'alldebrid' : autoClientFor(rel);
-  if (client === 'qbit' && autoGuardLow(rel)) {
+  const prefHit = (() => {
+    const p0 = watchPreferOf(item);
+    return Boolean(p0 && p0.guid === rel.guid);
+  })();
+  if (client === 'qbit' && (autoGuardLow(rel) || prefHit)) {
     grab.route = { low: true, ratio: Math.round((autoSiteRatio(rel.indexerId) || 0) * 100) / 100, via: 'torrent' };
     const qc0 = autoCfg().qbit || {};
     const dest0 = autoResolveFolder(item.type === 'movie' ? 'radarr' : 'sonarr', item.folderPath);
@@ -5071,7 +5144,11 @@ async function autoSend(rel, item, grab) {
 
 /** Envoie la meilleure version ; en mode AllDebrid, essaie les suivantes tant qu'elles ne sont pas en cache. */
 async function autoTryGrab(item, results, want) {
-  const ok = results.filter((r) => !r.rejected).slice(0, autoDebridOnly() ? 6 : 1);
+  let ok = results.filter((r) => !r.rejected).slice(0, autoDebridOnly() ? 6 : 1);
+  // Titre regardé en streaming : exactement la même version (même un pack de saison), elle est dans le cache
+  const pref = watchPreferOf(item);
+  const same = pref ? results.find((r) => r.guid === pref.guid && (!r.rejected || r.reasons.every((x) => /^pack de saison/.test(x)))) : null;
+  if (same) ok = [same, ...ok.filter((r) => r !== same)];
   for (const r of ok) {
     try {
       await autoGrab(item, r, want);
@@ -6006,10 +6083,13 @@ async function boostCandidates(force = false) {
   const list = all
     .filter((r) => r.size >= 20e6 && r.size <= 60e9 && !knownGuid.has(r.guid) && !(r.hash && known.has(r.hash)) && r.leechers != null && r.leechers >= 1)
     .map((r) => {
+      // Freeleech du torrent, ou période freeleech du compte (profil C411)
+      const freeleech = Boolean(r.freeleech || (r.indexerId && autoSiteFree(r.indexerId)));
       const demand = r.leechers / ((r.seeders || 0) + 1);
-      const expected = r.size * Math.min(5, demand);
-      const cost = r.freeleech ? 0 : r.size;
-      return { ...r, demand: Math.round(demand * 100) / 100, expected: Math.round(expected), cost, gain: Math.round(expected - cost) };
+      // Estimation prudente : les autres partageurs arrivent en même temps, on ne compte qu'un tiers de la demande (1,5 fois la taille au plus)
+      const expected = r.size * Math.min(1.5, demand / 3);
+      const cost = freeleech ? 0 : r.size;
+      return { ...r, freeleech, demand: Math.round(demand * 100) / 100, expected: Math.round(expected), cost, gain: Math.round(expected - cost) };
     })
     // Gratuits d'abord, puis le meilleur gain estimé
     .sort((a, b) => Number(b.freeleech) - Number(a.freeleech) || b.gain - a.gain);
@@ -6258,7 +6338,7 @@ function autoSeedView() {
       ratio: g.ratio || 0,
       uploaded: g.uploaded || 0,
       upSpeed: g.seeding ? g.upSpeed || 0 : 0,
-      hoursLeft: g.seeding ? hrLeft(g.seedTime) : null,
+      hoursLeft: g.seeding && !g.over ? hrLeft(g.seedTime) : null,
       seedEnd: g.seedEnd || null,
     }));
   return {
@@ -7328,7 +7408,7 @@ async function autoRoutes(req, res, p, q, user) {
           category: t.category || '',
           addedOn: t.added_on ? new Date(t.added_on * 1000).toISOString() : null,
           seedTime: t.seeding_time || 0,
-          hrLeftH: Number(t.progress) >= 1 && !hrSafe(t.seeding_time, t.ratio) ? hrLeft(t.seeding_time) : 0,
+          hrLeftH: Number(t.progress) >= 1 && !hrSafe(t.seeding_time, t.ratio) && !(ours.get((t.hash || '').toLowerCase()) || {}).over ? hrLeft(t.seeding_time) : 0,
           swarmLeechers: t.num_incomplete ?? null,
           swarmSeeders: t.num_complete ?? null,
           tracker: (() => {
@@ -7339,6 +7419,7 @@ async function autoRoutes(req, res, p, q, user) {
             }
           })(),
           lumio: ours.has((t.hash || '').toLowerCase()) ? ours.get(t.hash.toLowerCase()).title : null,
+          origin: t.category === BOOST_CATEGORY ? 'boost' : ours.has((t.hash || '').toLowerCase()) ? (ours.get(t.hash.toLowerCase()).over ? 'cache' : 'lumio') : 'other',
         })),
       });
     } catch (e) {
@@ -7395,7 +7476,8 @@ async function autoRoutes(req, res, p, q, user) {
     else if (b.action === 'delete' || b.action === 'deleteFiles') {
       if (!b.force) {
         const info = await (await qbitFetch(`/api/v2/torrents/info?hashes=${h}`)).json().catch(() => []);
-        const risky = info.filter((t) => Number(t.progress) >= 1 && !hrSafe(t.seeding_time, t.ratio));
+        const fromCache = new Set(auto.grabs.filter((g) => g.over && g.hash).map((g) => g.hash));
+        const risky = info.filter((t) => Number(t.progress) >= 1 && !hrSafe(t.seeding_time, t.ratio) && !fromCache.has(String(t.hash).toLowerCase()));
         if (risky.length)
           throw new HttpError(
             409,
@@ -7935,6 +8017,39 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
   if (url.pathname === '/tv' || url.pathname === '/tv.apk') {
     res.writeHead(302, { Location: process.env.TV_APK_URL || 'https://github.com/nono7444/lumio-tv/releases/latest/download/lumio-tv-armeabi-v7a.apk' });
     return res.end();
+  }
+
+  // Streaming AllDebrid relayé : /watch/s/<jeton>/video.mkv (jeton au hasard, 12 h), lecture par morceaux (Range)
+  const streamM = url.pathname.match(/^\/watch\/s\/([a-f0-9]{36})(?:\/[^/]*)?$/);
+  if (streamM && (req.method === 'GET' || req.method === 'HEAD')) {
+    const st0 = streamTokens.get(streamM[1]);
+    if (!st0 || Date.now() - st0.at > 12 * 3600e3) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('Lien expiré : relance la lecture');
+    }
+    const ac = new AbortController();
+    res.on('close', () => ac.abort());
+    let up;
+    try {
+      up = await fetch(st0.url, { method: req.method, headers: req.headers.range ? { Range: req.headers.range } : {}, signal: ac.signal });
+    } catch {
+      res.writeHead(502);
+      return res.end();
+    }
+    const h = {};
+    for (const k of ['content-type', 'content-length', 'content-range', 'last-modified', 'etag']) {
+      const v = up.headers.get(k);
+      if (v) h[k] = v;
+    }
+    h['accept-ranges'] = 'bytes';
+    if (!h['content-type'] || /octet-stream/.test(h['content-type'])) h['content-type'] = /\.mp4$|\.m4v$/i.test(url.pathname) ? 'video/mp4' : 'video/x-matroska';
+    res.writeHead(up.status, h);
+    if (req.method === 'HEAD' || !up.body) return res.end();
+    const { Readable } = require('stream');
+    Readable.fromWeb(up.body)
+      .on('error', () => res.destroy())
+      .pipe(res);
+    return;
   }
 
   // Lumio TV (fork de NuvioTV, dépôt nono7444/lumio-tv) : /tvnuvio = 32 bits (toutes les box), /tvnuvio64 = 64 bits
@@ -9061,7 +9176,11 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
 
     // ——— « Lire » un titre absent (admin) : lien de streaming TorBox + téléchargement en arrière-plan + reprise ———
     if (req.method === 'GET' && p === '/api/watch/now') return send(res, 200, watchNowView());
-    if (req.method === 'POST' && p === '/api/watch/now') return send(res, 200, await watchNow(user, await readBody(req)));
+    if (req.method === 'POST' && p === '/api/watch/now') {
+      const host = String(req.headers['x-forwarded-host'] || req.headers.host || '');
+      const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || (/^(\d+\.\d+\.\d+\.\d+|localhost)(:\d+)?$/.test(host) ? 'http' : 'https');
+      return send(res, 200, await watchNow(user, { ...(await readBody(req)), _base: host ? `${proto}://${host}` : null }));
+    }
     if (req.method === 'POST' && p === '/api/watch/progress') return send(res, 200, watchProgress(user, await readBody(req)));
     if (req.method === 'GET' && p === '/api/watch/progress') {
       const type = q.get('type') === 'tv' ? 'tv' : 'movie';

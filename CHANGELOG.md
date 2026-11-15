@@ -6,6 +6,12 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Streaming d'un titre absent réservé à l'admin : le serveur cherche dans le cache TorBox (lien direct) puis AllDebrid (vidéo relayée par le serveur, AllDebrid ne voit que son adresse). Les membres qui appuient sur « Lire » envoient une demande. Demande le serveur 3.101.0.
+- Quand l'admin lance un streaming, le même torrent se télécharge tout seul sur le serveur par le cache (rien de compté sur le site), puis passe en partage.
+- Garde du ratio : bascule sur le cache sous 1,0 de ratio (au lieu de 1,20).
+- Lumio Auto, onglet qBittorrent : nouvelle liste « En partage », claire, avec ratio, envoi, origine et une poubelle sur chaque torrent (arrêter le seed ou supprimer aussi le fichier).
+- Lumio Auto, onglet Seed : « Torrents qui peuvent rapporter », freeleech d'abord (y compris les périodes freeleech du compte), avec « Ajouter » ; rien n'est pris tout seul.
+
 ## 1.0.164 — 13 novembre 2026
 
 - Titre absent du serveur : il ne reste vraiment que le bouton « Lire ». Il lance le streaming si possible, sinon il envoie la demande ; quand le fichier est sur le serveur, le même bouton lit depuis Jellyfin. Demande le serveur 3.100.2.
