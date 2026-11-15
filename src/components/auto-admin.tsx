@@ -1118,7 +1118,7 @@ const ITEM_GROUPS = [
 function Demandes({ st, onItem }: { st: AutoState; onItem: (i: AutoItem) => void }) {
   const { settings } = useSettings();
   const group = (i: AutoItem, s: ReturnType<typeof itemStatus>) =>
-    i.needsChoice ? 'choose' : i.searching || i.active || s.icon === 'cloud-download' ? 'busy' : s.label === 'Complet' ? 'done' : 'wait';
+    i.available === false ? 'wait' : i.needsChoice ? 'choose' : i.searching || i.active || s.icon === 'cloud-download' ? 'busy' : s.label === 'Complet' ? 'done' : 'wait';
   const rows = st.items.map((i) => ({ i, s: itemStatus(i, st.grabs) }));
   return (
     <>
@@ -2852,7 +2852,7 @@ export function AutoDemandesScreen() {
   }, [loadReqs]);
   const rows = (st?.items ?? []).map((i) => ({ i, s: itemStatus(i, st!.grabs) }));
   const group = (i: AutoItem, s: ReturnType<typeof itemStatus>) =>
-    i.needsChoice ? 'choose' : i.searching || i.active || s.icon === 'cloud-download' ? 'busy' : s.label === 'Complet' ? 'done' : 'wait';
+    i.available === false ? 'wait' : i.needsChoice ? 'choose' : i.searching || i.active || s.icon === 'cloud-download' ? 'busy' : s.label === 'Complet' ? 'done' : 'wait';
   const by = (id: string) => rows.filter((r) => group(r.i, r.s) === id);
   const choose = by('choose');
   const busy = by('busy');

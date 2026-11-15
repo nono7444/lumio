@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.109.0';
+const VERSION = '3.109.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4149,6 +4149,7 @@ if (!auto.have || typeof auto.have !== 'object') auto.have = {};
 if (!auto.haveCodec || typeof auto.haveCodec !== 'object') auto.haveCodec = {};
 // 4K H.265 sur certains titres (interrupteur de l'admin) : { 'movie:123': true } ; have4k : ce qui est déjà là en 4K
 if (!auto.uhd || typeof auto.uhd !== 'object') auto.uhd = {};
+for (const i of auto.items || []) if (i.needsChoice && i.type === 'movie' && i.meta && i.meta.available === false) i.needsChoice = false;
 if (!auto.have4k || typeof auto.have4k !== 'object') auto.have4k = {};
 // Séries retirées à la main du suivi (on ne les reprend pas avec les séries en cours de la bibliothèque)
 if (!Array.isArray(auto.unfollowed)) auto.unfollowed = [];
@@ -5928,12 +5929,14 @@ async function autoSearchTick(force = false) {
           upgrading = true;
           item.nextUpgrade = Date.now() + 24 * 3600e3;
         } else {
+          item.needsChoice = false; // pas encore sorti ou complet : rien à choisir
           item.note = item.type === 'movie' && !(item.meta && item.meta.available) ? `pas encore sorti${item.meta && item.meta.availableFrom ? ` (prévu le ${item.meta.availableFrom})` : ''}` : up.length ? 'complet · une version H.265 plus légère est guettée' : 'rien ne manque';
           item.nextSearch = Date.now() + 6 * 3600e3;
           continue;
         }
       }
       let grabbed = false;
+      let anyResult = false; // au moins une version trouvée sur un site (sinon : rien à choisir, on attend)
       let waitUntil = 0;
       let quotaWait = false;
       let notCachedAll = false;
@@ -5949,6 +5952,7 @@ async function autoSearchTick(force = false) {
         const res1 = await autoSearch(item, want);
         autoReport(item, want, res1);
         const results = res1.results;
+        if (results.length) anyResult = true;
         let best = results.find((r) => !r.rejected);
         // Une bonne version existe, mais le quota du jour du tracker est atteint : on attend demain (pas de choix à faire)
         if (!best && results.some((r) => r.reasons.length && r.reasons.every((x) => x.startsWith('quota du jour')))) quotaWait = true;
@@ -6001,6 +6005,15 @@ async function autoSearchTick(force = false) {
           ? 'complet · une version H.265 plus légère est guettée'
           : `en attente d’une version H.265 (sinon H.264 à partir du ${new Date(waitUntil).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: process.env.TZ || 'Europe/Paris' })})`;
         item.nextSearch = upgrading ? Date.now() + 6 * 3600e3 : Math.min(Date.now() + 2 * 3600e3, waitUntil + 60e3);
+        item.lastSearch = new Date().toISOString();
+        autoSave();
+        continue;
+      }
+      // Aucune version sur les sites (film pas encore sorti en vidéo…) : rien à choisir, on réessaie plus tard
+      if (!grabbed && !anyResult) {
+        item.needsChoice = false;
+        item.note = 'aucune version sur les sites pour l’instant (réessai dans 6 h)';
+        item.nextSearch = Date.now() + 6 * 3600e3;
         item.lastSearch = new Date().toISOString();
         autoSave();
         continue;
