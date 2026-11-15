@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.168 — 15 novembre 2026
+
 - Bouton « Streaming » ouvert aux membres de la famille : Wawacity d'abord, puis le cache TorBox, puis AllDebrid (les liens AllDebrid passent par le serveur). Leur streaming ne télécharge rien : une demande arrive à l'admin. Demande le serveur 3.106.0.
 
 ## 1.0.167 — 15 novembre 2026
