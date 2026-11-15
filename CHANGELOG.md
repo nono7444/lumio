@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Demandes de la famille : si une version est dans le cache AllDebrid / TorBox, la demande est validée toute seule et le fichier arrive par le cache (rien de compté sur le site), puis passe en partage. Pas en cache : elle attend l'admin, puis torrent du site. Serveur 3.102.0.
+
 - Streaming d'un titre absent réservé à l'admin : le serveur cherche dans le cache TorBox (lien direct) puis AllDebrid (vidéo relayée par le serveur, AllDebrid ne voit que son adresse). Les membres qui appuient sur « Lire » envoient une demande. Demande le serveur 3.101.0.
 - Quand l'admin lance un streaming, le même torrent se télécharge tout seul sur le serveur par le cache (rien de compté sur le site), puis passe en partage.
 - Garde du ratio : bascule sur le cache sous 1,0 de ratio (au lieu de 1,20).

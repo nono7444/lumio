@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.101.0';
+const VERSION = '3.102.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2841,6 +2841,27 @@ function watchPickVideo(files, type, season, episode, nameOf) {
     }) || null
   );
 }
+/** Demande d'un membre en attente : une version du site est-elle dans le cache TorBox / AllDebrid ? Si oui, demande validée toute seule et
+ *  Lumio Auto prend exactement cette version, par le cache, puis la partage. Sinon elle attend l'admin. Série : saison demandée, épisode 1
+ *  (ou pack de la saison) comme témoin. */
+async function familyCacheCheck(r) {
+  if (!autoOn() || !(torboxKey() || secourDebridKey())) return;
+  const tried = [];
+  const season = r.type === 'tv' ? (r.seasons || [])[0] || 1 : null;
+  const hit = await watchFind(r.type, r.tmdbId, season, r.type === 'tv' ? 1 : null, r.title, tried);
+  if (!hit || r.status !== RequestStatus.PENDING) {
+    if (!hit) console.log(`Demande « ${r.title} » de ${r.requestedBy.name} : rien en cache (${tried.slice(-1)[0] || '?'}), elle attend l'admin`);
+    return;
+  }
+  watchPrefer.set(`${r.type}:${r.tmdbId}`, { guid: hit.rel.guid, hash: hit.hash, at: Date.now() });
+  r.cacheHit = hit.via;
+  await approveRequest({ id: 'lumio', name: `Cache ${hit.via === 'torbox' ? 'TorBox' : 'AllDebrid'}` }, r, {});
+  saveRequests();
+  console.log(`Demande « ${r.title} » de ${r.requestedBy.name} validée toute seule : en cache ${hit.via} (${hit.rel.title})`);
+  notify({ title: '✅ Demande validée toute seule', message: `${r.title} (${r.requestedBy.name}) : en cache ${hit.via === 'torbox' ? 'TorBox' : 'AllDebrid'}, rien de compté sur le site`, tags: ['white_check_mark'], click: 'lumio://auto' }).catch(() => {});
+}
+/** Titre demandé par un membre de la famille : toujours le cache d'abord (quel que soit le ratio), sinon torrent normal. */
+const itemFamily = (item) => (item.requestIds || []).some((id) => (requests.find((x) => x.id === id) || {}).family);
 // Version regardée en streaming : Lumio Auto prend ensuite exactement ce torrent, par le cache (rien de compté), puis le partage
 const watchPrefer = new Map();
 const watchPreferOf = (item) => {
@@ -5040,8 +5061,9 @@ async function autoSend(rel, item, grab) {
     const p0 = watchPreferOf(item);
     return Boolean(p0 && p0.guid === rel.guid);
   })();
-  if (client === 'qbit' && (autoGuardLow(rel) || prefHit)) {
+  if (client === 'qbit' && (autoGuardLow(rel) || prefHit || itemFamily(item))) {
     grab.route = { low: true, ratio: Math.round((autoSiteRatio(rel.indexerId) || 0) * 100) / 100, via: 'torrent' };
+    const why0 = itemFamily(item) ? 'demande de la famille' : prefHit ? 'regardé en streaming' : `ratio ${grab.route.ratio} sous ${autoGuard().ratio}`;
     const qc0 = autoCfg().qbit || {};
     const dest0 = autoResolveFolder(item.type === 'movie' ? 'radarr' : 'sonarr', item.folderPath);
     const hash0 = t.buf ? torrentHash(t.buf) : null;
@@ -5077,10 +5099,10 @@ async function autoSend(rel, item, grab) {
         grab.jobId = job.id;
         grab.over = { via: hit.via, hash: hash0, name: layout.name, root: dest0.root, folder: job.folder, torrent: tf };
         grab.route.via = hit.via;
-        autoLog(`${item.title} : en cache ${hit.via === 'torbox' ? 'TorBox' : 'AllDebrid'} (ratio ${grab.route.ratio} sous ${autoGuard().ratio}), rien de compté sur ${rel.indexer}`);
+        autoLog(`${item.title} : en cache ${hit.via === 'torbox' ? 'TorBox' : 'AllDebrid'} (${why0}), rien de compté sur ${rel.indexer}`);
         return;
       }
-      autoLog(`${item.title} : pas en cache (ratio ${grab.route.ratio} sous ${autoGuard().ratio}), torrent ${rel.indexer} normal`);
+      autoLog(`${item.title} : pas en cache (${why0}), torrent ${rel.indexer} normal`);
     }
   }
   if (client === 'rdt' || client === 'qbit') {
@@ -7879,6 +7901,8 @@ async function createRequest(user, b, opts = {}) {
   // Demande née du bouton « Lire » : streamed = le streaming a démarré ; elle attend toujours la validation de l'admin
   if (opts.noApprove) r.from = 'lire';
   if (opts.streamed) r.streamed = true;
+  // Demande d'un membre de la famille : téléchargement par le cache AllDebrid / TorBox d'abord, puis partage
+  if (!user.admin) r.family = true;
   if (perm.autoApprove && !opts.noApprove) {
     r.status = RequestStatus.APPROVED;
     r.modifiedBy = { id: user.id, name: user.name };
@@ -7898,6 +7922,8 @@ async function createRequest(user, b, opts = {}) {
   const what = type === 'tv' ? ` (${seasons.length > 1 ? `${seasons.length} saisons` : `saison ${seasons[0]}`})` : '';
   // Plus d'annonce dans le chat : notification push pour l'admin (sauf pour ses propres demandes)
   if (!user.admin || r.status === RequestStatus.FAILED) notifyRequest(r, what);
+  // Membre : si une version est déjà en cache, la demande est validée toute seule (rien de compté sur le site)
+  if (r.family && r.status === RequestStatus.PENDING) familyCacheCheck(r).catch((e) => console.log(`Demande « ${r.title} » : vérification du cache impossible — ${e.message}`));
   // « Lire » lancé par l'admin lui-même : pas d'annonce à la famille tant qu'il n'a pas validé
   if (opts.noApprove && user.admin) return r;
   notifyFamily({ title: `📥 ${user.name} a demandé`, message: `${r.title}${r.year ? ` (${r.year})` : ''}${what}`, tags: ['inbox_tray'], image: r.poster, click: 'lumio://activity' });
