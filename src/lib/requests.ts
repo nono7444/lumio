@@ -133,6 +133,9 @@ export const requestsApi = {
       qualityProfileId?: number;
       /** Profil 4K H.265 (Lumio Auto) */
       uhd?: boolean;
+      /** 4K, admin : fichier Wawacity choisi (film) ou version par saison (série) ; sinon C411 */
+      secourPick?: unknown;
+      secourTemplates?: Record<string, { quality: string; language: string; hoster: string }>;
     }
   ) => serverCall<Req>(s, '/api/requests', { method: 'POST', body: JSON.stringify(body) }),
   approve: (s: Settings, id: string, opts: { rootFolderPath?: string; qualityProfileId?: number; uhd?: boolean } = {}) =>

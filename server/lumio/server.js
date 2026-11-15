@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.107.0';
+const VERSION = '3.108.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2689,6 +2689,11 @@ function secourAutoView() {
 
 /** Envoie à Radarr / Sonarr ; s'ils sont hors service, bascule sur le groupe de secours. */
 async function sendOrSecour(r) {
+  // 4K : Wawacity d'abord (fichier choisi par l'admin, ou le meilleur pour une demande de la famille), C411 ensuite pour ce qui manque
+  if (autoOn() && r.uhd && (r.uhdSecour || r.family) && secourUrl() && secourKey() && secourDebridKey() && !r.uhdSecourDone) {
+    startSecour(r, r.uhdSecour ? 'Wawacity choisi (4K)' : 'Wawacity d’abord (4K)', { pick: r.uhdSecour && r.uhdSecour.pick, templates: r.uhdSecour && r.uhdSecour.templates, uhd: true });
+    return;
+  }
   // Lumio Auto actif : il remplace Radarr / Sonarr
   if (autoOn()) {
     await autoFromRequest(r);
@@ -3107,6 +3112,9 @@ function startSecour(r, reason, opts = {}) {
   if (opts.source) r.secour.source = String(opts.source).slice(0, 60);
   // Fichier précis choisi par l'admin (film)
   if (opts.pick && /^https?:\/\//.test(String(opts.pick.link || ''))) r.secour.pick = pick(opts.pick, ['link', 'hoster', 'source', 'season', 'episode', 'quality', 'language', 'sizeBytes', 'name']);
+  // 4K : versions choisies par saison, et seulement des fichiers 4K
+  if (opts.templates) r.secour.templates = opts.templates;
+  if (opts.uhd) (r.secour.uhd = true), (r.secour.source = r.secour.source || 'wawacity');
   delete r.error;
   saveRequests();
   if (!secourQueue.includes(r.id)) secourQueue.push(r.id);
@@ -3154,7 +3162,15 @@ async function secourGrab(r, item, target, folder, baseName, query) {
   const found = picked ? { links: [picked] } : await secour(`/lumio/links?${qs}`, { timeout: 120000 });
   const wanted = !picked && r.secour && r.secour.source ? r.secour.source.toLowerCase() : '';
   const all = (found && found.links) || [];
-  const candidates = picked ? [picked] : rankSecourLinks(wanted ? all.filter((l) => String(l.source || '').toLowerCase() === wanted) : all).slice(0, 6);
+  let pool = wanted ? all.filter((l) => String(l.source || '').toLowerCase().includes(wanted)) : all;
+  if (r.secour && r.secour.uhd) pool = pool.filter((l) => /2160|4k|uhd/i.test(String(l.quality || '')));
+  let candidates = picked ? [picked] : rankSecourLinks(pool).slice(0, 6);
+  // Série en 4K : la version choisie pour la saison (qualité, langue, hébergeur) passe devant
+  const tpl = r.secour && r.secour.templates && query.season ? r.secour.templates[Number(query.season)] : null;
+  if (!picked && tpl) {
+    const score = (l) => (l.quality === tpl.quality ? 4 : 0) + (l.language === tpl.language ? 2 : 0) + (l.hoster === tpl.hoster ? 1 : 0);
+    candidates = [...candidates].sort((a, b) => score(b) - score(a));
+  }
   if (!candidates.length) {
     item.status = 'notfound';
     item.error = wanted ? `Aucun lien sur ${r.secour.source}${all.length ? ` (${all.length} ailleurs)` : ''}` : 'Aucun lien trouvé';
@@ -3185,6 +3201,12 @@ async function secourGrab(r, item, target, folder, baseName, query) {
   return false;
 }
 
+/** Fichiers 4K arrivés par Lumio Secour : notés pour que Lumio Auto ne les reprenne pas sur C411. */
+function uhdHave(r, done) {
+  const key = autoItemKey(r.type === 'tv' ? 'tv' : 'movie', r.tmdbId);
+  auto.have4k[key] = [...new Set([...(auto.have4k[key] || []), ...done])];
+  autoSave();
+}
 async function processSecour(r) {
   const s = r.secour;
   s.state = 'running';
@@ -3200,7 +3222,8 @@ async function processSecour(r) {
     s.items.push(item);
     s.total = 1;
     saveRequests();
-    const ok = await secourGrab(r, item, target, path.posix.join(target.folder, show), show, { imdb, type: 'movie' });
+    const ok = await secourGrab(r, item, target, path.posix.join(target.folder, show), s.uhd ? `${show} - 2160p` : show, { imdb, type: 'movie' });
+    if (ok && s.uhd) uhdHave(r, ['movie']);
     s.done = ok ? 1 : 0;
     if (!ok) throw new Error(item.error || 'aucun lien utilisable');
     return;
@@ -3217,10 +3240,11 @@ async function processSecour(r) {
   for (const item of s.items) {
     if (secourStopped(r)) return;
     try {
-      const ok = await secourGrab(r, item, target, path.posix.join(target.folder, show, `Season ${pad2(item.season)}`), `${show} - ${item.label}`, {
+      const ok = await secourGrab(r, item, target, path.posix.join(target.folder, show, `Season ${pad2(item.season)}`), `${show} - ${item.label}${s.uhd ? ' - 2160p' : ''}`, {
         imdb, type: 'series', season: String(item.season), episode: String(item.episode),
       });
       if (ok) s.done += 1;
+      if (ok && s.uhd) uhdHave(r, [`${item.season}:${item.episode}`]);
     } catch (e) {
       item.status = 'error';
       item.error = String((e && e.message) || e);
@@ -3230,6 +3254,16 @@ async function processSecour(r) {
   if (!s.done) throw new Error('Aucun épisode trouvé');
 }
 
+/** 4K : après Wawacity, Lumio Auto suit le titre en 4K et va chercher sur C411 ce qui manque encore. */
+function uhdHandOff(r, err) {
+  r.uhdSecourDone = true;
+  if (err) {
+    r.status = RequestStatus.APPROVED;
+    delete r.error;
+    console.log(`Demande « ${r.title} » : Wawacity sans résultat (${err}), passage à C411 en 4K`);
+  }
+  autoFromRequest(r).catch((e) => console.log(`Demande « ${r.title} » : Lumio Auto impossible — ${e.message}`));
+}
 async function runSecourQueue() {
   if (secourBusy) return;
   secourBusy = true;
@@ -3240,6 +3274,7 @@ async function runSecourQueue() {
         try {
           await processSecour(r);
           r.secour.state = 'done';
+          if (r.uhd && autoOn()) uhdHandOff(r, null);
           r.status = RequestStatus.COMPLETED;
           r.completedAt = new Date().toISOString();
           arrHandOff(r).catch(() => {});
@@ -3248,7 +3283,10 @@ async function runSecourQueue() {
           notify({ title: '🛟 Disponible via Lumio Secour', message: `${r.title}${what} · demandé par ${r.requestedBy.name}`, tags: ['tada'], image: r.poster }).catch(() => {});
           notifyFamily({ title: '🎉 Disponible', message: `${r.title} est prêt à regarder`, tags: ['tada'], image: r.poster, click: 'lumio://' });
         } catch (e) {
-          if (r.secour.state !== 'cancelled') {
+          if (r.secour.state !== 'cancelled' && r.uhd && autoOn()) {
+            r.secour.state = 'error';
+            uhdHandOff(r, String((e && e.message) || e));
+          } else if (r.secour.state !== 'cancelled') {
             r.secour.state = 'error';
             r.status = RequestStatus.FAILED;
             r.error = `Lumio Secour : ${String((e && e.message) || e)}`;
@@ -8091,6 +8129,15 @@ async function createRequest(user, b, opts = {}) {
   if (opts.streamed) r.streamed = true;
   // Profil choisi à la demande : 4K H.265 (sinon le profil normal)
   if (b.uhd === true) r.uhd = true;
+  // 4K : fichier Wawacity choisi (film) ou version choisie par saison (série) — admin seulement
+  if (r.uhd && user.admin) {
+    if (b.secourPick && /^https?:\/\//.test(String(b.secourPick.link || ''))) r.uhdSecour = { pick: pick(b.secourPick, ['link', 'hoster', 'source', 'season', 'episode', 'quality', 'language', 'sizeBytes', 'name']) };
+    else if (b.secourTemplates && typeof b.secourTemplates === 'object') {
+      const t = {};
+      for (const [k, v] of Object.entries(b.secourTemplates)) if (Number(k) > 0 && v && typeof v === 'object') t[Number(k)] = pick(v, ['quality', 'language', 'hoster']);
+      if (Object.keys(t).length) r.uhdSecour = { templates: t };
+    }
+  }
   // Demande d'un membre de la famille : téléchargement par le cache AllDebrid / TorBox d'abord, puis partage
   if (!user.admin) r.family = true;
   if (perm.autoApprove && !opts.noApprove) {

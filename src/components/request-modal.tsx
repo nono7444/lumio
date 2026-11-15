@@ -12,6 +12,7 @@ import { C } from '@/constants/theme';
 import { formatBytes } from '@/lib/arr';
 import { suggestFolder } from '@/lib/grab';
 import { MediaStatus, mediaStatusLabel, requestsApi, type ArrOptions, type MediaInfo, type Me } from '@/lib/requests';
+import { secourApi, type SecourLink } from '@/lib/secour';
 import { useSettings } from '@/lib/settings';
 
 export type RequestTarget = {
@@ -50,6 +51,10 @@ export function RequestModal({
   const [profile, setProfile] = useState<number | null>(null);
   // Profil de téléchargement : 1080p (normal) ou 4K H.265
   const [uhd, setUhd] = useState(false);
+  // 4K (admin) : fichiers Wawacity proposés d'abord ; rien de choisi = C411
+  const [wawa, setWawa] = useState<Record<string, SecourLink[] | null>>({});
+  const [moviePick, setMoviePick] = useState<SecourLink | null>(null);
+  const [tpl, setTpl] = useState<Record<number, SecourLink | null>>({});
   const [busy, setBusy] = useState(false);
 
   const isTv = target.type === 'tv';
@@ -72,6 +77,30 @@ export function RequestModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
+  // Liste Wawacity en 4K : film, ou épisode 1 de chaque saison choisie (une version par saison)
+  const is4k = (l: SecourLink) => /wawa/i.test(l.source) && /2160|4k|uhd/i.test(l.quality);
+  const wawaKeys = !uhd || !me?.admin ? [] : isTv ? [...selected].sort((a, b) => a - b).map(String) : ['movie'];
+  useEffect(() => {
+    for (const k of wawaKeys) {
+      if (k in wawa) continue;
+      setWawa((o) => ({ ...o, [k]: null }));
+      secourApi
+        .links(settings, isTv ? { type: 'tv', tmdbId: target.tmdbId, season: Number(k), episode: 1 } : { type: 'movie', tmdbId: target.tmdbId })
+        .then((r) => {
+          const seen = new Set<string>();
+          const list = r.links.filter(is4k).filter((l) => {
+            const id = isTv ? `${l.quality}|${l.language}|${l.hoster}` : l.link;
+            if (seen.has(id)) return false;
+            seen.add(id);
+            return true;
+          });
+          setWawa((o) => ({ ...o, [k]: list }));
+        })
+        .catch(() => setWawa((o) => ({ ...o, [k]: [] })));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wawaKeys.join(',')]);
+
   const allOn = requestable.length > 0 && requestable.every((n) => selected.has(n));
   const quota = me ? (isTv ? me.quota.tv : me.quota.movie) : null;
   const overQuota = Boolean(quota && quota.remaining != null && (isTv && me?.quota.tv.unit !== 'series' ? selected.size > quota.remaining : quota.remaining < 1));
@@ -92,6 +121,10 @@ export function RequestModal({
         rootFolderPath: folder ?? undefined,
         qualityProfileId: me?.admin && profile ? profile : undefined,
         uhd: uhd || undefined,
+        ...(uhd && me?.admin && !isTv && moviePick ? { secourPick: moviePick } : {}),
+        ...(uhd && me?.admin && isTv && Object.values(tpl).some(Boolean)
+          ? { secourTemplates: Object.fromEntries(Object.entries(tpl).filter(([n, l]) => l && selected.has(Number(n))).map(([n, l]) => [n, { quality: l!.quality, language: l!.language, hoster: l!.hoster }])) }
+          : {}),
       });
       const what = isTv ? (r.seasons && r.seasons.length > 1 ? `${r.seasons.length} saisons` : `la saison ${r.seasons?.[0]}`) : 'le film';
       onDone(
@@ -223,6 +256,54 @@ export function RequestModal({
             </View>
           </View>
 
+          {/* 4K (admin) : Wawacity d'abord, C411 si rien n'est choisi */}
+          {wawaKeys.length ? (
+            <View style={{ gap: 10 }}>
+              <Text style={styles.label}>Fichiers 4K Wawacity</Text>
+              {wawaKeys.map((k) => {
+                const list = wawa[k];
+                const chosen = isTv ? tpl[Number(k)] ?? null : moviePick;
+                const choose = (l: SecourLink | null) => {
+                  tap();
+                  if (isTv) setTpl((o) => ({ ...o, [Number(k)]: l }));
+                  else setMoviePick(l);
+                };
+                return (
+                  <View key={k} style={{ gap: 6 }}>
+                    {isTv ? <Text style={styles.infoTxt}>Saison {k} · la version choisie sert pour tous ses épisodes</Text> : null}
+                    {list == null ? (
+                      <View style={styles.wawaRow}>
+                        <ActivityIndicator color={C.textDim} />
+                        <Text style={styles.wawaSub}>Recherche sur Wawacity…</Text>
+                      </View>
+                    ) : (
+                      <>
+                        <Pressable onPress={() => choose(null)} style={[styles.wawaRow, !chosen && styles.wawaOn]}>
+                          <Text style={[styles.wawaTxt, !chosen && { color: '#000' }]}>{list.length ? 'Aucun : C411' : 'Rien en 4K sur Wawacity : C411'}</Text>
+                        </Pressable>
+                        {list.slice(0, 8).map((l) => {
+                          const on = chosen != null && (isTv ? chosen.quality === l.quality && chosen.language === l.language && chosen.hoster === l.hoster : chosen.link === l.link);
+                          return (
+                            <Pressable key={`${l.link}`} onPress={() => choose(l)} style={[styles.wawaRow, on && styles.wawaOn]}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={[styles.wawaTxt, on && { color: '#000' }]} numberOfLines={1}>
+                                  {[l.quality, l.language].filter(Boolean).join(' · ')}
+                                </Text>
+                                <Text style={[styles.wawaSub, on && { color: '#444' }]} numberOfLines={1}>
+                                  {[isTv ? null : l.size, l.hoster].filter(Boolean).join(' · ')}
+                                </Text>
+                              </View>
+                            </Pressable>
+                          );
+                        })}
+                      </>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
+
           {/* Qualité (admin) */}
           {showProfiles ? (
             <View>
@@ -333,6 +414,10 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.14)',
   },
   chipOn: { backgroundColor: '#fff', borderColor: '#fff' },
+  wawaRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.07)' },
+  wawaOn: { backgroundColor: '#fff' },
+  wawaTxt: { color: C.text, fontSize: 14, fontWeight: '700' },
+  wawaSub: { color: C.textDim, fontSize: 12 },
   chipText: { color: C.text, fontSize: 13, fontWeight: '700' },
   chipSub: { color: C.textFaint, fontSize: 11 },
   info: {

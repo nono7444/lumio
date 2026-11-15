@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- « Demander » en profil 4K (admin) : les fichiers 4K de Wawacity sont proposés d'abord (un fichier pour un film, une version par saison pour une série) ; rien de choisi ou rien de trouvé → C411 en 4K. Les demandes 4K de la famille passent aussi par Wawacity d'abord. Demande le serveur 3.108.0.
+
 ## 1.0.169 — 15 novembre 2026
 
 - Streaming : la 4K est retirée du menu (1080p ou 720p). Pastille verte / rouge sur le bouton « Streaming » : vert si au moins un service (TorBox, AllDebrid, Wawacity) marche. Demande le serveur 3.107.0.
