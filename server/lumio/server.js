@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.108.2';
+const VERSION = '3.109.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2804,7 +2804,7 @@ function streamToken(url, who, name) {
 }
 /** Versions du site pour ce titre : la mieux classée qui est en cache TorBox (lien direct) ou AllDebrid (relayé) → { rel, hash, via, adId } ou null.
  *  Seule l'empreinte part chez TorBox / AllDebrid, jamais le .torrent ni la clé du site. */
-async function watchFind(type, tmdbId, season, episode, title, tried, quality = null) {
+async function watchCands(type, tmdbId, season, episode, title, tried, quality) {
   let item = findItem(type, tmdbId);
   if (!item) {
     // Titre pas encore suivi : fiche provisoire, juste pour la recherche (rien n'est enregistré)
@@ -2837,6 +2837,11 @@ async function watchFind(type, tmdbId, season, episode, title, tried, quality = 
     tried.push('empreinte des torrents illisible');
     return null;
   }
+  return cands;
+}
+async function watchFind(type, tmdbId, season, episode, title, tried, quality = null) {
+  const cands = await watchCands(type, tmdbId, season, episode, title, tried, quality);
+  if (!cands) return null;
   // 1. TorBox : vérification sans rien créer, lien direct (le plus fluide)
   if (torboxKey()) {
     try {
@@ -2867,6 +2872,61 @@ async function watchFind(type, tmdbId, season, episode, title, tried, quality = 
   }
   tried.push(`${cands.length} version(s) du site, aucune dans le cache ${[torboxKey() ? 'TorBox' : null, secourDebridKey() ? 'AllDebrid' : null].filter(Boolean).join(' ni ')}`);
   return null;
+}
+/** Menu « Streaming » : pour chaque qualité, d'où le flux peut venir (TorBox direct, AllDebrid relayé, Wawacity relayé).
+ *  Rien n'est gardé chez AllDebrid : les empreintes proposées sont retirées aussitôt. Résultat gardé 15 min. */
+const probeCache = new Map();
+async function watchProbe(user, b) {
+  const type = b.type === 'tv' ? 'tv' : 'movie';
+  const tmdbId = Number(b.tmdbId);
+  if (!tmdbId) throw new HttpError(400, 'Identifiant TMDB manquant');
+  if (!user.admin && config.watchMembers === false) throw new HttpError(403, 'Streaming réservé à l’admin');
+  const season = type === 'tv' ? Number(b.season) || 1 : null;
+  const episode = type === 'tv' ? Number(b.episode) || 1 : null;
+  const ck = `${type}:${tmdbId}:${season}:${episode}`;
+  const hit = probeCache.get(ck);
+  if (hit && Date.now() - hit.at < 15 * 60e3) return hit.out;
+  const out = {};
+  const qualities = [1080, 720];
+  // Wawacity : une seule recherche pour toutes les qualités
+  let wawa = [];
+  if (secourUrl() && secourKey() && secourDebridKey()) {
+    try {
+      const ext = await tmdbGet(`/${type}/${tmdbId}/external_ids`).catch(() => null);
+      if (ext && ext.imdb_id) {
+        const q = type === 'movie' ? { imdb: ext.imdb_id, type: 'movie' } : { imdb: ext.imdb_id, type: 'series', season: String(season), episode: String(episode) };
+        const f = await secour(`/lumio/links?${new URLSearchParams(q)}`, { timeout: 90000 });
+        wawa = ((f && f.links) || []).filter((l) => /wawa/i.test(String(l.source || '')));
+      }
+    } catch {}
+  }
+  const resOf = (l) => (/2160|4k|uhd/i.test(String(l.quality || '')) ? 2160 : /1080/.test(String(l.quality || '')) ? 1080 : /720/.test(String(l.quality || '')) ? 720 : 0);
+  for (const q of qualities) {
+    const r0 = { torbox: false, alldebrid: false, wawacity: wawa.some((l) => resOf(l) === q) };
+    const cands = await watchCands(type, tmdbId, season, episode, b.title, [], q).catch(() => null);
+    if (cands && cands.length) {
+      if (torboxKey()) {
+        try {
+          const d = await tb('/torrents/checkcached', { query: { hash: cands.map((c) => c.hash).join(','), format: 'list', list_files: 'false' } });
+          const cached = new Set((Array.isArray(d) ? d.map((x) => x && x.hash) : Object.keys(d || {})).map((h) => String(h || '').toLowerCase()));
+          r0.torbox = cands.some((c) => cached.has(c.hash));
+        } catch {}
+      }
+      if (secourDebridKey()) {
+        try {
+          const u = await ad('/v4/magnet/upload', { magnets: cands.map((c) => `magnet:?xt=urn:btih:${c.hash}`) });
+          for (const m of (u && u.magnets) || []) {
+            if (m && m.ready) r0.alldebrid = true;
+            if (m && m.id) await ad('/v4/magnet/delete', { id: m.id }).catch(() => {});
+          }
+        } catch {}
+      }
+    }
+    out[q] = r0;
+  }
+  probeCache.set(ck, { at: Date.now(), out });
+  if (probeCache.size > 300) probeCache.delete(probeCache.keys().next().value);
+  return out;
 }
 /** Le bon fichier vidéo d'une liste (le plus gros ; pour une série, celui de l'épisode). */
 function watchPickVideo(files, type, season, episode, nameOf) {
@@ -3116,6 +3176,8 @@ function startSecour(r, reason, opts = {}) {
   // 4K : versions choisies par saison, et seulement des fichiers 4K
   if (opts.templates) r.secour.templates = opts.templates;
   if (opts.uhd) (r.secour.uhd = true), (r.secour.source = r.secour.source || 'wawacity');
+  // Bouton « DL » : qualité choisie (2160 ou 1080)
+  if ([2160, 1080, 720].includes(Number(opts.quality))) r.secour.quality = Number(opts.quality);
   delete r.error;
   saveRequests();
   if (!secourQueue.includes(r.id)) secourQueue.push(r.id);
@@ -3165,6 +3227,10 @@ async function secourGrab(r, item, target, folder, baseName, query) {
   const all = (found && found.links) || [];
   let pool = wanted ? all.filter((l) => String(l.source || '').toLowerCase().includes(wanted)) : all;
   if (r.secour && r.secour.uhd) pool = pool.filter((l) => /2160|4k|uhd/i.test(String(l.quality || '')));
+  if (r.secour && r.secour.quality) {
+    const rq = r.secour.quality;
+    pool = pool.filter((l) => (rq === 2160 ? /2160|4k|uhd/i : rq === 1080 ? /1080/ : /720/).test(String(l.quality || '')));
+  }
   let candidates = picked ? [picked] : rankSecourLinks(pool).slice(0, 6);
   // Série en 4K : la version choisie pour la saison (qualité, langue, hébergeur) passe devant
   const tpl = r.secour && r.secour.templates && query.season ? r.secour.templates[Number(query.season)] : null;
@@ -9445,6 +9511,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
 
     // ——— « Lire » un titre absent (admin) : lien de streaming TorBox + téléchargement en arrière-plan + reprise ———
     if (req.method === 'GET' && p === '/api/watch/now') return send(res, 200, watchNowView(user));
+    if (req.method === 'POST' && p === '/api/watch/probe') return send(res, 200, await watchProbe(user, await readBody(req)));
     if (req.method === 'POST' && p === '/api/watch/now') {
       const host = String(req.headers['x-forwarded-host'] || req.headers.host || '');
       const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || (/^(\d+\.\d+\.\d+\.\d+|localhost)(:\d+)?$/.test(host) ? 'http' : 'https');
@@ -9556,7 +9623,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         r.modifiedBy = { id: user.id, name: user.name };
         r.modifiedAt = new Date().toISOString();
         try {
-          startSecour(r, `téléchargement direct par ${user.name}${b.source ? ` · ${String(b.source).slice(0, 60)}` : ''}`, { source: b.source, pick: type === 'movie' && b.pick && typeof b.pick === 'object' ? b.pick : undefined });
+          startSecour(r, `téléchargement direct par ${user.name}${b.source ? ` · ${String(b.source).slice(0, 60)}` : ''}`, { source: b.source, quality: b.quality, pick: type === 'movie' && b.pick && typeof b.pick === 'object' ? b.pick : undefined });
         } catch (e) {
           if (isNew) requests.splice(requests.indexOf(r), 1); // pas de demande fantôme si Lumio Secour n'est pas prêt
           throw e;

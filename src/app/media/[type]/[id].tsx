@@ -20,7 +20,7 @@ import { jf, type JfItem } from '@/lib/jellyfin';
 import { askFolder } from '@/components/folder-picker';
 import { TvBackdropLayer } from '@/components/tv-backdrop';
 import { JfEpisodes } from '@/components/jf-episodes';
-import { StreamingButton } from '@/components/quality-menu';
+import { DlButton, StreamingButton } from '@/components/quality-menu';
 import { ReportProblemButton } from '@/components/report-problem';
 import { RequestSection } from '@/components/request-section';
 import { TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
@@ -390,17 +390,8 @@ export default function MediaScreen() {
               {/* Admin : « Streaming » (cache TorBox / AllDebrid, puis Wawacity), avec le choix de la qualité */}
               {canWatchNow ? <StreamingButton type={details.kind} tmdbId={tmdbId} title={title} imdb={imdbId ?? undefined} label={!jfItem} style={jfItem ? undefined : { flex: 1 }} ok={streamOk} /> : null}
               {jfItem || canWatchNow ? <WatchlistButton item={wlItem} variant="icon" /> : <View style={{ flex: 1 }} />}
-              {/* Admin, titre absent : « DL » → fichiers Wawacity, téléchargés par le serveur (AllDebrid) */}
-              {settings.chatUrl && settings.jellyfin?.isAdmin === true && !jfItem ? (
-                <Button
-                  title="DL"
-                  icon="download-outline"
-                  variant="glass"
-                  small
-                  onPress={() => router.push({ pathname: '/secour', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title, source: 'wawacity' } })}
-                  style={{ paddingHorizontal: 14 }}
-                />
-              ) : null}
+              {/* Admin : « DL » → qualité (4K / 1080p), puis fichiers Wawacity téléchargés par le serveur (AllDebrid) */}
+              {settings.chatUrl && settings.jellyfin?.isAdmin === true ? <DlButton type={details.kind} tmdbId={tmdbId} title={title} imdb={imdbId ?? undefined} /> : null}
               {/* Proposer dans le chat famille : seulement pour un titre pas encore sur le serveur */}
               {settings.chatUrl && settings.jellyfin && !jfItem ? (
                 <Button title="" icon="chatbubbles-outline" variant="glass" small onPress={propose} style={{ width: 46, paddingHorizontal: 0 }} />

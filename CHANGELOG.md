@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Menu « Streaming » : pour 1080p et 720p, des pastilles disent d'où le flux peut venir (TorBox en direct, AllDebrid ou Wawacity par ton serveur). Demande le serveur 3.109.0.
+- Bouton « DL » (admin) : choix 4K ou 1080p d'abord, puis les fichiers Wawacity de cette qualité ; affiché aussi quand le titre est déjà sur le serveur.
+
 ## 1.0.172 — 15 novembre 2026
 
 - Plus d'interrupteur 4K : le profil (1080p ou 4K) se choisit seulement dans « Demander », et le serveur fait le reste.

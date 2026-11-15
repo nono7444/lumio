@@ -14,7 +14,7 @@ import { qualityBucket, secourApi, type SecourLink, type SecourStatus } from '@/
 import { useSettings } from '@/lib/settings';
 import { tmdb } from '@/lib/tmdb';
 
-type Params = { type: 'movie' | 'tv'; tmdbId: string; imdb?: string; title: string; season?: string; source?: string };
+type Params = { type: 'movie' | 'tv'; tmdbId: string; imdb?: string; title: string; season?: string; source?: string; quality?: string };
 
 // Dernière destination choisie (le temps que l'appli reste ouverte)
 const lastDest: Record<'movie' | 'tv', { root: string; folder: string } | null> = { movie: null, tv: null };
@@ -47,7 +47,8 @@ export default function Secour() {
   const [links, setLinks] = useState<SecourLink[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]>('Toutes');
+  // Qualité choisie avant d'ouvrir (bouton « DL » : 4K ou 1080p)
+  const [filter, setFilter] = useState<(typeof FILTERS)[number]>((FILTERS as readonly string[]).includes(String(p.quality)) ? (p.quality as (typeof FILTERS)[number]) : 'Toutes');
   const [cachedOnly, setCachedOnly] = useState(false);
   // Source choisie depuis le bouton « DL » (sinon toutes)
   const [source, setSource] = useState<string>(typeof p.source === 'string' ? p.source : '');
