@@ -390,6 +390,17 @@ export default function MediaScreen() {
               {/* Admin : « Streaming » (cache TorBox / AllDebrid, puis Wawacity), avec le choix de la qualité */}
               {canWatchNow ? <StreamingButton type={details.kind} tmdbId={tmdbId} title={title} imdb={imdbId ?? undefined} label={!jfItem} style={jfItem ? undefined : { flex: 1 }} ok={streamOk} /> : null}
               {jfItem || canWatchNow ? <WatchlistButton item={wlItem} variant="icon" /> : <View style={{ flex: 1 }} />}
+              {/* Admin, titre absent : « DL » → fichiers Wawacity, téléchargés par le serveur (AllDebrid) */}
+              {settings.chatUrl && settings.jellyfin?.isAdmin === true && !jfItem ? (
+                <Button
+                  title="DL"
+                  icon="download-outline"
+                  variant="glass"
+                  small
+                  onPress={() => router.push({ pathname: '/secour', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title, source: 'wawacity' } })}
+                  style={{ paddingHorizontal: 14 }}
+                />
+              ) : null}
               {/* Proposer dans le chat famille : seulement pour un titre pas encore sur le serveur */}
               {settings.chatUrl && settings.jellyfin && !jfItem ? (
                 <Button title="" icon="chatbubbles-outline" variant="glass" small onPress={propose} style={{ width: 46, paddingHorizontal: 0 }} />

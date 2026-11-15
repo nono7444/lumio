@@ -51,7 +51,7 @@ function statusOf(r: Req): { text: string; color: string; progress?: number } {
 }
 
 /** Demande à valider (admin) : grande carte avec deux vrais boutons, « Refuser » et « Valider ». Valider lance le téléchargement. */
-function PendingCard({ r, meId, onChanged }: { r: Req; meId?: string; onChanged: () => void }) {
+export function PendingCard({ r, meId, onChanged }: { r: Req; meId?: string; onChanged: () => void }) {
   const { settings } = useSettings();
   const [busy, setBusy] = useState<'approve' | 'decline' | null>(null);
   const [uhd, setUhd] = useState(Boolean(r.uhd));

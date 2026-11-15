@@ -15,7 +15,8 @@ import { C, TAB_SPACE } from '@/constants/theme';
 import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoBoost, type AutoBoostCandidate, type AutoSeedView, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
 import { useSettings } from '@/lib/settings';
 import { IS_AUTO } from '@/lib/variant';
-import { ServerRequests } from '@/components/server-requests';
+import { PendingCard } from '@/components/server-requests';
+import { RequestStatus, requestsApi, type Req } from '@/lib/requests';
 import { ServerActionsSection } from '@/components/server-actions';
 import { StorageSection } from '@/components/storage-section';
 import { UptimeSection } from '@/components/uptime';
@@ -829,7 +830,7 @@ function SeedCandidatesCard() {
   const list = d?.candidates ?? [];
   const free = list.filter((c) => c.free);
   return (
-    <Fold id="seed-cands" title="Torrents qui peuvent rapporter" count={list.length}>
+    <Fold id="seed-cands" title="Torrents qui peuvent rapporter" count={list.length} defaultOpen={false}>
       <Text style={styles.help}>
         Les dernières sorties du site, triées : freeleech d’abord (rien de compté), puis la demande. Rien n’est pris tout seul : « Ajouter » les met dans qBittorrent pour le partage seulement (pas dans Jellyfin). Le gain est une estimation prudente.
       </Text>
@@ -887,32 +888,25 @@ function SeedAutoCards() {
   const bad = d.health?.checks.filter((c) => c.level !== 'ok') ?? [];
   return (
     <>
-      <View style={styles.ratioCard}>
-        <View style={styles.rowBetween}>
-          <Text style={styles.ratioLabel}>Garde du ratio</Text>
-          <Text style={[styles.small, { color: C.text, fontWeight: '800' }]}>seuil {fmtRatio(d.guard.ratio)}</Text>
+      {/* L'essentiel : le ratio du site en grand, et ce que le serveur fait en ce moment */}
+      {d.guard.sites.map((x) => (
+        <View key={x.id} style={[styles.ratioCard, { alignItems: 'center', gap: 4 }]}>
+          <Text style={styles.ratioLabel}>Ratio {x.name}</Text>
+          <Text style={{ color: ratioColor(x.ratio), fontSize: 44, fontWeight: '900' }}>{fmtRatio(x.ratio)}</Text>
+          <Text style={[styles.small, { color: x.freeleech ? C.success : x.low ? C.warning : C.success, fontWeight: '800' }]}>
+            {x.freeleech ? 'Freeleech en cours' : x.low ? `Sous ${fmtRatio(d.guard.ratio)} : cache d’abord` : 'Torrent direct'}
+            {x.real ? '' : ' · estimé'}
+          </Text>
+          <Text style={styles.small}>
+            {d.seeding.count} en partage · ↑ {fmtSpeed(d.seeding.upSpeed)}
+            {bad.length ? '' : ' · tout roule'}
+          </Text>
         </View>
-        {d.guard.sites.map((x) => (
-          <View key={x.id} style={styles.rowBetween}>
-            <Text style={[styles.small, { color: C.text, fontWeight: '700' }]}>
-              {x.name} · <Text style={{ color: ratioColor(x.ratio) }}>{fmtRatio(x.ratio)}</Text>
-              {x.real ? '' : ' (estimé)'}
-            </Text>
-            <Text style={[styles.small, { color: x.freeleech ? C.success : x.low ? C.warning : C.success, fontWeight: '800' }]}>{x.freeleech ? 'Freeleech' : x.low ? 'Cache d’abord' : 'Torrent direct'}</Text>
-          </View>
-        ))}
-        <Text style={styles.small}>
-          Sous le seuil, chaque titre est d’abord cherché dans le cache AllDebrid / TorBox (rien de compté sur le site), puis remis en partage par-dessus. Pas en cache : torrent du site, puis partage. Au-dessus du seuil ou en
-          freeleech : torrent du site directement.
-        </Text>
-      </View>
-      {d.health ? (
-        <View style={styles.ratioCard}>
-          <View style={styles.rowBetween}>
-            <Text style={styles.ratioLabel}>Vérifications automatiques</Text>
-            <Text style={[styles.small, { color: bad.length ? C.warning : C.success, fontWeight: '800' }]}>{bad.length ? `${bad.length} à voir` : 'Tout roule'}</Text>
-          </View>
-          {d.health.checks.map((c) => (
+      ))}
+      {/* Vérifications : seulement ce qui ne va pas */}
+      {bad.length ? (
+        <View style={[styles.ratioCard, { borderColor: 'rgba(255,159,10,0.35)', borderWidth: 1 }]}>
+          {bad.map((c) => (
             <View key={c.id} style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start' }}>
               <Ionicons name={LEVEL_ICON[c.level]} size={15} color={LEVEL_COLOR[c.level]} style={{ marginTop: 1 }} />
               <Text style={[styles.small, { flex: 1 }]}>
@@ -921,10 +915,9 @@ function SeedAutoCards() {
               </Text>
             </View>
           ))}
-          <Text style={styles.small}>Refait toutes les 15 min · dernière fois : {fmtWhen(d.health.at)}</Text>
         </View>
       ) : null}
-      <Fold id="seed-routes" title="Chemin des derniers titres" count={d.routes.length}>
+      <Fold id="seed-routes" title="Chemin des derniers titres" count={d.routes.length} defaultOpen={false}>
         {!d.routes.length ? <Text style={styles.help}>Rien pour le moment.</Text> : null}
         {d.routes.map((r) => (
           <View key={r.id} style={styles.card}>
@@ -1397,11 +1390,6 @@ function ItemSheet({ item, st, onClose, reload }: { item: AutoItem; st: AutoStat
           </View>
         ))}
 
-        <Toggle
-          label={`4K H.265 (le 1080p reste)${item.uhd && item.have4k ? ` · ${item.have4k} déjà en 4K` : ''}`}
-          value={Boolean(item.uhd)}
-          onChange={(v) => autoApi.setUhd(settings, { type: item.type, tmdbId: item.tmdbId, on: v, title: item.title }).then((r) => (toast(r.message), reload()))}
-        />
         {item.type === 'tv' ? (
           <>
             <Toggle label="Suivre aussi les prochaines saisons" value={item.future} onChange={(v) => autoApi.updateItem(settings, item.id, { future: v }).then(reload)} />
@@ -2348,6 +2336,8 @@ function ClientForm({ kind, st, save }: { kind: 'rdt' | 'qbit'; st: AutoState; s
 }
 
 const styles = StyleSheet.create({
+  sectionLabel: { color: C.textDim, fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 },
+  simpleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.08)' },
   tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 4 },
   qbStats: { flexDirection: 'row', gap: 8 },
   qbStat: { flex: 1, padding: 12, borderRadius: 16, backgroundColor: C.surface, gap: 2 },
@@ -2764,10 +2754,8 @@ export function AutoSeedScreen() {
         refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
         <AutoHeader title="Seed" sub={st ? `${seeding.length} en partage · ↑ ${fmtSpeed2(up)}` : null} color={seeding.length ? C.success : C.textFaint} />
         <SeedAutoCards />
-        <SeedCandidatesCard />
-        <RatioTab />
         {st ? (
-          <Fold id="seed-list" title="En partage" count={seeding.length} color={seeding.length ? C.success : undefined}>
+          <Fold id="seed-list" title="En partage" count={seeding.length} color={seeding.length ? C.success : undefined} defaultOpen={false}>
             {!seeding.length ? <Text style={styles.help}>Rien en partage pour le moment.</Text> : null}
             {seeding.map((g) => {
               const pct = Math.min(100, Math.max(goal.ratio ? ((g.ratio ?? 0) / goal.ratio) * 100 : 0, goal.days ? ((g.seedTime ?? 0) / (goal.days * 86400)) * 100 : 0));
@@ -2792,7 +2780,11 @@ export function AutoSeedScreen() {
             })}
           </Fold>
         ) : null}
-        <QbitPrefsSection />
+        <SeedCandidatesCard />
+        <Fold id="seed-details" title="Détails (qBittorrent, sites)" defaultOpen={false}>
+          <RatioTab />
+          <QbitPrefsSection />
+        </Fold>
       </ScrollView>
     </SectionCollapse.Provider>
   );
@@ -2837,48 +2829,126 @@ export function AutoQbitScreen() {
 /** Onglet « Demandes » : les demandes de la famille, les titres suivis par Lumio Auto, les épisodes manquants. */
 export function AutoDemandesScreen() {
   const insets = useSafeAreaInsets();
-  const [part, setPart] = useState<'demandes' | 'titres' | 'manquants'>('demandes');
+  const { settings } = useSettings();
   const { st, error, load } = useAutoState();
   const [itemOpen, setItemOpen] = useState<string | null>(null);
+  const [pending, setPending] = useState<Req[] | null>(null);
+  const [failed, setFailed] = useState<Req[]>([]);
   const open = st?.items.find((i) => i.id === itemOpen) ?? null;
-  const toChoose = st?.items.filter((i) => i.needsChoice).length ?? 0;
-  const seg = (
-    <View style={[styles.seg, { marginHorizontal: 16, marginBottom: 10 }]}>
-      {(
-        [
-          { id: 'demandes', label: 'Demandes', badge: 0 },
-          { id: 'titres', label: 'Titres', badge: toChoose },
-          { id: 'manquants', label: 'Manquants', badge: 0 },
-        ] as const
-      ).map((t) => (
-        <Pressable key={t.id} onPress={() => setPart(t.id)} style={[styles.segItem, part === t.id && styles.segOn]} accessibilityRole="tab" accessibilityState={{ selected: part === t.id }}>
-          <Text style={[styles.segTxt, part === t.id && { color: '#000' }]}>{t.label}</Text>
-          {t.badge ? (
-            <View style={[styles.segBadge, { backgroundColor: C.warning }]}>
-              <Text style={styles.segBadgeTxt}>{t.badge}</Text>
+  const loadReqs = useCallback(() => {
+    requestsApi
+      .list(settings, 'pending', { take: 50 })
+      .then((x) => setPending(x.results))
+      .catch(() => setPending([]));
+    requestsApi
+      .list(settings, 'failed', { take: 20 })
+      .then((x) => setFailed(x.results.filter((r) => r.status === RequestStatus.FAILED)))
+      .catch(() => setFailed([]));
+  }, [settings]);
+  useEffect(() => {
+    loadReqs();
+    const t = setInterval(loadReqs, 30000);
+    return () => clearInterval(t);
+  }, [loadReqs]);
+  const rows = (st?.items ?? []).map((i) => ({ i, s: itemStatus(i, st!.grabs) }));
+  const group = (i: AutoItem, s: ReturnType<typeof itemStatus>) =>
+    i.needsChoice ? 'choose' : i.searching || i.active || s.icon === 'cloud-download' ? 'busy' : s.label === 'Complet' ? 'done' : 'wait';
+  const by = (id: string) => rows.filter((r) => group(r.i, r.s) === id);
+  const choose = by('choose');
+  const busy = by('busy');
+  const wait = by('wait');
+  const done = by('done');
+  const row = ({ i, s }: { i: AutoItem; s: ReturnType<typeof itemStatus> }) => (
+    <Pressable key={i.id} onPress={() => setItemOpen(i.id)} style={styles.simpleRow}>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={styles.title} numberOfLines={1}>
+          {i.title}
+        </Text>
+        <Text style={[styles.small, { color: s.color }]} numberOfLines={1}>
+          {s.label}
+          {i.type === 'tv' && i.seasons.length ? <Text style={styles.small}> · S{i.seasons.join(', S')}</Text> : null}
+        </Text>
+      </View>
+      {i.searching ? <ActivityIndicator size="small" color={s.color} /> : <Ionicons name="chevron-forward" size={16} color={C.textDim} />}
+    </Pressable>
+  );
+  const nothing = pending && !pending.length && !choose.length && !busy.length && !failed.length;
+  return (
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <SectionCollapse.Provider value={COLLAPSE}>
+        <ScrollView
+          contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: TAB_SPACE + 20, gap: 16 }}
+          refreshControl={<RefreshControl refreshing={false} onRefresh={() => (load(), loadReqs())} tintColor={C.text} />}>
+          <AutoHeader
+            title="Demandes"
+            sub={pending?.length ? `${pending.length} à valider` : choose.length ? `${choose.length} à choisir` : 'Rien à faire'}
+            color={pending?.length || choose.length ? C.warning : C.textFaint}
+          />
+          {nothing ? <Text style={styles.help}>Rien à faire : tout suit son cours.</Text> : null}
+          {pending?.length ? (
+            <View style={{ gap: 10 }}>
+              <Text style={styles.sectionLabel}>À valider</Text>
+              {pending.map((r) => (
+                <PendingCard key={r.id} r={r} meId={settings.jellyfin?.userId} onChanged={() => (loadReqs(), load())} />
+              ))}
             </View>
           ) : null}
-        </Pressable>
-      ))}
-    </View>
-  );
-  const header = (
-    <View>
-      <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
-        <AutoHeader title="Demandes" sub={toChoose ? `${toChoose} version(s) à choisir` : null} color={toChoose ? C.warning : undefined} />
-      </View>
-      {seg}
-    </View>
-  );
-  if (part === 'demandes') return <ServerRequests header={header} />;
-  return (
-    <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
-      <SectionCollapse.Provider value={COLLAPSE}>
-        <ScrollView contentContainerStyle={{ paddingBottom: TAB_SPACE + 20 }} refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
-          {header}
-          <View style={{ paddingHorizontal: 16, gap: 12 }}>
-            {part === 'titres' ? st ? <Demandes st={st} onItem={(i) => setItemOpen(i.id)} /> : <Loading error={error} /> : <Manquants />}
-          </View>
+          {choose.length ? (
+            <View style={{ gap: 6 }}>
+              <Text style={styles.sectionLabel}>Version à choisir</Text>
+              <View style={styles.list}>{choose.map(row)}</View>
+            </View>
+          ) : null}
+          {busy.length ? (
+            <View style={{ gap: 6 }}>
+              <Text style={styles.sectionLabel}>En cours</Text>
+              <View style={styles.list}>{busy.map(row)}</View>
+            </View>
+          ) : null}
+          {failed.length ? (
+            <View style={{ gap: 6 }}>
+              <Text style={styles.sectionLabel}>En échec</Text>
+              <View style={styles.list}>
+                {failed.map((r) => (
+                  <View key={r.id} style={styles.simpleRow}>
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <Text style={styles.title} numberOfLines={1}>
+                        {r.title}
+                      </Text>
+                      <Text style={[styles.small, { color: C.danger }]} numberOfLines={2}>
+                        {r.error ?? 'échec'}
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={() =>
+                        requestsApi
+                          .retry(settings, r.id)
+                          .then(() => (toast('Relancée'), loadReqs()))
+                          .catch((e) => toast(e.message, 'error'))
+                      }
+                      hitSlop={8}
+                      style={styles.pill}>
+                      <Text style={styles.pillTxt}>Réessayer</Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            </View>
+          ) : null}
+          {!st ? <Loading error={error} /> : null}
+          {wait.length ? (
+            <Fold id="dem-wait" title="En attente de sortie" count={wait.length} defaultOpen={false}>
+              <View style={styles.list}>{wait.map(row)}</View>
+            </Fold>
+          ) : null}
+          {done.length ? (
+            <Fold id="dem-done" title="Terminés" count={done.length} defaultOpen={false}>
+              <View style={styles.list}>{done.map(row)}</View>
+            </Fold>
+          ) : null}
+          <Fold id="dem-missing" title="Épisodes manquants" defaultOpen={false}>
+            <Manquants />
+          </Fold>
         </ScrollView>
       </SectionCollapse.Provider>
       {open && st ? <ItemSheet item={open} st={st} onClose={() => setItemOpen(null)} reload={load} /> : null}
