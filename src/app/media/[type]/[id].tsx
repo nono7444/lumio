@@ -388,7 +388,7 @@ export default function MediaScreen() {
                 <WatchlistButton item={wlItem} variant="pill" />
               )}
               {/* Admin : « Streaming » (cache TorBox / AllDebrid, puis Wawacity), avec le choix de la qualité */}
-              {canWatchNow ? <StreamingButton type={details.kind} tmdbId={tmdbId} title={title} imdb={imdbId ?? undefined} label={!jfItem} style={jfItem ? undefined : { flex: 1 }} ok={streamOk} /> : null}
+              {canWatchNow && !jfItem ? <StreamingButton type={details.kind} tmdbId={tmdbId} title={title} imdb={imdbId ?? undefined} label={!jfItem} style={jfItem ? undefined : { flex: 1 }} ok={streamOk} /> : null}
               {jfItem || canWatchNow ? <WatchlistButton item={wlItem} variant="icon" /> : <View style={{ flex: 1 }} />}
               {/* Admin : « DL » → qualité (4K / 1080p), puis fichiers Wawacity téléchargés par le serveur (AllDebrid) */}
               {settings.chatUrl && settings.jellyfin?.isAdmin === true ? <DlButton type={details.kind} tmdbId={tmdbId} title={title} imdb={imdbId ?? undefined} /> : null}

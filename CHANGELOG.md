@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Le bouton « Streaming » n'apparaît plus quand le fichier est déjà sur le serveur (« Lire » suffit).
+
 - Lumio Auto : un film pas encore sorti, ou sans aucune version sur les sites, n'apparaît plus dans « Version à choisir » (il attend dans « En attente de sortie »). Serveur 3.109.1.
 
 - Menu « Streaming » : pour 1080p et 720p, des pastilles disent d'où le flux peut venir (TorBox en direct, AllDebrid ou Wawacity par ton serveur). Demande le serveur 3.109.0.
