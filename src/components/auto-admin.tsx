@@ -1397,6 +1397,11 @@ function ItemSheet({ item, st, onClose, reload }: { item: AutoItem; st: AutoStat
           </View>
         ))}
 
+        <Toggle
+          label={`4K H.265 (le 1080p reste)${item.uhd && item.have4k ? ` · ${item.have4k} déjà en 4K` : ''}`}
+          value={Boolean(item.uhd)}
+          onChange={(v) => autoApi.setUhd(settings, { type: item.type, tmdbId: item.tmdbId, on: v, title: item.title }).then((r) => (toast(r.message), reload()))}
+        />
         {item.type === 'tv' ? (
           <>
             <Toggle label="Suivre aussi les prochaines saisons" value={item.future} onChange={(v) => autoApi.updateItem(settings, item.id, { future: v }).then(reload)} />

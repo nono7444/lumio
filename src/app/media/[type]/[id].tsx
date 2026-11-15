@@ -34,6 +34,8 @@ import { MoveFolder } from '@/components/move-folder';
 import { arrReady, hasTmdb, isManager, useSettings } from '@/lib/settings';
 import { pickLogo, tmdb, tmdbImg, upcomingRelease, type TmdbMovie, type TmdbTv } from '@/lib/tmdb';
 import { adminUI } from '@/lib/variant';
+import { autoApi } from '@/lib/auto';
+import { toast } from '@/components/toast';
 
 type Details =
   | { kind: 'movie'; data: TmdbMovie; arr: RadarrMovie | null; arrError?: string }
@@ -398,6 +400,8 @@ export default function MediaScreen() {
               {settings.chatUrl && settings.jellyfin && !jfItem ? (
                 <Button title="" icon="chatbubbles-outline" variant="glass" small onPress={propose} style={{ width: 46, paddingHorizontal: 0 }} />
               ) : null}
+              {/* 4K H.265 (admin) : interrupteur par titre, le 1080p déjà là reste */}
+              {settings.chatUrl && settings.jellyfin?.isAdmin === true ? <UhdButton kind={details.kind} tmdbId={tmdbId} title={title} /> : null}
               {/* Déplacer (admin) : titre rangé dans le mauvais dossier → Radarr / Sonarr le déplacent */}
               {settings.chatUrl && adminUI(settings) && jfItem?.Path ? (
                 <MoveButton path={jfItem!.Path!} title={title} />
@@ -672,3 +676,34 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 });
+
+/** Admin : « 4K » allumé = Lumio Auto cherche ce titre en 2160p H.265 (HDR10 accepté, Dolby Vision seul refusé) et l'ajoute à côté du 1080p. */
+function UhdButton({ kind, tmdbId, title }: { kind: 'movie' | 'tv'; tmdbId: number; title: string }) {
+  const { settings } = useSettings();
+  const [on, setOn] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    autoApi
+      .uhd(settings, kind, tmdbId)
+      .then((r) => setOn(r.on))
+      .catch(() => setOn(null));
+  }, [settings, kind, tmdbId]);
+  if (on == null) return null;
+  const flip = () => {
+    const next = !on;
+    const go = () => {
+      setBusy(true);
+      autoApi
+        .setUhd(settings, { type: kind, tmdbId, on: next, title })
+        .then((r) => (setOn(r.on), toast(r.message)))
+        .catch((e) => Alert.alert('4K', e?.message ?? String(e)))
+        .finally(() => setBusy(false));
+    };
+    if (!next) return go();
+    Alert.alert('Passer en 4K H.265 ?', `${title}\n\nLumio Auto va chercher une version 4K H.265 (HDR10 accepté, pas de Dolby Vision seul) et l’ajouter à côté du 1080p. S’il n’y en a pas encore, il attend qu’elle sorte.${kind === 'tv' ? '\n\nToute la série sera cherchée en 4K.' : ''}`, [
+      { text: 'Annuler', style: 'cancel' },
+      { text: 'Activer la 4K', onPress: go },
+    ]);
+  };
+  return <Button title="4K" variant={on ? 'primary' : 'glass'} small loading={busy} onPress={flip} style={{ paddingHorizontal: 12 }} />;
+}

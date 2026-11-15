@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.102.0';
+const VERSION = '3.103.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2862,6 +2862,25 @@ async function familyCacheCheck(r) {
 }
 /** Titre demandé par un membre de la famille : toujours le cache d'abord (quel que soit le ratio), sinon torrent normal. */
 const itemFamily = (item) => (item.requestIds || []).some((id) => (requests.find((x) => x.id === id) || {}).family);
+/** Streaming en dernier recours : liens Wawacity (Lumio Secour), le premier qu'AllDebrid arrive à ouvrir (3 essais au plus). */
+async function watchWawacity(type, tmdbId, season, episode) {
+  const kind = type === 'movie' ? 'movie' : 'tv';
+  const ext = await tmdbGet(`/${kind}/${tmdbId}/external_ids`).catch(() => null);
+  const imdb = ext && ext.imdb_id;
+  if (!imdb) throw new Error('identifiant IMDb introuvable');
+  const query = type === 'movie' ? { imdb, type: 'movie' } : { imdb, type: 'series', season: String(season), episode: String(episode) };
+  const found = await secour(`/lumio/links?${new URLSearchParams(query)}`, { timeout: 90000 });
+  const links = rankSecourLinks(((found && found.links) || []).filter((l) => /wawa/i.test(String(l.source || '')))).filter((l) => !/2160|4k|uhd/i.test(String(l.quality || ''))).slice(0, 3);
+  for (const l of links) {
+    try {
+      const r = await secour('/lumio/resolve', { method: 'POST', body: { link: l.link, hoster: l.hoster, source: l.source, season: l.season, episode: l.episode, type: query.type }, timeout: 120000 });
+      if (r && r.url) return { url: r.url, name: fileNameFromUrl(r.url) || `${tmdbId}.mkv`, size: Number(l.sizeBytes) || 0, hoster: l.hoster, quality: l.quality, language: l.language };
+    } catch (e) {
+      console.log(`Lire : lien Wawacity ${l.hoster || '?'} en échec (${e.message})`);
+    }
+  }
+  return null;
+}
 // Version regardée en streaming : Lumio Auto prend ensuite exactement ce torrent, par le cache (rien de compté), puis le partage
 const watchPrefer = new Map();
 const watchPreferOf = (item) => {
@@ -2915,7 +2934,21 @@ async function watchNow(user, b) {
       if (!b._base) throw new Error('adresse du serveur inconnue');
       out = { url: `${b._base}/watch/s/${streamToken(direct.url, user.name, file.rel)}`, service: 'alldebrid', sizeBytes: Number(file.size) || 0 };
     }
-    if (out) {
+    // Dernier recours : Wawacity (Lumio Secour), lien ouvert par AllDebrid et relayé par le serveur
+    if (!out && !hit && secourUrl() && secourKey() && secourDebridKey()) {
+      try {
+        const w = await watchWawacity(type, tmdbId, season, episode);
+        if (w) {
+          if (!b._base) throw new Error('adresse du serveur inconnue');
+          out = { url: `${b._base}/watch/s/${streamToken(w.url, user.name, w.name)}`, service: 'alldebrid', sizeBytes: w.size || 0, source: 'wawacity', hoster: w.hoster || null, name: w.name, quality: w.quality || null, language: w.language || null };
+          watchCache.set(ck, { at: Date.now(), out });
+          console.log(`Lire en streaming : « ${b.title || tmdbId} » pour ${user.name} (Wawacity en dernier recours, ${w.hoster || '?'})`);
+        } else tried.push('rien sur Wawacity');
+      } catch (e) {
+        tried.push(`Wawacity : ${e.message.replace(/^Lumio Secour : /, '')}`);
+      }
+    }
+    if (out && hit) {
       const pz = autoParse(hit.rel.title);
       Object.assign(out, { source: hit.rel.indexer || null, hoster: null, name: hit.rel.title, quality: pz.resolution ? `${pz.resolution}p` : null, language: null });
       watchCache.set(ck, { at: Date.now(), out });
@@ -3949,6 +3982,9 @@ for (const k of ['items', 'grabs', 'blocked', 'log']) if (!Array.isArray(auto[k]
 if (!auto.have || typeof auto.have !== 'object') auto.have = {};
 // Codec de ce que Lumio Auto a rangé ({ 'tv:1399': { '2:1': { c: 'h264', at } } }) : pour remplacer plus tard par du H.265
 if (!auto.haveCodec || typeof auto.haveCodec !== 'object') auto.haveCodec = {};
+// 4K H.265 sur certains titres (interrupteur de l'admin) : { 'movie:123': true } ; have4k : ce qui est déjà là en 4K
+if (!auto.uhd || typeof auto.uhd !== 'object') auto.uhd = {};
+if (!auto.have4k || typeof auto.have4k !== 'object') auto.have4k = {};
 // Séries retirées à la main du suivi (on ne les reprend pas avec les séries en cours de la bibliothèque)
 if (!Array.isArray(auto.unfollowed)) auto.unfollowed = [];
 if (!Array.isArray(auto.missingHidden)) auto.missingHidden = []; // séries masquées de « À compléter »
@@ -4041,6 +4077,13 @@ const autoProfile = () => {
   }
   return { ...AUTO_PROFILE, ...(c.profile || {}) };
 };
+/** Titre marqué 4K : 2160p en H.265 uniquement, pas de Dolby Vision seul, fichiers plus gros acceptés ; sinon le profil normal. */
+const isUhd = (item) => Boolean(item && auto.uhd[autoItemKey(item.type, item.tmdbId)]);
+function autoProfileFor(item) {
+  const pf = autoProfile();
+  if (!isUhd(item)) return pf;
+  return { ...pf, resolution: 2160, h265: 'required', allowLower: false, maxMovieGb: Math.max(pf.maxMovieGb, pf.uhdMaxMovieGb || 40), maxEpisodeGb: Math.max(pf.maxEpisodeGb, pf.uhdMaxEpisodeGb || 10), uhd: true };
+}
 /** Date de sortie de ce qu'on cherche (film : sortie vidéo ; épisode / saison : diffusion). */
 function autoWantAir(item, want) {
   const m = item.meta || {};
@@ -4051,6 +4094,7 @@ function autoWantAir(item, want) {
 }
 /** Sortie récente : on n'accepte que du H.265 pendant quelques heures (les encodages légers arrivent souvent après). */
 function autoWaitH265(item, want, pf = autoProfile()) {
+  if (isUhd(item)) return null;
   if (pf.h265 !== 'preferred' || !(pf.h265Wait > 0)) return null;
   const air = autoWantAir(item, want);
   if (!air || Date.now() - air > 30 * 86400e3) return null;
@@ -4059,6 +4103,7 @@ function autoWaitH265(item, want, pf = autoProfile()) {
 }
 /** Ce que Lumio Auto a rangé en H.264 récemment : à remplacer par du H.265 s'il apparaît. */
 function autoUpgradeWants(item, pf = autoProfile()) {
+  if (isUhd(item)) return [];
   if (pf.h265 === 'any' || !(pf.upgradeDays > 0)) return [];
   const hc = auto.haveCodec[autoItemKey(item.type, item.tmdbId)] || {};
   const old = Object.entries(hc).filter(([, v]) => v && v.c !== 'h265' && Date.now() - v.at < pf.upgradeDays * 86400e3).map(([k]) => k);
@@ -4425,7 +4470,7 @@ const nameMatches = (item, rel) => {
  * de Radarr / Sonarr) : reasons[] ; rejected = la première, ou null si la release est acceptée.
  */
 function autoScore(rel, item, want) {
-  const pf = autoProfile();
+  const pf = autoProfileFor(item);
   const p = autoParse(rel.title);
   // Le nom dit souvent juste « MULTi » : on regarde aussi la langue donnée par le site (VF2, QC, VFQ…)
   if (rel.langHint) {
@@ -4465,6 +4510,8 @@ function autoScore(rel, item, want) {
   else if (p.langs.includes('vfq') && !pf.languages.includes('vfq') && !(p.langs.includes('vf2') && pf.languages.includes('vf2'))) no(p.langs.includes('vf2') ? 'VF2 (contient le doublage québécois)' : 'VFQ (doublage québécois)');
   if (p.resolution && p.resolution > pf.resolution) no(`${p.resolution}p (trop lourd)`);
   else if (p.resolution !== pf.resolution && !(pf.allowLower && p.resolution >= 720)) no(p.resolution ? `${p.resolution}p (${pf.resolution}p demandé)` : 'résolution inconnue');
+  // 4K : Dolby Vision sans base HDR10 refusé (couleurs vertes / violettes sur les écrans qui ne le gèrent pas)
+  if (pf.uhd && /\b(dv|dovi|dolby[ .]?vision)\b/i.test(rel.title) && !/\bhdr(10)?(\+|plus)?\b/i.test(rel.title)) no('Dolby Vision seul (pas de HDR10)');
   if ((pf.h265 === 'required' || want.h265Only) && p.codec !== 'h265')
     no(p.codec ? `${p.codec.toUpperCase()} (${want.upgrade ? 'déjà là, on attend du H.265' : want.h265Only ? 'sortie récente : on attend du H.265' : 'H.265 demandé'})` : 'codec inconnu (H.265 demandé)');
   const gb = (rel.size || 0) / 1e9;
@@ -4597,17 +4644,22 @@ async function jfSeriesEpisodes(item) {
   const lib = await loadLibrary().catch(() => null);
   const jfId = lib && lib.jf && lib.jf.seriesJf && ((item.tvdbId && lib.jf.seriesJfTvdb.get(Number(item.tvdbId))) || lib.jf.seriesJf.get(item.tmdbId));
   const have = new Set(auto.have[autoItemKey('tv', item.tmdbId)] || []);
-  if (!jfId || !token) return { have, jf: null };
+  const have4k = new Set();
+  if (!jfId || !token) return { have, have4k, jf: null };
   try {
-    const r = await fetch(`${JELLYFIN_URL}/Shows/${jfId.id}/Episodes?IsMissing=false&Fields=Path`, { headers: jfHeaders(token), signal: AbortSignal.timeout(15000) });
+    const r = await fetch(`${JELLYFIN_URL}/Shows/${jfId.id}/Episodes?IsMissing=false&Fields=Path,MediaSources`, { headers: jfHeaders(token), signal: AbortSignal.timeout(15000) });
     if (r.ok) {
       for (const e of (await r.json()).Items || []) {
         if (e.LocationType === 'Virtual' || e.ParentIndexNumber == null || e.IndexNumber == null) continue;
-        for (let n = e.IndexNumber; n <= (e.IndexNumberEnd || e.IndexNumber); n++) have.add(`${e.ParentIndexNumber}:${n}`);
+        const is4k = [e.Path, ...((e.MediaSources || []).map((m) => m.Path))].some((x) => /(2160p|\b4k\b|\buhd\b)/i.test(String(x || '')));
+        for (let n = e.IndexNumber; n <= (e.IndexNumberEnd || e.IndexNumber); n++) {
+          have.add(`${e.ParentIndexNumber}:${n}`);
+          if (is4k) have4k.add(`${e.ParentIndexNumber}:${n}`);
+        }
       }
     }
   } catch {}
-  return { have, jf: jfId };
+  return { have, have4k, jf: jfId };
 }
 async function movieInJellyfin(item) {
   if ((auto.have[autoItemKey('movie', item.tmdbId)] || []).length) return true;
@@ -4618,12 +4670,15 @@ async function movieInJellyfin(item) {
 /** Ce qu'il reste à trouver pour un titre : [{ kind: 'movie' | 'season' | 'episode', season, episode, count, absolute }] */
 async function autoWanted(item) {
   const busy = new Set(auto.grabs.filter((g) => g.itemId === item.id && ['sent', 'downloading', 'importing'].includes(g.state)).flatMap((g) => g.episodes || ['movie']));
+  const uhd = isUhd(item);
   if (item.type === 'movie') {
     if (busy.has('movie')) return [];
     if (!(item.meta && item.meta.available)) return [];
+    if (uhd) return (auto.have4k[autoItemKey('movie', item.tmdbId)] || []).length ? [] : [{ kind: 'movie' }];
     return (await movieInJellyfin(item)) ? [] : [{ kind: 'movie' }];
   }
-  const { have } = await jfSeriesEpisodes(item);
+  const jfEps = await jfSeriesEpisodes(item);
+  const have = uhd ? new Set([...(auto.have4k[autoItemKey('tv', item.tmdbId)] || []), ...jfEps.have4k]) : jfEps.have;
   const today = new Date().toISOString().slice(0, 10);
   const out = [];
   let absolute = 0;
@@ -4634,7 +4689,7 @@ async function autoWanted(item) {
     const full = (item.fullSeasons || []).includes(n);
     const inSeason = item.seasons.includes(n);
     // Série reprise de la bibliothèque : seulement les épisodes diffusés à partir du jour où on la suit (pas de rattrapage)
-    const aired = eps.filter((e) => e.air && e.air <= today && (!item.since || full || extra.has(`${n}:${e.e}`) || e.air >= item.since));
+    const aired = eps.filter((e) => e.air && e.air <= today && (uhd || !item.since || full || extra.has(`${n}:${e.e}`) || e.air >= item.since));
     let missing = aired.filter((e) => !have.has(`${n}:${e.e}`) && !busy.has(`${n}:${e.e}`));
     if (!inSeason) missing = missing.filter((e) => extra.has(`${n}:${e.e}`));
     const firstAbs = absolute;
@@ -5331,6 +5386,39 @@ function seasonDir(base, n) {
   return path.join(base, `Season ${autoPad(n)}`);
 }
 
+const is4kRelease = (grab, file) => autoParse(grab.release.title).resolution === 2160 || /(2160p|\b4k\b|\buhd\b)/i.test(path.basename(String(file || '')));
+/** Nom du fichier à ranger, en gardant les deux versions : la 4K s'appelle « <nom> - 2160p », et dès qu'une 4K est là, l'autre
+ *  version s'appelle « <nom> - 1080p » (le fichier sans étiquette est renommé). Une version du même type est remplacée. */
+function versionTarget(dir, label, plain, ext, is4k) {
+  let files = [];
+  try {
+    files = fs.readdirSync(dir).filter((f) => VIDEO_EXT.test(f) && (f.startsWith(`${plain}.`) || f.startsWith(`${label}.`) || f.startsWith(`${plain} - `) || f.startsWith(`${label} - `)));
+  } catch {}
+  const k4 = (f) => / - 2160p\.[^.]+$/.test(f);
+  const del = (f) => {
+    try {
+      fs.unlinkSync(path.join(dir, f));
+    } catch {}
+  };
+  if (is4k) {
+    for (const f of files) {
+      if (k4(f)) del(f); // ancienne 4K remplacée
+      else if (!/ - 1080p\.[^.]+$/.test(f)) {
+        // version sans étiquette → « - 1080p »
+        const to = `${label} - 1080p${path.extname(f)}`;
+        try {
+          if (fs.existsSync(path.join(dir, to))) del(f);
+          else fs.renameSync(path.join(dir, f), path.join(dir, to));
+        } catch {}
+      }
+    }
+    return `${label} - 2160p${ext}`;
+  }
+  const has4k = files.some(k4);
+  const target = has4k ? `${label} - 1080p${ext}` : `${plain}${ext}`;
+  for (const f of files) if (!k4(f) && f !== target) del(f); // remplacement de la version normale
+  return target;
+}
 async function autoImport(grab, srcPath) {
   // qBittorrent : le fichier reste en place pour le partage, la bibliothèque reçoit un lien dur
   const place = grab.client === 'qbit' ? linkFile : moveFile;
@@ -5345,12 +5433,11 @@ async function autoImport(grab, srcPath) {
     if (!dest) throw new Error('aucun dossier pour les films');
     const main = videos.sort((a, b) => fs.statSync(b).size - fs.statSync(a).size)[0];
     const base = safeFile(`${item.title}${item.year ? ` (${item.year})` : ''}`);
-    const dir = path.join(dest.path, `${base} [tmdbid-${item.tmdbId}]`);
-    // Remplacement (version plus légère) : l'ancien fichier vidéo part
-    try {
-      for (const f of fs.readdirSync(dir)) if (VIDEO_EXT.test(f) && f !== `${base}${path.extname(main)}`) fs.unlinkSync(path.join(dir, f));
-    } catch {}
-    await place(main, path.join(dir, `${base}${path.extname(main)}`));
+    const folder = `${base} [tmdbid-${item.tmdbId}]`;
+    const dir = path.join(dest.path, folder);
+    // Plusieurs versions (Jellyfin) : « <dossier> - 2160p » et « <dossier> - 1080p » dans le même dossier
+    const target = versionTarget(dir, folder, base, path.extname(main), is4kRelease(grab, main));
+    await place(main, path.join(dir, target));
     for (const s of files.filter((f) => SUB_EXT.test(f))) await place(s, path.join(dir, `${base}.${path.basename(s).split('.').slice(-2).join('.')}`)).catch(() => {});
     done.push('movie');
   } else {
@@ -5384,10 +5471,8 @@ async function autoImport(grab, srcPath) {
       const tag = `S${autoPad(season)}E${autoPad(ep)}${epEnd > ep ? `-E${autoPad(epEnd)}` : ''}`;
       const name = safeFile(`${item.title} - ${tag}`);
       const dir = seasonDir(base, season);
-      try {
-        for (const f of fs.readdirSync(dir)) if (VIDEO_EXT.test(f) && f.startsWith(`${name}.`) && f !== `${name}${path.extname(v)}`) fs.unlinkSync(path.join(dir, f));
-      } catch {}
-      await place(v, path.join(dir, `${name}${path.extname(v)}`));
+      const target = versionTarget(dir, name, name, path.extname(v), is4kRelease(grab, v));
+      await place(v, path.join(dir, target));
       const stem = path.basename(v, path.extname(v));
       for (const s of files.filter((f) => SUB_EXT.test(f) && path.basename(f).startsWith(stem))) await place(s, path.join(dir, `${name}${path.basename(s).slice(stem.length)}`)).catch(() => {});
       for (let e = ep; e <= epEnd; e++) done.push(`${season}:${e}`);
@@ -5396,6 +5481,7 @@ async function autoImport(grab, srcPath) {
   }
   const key = autoItemKey(item.type, item.tmdbId);
   auto.have[key] = [...new Set([...(auto.have[key] || []), ...done])];
+  if (is4kRelease(grab, videos[0])) auto.have4k[key] = [...new Set([...(auto.have4k[key] || []), ...done])];
   const codec = autoParse(grab.release.title).codec || null;
   const hc = (auto.haveCodec[key] = auto.haveCodec[key] || {});
   for (const d of done) hc[d] = { c: codec, at: Date.now() };
@@ -6902,6 +6988,8 @@ function publicItem(item) {
     searching: item.searching || null,
     lastReport: item.lastReport || null,
     needsChoice: Boolean(item.needsChoice),
+    uhd: isUhd(item),
+    have4k: (auto.have4k[autoItemKey(item.type, item.tmdbId)] || []).length,
     imdbId: item.imdbId || null,
     events: (item.events || []).slice(0, 25),
     requestedBy: [...new Set(requests.filter((r) => (item.requestIds || []).includes(r.id)).map((r) => r.requestedBy && r.requestedBy.name).filter(Boolean))],
@@ -7179,6 +7267,40 @@ async function autoRoutes(req, res, p, q, user) {
     const b = await readBody(req);
     const item = await autoAdd({ type: b.type, tmdbId: b.tmdbId, title: b.title, seasons: b.seasons, folderPath: b.folderPath, future: b.future });
     send(res, 200, { item: publicItem(item) });
+    return true;
+  }
+  // 4K H.265 pour un titre (admin) : { type, tmdbId, on, title?, seasons? } — un titre pas encore suivi est ajouté au suivi
+  if (req.method === 'GET' && p === '/api/auto/uhd') {
+    const type = q.get('type') === 'tv' ? 'tv' : 'movie';
+    const key = autoItemKey(type, Number(q.get('tmdbId')));
+    send(res, 200, { on: Boolean(auto.uhd[key]), have: (auto.have4k[key] || []).length });
+    return true;
+  }
+  if (req.method === 'POST' && p === '/api/auto/uhd') {
+    const b = await readBody(req);
+    const type = b.type === 'tv' ? 'tv' : 'movie';
+    const tmdbId = Number(b.tmdbId);
+    if (!tmdbId) throw new HttpError(400, 'Identifiant TMDB manquant');
+    const key = autoItemKey(type, tmdbId);
+    if (b.on) auto.uhd[key] = true;
+    else delete auto.uhd[key];
+    let item = findItem(type, tmdbId);
+    if (b.on && !item) {
+      // Série : toutes les saisons sorties ; film : suivi normal (le 1080p déjà là reste)
+      let seasons = Array.isArray(b.seasons) ? b.seasons : [];
+      if (type === 'tv' && !seasons.length) {
+        const d = await tmdbGet(`/tv/${tmdbId}`).catch(() => null);
+        seasons = ((d && d.seasons) || []).map((x) => x.season_number).filter((n) => n > 0);
+      }
+      item = await autoAdd({ type, tmdbId, title: b.title, seasons });
+    }
+    if (item) {
+      item.nextSearch = 0;
+      autoEvent(item, 'uhd', b.on ? '4K H.265 activée' : '4K H.265 coupée');
+      if (b.on) setTimeout(() => autoSearchTick().catch(() => {}), 1500);
+    }
+    autoSave();
+    send(res, 200, { on: Boolean(auto.uhd[key]), have: (auto.have4k[key] || []).length, message: b.on ? `${b.title || 'Titre'} : 4K H.265 activée, recherche lancée. Le 1080p déjà là reste.` : '4K H.265 coupée.' });
     return true;
   }
   if (req.method === 'POST' && p === '/api/auto/search-all') {

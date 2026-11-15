@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- 4K H.265 sur certains titres (admin) : bouton « 4K » sur la fiche d'un film ou d'une série, et interrupteur dans Lumio Auto. Lumio Auto cherche alors une version 2160p H.265 (HDR10 accepté, Dolby Vision seul refusé), attend qu'elle existe, et la range à côté du 1080p (deux versions dans Jellyfin). Demande le serveur 3.103.0.
+- Streaming de l'admin : Wawacity en dernier recours quand rien n'est dans le cache TorBox / AllDebrid (lien ouvert par AllDebrid, relayé par le serveur).
+
 - Demandes de la famille : si une version est dans le cache AllDebrid / TorBox, la demande est validée toute seule et le fichier arrive par le cache (rien de compté sur le site), puis passe en partage. Pas en cache : elle attend l'admin, puis torrent du site. Serveur 3.102.0.
 
 ## 1.0.165 — 15 novembre 2026

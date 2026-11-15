@@ -89,6 +89,9 @@ export type AutoTry = { query: string; count: number; error: string | null; skip
 export type AutoEvent = { at: string; type: 'added' | 'found' | 'none' | 'sent' | 'imported' | 'failed'; msg: string; indexer?: string; size?: number; by?: string };
 export type AutoItem = {
   id: string;
+  /** 4K H.265 demandée pour ce titre ; have4k : éléments déjà là en 4K */
+  uhd?: boolean;
+  have4k?: number;
   type: 'movie' | 'tv';
   tmdbId: number;
   title: string;
@@ -204,6 +207,10 @@ export const autoApi = {
     serverCall<{ ok: boolean; message: string }>(s, '/api/auto/test-client', { method: 'POST', body: JSON.stringify({ client }) }),
   addItem: (s: Settings, b: { type: 'movie' | 'tv'; tmdbId: number; title?: string; seasons?: number[]; folderPath?: string }) =>
     serverCall<{ item: AutoItem }>(s, '/api/auto/items', { method: 'POST', ...json(b) }),
+  /** 4K H.265 pour un titre (admin) ; un titre pas encore suivi est ajouté au suivi, le 1080p déjà là reste */
+  uhd: (s: Settings, type: 'movie' | 'tv', tmdbId: number) => serverCall<{ on: boolean; have: number }>(s, `/api/auto/uhd?type=${type}&tmdbId=${tmdbId}`),
+  setUhd: (s: Settings, b: { type: 'movie' | 'tv'; tmdbId: number; on: boolean; title?: string }) =>
+    serverCall<{ on: boolean; have: number; message: string }>(s, '/api/auto/uhd', { method: 'POST', body: JSON.stringify(b) }),
   updateItem: (s: Settings, id: string, b: Partial<{ seasons: number[]; future: boolean; folderPath: string; anime: boolean }>) =>
     serverCall<{ item: AutoItem }>(s, `/api/auto/items/${id}`, { method: 'PATCH', ...json(b) }),
   removeItem: (s: Settings, id: string) => serverCall(s, `/api/auto/items/${id}`, { method: 'DELETE' }),
