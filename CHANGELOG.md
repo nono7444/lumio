@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.174 — 16 novembre 2026
+
 - Fiche d'un titre : la bonne page s'affiche directement (plus de « Streaming » qui se change en « Lire » au bout d'une seconde).
 
 ## 1.0.173 — 15 novembre 2026
