@@ -54,6 +54,22 @@ function seasonInfo(series: SonarrSeries | null, n: number): SeasonInfo | null {
   return { label: '', color: C.textFaint, monitored: false, have, total };
 }
 
+/** État du streaming déjà connu (gardé pendant que l'appli est ouverte). */
+let streamMemo: { can: boolean; ok: boolean | null } | null = null;
+/** Attend la recherche Jellyfin 2,5 s au plus ; si elle est plus lente, la fiche s'affiche et le résultat arrive ensuite. */
+function jfFirst<T>(p: Promise<T | null>, late: (v: T | null) => void): Promise<T | null> {
+  const safe = p.catch(() => null);
+  return Promise.race([
+    safe,
+    new Promise<T | null>((res) =>
+      setTimeout(() => {
+        safe.then(late);
+        res(null);
+      }, 2500)
+    ),
+  ]);
+}
+
 export default function MediaScreen() {
   const { type, id } = useLocalSearchParams<{ type: string; id: string }>();
   const { settings } = useSettings();
@@ -64,20 +80,29 @@ export default function MediaScreen() {
   // Statut sur le serveur Lumio (disponible, partiel…) : le bouton « DL » ne s'affiche que si le titre manque
   const [mediaStatus, setMediaStatus] = useState<number | null>(null);
   // « Regarder » : le serveur sait lire tout de suite un titre absent quand son torrent est dans le cache TorBox
-  const [canWatchNow, setCanWatchNow] = useState(false);
-  const [streamOk, setStreamOk] = useState<boolean | null>(null);
+  // État du streaming gardé entre les fiches : la bonne barre de boutons s'affiche d'emblée
+  const [canWatchNow, setCanWatchNow] = useState(streamMemo?.can ?? false);
+  const [streamOk, setStreamOk] = useState<boolean | null>(streamMemo?.ok ?? null);
+  const [streamKnown, setStreamKnown] = useState(Boolean(streamMemo) || !settings.chatUrl);
   useEffect(() => {
-    if (!settings.chatUrl) return;
+    if (!settings.chatUrl) return setStreamKnown(true);
     watchNowApi
       .status(settings)
-      .then((st) => (setCanWatchNow(Boolean(st.streaming)), setStreamOk(st.health ? st.health.ok : null)))
-      .catch(() => setCanWatchNow(false));
+      .then((st) => {
+        streamMemo = { can: Boolean(st.streaming), ok: st.health ? st.health.ok : null };
+        setCanWatchNow(streamMemo.can);
+        setStreamOk(streamMemo.ok);
+      })
+      .catch(() => setCanWatchNow(false))
+      .finally(() => setStreamKnown(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.chatUrl]);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [jfItem, setJfItem] = useState<JfItem | null>(null);
+  // La recherche dans Jellyfin est faite avant d'afficher la fiche : pas de « Streaming » qui devient « Lire »
+  const [jfChecked, setJfChecked] = useState(false);
   const [showRate, setShowRate] = useState(false);
   // Statut de chaque saison (serveur Lumio) et demande d'une saison en cours d'envoi
   // Une saison demandée depuis la liste : le bloc de demande se recharge (et inversement)
@@ -121,16 +146,20 @@ export default function MediaScreen() {
           if (!tvdb) arrError = 'Pas d’identifiant TVDB sur TMDB : Sonarr ne peut pas l’ajouter.';
           else arrItem = await sonarr.byTvdb(settings.sonarr, tvdb).catch((e) => ((arrError = e.message), null));
         }
+        const found = await jfFirst(jf.findByTmdb(settings, 'tv', tmdbId, data.name, data.external_ids?.imdb_id), setJfItem);
+        setJfItem(found);
+        setJfChecked(true);
         setDetails({ kind: 'tv', data, arr: arrItem, arrError });
-        jf.findByTmdb(settings, 'tv', tmdbId, data.name, data.external_ids?.imdb_id).then(setJfItem).catch(() => {});
       } else {
         const data = await tmdb.movie(settings, tmdbId);
         let arrError: string | undefined;
         const arrItem = configured
           ? await radarr.byTmdb(settings.radarr, tmdbId).catch((e) => ((arrError = e.message), null))
           : null;
+        const found = await jfFirst(jf.findByTmdb(settings, 'movie', tmdbId, data.title, data.imdb_id), setJfItem);
+        setJfItem(found);
+        setJfChecked(true);
         setDetails({ kind: 'movie', data, arr: arrItem, arrError });
-        jf.findByTmdb(settings, 'movie', tmdbId, data.title, data.imdb_id).then(setJfItem).catch(() => {});
       }
     } catch (e: any) {
       setError(e?.message ?? String(e));
@@ -374,7 +403,8 @@ export default function MediaScreen() {
 
         <View style={[{ paddingHorizontal: 16, gap: 20, marginTop: 4 }, Platform.isTV && { width: '100%', maxWidth: 1100, alignSelf: 'flex-start', paddingLeft: 48 }]}>
           {/* ——— Barre d'actions : Lire (ou « Regarder » en streaming, ou « À voir »), puis Proposer ——— */}
-          {!Platform.isTV ? (
+          {!Platform.isTV && !(jfChecked && streamKnown) ? <View style={[styles.actionBar, { height: 46 }]} /> : null}
+          {!Platform.isTV && jfChecked && streamKnown ? (
             <View style={styles.actionBar}>
               {jfItem ? (
                 <Button
@@ -406,7 +436,7 @@ export default function MediaScreen() {
           {/* ——— Demande façon Seerr (serveur Lumio) ——— */}
           {/* Film absent avec « Lire » en streaming : un seul bouton, pas de « Demander » (le suivi revient dès que le téléchargement est lancé) */}
           {/* Titre absent : un seul bouton, « Lire » (streaming ou demande) ; la section des demandes ne reste que pour une série déjà en partie sur le serveur (saisons manquantes) */}
-          {serverReq && !Platform.isTV ? (
+          {serverReq && !Platform.isTV && jfChecked ? (
             <RequestSection
               inJellyfin={Boolean(jfItem)}
               onAvailable={refreshJf}
