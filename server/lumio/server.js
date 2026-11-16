@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.109.1';
+const VERSION = '3.109.2';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4241,6 +4241,12 @@ const autoProfile = () => {
     if (Array.isArray(c.profile.languages)) c.profile.languages = c.profile.languages.filter((l) => l !== 'vf2' && l !== 'vfq');
     saveConfig();
   }
+  // Profil 1080p : H.265 de préférence (un ancien réglage « peu importe » ne le privilégiait presque pas)
+  if (c.profile && !c.profileV5) {
+    c.profileV5 = true;
+    if (c.profile.h265 === 'any') c.profile.h265 = 'preferred';
+    saveConfig();
+  }
   return { ...AUTO_PROFILE, ...(c.profile || {}) };
 };
 /** Titre marqué 4K : 2160p en H.265 uniquement, pas de Dolby Vision seul, fichiers plus gros acceptés ; sinon le profil normal. */
@@ -4701,7 +4707,8 @@ function autoScore(rel, item, want) {
   out.score += 100 - li * 8;
   // Piste française de France confirmée (nom ou site) : passe devant un MULTi sans précision
   if (p.langs.includes('vff') || p.langs.includes('truefrench')) out.score += 15;
-  if (p.codec === 'h265') out.score += pf.h265 === 'any' ? 5 : 30;
+  // H.265 de préférence : passe devant tout le reste (freeleech, VFF confirmée, sources actives) à langue acceptée égale
+  if (p.codec === 'h265') out.score += pf.h265 === 'any' ? 5 : 70;
   out.score += { bluray: 12, webdl: 10, webrip: 8, hdtv: 3 }[p.source] || 0;
   if (p.resolution === pf.resolution) out.score += 20;
   out.score += Math.min(rel.seeders || 0, 50) / 5;
