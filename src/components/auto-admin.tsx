@@ -12,7 +12,7 @@ import { Picker, Toggle } from '@/components/arr-section';
 import { toast } from '@/components/toast';
 import { Button, Field, ScreenTitle, Section, SectionCollapse, SegChip } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
-import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoBoost, type AutoBoostCandidate, type AutoSeedView, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
+import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoBoost, type AutoBoostCandidate, type AutoSeedView, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant, palliApi, type PalliView } from '@/lib/auto';
 import { useSettings } from '@/lib/settings';
 import { IS_AUTO } from '@/lib/variant';
 import { PendingCard } from '@/components/server-requests';
@@ -703,6 +703,7 @@ const ORIGIN_LABEL: Record<string, { label: string; color: string }> = {
   lumio: { label: 'Film / série', color: C.accent },
   cache: { label: 'Venu du cache', color: C.success },
   boost: { label: 'Partage seul', color: C.warning },
+  palliatif: { label: 'Soins palliatifs', color: C.danger },
   other: { label: 'Autre', color: C.textDim },
 };
 
@@ -2780,6 +2781,7 @@ export function AutoSeedScreen() {
             })}
           </Fold>
         ) : null}
+        <PalliCard />
         <SeedCandidatesCard />
         <Fold id="seed-details" title="Détails (qBittorrent, sites)" defaultOpen={false}>
           <RatioTab />
@@ -2953,5 +2955,82 @@ export function AutoDemandesScreen() {
       </SectionCollapse.Provider>
       {open && st ? <ItemSheet item={open} st={st} onClose={() => setItemOpen(null)} reload={load} /> : null}
     </View>
+  );
+}
+
+/** Onglet Seed → « Soins palliatifs » : anciens torrents C411 sans source, repartagés depuis la bibliothèque. */
+function PalliCard() {
+  const { settings } = useSettings();
+  const [v, setV] = useState<PalliView | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => {
+    palliApi.view(settings).then(setV).catch(() => {});
+  }, [settings]);
+  useFocusEffect(
+    useCallback(() => {
+      load();
+      const t = setInterval(load, 30000);
+      return () => clearInterval(t);
+    }, [load])
+  );
+  if (!v) return null;
+  const err = (e: unknown) => toast(e instanceof Error ? e.message : String(e));
+  const up = v.active.reduce((n, x) => n + (x.uploaded || 0), 0);
+  const sub = `${v.active.length} en soins · ${gb(up)} envoyés${v.zen != null ? ` · ${v.zen} Z` : ''}`;
+  return (
+    <Fold id="seed-palli" title="Soins palliatifs" count={v.active.length} color={v.active.length ? C.danger : undefined} defaultOpen={false}>
+      <View style={styles.bigCard}>
+        <Text style={styles.small}>
+          Les torrents C411 sans source ne peuvent pas être téléchargés, seulement repartagés. Lumio remet en partage ses anciens torrents C411 dont le film ou les épisodes sont
+          encore dans la bibliothèque (liens durs : aucune place en plus). Ceux qui ont déjà assez de sources sont retirés au bout de 3 h.
+        </Text>
+        <Toggle label="Repartager tout seul" value={v.settings.enabled} onChange={(x) => palliApi.save(settings, { enabled: x }).then(setV).catch(err)} />
+        <Text style={styles.small}>
+          {sub} · {v.waiting} ancien{v.waiting > 1 ? 's' : ''} torrent{v.waiting > 1 ? 's' : ''} à essayer
+          {v.lastRun ? ` · dernier passage ${new Date(v.lastRun).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}` : ''}
+        </Text>
+        {v.error ? <Text style={[styles.small, { color: C.danger }]}>{v.error}</Text> : null}
+        <Pressable
+          disabled={busy}
+          onPress={() => {
+            setBusy(true);
+            palliApi
+              .run(settings)
+              .then((x) => (setV(x), toast('Passage lancé')))
+              .catch(err)
+              .finally(() => setBusy(false));
+          }}
+          style={[styles.pill, { alignSelf: 'flex-start' }]}>
+          {busy ? <ActivityIndicator size="small" color={C.text} /> : <Ionicons name="heart-outline" size={16} color={C.danger} />}
+          <Text style={styles.pillTxt}>Chercher maintenant</Text>
+        </Pressable>
+      </View>
+      {v.active.map((x) => (
+        <View key={x.hash} style={styles.card}>
+          <View style={{ flex: 1, gap: 3 }}>
+            <Text style={styles.title} numberOfLines={1}>
+              {x.title}
+            </Text>
+            <Text style={styles.small} numberOfLines={2}>
+              {x.stage === 'seeding' ? (x.note ?? 'en partage') : 'vérification des fichiers'} · {x.leechers ?? 0} en attente · ↑ {gb(x.uploaded)}
+              {x.upSpeed ? ` · ${fmtSpeed2(x.upSpeed)}` : ''}
+            </Text>
+          </View>
+          <Pressable onPress={() => palliApi.remove(settings, x.hash).then(setV).catch(err)} hitSlop={8} accessibilityLabel="Retirer">
+            <Ionicons name="trash-outline" size={19} color={C.textDim} />
+          </Pressable>
+        </View>
+      ))}
+      {v.done.length ? (
+        <Fold id="seed-palli-done" title="Derniers essais" count={v.done.length} defaultOpen={false}>
+          {v.done.slice(0, 15).map((x, i) => (
+            <Text key={`${x.hash}-${i}`} style={styles.small} numberOfLines={2}>
+              {x.ok ? '✓' : '·'} {x.title} : {x.why}
+              {x.uploaded ? ` · ↑ ${gb(x.uploaded)}` : ''}
+            </Text>
+          ))}
+        </Fold>
+      ) : null}
+    </Fold>
   );
 }

@@ -59,7 +59,7 @@ export type QbitTorrent = {
   tracker: string;
   lumio: string | null;
   /** lumio : film / série de Lumio ; cache : arrivé par le cache AllDebrid / TorBox ; boost : ajouté pour le partage ; other : autre */
-  origin?: 'lumio' | 'cache' | 'boost' | 'other';
+  origin?: 'lumio' | 'cache' | 'boost' | 'palliatif' | 'other';
 };
 export type AutoSeed = { ratio: number; days: number; smart?: boolean; summary?: boolean };
 export type QbitPrefs = {
@@ -341,4 +341,22 @@ export type AutoSeedView = {
   cleaned: { title: string; why: string; ratio: number; uploaded: number; boost: boolean; at: string }[];
   health: { at: string; checks: { id: string; label: string; level: 'ok' | 'warn' | 'bad'; note: string | null }[] } | null;
   at: string;
+};
+
+/** Soins palliatifs (serveur 3.111.0) : anciens torrents C411 repartagés depuis la bibliothèque */
+export type PalliSettings = { enabled: boolean; perRun: number; keepDays: number; maxActive: number };
+export type PalliView = {
+  settings: PalliSettings;
+  zen: number | null;
+  active: { hash: string; title: string; release: string; size: number; stage: 'added' | 'check' | 'seeding'; seeders: number | null; leechers: number | null; uploaded: number; ratio: number; upSpeed: number; note: string | null; since: string }[];
+  done: { hash: string; title: string; release: string; ok: boolean; why: string; uploaded?: number; days?: number; at: string }[];
+  waiting: number;
+  lastRun: string | null;
+  error: string | null;
+};
+export const palliApi = {
+  view: (s: Settings) => serverCall<PalliView>(s, '/api/auto/palli'),
+  save: (s: Settings, b: Partial<PalliSettings>) => serverCall<PalliView>(s, '/api/auto/palli', { method: 'PUT', body: JSON.stringify(b) }),
+  run: (s: Settings) => serverCall<PalliView>(s, '/api/auto/palli/run', { method: 'POST', body: '{}' }),
+  remove: (s: Settings, hash: string) => serverCall<PalliView>(s, `/api/auto/palli/${hash}`, { method: 'DELETE' }),
 };

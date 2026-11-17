@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.110.1';
+const VERSION = '3.111.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -6153,6 +6153,231 @@ async function autoSeedTick() {
 }
 setInterval(() => autoSeedTick().catch(() => {}), 2 * 60_000);
 
+// ——— Soins palliatifs (C411) : remettre en partage ce qu'on a déjà ———
+// Un torrent en soins palliatifs n'a plus de source : on ne peut pas le télécharger, seulement le repartager.
+// Lumio reprend ses anciens torrents C411 (partage terminé, torrent retiré) dont le film ou les épisodes sont encore dans la
+// bibliothèque : le .torrent est relu, les fichiers de la bibliothèque sont reliés (liens durs, aucune place en plus) à l'endroit
+// attendu par qBittorrent, vérifiés, puis partagés. Les fichiers absents (nfo, sample…) sont décochés.
+// Un torrent qui a déjà assez de sources est retiré au bout de quelques heures (pas un soin palliatif) ; les autres restent
+// partagés jusqu'à ce qu'ils aillent mieux, ou au plus 30 jours. Le fichier de la bibliothèque n'est jamais touché.
+if (!auto.palli || typeof auto.palli !== 'object') auto.palli = {};
+const palli = auto.palli;
+palli.settings = Object.assign({ enabled: true, perRun: 4, keepDays: 30, maxActive: 40 }, palli.settings || {});
+for (const k of ['items', 'done']) if (!Array.isArray(palli[k])) palli[k] = [];
+if (!palli.tried || typeof palli.tried !== 'object') palli.tried = {}; // empreinte → date du dernier essai
+const PALLI_TAG = 'lumio-palliatif';
+const PALLI_HEALTHY = 5; // sources au-delà desquelles le torrent va bien
+const isC411 = (rel) => {
+  if (!rel) return false;
+  const ix = autoIndexers().find((x) => x.id === rel.indexerId || x.name === rel.indexer);
+  return Boolean(ix ? ix.type === 'c411' || /c411/i.test(ix.url || ix.name || '') : /c411/i.test(rel.indexer || ''));
+};
+const palliPost = (p2, form) => qbitFetch(p2, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(form) });
+
+/** Anciens torrents C411 qu'on pourrait repartager (partage fini, fichiers encore dans la bibliothèque). */
+function palliCandidates() {
+  const busy = new Set(palli.items.map((x) => x.hash));
+  const out = [];
+  for (const g of auto.grabs) {
+    const hash = g.hash || (g.over && g.over.hash);
+    if (!hash || g.seeding || busy.has(hash) || !isC411(g.release)) continue;
+    if (g.state !== 'done') continue;
+    if (palli.tried[hash] && Date.now() - palli.tried[hash] < 30 * 86400e3) continue;
+    if (!auto.items.some((i) => i.id === g.itemId)) continue;
+    busy.add(hash);
+    out.push({ g, hash });
+  }
+  return out;
+}
+
+/** Vidéos et sous-titres du titre dans la bibliothèque, rangés par taille. */
+async function palliLibrary(item) {
+  let dir = null;
+  if (item.type === 'movie') {
+    const dest = autoResolveFolder('radarr', item.folderPath);
+    if (dest && fs.existsSync(dest.path)) {
+      const hit = fs.readdirSync(dest.path).find((n) => n.includes(`[tmdbid-${item.tmdbId}]`));
+      if (hit) dir = path.join(dest.path, hit);
+    }
+  } else dir = await seriesDir(item).catch(() => null);
+  const bySize = new Map();
+  if (!dir || !fs.existsSync(dir)) return { dir: null, bySize };
+  for (const f of listFiles(dir)) {
+    if (!VIDEO_EXT.test(f) && !SUB_EXT.test(f)) continue;
+    try {
+      const st = fs.statSync(f);
+      if (!bySize.has(st.size)) bySize.set(st.size, []);
+      bySize.get(st.size).push(f);
+    } catch {}
+  }
+  return { dir, bySize };
+}
+
+/** Prépare un ancien torrent : .torrent relu, fichiers de la bibliothèque reliés, ajout dans qBittorrent à l'arrêt. */
+async function palliStart({ g, hash }) {
+  palli.tried[hash] = Date.now();
+  const item = auto.items.find((i) => i.id === g.itemId);
+  const base = { hash, grabId: g.id, title: g.title || (item && item.title) || g.release.title, release: g.release.title, size: g.release.size || 0, at: new Date().toISOString() };
+  const skip = (why) => (palli.done.unshift({ ...base, ok: false, why }), null);
+  const dest = autoResolveFolder(item.type === 'movie' ? 'radarr' : 'sonarr', item.folderPath);
+  if (!dest) return skip('dossier de la bibliothèque introuvable');
+  const lib = await palliLibrary(item);
+  if (!lib.dir) return skip('plus dans la bibliothèque');
+  let t;
+  try {
+    t = await fetchTorrent(g.release);
+  } catch (e) {
+    return skip(e.message);
+  }
+  if (!t.buf) return skip('pas de .torrent (lien magnet)');
+  const layout = torrentLayout(t.buf);
+  if (!layout) return skip('.torrent illisible');
+  const known = await (await qbitFetch(`/api/v2/torrents/info?hashes=${hash}`)).json().catch(() => []);
+  if (known.length) return skip('déjà dans qBittorrent');
+  const local = safePath(dest.root, qbitLocalFolder()).full;
+  const used = new Set();
+  const linked = [];
+  let videoOk = 0;
+  for (const f of layout.files) {
+    if (!VIDEO_EXT.test(f.rel) && !SUB_EXT.test(f.rel)) continue;
+    const src = (lib.bySize.get(f.size) || []).find((x) => !used.has(x));
+    if (!src) continue;
+    const to = path.join(local, f.rel);
+    try {
+      await fs.promises.mkdir(path.dirname(to), { recursive: true });
+      if (!fs.existsSync(to)) await fs.promises.link(src, to); // lien dur seulement : jamais de copie
+      used.add(src);
+      linked.push(f.rel);
+      if (VIDEO_EXT.test(f.rel)) videoOk++;
+    } catch (e) {
+      if (e.code === 'EXDEV') {
+        await fs.promises.rm(path.join(local, layout.name), { recursive: true, force: true }).catch(() => {});
+        return skip('dossier de qBittorrent sur un autre disque que la bibliothèque');
+      }
+    }
+  }
+  if (!videoOk) {
+    if (linked.length) await fs.promises.rm(path.join(local, layout.name), { recursive: true, force: true }).catch(() => {});
+    return skip('fichier de la bibliothèque différent du torrent');
+  }
+  const qc = autoCfg().qbit || {};
+  const fd = new FormData();
+  fd.append('torrents', new Blob([t.buf], { type: 'application/x-bittorrent' }), `${cleanName(g.release.title)}.torrent`);
+  fd.append('category', qbitCategory());
+  fd.append('tags', PALLI_TAG);
+  fd.append('savepath', `${String(qc.remotePath || '/downloads').replace(/\/+$/, '')}/${dest.root}`);
+  fd.append('paused', 'true');
+  fd.append('stopped', 'true');
+  fd.append('dlLimit', '1024');
+  fd.append('skip_checking', 'false');
+  fd.append('contentLayout', 'Original');
+  const r = await qbitFetch('/api/v2/torrents/add', { method: 'POST', body: fd });
+  if (/fail/i.test(await r.text())) {
+    await fs.promises.rm(path.join(local, layout.name), { recursive: true, force: true }).catch(() => {});
+    return skip('refusé par qBittorrent');
+  }
+  const it = { ...base, root: dest.root, name: layout.name, linked, stage: 'added', since: Date.now(), seeders: null, leechers: null, uploaded: 0, ratio: 0, upSpeed: 0, note: null };
+  palli.items.push(it);
+  autoLog(`soins palliatifs : ${it.title} remis en partage depuis la bibliothèque (${linked.length} fichier${linked.length > 1 ? 's' : ''})`);
+  return it;
+}
+
+/** Retire un torrent palliatif (le torrent et ses liens ; la bibliothèque reste). */
+async function palliRemove(it, why, ok = true) {
+  await palliPost('/api/v2/torrents/delete', { hashes: it.hash, deleteFiles: 'false' }).catch(() => {});
+  if (it.root && it.name) {
+    try {
+      await fs.promises.rm(path.join(safePath(it.root, qbitLocalFolder()).full, it.name), { recursive: true, force: true });
+    } catch {}
+  }
+  palli.items = palli.items.filter((x) => x !== it);
+  palli.done.unshift({ hash: it.hash, title: it.title, release: it.release, size: it.size, at: new Date().toISOString(), ok, why, uploaded: it.uploaded, ratio: it.ratio, days: Math.round(((Date.now() - it.since) / 86400e3) * 10) / 10 });
+  palli.done = palli.done.slice(0, 60);
+}
+
+let palliBusy = false;
+async function palliTick(force = false) {
+  if (palliBusy) return;
+  const s = palli.settings;
+  if (!s.enabled && !force) return;
+  if (!(autoCfg().qbit || {}).url) return;
+  palliBusy = true;
+  try {
+    // 1. Suivi des torrents en cours : vérification, puis partage ; retirés s'ils vont bien ou au bout de keepDays
+    const list = palli.items.length ? await (await qbitFetch(`/api/v2/torrents/info?hashes=${palli.items.map((x) => x.hash).join('|')}`)).json() : [];
+    for (const it of [...palli.items]) {
+      const t = list.find((x) => (x.hash || '').toLowerCase() === it.hash);
+      if (!t) {
+        if (Date.now() - it.since > 10 * 60e3) await palliRemove(it, 'retiré de qBittorrent', false);
+        continue;
+      }
+      it.seeders = Math.max(0, (Number(t.num_complete) || 0) - (it.stage === 'seeding' ? 1 : 0)); // sans compter Lumio
+      it.leechers = Number(t.num_incomplete) || 0;
+      it.uploaded = Number(t.uploaded) || 0;
+      it.ratio = Math.round((Number(t.ratio) || 0) * 100) / 100;
+      it.upSpeed = Number(t.upspeed) || 0;
+      const state = String(t.state || '');
+      if (/checking|moving|allocating|metaDL/i.test(state)) continue;
+      if (it.stage === 'added') {
+        // Fichiers absents de la bibliothèque (nfo, sample…) : décochés, puis vérification
+        const files = await (await qbitFetch(`/api/v2/torrents/files?hash=${it.hash}`)).json().catch(() => []);
+        const off = files.map((f, i) => ({ f, i })).filter(({ f }) => !it.linked.includes(f.name));
+        if (off.length) await palliPost('/api/v2/torrents/filePrio', { hash: it.hash, id: off.map((x) => x.i).join('|'), priority: '0' }).catch(() => {});
+        await palliPost('/api/v2/torrents/recheck', { hashes: it.hash }).catch(() => {});
+        it.stage = 'check';
+        it.checkAt = Date.now();
+        continue;
+      }
+      if (it.stage === 'check') {
+        if (Date.now() - it.checkAt < 20e3) continue;
+        const prog = Number(t.progress) || 0;
+        if (prog >= 1 || (prog >= 0.99 && Number(t.amount_left) < 50e6)) {
+          await palliPost('/api/v2/torrents/setDownloadLimit', { hashes: it.hash, limit: '0' }).catch(() => {});
+          await palliPost('/api/v2/torrents/start', { hashes: it.hash }).catch(() => palliPost('/api/v2/torrents/resume', { hashes: it.hash }).catch(() => {}));
+          it.stage = 'seeding';
+          it.seedAt = Date.now();
+        } else if (Date.now() - it.checkAt > 30 * 60e3) await palliRemove(it, `fichiers vérifiés à ${Math.round(prog * 100)} % seulement`, false);
+        continue;
+      }
+      if (/error|missingFiles/i.test(state)) {
+        await palliRemove(it, `torrent cassé (${state})`, false);
+        continue;
+      }
+      if (/^(paused|stopped)UP$/i.test(state)) await palliPost('/api/v2/torrents/start', { hashes: it.hash }).catch(() => palliPost('/api/v2/torrents/resume', { hashes: it.hash }).catch(() => {}));
+      // En partage : au bout de 3 h, un torrent qui a déjà ses sources (et personne qui attend) n'a pas besoin de soins
+      const age = Date.now() - (it.seedAt || it.since);
+      if (age > 3 * 3600e3 && it.seeders >= PALLI_HEALTHY && it.leechers === 0) await palliRemove(it, `${it.seeders} sources : il va bien`);
+      else if (age > s.keepDays * 86400e3) await palliRemove(it, `${s.keepDays} j de partage`);
+      else it.note = it.seeders === 0 ? 'seule source' : `${it.seeders} autre${it.seeders > 1 ? 's' : ''} source${it.seeders > 1 ? 's' : ''}`;
+    }
+    // 2. Nouveaux : quelques anciens torrents par passage
+    const room = Math.max(0, s.maxActive - palli.items.length);
+    if (room) for (const c of palliCandidates().slice(0, Math.min(room, s.perRun))) await palliStart(c).catch((e) => autoLog(`soins palliatifs : ${e.message}`, 'warn'));
+    palli.done = palli.done.slice(0, 60);
+    for (const [h, at] of Object.entries(palli.tried)) if (Date.now() - at > 90 * 86400e3) delete palli.tried[h];
+    palli.lastRun = new Date().toISOString();
+    autoSave();
+  } catch (e) {
+    palli.error = e.message;
+  } finally {
+    palliBusy = false;
+  }
+}
+setInterval(() => palliTick().catch(() => {}), 10 * 60_000);
+
+function palliView() {
+  const zen = Object.values(auto.siteProfile || {}).map((p) => p && p.zen).find((z) => z != null);
+  return {
+    settings: palli.settings,
+    zen: zen ?? null,
+    active: palli.items.map((x) => ({ hash: x.hash, title: x.title, release: x.release, size: x.size, stage: x.stage, seeders: x.seeders, leechers: x.leechers, uploaded: x.uploaded, ratio: x.ratio, upSpeed: x.upSpeed, note: x.note, since: new Date(x.since).toISOString() })),
+    done: palli.done.slice(0, 30),
+    waiting: palliCandidates().length,
+    lastRun: palli.lastRun || null,
+    error: palli.error || null,
+  };
+}
+
 // ——— Ratio par site (C411…) ———
 // Toutes les 5 min : on additionne ce que chaque torrent de Lumio a envoyé / reçu depuis la dernière fois,
 // rangé par site. Le freeleech reçu est compté à part (il ne compte pas dans le ratio du site).
@@ -6239,6 +6464,12 @@ async function autoProfileTick() {
         const fl = j.freeleech || {};
         const cur = { at: new Date().toISOString(), up: num(t.uploaded), down: num(t.downloaded), allowed: !(j.download && j.download.allowed === false), freeleech: Boolean(fl.active), sources: Array.isArray(fl.sources) ? fl.sources.map(String).slice(0, 5) : [] };
         cur.ratio = cur.down > 0 ? Math.round((cur.up / cur.down) * 100) / 100 : null;
+        // Points bonus du site (Z sur C411), si le profil les donne
+        const zenOf = (o) => {
+          for (const [k, v] of Object.entries(o || {})) if (/^(zen|zens|bonus|bonus_?points|points|seedbonus|credits?)$/i.test(k) && (typeof v === 'number' || (v && typeof v === 'object' && typeof v.total === 'number'))) return typeof v === 'number' ? v : v.total;
+          return null;
+        };
+        cur.zen = zenOf(j) ?? zenOf(j.user) ?? zenOf(j.stats) ?? zenOf(j.bonus && typeof j.bonus === 'object' ? j.bonus : null);
         auto.siteProfile[ix.id] = cur;
         if (!prev.at || prev.error) autoLog(`${ix.name} : profil lu (ratio ${cur.ratio ?? '?'}, freeleech ${cur.freeleech ? 'actif' : 'non'})`);
         if (cur.freeleech !== Boolean(prev.freeleech) && (prev.at || cur.freeleech)) {
@@ -7348,6 +7579,29 @@ async function autoRoutes(req, res, p, q, user) {
     }
     return true;
   }
+  // Soins palliatifs : anciens torrents C411 repartagés depuis la bibliothèque
+  if (p === '/api/auto/palli' && req.method === 'GET') return send(res, 200, palliView()), true;
+  if (p === '/api/auto/palli' && req.method === 'PUT') {
+    const b = await readBody(req);
+    const ps = palli.settings;
+    if (typeof b.enabled === 'boolean') ps.enabled = b.enabled;
+    if (b.perRun != null) ps.perRun = Math.max(1, Math.min(20, Math.round(Number(b.perRun)) || 4));
+    if (b.keepDays != null) ps.keepDays = Math.max(3, Math.min(120, Math.round(Number(b.keepDays)) || 30));
+    if (b.maxActive != null) ps.maxActive = Math.max(1, Math.min(200, Math.round(Number(b.maxActive)) || 40));
+    autoSave();
+    return send(res, 200, palliView()), true;
+  }
+  if (p === '/api/auto/palli/run' && req.method === 'POST') {
+    await palliTick(true);
+    return send(res, 200, palliView()), true;
+  }
+  if (p.startsWith('/api/auto/palli/') && req.method === 'DELETE') {
+    const it = palli.items.find((x) => x.hash === p.split('/').pop());
+    if (!it) throw new HttpError(404, 'Torrent introuvable');
+    await palliRemove(it, 'retiré à la main');
+    autoSave();
+    return send(res, 200, palliView()), true;
+  }
   if (req.method === 'GET' && p === '/api/auto/seed') {
     send(res, 200, autoSeedView());
     return true;
@@ -7756,7 +8010,7 @@ async function autoRoutes(req, res, p, q, user) {
             }
           })(),
           lumio: ours.has((t.hash || '').toLowerCase()) ? ours.get(t.hash.toLowerCase()).title : null,
-          origin: t.category === BOOST_CATEGORY ? 'boost' : ours.has((t.hash || '').toLowerCase()) ? (ours.get(t.hash.toLowerCase()).over ? 'cache' : 'lumio') : 'other',
+          origin: t.category === BOOST_CATEGORY ? 'boost' : palli.items.some((x) => x.hash === (t.hash || '').toLowerCase()) ? 'palliatif' : ours.has((t.hash || '').toLowerCase()) ? (ours.get(t.hash.toLowerCase()).over ? 'cache' : 'lumio') : 'other',
         })),
       });
     } catch (e) {
