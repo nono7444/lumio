@@ -58,13 +58,12 @@ export default function TabsLayout() {
         tabBar={(props) => <FloatingTabBar {...props} />}
         initialRouteName="index"
         screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: C.bg } }}>
-        {/* Gestion du serveur seulement : Performance, Seed, Demandes, qBittorrent, Disques, H.265, Serveur, Lecture (réglages : roue en haut à droite) */}
+        {/* Gestion du serveur seulement : Performance, Seed, Demandes, qBittorrent, Disques, Serveur, Lecture (réglages : roue en haut à droite) */}
         <Tabs.Screen name="index" options={{ title: 'Performance' }} />
         <Tabs.Screen name="auto" options={{ title: 'Seed' }} />
         <Tabs.Screen name="activity" options={{ title: 'Demandes' }} />
         <Tabs.Screen name="qbit" options={{ title: 'qBittorrent' }} />
         <Tabs.Screen name="disks" options={{ title: 'Disques' }} />
-        <Tabs.Screen name="convert" options={{ title: 'H.265' }} />
         <Tabs.Screen name="server" options={{ title: 'Serveur' }} />
         <Tabs.Screen name="playing" options={{ title: 'Lecture' }} />
         <Tabs.Screen name="settings" options={{ href: null }} />
@@ -101,7 +100,6 @@ export default function TabsLayout() {
       <Tabs.Screen name="disks" options={{ href: null }} />
       <Tabs.Screen name="server" options={{ href: null }} />
       <Tabs.Screen name="playing" options={{ href: null }} />
-      <Tabs.Screen name="convert" options={{ href: null }} />
       <Tabs.Screen name="watchlist" options={{ title: 'À voir', href: Platform.isTV ? null : undefined }} />
       <Tabs.Screen name="settings" options={{ title: 'Profil' }} />
     </Tabs>

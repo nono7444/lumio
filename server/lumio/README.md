@@ -93,29 +93,6 @@ La clé API AllDebrid se saisit dans l'appli (Accueil → icône Téléchargemen
 Tu peux aussi la mettre dans `.env` (`ALLDEBRID_KEY=…`).
 
 
-## Conversion H.265 de nuit (Lumio Auto → onglet « H.265 »)
-
-Les films qui ne sont pas en H.265 sont convertis la nuit (3 h – 6 h par défaut, 2 films par nuit au plus), puis l'original est supprimé
-une fois le fichier converti vérifié (codec, durée, pistes audio, taille). Pas touché : la 4K, le HDR / Dolby Vision, un film encore en
-partage (lien dur vers qBittorrent) ou ajouté il y a moins de 3 jours. La conversion se met en pause quand quelqu'un regarde Jellyfin.
-
-Pour utiliser la puce graphique Intel (20 à 40 min par film au lieu de plusieurs heures), donne-la au conteneur, une seule fois :
-
-```yaml
-  lumio:
-    devices:
-      - /dev/dri:/dev/dri
-```
-
-puis `docker compose up -d lumio`. L'image contient ffmpeg et les pilotes Intel (VAAPI).
-
-| Méthode | Route | Rôle |
-|---|---|---|
-| GET | `/api/auto/conv` | État : encodeur, conversion en cours, file, historique |
-| PUT | `/api/auto/conv/settings` | `{ enabled, start, end, perNight, quality: haute / normal / compacte, minAgeDays, pauseWhenWatching, encoder: auto / gpu / cpu }` |
-| POST | `/api/auto/conv/run` · `/stop` · `/scan` | Convertir maintenant `{ key? }` · arrêter · relire la liste |
-| POST | `/api/auto/conv/exclude` · `/retry` | `{ key, on }` exclure un film · `{ key }` réessayer |
-
 ## Lumio Secour (groupe de secours, intégré)
 
 Lumio Secour est intégré au serveur Lumio : c'est un fork de WAStream (licence MIT, `secour/LICENSE`) transformé en

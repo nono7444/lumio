@@ -34,7 +34,6 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   auto: IS_AUTO ? 'arrow-up-circle' : 'flash',
   qbit: 'magnet',
   disks: 'server',
-  convert: 'film',
   server: 'power',
   playing: 'play-circle',
   // Lumio Auto : l'onglet « Réglages »
@@ -54,7 +53,6 @@ const SHORT: Record<string, string> = {
   auto: IS_AUTO ? 'Seed' : 'Auto',
   qbit: 'qBit',
   disks: 'Disques',
-  convert: 'H.265',
   server: 'Serveur',
   playing: 'Lecture',
   settings: IS_AUTO ? 'Réglages' : 'Profil',

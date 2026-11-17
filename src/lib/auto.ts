@@ -342,37 +342,3 @@ export type AutoSeedView = {
   health: { at: string; checks: { id: string; label: string; level: 'ok' | 'warn' | 'bad'; note: string | null }[] } | null;
   at: string;
 };
-
-/** Conversion H.265 de nuit (serveur 3.110.0) */
-export type ConvSettings = {
-  enabled: boolean;
-  start: number;
-  end: number;
-  perNight: number;
-  quality: 'haute' | 'normal' | 'compacte';
-  minAgeDays: number;
-  pauseWhenWatching: boolean;
-  encoder: 'auto' | 'gpu' | 'cpu';
-};
-export type ConvFilm = { key: string; title: string; year: number | null; codec: string; height: number | null; size: number; status: 'ready' | 'wait' | 'failed' | 'skip' | 'excluded'; why: string | null };
-export type ConvView = {
-  settings: ConvSettings;
-  encoder: { kind: 'gpu' | 'cpu' | null; label: string; why: string | null };
-  current: { key: string; title: string; year: number | null; pct: number; speed: number | null; startedAt: string; paused: boolean; why: string | null; size: number; enc: string } | null;
-  tonight: { done: number; max: number; inside: boolean };
-  counts: { ready: number; wait: number; failed: number; readySize: number; converted: number; saved: number };
-  queue: ConvFilm[];
-  skipped: ConvFilm[];
-  history: { title: string; year: number | null; ok: boolean; kept?: boolean; before: number; after: number | null; minutes?: number; note: string; at: string }[];
-  error: string | null;
-  at: string;
-};
-export const convApi = {
-  view: (s: Settings) => serverCall<ConvView>(s, '/api/auto/conv'),
-  save: (s: Settings, b: Partial<ConvSettings>) => serverCall<ConvView>(s, '/api/auto/conv/settings', { method: 'PUT', body: JSON.stringify(b) }),
-  run: (s: Settings, key?: string) => serverCall<{ ok: boolean; message: string }>(s, '/api/auto/conv/run', { method: 'POST', body: JSON.stringify({ key }) }),
-  stop: (s: Settings) => serverCall(s, '/api/auto/conv/stop', { method: 'POST', body: '{}' }),
-  exclude: (s: Settings, key: string, on: boolean) => serverCall<ConvView>(s, '/api/auto/conv/exclude', { method: 'POST', body: JSON.stringify({ key, on }) }),
-  retry: (s: Settings, key: string) => serverCall<ConvView>(s, '/api/auto/conv/retry', { method: 'POST', body: JSON.stringify({ key }) }),
-  scan: (s: Settings) => serverCall<ConvView>(s, '/api/auto/conv/scan', { method: 'POST', body: '{}' }),
-};
