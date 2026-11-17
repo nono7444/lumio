@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.176 — 17 novembre 2026
+
 - Lumio Auto : onglet « H.265 » et conversion de nuit retirés (serveur 3.110.1).
 
 ## 1.0.175 — 17 novembre 2026
