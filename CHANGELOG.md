@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.177 — 17 novembre 2026
+
 - Lumio Auto, onglet Seed : « Soins palliatifs ». Lumio remet tout seul en partage ses anciens torrents C411 dont le film ou les épisodes sont encore dans la bibliothèque (liens durs, aucune place en plus), pour aider les torrents sans source et gagner des Z. Ceux qui ont déjà assez de sources sont retirés au bout de 3 h, les autres après 30 jours au plus. Les Z du compte s'affichent si le profil C411 les donne (serveur 3.111.0).
 
 ## 1.0.176 — 17 novembre 2026
