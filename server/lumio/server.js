@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.109.2';
+const VERSION = '3.110.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -7190,9 +7190,436 @@ function publicItem(item) {
   };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// Conversion H.265 (Lumio Auto → onglet « H.265 ») : les films qui ne sont pas en H.265 sont convertis la nuit
+// - Liste tirée de Jellyfin (codec, définition, chemin) ; films seulement, 4K / HDR / Dolby Vision laissés tels quels
+// - Pas un film encore en partage (lien dur vers qBittorrent) ni trop récent (la recherche H.265 de Lumio Auto passe d'abord)
+// - Entre 3 h et 6 h (réglable), 2 films par nuit au plus ; pause si quelqu'un regarde Jellyfin
+// - Puce graphique Intel (VAAPI) si le conteneur y a accès (/dev/dri), sinon le processeur (lent)
+// - Fichier vérifié (durée, pistes audio, taille) avant de remplacer l'original ; l'original est supprimé
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+if (!auto.conv || typeof auto.conv !== 'object') auto.conv = {};
+const conv = auto.conv;
+conv.settings = Object.assign(
+  { enabled: true, start: 3, end: 6, perNight: 2, quality: 'normal', minAgeDays: 3, pauseWhenWatching: true, encoder: 'auto' },
+  conv.settings || {}
+);
+for (const k of ['history', 'exclude']) if (!Array.isArray(conv[k])) conv[k] = [];
+if (!conv.failed || typeof conv.failed !== 'object') conv.failed = {}; // chemin → raison (pas réessayé tout seul)
+if (!conv.compact || typeof conv.compact !== 'object') conv.compact = {}; // chemin → déjà compact (H.265 pas plus petit)
+if (!conv.nights || typeof conv.nights !== 'object') conv.nights = {}; // nuit → nombre de films lancés
+const CONV_QP = { haute: 22, normal: 24, compacte: 27 }; // puce graphique (qp)
+const CONV_CRF = { haute: 20, normal: 22, compacte: 25 }; // processeur (x265)
+let convJob = null; // { key, title, child, pct, speed, startedAt, paused, why, tmp }
+let convScan = { at: 0, list: [], error: null };
+let convEnc = null; // { kind: 'gpu' | 'cpu' | null, driver, device, label, why, at }
+let convFfmpegInstall = null;
+
+// Les fichiers temporaires d'une conversion interrompue (redémarrage du serveur) sont effacés au démarrage
+setTimeout(() => {
+  for (const h of conv.history.slice(0, 5)) if (h.tmp && fs.existsSync(h.tmp)) fs.promises.unlink(h.tmp).catch(() => {});
+  if (conv.running && conv.running.tmp) fs.promises.unlink(conv.running.tmp).catch(() => {});
+  conv.running = null;
+}, 5_000);
+
+function parisAt(ts) {
+  const d = new Date(new Date(ts).toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
+  return { day: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, hour: d.getHours() };
+}
+/** Dans la plage horaire de nuit ? (et à quelle nuit elle appartient, pour la limite par nuit) */
+function convWindow(now = Date.now()) {
+  const s = conv.settings;
+  const { hour, day } = parisAt(now);
+  const wraps = s.start > s.end; // ex. 23 h → 5 h
+  const inside = wraps ? hour >= s.start || hour < s.end : hour >= s.start && hour < s.end;
+  const night = wraps && hour < s.end ? parisAt(now - 86400e3).day : day;
+  return { inside, night };
+}
+
+/** ffmpeg : lance une commande et suit sa sortie. */
+function ffSpawn(cmd, args, { env, onOut, timeout = 0 } = {}) {
+  const { spawn } = require('child_process');
+  const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...(env || {}) } });
+  let err = '';
+  let out = '';
+  const done = new Promise((resolve, reject) => {
+    const t = timeout ? setTimeout(() => child.kill('SIGKILL'), timeout) : null;
+    child.stdout.on('data', (d) => (onOut ? onOut(String(d)) : (out += d)));
+    child.stderr.on('data', (d) => (err = (err + d).slice(-4000)));
+    child.on('error', (e) => (t && clearTimeout(t), reject(e)));
+    child.on('close', (code, sig) => {
+      if (t) clearTimeout(t);
+      code === 0 ? resolve(out) : reject(new Error(sig ? `arrêté (${sig})` : err.trim().split('\n').slice(-3).join(' | ') || `code ${code}`));
+    });
+  });
+  return { child, done };
+}
+const hasCmd = (c) => ffSpawn(c, ['-version'], { timeout: 15_000 }).done.then(() => true, () => false);
+
+/** ffmpeg absent (ancienne image) : installé dans le conteneur, une seule fois. */
+async function convEnsureFfmpeg() {
+  if (await hasCmd('ffmpeg')) return true;
+  if (!convFfmpegInstall)
+    convFfmpegInstall = (async () => {
+      try {
+        if (fs.existsSync('/sbin/apk')) await run('apk', ['add', '--no-cache', 'ffmpeg', 'libva-intel-driver', 'intel-media-driver'], { timeout: 15 * 60_000 });
+        else {
+          await run('apt-get', ['update'], { timeout: 10 * 60_000 });
+          await run('apt-get', ['install', '-y', '--no-install-recommends', 'ffmpeg'], { timeout: 20 * 60_000 });
+        }
+      } catch (e) {
+        console.log('Conversion H.265 : installation de ffmpeg impossible :', e.message);
+      }
+    })();
+  await convFfmpegInstall;
+  convFfmpegInstall = null;
+  return hasCmd('ffmpeg');
+}
+
+/** Quel encodeur marche ici : puce graphique Intel (rapide) ou processeur (lent). Revérifié toutes les 6 h. */
+async function convEncoder(force = false) {
+  if (convEnc && !force && Date.now() - convEnc.at < 6 * 3600e3) return convEnc;
+  const out = { kind: null, driver: null, device: null, label: '', why: null, at: Date.now() };
+  if (!(await convEnsureFfmpeg())) {
+    out.why = 'ffmpeg n’est pas installé dans le conteneur (Profil → Serveur → Mettre à jour)';
+    return (convEnc = out);
+  }
+  const devs = fs.existsSync('/dev/dri') ? fs.readdirSync('/dev/dri').filter((f) => f.startsWith('renderD')).map((f) => `/dev/dri/${f}`) : [];
+  if (conv.settings.encoder !== 'cpu') {
+    for (const device of devs)
+      for (const driver of ['iHD', 'i965']) {
+        const test = ['-hide_banner', '-v', 'error', '-vaapi_device', device, '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=25:duration=1', '-vf', 'format=nv12,hwupload', '-c:v', 'hevc_vaapi', '-qp', '24', '-f', 'null', '-'];
+        const ok = await ffSpawn('ffmpeg', test, { env: { LIBVA_DRIVER_NAME: driver }, timeout: 60_000 }).done.then(() => true, () => false);
+        if (ok) return (convEnc = Object.assign(out, { kind: 'gpu', driver, device, label: `Puce graphique Intel (${driver})` }));
+      }
+    out.why = devs.length ? 'la puce graphique n’accepte pas l’encodage H.265 (pilote)' : 'le conteneur n’a pas accès à la puce graphique (/dev/dri)';
+  }
+  if (conv.settings.encoder === 'gpu') return (convEnc = out);
+  const cpu = await ffSpawn('ffmpeg', ['-hide_banner', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x240:rate=25:duration=1', '-c:v', 'libx265', '-f', 'null', '-'], { timeout: 60_000 }).done.then(
+    () => true,
+    () => false
+  );
+  if (cpu) Object.assign(out, { kind: 'cpu', label: 'Processeur (lent : plusieurs heures par film)' });
+  else out.why = (out.why ? out.why + ' ; ' : '') + 'x265 indisponible';
+  return (convEnc = out);
+}
+
+/** Films de Jellyfin à convertir (et ceux en attente, avec la raison). Relu toutes les heures. */
+async function convList(force = false) {
+  if (!force && Date.now() - convScan.at < 3600e3 && convScan.list.length) return convScan;
+  const token = process.env.JELLYFIN_API_KEY || jfAdminToken;
+  if (!token) return (convScan = { at: Date.now(), list: [], error: 'Jellyfin : aucun jeton (ouvre Lumio avec le compte admin)' });
+  const data = await jfJson(token, '/Items?IncludeItemTypes=Movie&Recursive=true&Fields=Path,MediaSources,ProviderIds,ProductionYear&EnableImages=false');
+  const s = conv.settings;
+  const list = [];
+  for (const it of (data && data.Items) || []) {
+    for (const src of it.MediaSources || [it]) {
+      const v = (src.MediaStreams || []).find((x) => x.Type === 'Video');
+      if (!v || !src.Path) continue;
+      const codec = String(v.Codec || '').toLowerCase();
+      if (['hevc', 'h265', 'av1'].includes(codec)) continue;
+      const key = src.Path;
+      const e = { key, jfId: it.Id, tmdbId: Number((it.ProviderIds || {}).Tmdb) || null, title: it.Name, year: it.ProductionYear || null, codec, height: v.Height || null, size: src.Size || 0, status: 'ready', why: null };
+      const range = String(v.VideoRangeType || v.VideoRange || '');
+      const local = localPath(src.Path);
+      if (conv.exclude.includes(key)) Object.assign(e, { status: 'excluded', why: 'exclu' });
+      else if ((v.Height || 0) > 1600 || (v.Width || 0) > 3000) Object.assign(e, { status: 'skip', why: '4K : laissé tel quel' });
+      else if (/HDR|DOVI|HLG/i.test(range) && range !== 'SDR') Object.assign(e, { status: 'skip', why: 'HDR / Dolby Vision : laissé tel quel' });
+      else if (conv.compact[key]) Object.assign(e, { status: 'skip', why: 'déjà compact (le H.265 n’était pas plus petit)' });
+      else if (conv.failed[key]) Object.assign(e, { status: 'failed', why: conv.failed[key] });
+      else if (!local) Object.assign(e, { status: 'wait', why: 'fichier introuvable sur les disques du serveur' });
+      else {
+        try {
+          const st = fs.statSync(local);
+          e.size = st.size;
+          if (st.nlink > 1) Object.assign(e, { status: 'wait', why: 'encore en partage (qBittorrent)' });
+          else if (Date.now() - st.mtimeMs < s.minAgeDays * 86400e3) Object.assign(e, { status: 'wait', why: `ajouté il y a moins de ${s.minAgeDays} j` });
+        } catch {
+          Object.assign(e, { status: 'wait', why: 'fichier illisible' });
+        }
+      }
+      e.local = local;
+      list.push(e);
+    }
+  }
+  const rank = { ready: 0, wait: 1, failed: 2, skip: 3, excluded: 4 };
+  list.sort((a, b) => rank[a.status] - rank[b.status] || b.size - a.size);
+  return (convScan = { at: Date.now(), list, error: null });
+}
+
+async function ffprobe(file) {
+  const out = await ffSpawn('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', file], { timeout: 120_000 }).done;
+  return JSON.parse(out);
+}
+/** Quelqu'un regarde en ce moment sur Jellyfin ? */
+async function convWatching() {
+  const token = process.env.JELLYFIN_API_KEY || jfAdminToken;
+  if (!token) return false;
+  try {
+    const r = await fetch(`${JELLYFIN_URL}/Sessions?ActiveWithinSeconds=120`, { headers: jfHeaders(token) });
+    const list = r.ok ? await r.json() : [];
+    return list.some((x) => x.NowPlayingItem && !(x.PlayState && x.PlayState.IsPaused));
+  } catch {
+    return false;
+  }
+}
+
+/** Convertit un film. Renvoie le résumé ajouté à l'historique. */
+async function convRun(e, manual = false) {
+  const enc = await convEncoder();
+  if (!enc.kind) throw new Error(enc.why || 'aucun encodeur');
+  const src = e.local || localPath(e.key);
+  if (!src || !fs.existsSync(src)) throw new Error('fichier introuvable');
+  const st0 = fs.statSync(src);
+  if (st0.nlink > 1 && !manual) throw new Error('encore en partage');
+  const free = await fs.promises.statfs(path.dirname(src)).then((x) => x.bavail * x.bsize, () => Infinity);
+  if (free < st0.size * 0.8 + 2e9) throw new Error('pas assez de place sur le disque');
+  const info = await ffprobe(src);
+  const streams = info.streams || [];
+  const vid = streams.find((x) => x.codec_type === 'video' && !(x.disposition && x.disposition.attached_pic));
+  if (!vid) throw new Error('aucune piste vidéo');
+  const duration = Number(info.format && info.format.duration) || Number(vid.duration) || 0;
+  const ext = path.extname(src).toLowerCase();
+  const mp4 = ['.mp4', '.m4v'].includes(ext);
+  const outExt = mp4 ? ext : '.mkv';
+  const final = path.join(path.dirname(src), path.basename(src, path.extname(src)) + outExt);
+  const tmp = path.join(path.dirname(src), `.${path.basename(src, path.extname(src))}.lumio-h265${outExt}`);
+  const ten = /10/.test(String(vid.pix_fmt || ''));
+  const args = ['-hide_banner', '-nostdin', '-y', '-nostats', '-progress', 'pipe:1'];
+  if (enc.kind === 'gpu') args.push('-vaapi_device', enc.device, '-hwaccel', 'vaapi');
+  args.push('-i', src, '-map', `0:${vid.index}`);
+  const codecs = [];
+  let sOut = 0;
+  for (const x of streams) {
+    if (x.codec_type === 'audio') args.push('-map', `0:${x.index}`);
+    else if (x.codec_type === 'subtitle') {
+      if (mp4 && x.codec_name !== 'mov_text') continue;
+      args.push('-map', `0:${x.index}`);
+      if (!mp4 && x.codec_name === 'mov_text') codecs.push(`-c:s:${sOut}`, 'srt');
+      sOut++;
+    } else if (x.codec_type === 'attachment' && !mp4) args.push('-map', `0:${x.index}`);
+  }
+  args.push('-map_metadata', '0', '-map_chapters', '0', '-c', 'copy', ...codecs);
+  const q = conv.settings.quality in CONV_QP ? conv.settings.quality : 'normal';
+  if (enc.kind === 'gpu') args.push('-vf', ten ? 'format=p010,hwupload' : 'format=nv12,hwupload', '-c:v', 'hevc_vaapi', '-rc_mode', 'CQP', '-qp', String(CONV_QP[q]), '-profile:v', ten ? 'main10' : 'main');
+  else args.push('-c:v', 'libx265', '-preset', 'fast', '-crf', String(CONV_CRF[q]), '-pix_fmt', ten ? 'yuv420p10le' : 'yuv420p', '-x265-params', 'log-level=error');
+  if (mp4) args.push('-tag:v', 'hvc1', '-movflags', '+faststart');
+  args.push(tmp);
+
+  const t0 = Date.now();
+  const { child, done } = ffSpawn('ffmpeg', args, {
+    env: enc.driver ? { LIBVA_DRIVER_NAME: enc.driver } : {},
+    onOut: (chunk) => {
+      if (!convJob) return;
+      const m = chunk.match(/out_time_us=(\d+)/g);
+      if (m && duration) convJob.pct = Math.min(99, Math.round((Number(m[m.length - 1].split('=')[1]) / 1e6 / duration) * 100));
+      const sp = chunk.match(/speed=\s*([\d.]+)x/g);
+      if (sp) convJob.speed = Number(sp[sp.length - 1].replace(/[^\d.]/g, '')) || convJob.speed;
+    },
+  });
+  convJob = { key: e.key, title: e.title, year: e.year, child, pct: 0, speed: null, startedAt: new Date(t0).toISOString(), paused: false, why: null, size: st0.size, enc: enc.label, tmp, manual };
+  conv.running = { key: e.key, tmp };
+  autoSave();
+  try {
+    await done;
+  } catch (err) {
+    await fs.promises.unlink(tmp).catch(() => {});
+    throw err;
+  }
+  // Vérifications avant de remplacer l'original
+  const outInfo = await ffprobe(tmp).catch(() => null);
+  const ov = outInfo && (outInfo.streams || []).find((x) => x.codec_type === 'video');
+  const oDur = Number(outInfo && outInfo.format && outInfo.format.duration) || 0;
+  const nAudio = (s2) => s2.filter((x) => x.codec_type === 'audio').length;
+  const fail = async (why) => (await fs.promises.unlink(tmp).catch(() => {}), Object.assign(new Error(why), { verify: true }));
+  if (!ov || ov.codec_name !== 'hevc') throw await fail('le fichier converti n’est pas en H.265');
+  if (duration && Math.abs(oDur - duration) > Math.max(3, duration * 0.005)) throw await fail(`durée différente (${Math.round(oDur)} s au lieu de ${Math.round(duration)} s)`);
+  if (nAudio(outInfo.streams) !== nAudio(streams)) throw await fail('pistes audio manquantes');
+  const after = fs.statSync(tmp).size;
+  if (after < st0.size * 0.05) throw await fail('fichier converti trop petit');
+  if (after >= st0.size * 0.97) {
+    await fs.promises.unlink(tmp).catch(() => {});
+    conv.compact[e.key] = true;
+    return { title: e.title, year: e.year, ok: true, kept: true, before: st0.size, after: st0.size, minutes: Math.round((Date.now() - t0) / 60000), note: 'déjà compact : original gardé' };
+  }
+  // Remplacement : le converti prend la place de l'original (même nom ; .avi & co. → .mkv)
+  await fs.promises.rename(tmp, final);
+  if (final !== src) await fs.promises.unlink(src).catch(() => {});
+  // Lumio Auto : ce film est maintenant en H.265 (plus de remplacement à chercher)
+  if (e.tmdbId) {
+    const hc = (auto.haveCodec[autoItemKey('movie', e.tmdbId)] = auto.haveCodec[autoItemKey('movie', e.tmdbId)] || {});
+    hc.movie = { c: 'h265', at: Date.now() };
+  }
+  const token = process.env.JELLYFIN_API_KEY || jfAdminToken;
+  if (token) {
+    if (final !== src) fetch(`${JELLYFIN_URL}/Library/Refresh`, { method: 'POST', headers: jfHeaders(token) }).catch(() => {});
+    else fetch(`${JELLYFIN_URL}/Items/${e.jfId}/Refresh?MetadataRefreshMode=Default&ImageRefreshMode=None`, { method: 'POST', headers: jfHeaders(token) }).catch(() => {});
+  }
+  return { title: e.title, year: e.year, ok: true, before: st0.size, after, minutes: Math.round((Date.now() - t0) / 60000), note: enc.kind === 'gpu' ? 'puce graphique' : 'processeur' };
+}
+
+async function convStart(e, manual = false) {
+  if (convJob) throw new HttpError(409, 'Une conversion est déjà en cours');
+  const w = convWindow();
+  if (!manual) conv.nights[w.night] = (conv.nights[w.night] || 0) + 1; // « Convertir maintenant » ne compte pas dans la limite
+  for (const k of Object.keys(conv.nights)) if (k < parisAt(Date.now() - 14 * 86400e3).day) delete conv.nights[k];
+  let h;
+  try {
+    h = await convRun(e, manual);
+    delete conv.failed[e.key];
+  } catch (err) {
+    h = { title: e.title, year: e.year, ok: false, before: e.size, after: null, note: err.message };
+    if (!/arrêté \(SIGTERM\)/.test(err.message)) conv.failed[e.key] = err.message.slice(0, 200);
+    else h.note = 'arrêtée à la main';
+    if (!/arrêté/.test(err.message)) notify({ title: 'Conversion H.265 en échec', message: `${e.title} : ${err.message}`.slice(0, 300), tags: ['warning'] }).catch(() => {});
+  }
+  h.at = new Date().toISOString();
+  h.night = w.night;
+  conv.history.unshift(h);
+  conv.history = conv.history.slice(0, 60);
+  conv.running = null;
+  convJob = null;
+  convScan.at = 0;
+  autoSave();
+  return h;
+}
+
+/** Toutes les minutes : pause si quelqu'un regarde ou hors de la plage ; sinon lance le film suivant. */
+let convBusy = false;
+async function convTick() {
+  if (convBusy) return;
+  convBusy = true;
+  try {
+    const s = conv.settings;
+    const w = convWindow();
+    if (convJob) {
+      const watching = s.pauseWhenWatching && (await convWatching());
+      const why = watching ? 'quelqu’un regarde Jellyfin' : !w.inside && !convJob.manual ? 'en dehors de la plage horaire' : null;
+      if (why && !convJob.paused) (convJob.child.kill('SIGSTOP'), (convJob.paused = true));
+      else if (!why && convJob.paused) (convJob.child.kill('SIGCONT'), (convJob.paused = false));
+      convJob.why = why;
+      return;
+    }
+    // Résumé du matin, une fois la nuit finie
+    if (!w.inside && conv.lastSummary !== w.night) {
+      const night = conv.history.filter((h) => h.night === w.night && h.ok && !h.kept);
+      if (night.length && conv.nights[w.night]) {
+        conv.lastSummary = w.night;
+        const saved = night.reduce((n, h) => n + (h.before - h.after), 0);
+        notify({ title: 'Conversion H.265', message: `${night.length} film${night.length > 1 ? 's' : ''} converti${night.length > 1 ? 's' : ''} cette nuit : ${night.map((h) => h.title).join(', ')}. ${(saved / 1e9).toFixed(1).replace('.', ',')} Go gagnés.`, tags: ['film_frames'] }).catch(() => {});
+        autoSave();
+      }
+    }
+    if (!s.enabled || !w.inside || (conv.nights[w.night] || 0) >= s.perNight) return;
+    if (s.pauseWhenWatching && (await convWatching())) return;
+    const { list } = await convList();
+    const next = list.find((x) => x.status === 'ready');
+    if (!next) return;
+    const enc = await convEncoder();
+    if (!enc.kind) return;
+    convStart(next).catch(() => {});
+  } finally {
+    convBusy = false;
+  }
+}
+setInterval(() => convTick().catch((e) => console.log('Conversion H.265 :', e.message)), 60_000);
+
+async function convView() {
+  const s = conv.settings;
+  const [enc, scan] = await Promise.all([convEncoder(), convList().catch((e) => ({ at: Date.now(), list: [], error: e.message }))]);
+  const w = convWindow();
+  const ok = conv.history.filter((h) => h.ok && !h.kept);
+  const pub = (x) => ({ key: x.key, title: x.title, year: x.year, codec: x.codec, height: x.height, size: x.size, status: x.status, why: x.why });
+  return {
+    settings: s,
+    encoder: { kind: enc.kind, label: enc.label, why: enc.why },
+    current: convJob
+      ? { key: convJob.key, title: convJob.title, year: convJob.year, pct: convJob.pct, speed: convJob.speed, startedAt: convJob.startedAt, paused: convJob.paused, why: convJob.why, size: convJob.size, enc: convJob.enc }
+      : null,
+    tonight: { done: conv.nights[w.night] || 0, max: s.perNight, inside: w.inside },
+    counts: {
+      ready: scan.list.filter((x) => x.status === 'ready').length,
+      wait: scan.list.filter((x) => x.status === 'wait').length,
+      failed: scan.list.filter((x) => x.status === 'failed').length,
+      readySize: scan.list.filter((x) => x.status === 'ready').reduce((n, x) => n + x.size, 0),
+      converted: ok.length,
+      saved: ok.reduce((n, h) => n + Math.max(0, h.before - h.after), 0),
+    },
+    queue: scan.list.filter((x) => x.status !== 'skip').slice(0, 150).map(pub),
+    skipped: scan.list.filter((x) => x.status === 'skip').slice(0, 80).map(pub),
+    history: conv.history.slice(0, 30),
+    error: scan.error,
+    at: new Date(scan.at).toISOString(),
+  };
+}
+
+async function convRoutes(req, res, p) {
+  if (!p.startsWith('/api/auto/conv')) return false;
+  if (req.method === 'GET' && p === '/api/auto/conv') return send(res, 200, await convView()), true;
+  if (req.method === 'PUT' && p === '/api/auto/conv/settings') {
+    const b = await readBody(req);
+    const s = conv.settings;
+    const hour = (v) => Math.max(0, Math.min(23, Math.round(Number(v))));
+    if (typeof b.enabled === 'boolean') s.enabled = b.enabled;
+    if (typeof b.pauseWhenWatching === 'boolean') s.pauseWhenWatching = b.pauseWhenWatching;
+    if (b.start != null && Number.isFinite(Number(b.start))) s.start = hour(b.start);
+    if (b.end != null && Number.isFinite(Number(b.end))) s.end = hour(b.end);
+    if (s.start === s.end) s.end = (s.start + 1) % 24;
+    if (b.perNight != null) s.perNight = Math.max(1, Math.min(10, Math.round(Number(b.perNight)) || 2));
+    if (b.minAgeDays != null) s.minAgeDays = Math.max(0, Math.min(60, Math.round(Number(b.minAgeDays)) || 0));
+    if (b.quality in CONV_QP) s.quality = b.quality;
+    if (['auto', 'gpu', 'cpu'].includes(b.encoder) && b.encoder !== s.encoder) ((s.encoder = b.encoder), (convEnc = null));
+    convScan.at = 0;
+    autoSave();
+    return send(res, 200, await convView()), true;
+  }
+  if (req.method === 'POST' && p === '/api/auto/conv/run') {
+    const b = await readBody(req);
+    const { list } = await convList();
+    const e = b.key ? list.find((x) => x.key === b.key) : list.find((x) => x.status === 'ready');
+    if (!e) throw new HttpError(404, 'Film introuvable dans la liste');
+    if (!(e.local || localPath(e.key))) throw new HttpError(400, 'Fichier introuvable sur les disques du serveur');
+    const enc = await convEncoder();
+    if (!enc.kind) throw new HttpError(503, enc.why || 'Aucun encodeur disponible');
+    if (convJob) throw new HttpError(409, 'Une conversion est déjà en cours');
+    convStart(e, true).catch(() => {});
+    return send(res, 200, { ok: true, message: `Conversion de ${e.title} lancée` }), true;
+  }
+  if (req.method === 'POST' && p === '/api/auto/conv/stop') {
+    if (convJob) {
+      if (convJob.paused) convJob.child.kill('SIGCONT');
+      convJob.child.kill('SIGTERM');
+    }
+    return send(res, 200, { ok: true }), true;
+  }
+  if (req.method === 'POST' && p === '/api/auto/conv/exclude') {
+    const b = await readBody(req);
+    conv.exclude = conv.exclude.filter((k) => k !== b.key);
+    if (b.on) conv.exclude.push(String(b.key));
+    convScan.at = 0;
+    autoSave();
+    return send(res, 200, await convView()), true;
+  }
+  if (req.method === 'POST' && p === '/api/auto/conv/retry') {
+    const b = await readBody(req);
+    delete conv.failed[b.key];
+    delete conv.compact[b.key];
+    convScan.at = 0;
+    autoSave();
+    return send(res, 200, await convView()), true;
+  }
+  if (req.method === 'POST' && p === '/api/auto/conv/scan') {
+    await convList(true);
+    await convEncoder(true);
+    return send(res, 200, await convView()), true;
+  }
+  return false;
+}
+
 async function autoRoutes(req, res, p, q, user) {
   if (!p.startsWith('/api/auto')) return false;
   requireAdmin(user);
+  if (await convRoutes(req, res, p)) return true;
   const c = autoCfg();
   if (req.method === 'GET' && p === '/api/auto/state') {
     send(res, 200, {

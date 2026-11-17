@@ -12,7 +12,7 @@ import { Picker, Toggle } from '@/components/arr-section';
 import { toast } from '@/components/toast';
 import { Button, Field, ScreenTitle, Section, SectionCollapse, SegChip } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
-import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoBoost, type AutoBoostCandidate, type AutoSeedView, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant } from '@/lib/auto';
+import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoBoost, type AutoBoostCandidate, type AutoSeedView, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant, convApi, type ConvFilm, type ConvSettings, type ConvView } from '@/lib/auto';
 import { useSettings } from '@/lib/settings';
 import { IS_AUTO } from '@/lib/variant';
 import { PendingCard } from '@/components/server-requests';
@@ -2953,5 +2953,260 @@ export function AutoDemandesScreen() {
       </SectionCollapse.Provider>
       {open && st ? <ItemSheet item={open} st={st} onClose={() => setItemOpen(null)} reload={load} /> : null}
     </View>
+  );
+}
+
+// ——— Onglet « H.265 » : conversion de nuit des films qui ne sont pas en H.265 ———
+const CONV_STATUS: Record<ConvFilm['status'], { label: string; color: string }> = {
+  ready: { label: 'Prêt', color: C.accent },
+  wait: { label: 'En attente', color: C.textFaint },
+  failed: { label: 'Échec', color: C.danger },
+  skip: { label: 'Laissé tel quel', color: C.textFaint },
+  excluded: { label: 'Exclu', color: C.textFaint },
+};
+const fmtGo = (n?: number | null) => (n == null ? '—' : n >= 1e12 ? `${(n / 1e12).toFixed(2).replace('.', ',')} To` : `${(n / 1e9).toFixed(1).replace('.', ',')} Go`);
+
+function Stepper({ label, value, unit, min, max, onChange }: { label: string; value: number; unit: string; min: number; max: number; onChange: (v: number) => void }) {
+  return (
+    <View style={[styles.rowBetween, { paddingVertical: 6 }]}>
+      <Text style={styles.title}>{label}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <Pressable onPress={() => onChange(value <= min ? (unit === 'h' ? max : min) : value - 1)} hitSlop={8} style={styles.pill} accessibilityLabel={`${label} moins`}>
+          <Ionicons name="remove" size={16} color={C.text} />
+        </Pressable>
+        <Text style={[styles.title, { minWidth: 52, textAlign: 'center' }]}>
+          {value} {unit}
+        </Text>
+        <Pressable onPress={() => onChange(value >= max ? (unit === 'h' ? min : max) : value + 1)} hitSlop={8} style={styles.pill} accessibilityLabel={`${label} plus`}>
+          <Ionicons name="add" size={16} color={C.text} />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+export function AutoConvScreen() {
+  const { settings } = useSettings();
+  const insets = useSafeAreaInsets();
+  const [v, setV] = useState<ConvView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    convApi
+      .view(settings)
+      .then((x) => (setV(x), setError(null)))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  }, [settings]);
+  useFocusEffect(
+    useCallback(() => {
+      load();
+      const t = setInterval(load, 10000);
+      return () => clearInterval(t);
+    }, [load])
+  );
+  const save = (b: Partial<ConvSettings>) => {
+    if (v) setV({ ...v, settings: { ...v.settings, ...b } });
+    convApi.save(settings, b).then(setV).catch((e) => toast(e instanceof Error ? e.message : String(e)));
+  };
+  const act = (p: Promise<unknown>, msg?: string) =>
+    p
+      .then((x) => {
+        if (x && typeof x === 'object' && 'settings' in (x as object)) setV(x as ConvView);
+        else load();
+        if (msg) toast(msg);
+      })
+      .catch((e) => toast(e instanceof Error ? e.message : String(e)));
+  const runNow = (f: ConvFilm) =>
+    Alert.alert('Convertir maintenant ?', `${f.title} est converti tout de suite, même en dehors de la nuit (pause si quelqu'un regarde). L'original est supprimé une fois le fichier vérifié.`, [
+      { text: 'Annuler', style: 'cancel' },
+      { text: 'Convertir', onPress: () => act(convApi.run(settings, f.key), 'Conversion lancée') },
+    ]);
+
+  const s = v?.settings;
+  const cur = v?.current;
+  const enc = v?.encoder;
+  const encColor = !enc ? C.textFaint : enc.kind === 'gpu' ? C.success : enc.kind === 'cpu' ? C.warning : C.danger;
+  const sub = !v
+    ? null
+    : cur
+      ? `${cur.paused ? 'En pause' : 'En cours'} : ${cur.title} · ${cur.pct} %`
+      : !s?.enabled
+        ? 'Arrêtée'
+        : `${v.counts.ready} film${v.counts.ready > 1 ? 's' : ''} à convertir · ${fmtGo(v.counts.saved)} gagnés`;
+  const toDo = v?.queue ?? [];
+  return (
+    <SectionCollapse.Provider value={COLLAPSE}>
+      <ScrollView
+        style={{ flex: 1, backgroundColor: C.bg }}
+        contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: TAB_SPACE + 20, gap: 14 }}
+        refreshControl={<RefreshControl refreshing={false} onRefresh={() => act(convApi.scan(settings))} tintColor={C.text} />}>
+        <AutoHeader title="H.265" sub={sub} color={cur ? (cur.paused ? C.warning : C.accent) : s?.enabled ? C.success : C.textFaint} />
+        {!v ? (
+          <Loading error={error} />
+        ) : (
+          <>
+            {/* En cours, ou ce qui est prévu cette nuit */}
+            <View style={styles.bigCard}>
+              {cur ? (
+                <>
+                  <View style={styles.rowBetween}>
+                    <Text style={[styles.bigCardTitle, { flex: 1 }]} numberOfLines={2}>
+                      {cur.title}
+                      {cur.year ? ` (${cur.year})` : ''}
+                    </Text>
+                    <Text style={[styles.bigNum, { color: cur.paused ? C.warning : C.accent }]}>{cur.pct} %</Text>
+                  </View>
+                  <View style={styles.bar}>
+                    <View style={[styles.barFill, { width: `${Math.max(2, cur.pct)}%`, backgroundColor: cur.paused ? C.warning : C.accent }]} />
+                  </View>
+                  <Text style={styles.small}>
+                    {cur.paused ? `En pause : ${cur.why ?? '—'}` : `${cur.speed ? `${String(cur.speed).replace('.', ',')}× la vitesse de lecture · ` : ''}${cur.enc}`} · {fmtGo(cur.size)} au départ
+                  </Text>
+                  <Pressable onPress={() => act(convApi.stop(settings), 'Conversion arrêtée')} style={[styles.pill, { alignSelf: 'flex-start' }]}>
+                    <Ionicons name="stop-circle-outline" size={16} color={C.danger} />
+                    <Text style={styles.pillTxt}>Arrêter (l'original est gardé)</Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.bigCardTitle}>{s?.enabled ? `Cette nuit, de ${s.start} h à ${s.end} h` : 'Conversion arrêtée'}</Text>
+                  <Text style={styles.small}>
+                    {s?.enabled
+                      ? `${v.tonight.done} / ${v.tonight.max} film${v.tonight.max > 1 ? 's' : ''} lancé${v.tonight.done > 1 ? 's' : ''} cette nuit · ${v.counts.ready} prêt${v.counts.ready > 1 ? 's' : ''} (${fmtGo(v.counts.readySize)})`
+                      : 'Active-la dans les réglages ci-dessous.'}
+                  </Text>
+                </>
+              )}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 4 }}>
+                <View style={[styles.aheadDot, { backgroundColor: encColor }]} />
+                <Text style={[styles.small, { flex: 1 }]}>{enc?.kind ? enc.label : `Aucun encodeur : ${enc?.why ?? '—'}`}</Text>
+              </View>
+              {enc && enc.kind !== 'gpu' && enc.why ? (
+                <Text style={styles.small}>
+                  {enc.why}. Pour la puce graphique (20 à 40 min par film), ajoute « devices: - /dev/dri:/dev/dri » au service lumio du docker-compose, puis redémarre-le.
+                </Text>
+              ) : null}
+              <Text style={styles.small}>
+                {v.counts.converted} film{v.counts.converted > 1 ? 's' : ''} converti{v.counts.converted > 1 ? 's' : ''} · {fmtGo(v.counts.saved)} gagnés
+                {v.counts.wait ? ` · ${v.counts.wait} en attente` : ''}
+                {v.counts.failed ? ` · ${v.counts.failed} en échec` : ''}
+              </Text>
+              {v.error ? <Text style={[styles.small, { color: C.danger }]}>{v.error}</Text> : null}
+            </View>
+
+            {s ? (
+              <Fold id="conv-settings" title="Réglages" defaultOpen={false}>
+                <View style={styles.bigCard}>
+                  <Toggle label="Conversion de nuit" value={s.enabled} onChange={(x) => save({ enabled: x })} />
+                  <Stepper label="Début" value={s.start} unit="h" min={0} max={23} onChange={(x) => save({ start: x })} />
+                  <Stepper label="Fin" value={s.end} unit="h" min={0} max={23} onChange={(x) => save({ end: x })} />
+                  <Stepper label="Films par nuit" value={s.perNight} unit="" min={1} max={10} onChange={(x) => save({ perNight: x })} />
+                  <Stepper label="Attendre après l'ajout" value={s.minAgeDays} unit="j" min={0} max={30} onChange={(x) => save({ minAgeDays: x })} />
+                  <Toggle label="Pause si quelqu'un regarde" value={s.pauseWhenWatching} onChange={(x) => save({ pauseWhenWatching: x })} />
+                  <Picker
+                    label="Qualité"
+                    value={s.quality}
+                    onChange={(x) => save({ quality: x })}
+                    options={[
+                      { value: 'haute', label: 'Haute', hint: 'fichiers plus gros' },
+                      { value: 'normal', label: 'Normale', hint: 'conseillée' },
+                      { value: 'compacte', label: 'Compacte', hint: 'plus de place gagnée' },
+                    ]}
+                  />
+                  <Picker
+                    label="Encodeur"
+                    value={s.encoder}
+                    onChange={(x) => save({ encoder: x })}
+                    options={[
+                      { value: 'auto', label: 'Automatique' },
+                      { value: 'gpu', label: 'Puce graphique' },
+                      { value: 'cpu', label: 'Processeur' },
+                    ]}
+                  />
+                  <Text style={styles.small}>
+                    Films seulement. La 4K, le HDR / Dolby Vision et les films encore en partage ne sont pas touchés. L'original est supprimé une fois le fichier converti vérifié
+                    (durée, pistes audio, taille).
+                  </Text>
+                </View>
+              </Fold>
+            ) : null}
+
+            <Fold id="conv-queue" title="À convertir" count={toDo.length} defaultOpen>
+              {!toDo.length ? <Text style={styles.help}>Tous les films sont déjà en H.265.</Text> : null}
+              {toDo.map((f) => {
+                const st = CONV_STATUS[f.status];
+                return (
+                  <View key={f.key} style={styles.card}>
+                    <View style={{ flex: 1, gap: 3 }}>
+                      <Text style={styles.title} numberOfLines={1}>
+                        {f.title}
+                        {f.year ? ` (${f.year})` : ''}
+                      </Text>
+                      <Text style={styles.small} numberOfLines={2}>
+                        <Text style={{ color: st.color, fontWeight: '700' }}>{st.label}</Text>
+                        {` · ${f.codec.toUpperCase()}${f.height ? ` ${f.height}p` : ''} · ${fmtGo(f.size)}`}
+                        {f.why && f.status !== 'ready' ? ` · ${f.why}` : ''}
+                      </Text>
+                    </View>
+                    {f.status === 'failed' ? (
+                      <Pressable onPress={() => act(convApi.retry(settings, f.key), 'Remis dans la file')} hitSlop={8} accessibilityLabel="Réessayer">
+                        <Ionicons name="refresh" size={20} color={C.text} />
+                      </Pressable>
+                    ) : null}
+                    {f.status === 'ready' || f.status === 'wait' ? (
+                      <Pressable onPress={() => runNow(f)} hitSlop={8} accessibilityLabel="Convertir maintenant" disabled={Boolean(cur)}>
+                        <Ionicons name="play-circle-outline" size={22} color={cur ? C.textFaint : C.accent} />
+                      </Pressable>
+                    ) : null}
+                    <Pressable onPress={() => act(convApi.exclude(settings, f.key, f.status !== 'excluded'))} hitSlop={8} accessibilityLabel={f.status === 'excluded' ? 'Remettre' : 'Exclure'}>
+                      <Ionicons name={f.status === 'excluded' ? 'eye-outline' : 'eye-off-outline'} size={20} color={C.textDim} />
+                    </Pressable>
+                  </View>
+                );
+              })}
+            </Fold>
+
+            <Fold id="conv-history" title="Historique" count={v.history.length} defaultOpen={false}>
+              {!v.history.length ? <Text style={styles.help}>Aucune conversion pour le moment.</Text> : null}
+              {v.history.map((h, i) => (
+                <View key={`${h.at}-${i}`} style={styles.card}>
+                  <Ionicons name={h.ok ? 'checkmark-circle' : 'close-circle'} size={20} color={h.ok ? C.success : C.danger} />
+                  <View style={{ flex: 1, gap: 3 }}>
+                    <Text style={styles.title} numberOfLines={1}>
+                      {h.title}
+                    </Text>
+                    <Text style={styles.small} numberOfLines={2}>
+                      {new Date(h.at).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                      {h.ok && !h.kept && h.after != null ? ` · ${fmtGo(h.before)} → ${fmtGo(h.after)} (−${Math.round((1 - h.after / h.before) * 100)} %)` : ''}
+                      {h.minutes != null && h.ok ? ` · ${h.minutes} min` : ''} · {h.note}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </Fold>
+
+            {v.skipped.length ? (
+              <Fold id="conv-skipped" title="Laissés tels quels" count={v.skipped.length} defaultOpen={false}>
+                {v.skipped.map((f) => (
+                  <View key={f.key} style={styles.card}>
+                    <View style={{ flex: 1, gap: 3 }}>
+                      <Text style={styles.title} numberOfLines={1}>
+                        {f.title}
+                        {f.year ? ` (${f.year})` : ''}
+                      </Text>
+                      <Text style={styles.small}>{f.why}</Text>
+                    </View>
+                    {/déjà compact/.test(f.why || '') ? (
+                      <Pressable onPress={() => act(convApi.retry(settings, f.key), 'Remis dans la file')} hitSlop={8} accessibilityLabel="Réessayer">
+                        <Ionicons name="refresh" size={20} color={C.textDim} />
+                      </Pressable>
+                    ) : null}
+                  </View>
+                ))}
+              </Fold>
+            ) : null}
+          </>
+        )}
+      </ScrollView>
+    </SectionCollapse.Provider>
   );
 }

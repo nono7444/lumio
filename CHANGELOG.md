@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Lumio Auto : nouvel onglet « H.265 ». Les films qui ne sont pas en H.265 sont convertis la nuit (3 h – 6 h, 2 films par nuit, réglables), avec pause si quelqu'un regarde Jellyfin. La 4K, le HDR et les films encore en partage ne sont pas touchés. L'original est supprimé une fois le fichier vérifié. Réglages, file d'attente, « Convertir maintenant », exclusion et historique dans l'onglet (serveur 3.110.0).
+
 ## 1.0.174 — 16 novembre 2026
 
 - Fiche d'un titre : la bonne page s'affiche directement (plus de « Streaming » qui se change en « Lire » au bout d'une seconde).
