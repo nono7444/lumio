@@ -867,7 +867,7 @@ const VIA_LABEL: Record<string, string> = { alldebrid: 'Cache AllDebrid', torbox
 const LEVEL_COLOR = { ok: C.success, warn: C.warning, bad: C.danger } as const;
 const LEVEL_ICON = { ok: 'checkmark-circle', warn: 'alert-circle', bad: 'close-circle' } as const;
 
-/** Onglet Seed : ce que le serveur fait tout seul pour le ratio (garde à 1,0, chemin de chaque titre, nettoyage, vérifications). Aucun bouton. */
+/** Onglet Seed : ce que le serveur fait tout seul pour le ratio (garde à 2,0, chemin de chaque titre, nettoyage, vérifications). Aucun bouton. */
 function SeedAutoCards() {
   const { settings } = useSettings();
   const [d, setD] = useState<AutoSeedView | null>(null);

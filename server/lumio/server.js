@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.111.0';
+const VERSION = '3.111.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2719,7 +2719,7 @@ async function sendOrSecour(r) {
 // 1. Streaming : le torrent du site (C411) est cherché, par son empreinte seulement, dans le cache TorBox. S'il y est,
 //    TorBox donne un lien de lecture tout de suite. Le site ne voit rien : aucune clé du site ne part chez TorBox.
 // 2. Rien ne se télécharge tout seul : une demande en attente est créée, l'admin la valide ou la refuse dans Lumio Auto.
-//    La validation lance le téléchargement (cache AllDebrid / TorBox sous 1,20 de ratio, sinon torrent C411).
+//    La validation lance le téléchargement (cache AllDebrid / TorBox sous 2,0 de ratio, sinon torrent C411).
 // 3. La position de lecture est gardée ici, puis recopiée dans Jellyfin quand le fichier arrive : on reprend au même endroit.
 const watchNowOn = () => config.watchNow !== false && Boolean(torboxKey() || secourDebridKey()) && autoOn();
 // enabled : le bouton « Lire » s'affiche sur un titre absent, même sans TorBox (il envoie alors seulement la demande)
@@ -5079,7 +5079,9 @@ async function fetchTorrent(rel) {
 // Seule l'empreinte du torrent est envoyée (jamais le .torrent, qui porte la clé du compte) : en cache → fichier reçu sans
 // rien compter sur le site ; pas en cache → torrent normal dans qBittorrent. Le fichier du cache est exactement celui du
 // site : le torrent est ensuite ajouté par-dessus dans qBittorrent, vérifié, et il partage sans avoir rien téléchargé.
-const autoGuard = () => ({ enabled: true, ...(autoCfg().guard || {}), ratio: 1.0 });
+// Cache d'abord tant que le ratio du site n'est pas confortable (2,0) : un fichier venu du cache ne compte pas en téléchargement,
+// et le seed par-dessus fait monter le ratio ; au-dessus, torrent du site directement
+const autoGuard = () => ({ enabled: true, ...(autoCfg().guard || {}), ratio: 2.0 });
 function autoGuardLow(rel) {
   const g = autoGuard();
   const ixId = rel.indexerId || (autoIndexers().find((x) => x.name === rel.indexer) || {}).id;
