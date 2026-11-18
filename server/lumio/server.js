@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.111.2';
+const VERSION = '3.111.3';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4214,7 +4214,7 @@ const AUTO_PROFILE = {
   h265Wait: 48, // sortie récente : on attend une version H.265 pendant ce nombre d'heures avant de prendre du H.264
   upgradeDays: 30, // version H.264 rangée : on cherche encore du H.265 (plus léger) pendant ce nombre de jours, puis on remplace
   languages: ['multi', 'vff', 'truefrench', 'vf2', 'french'], // ordre de préférence (VF2 = VFF + VFQ : acceptée, une VFF seule passe devant ; VFQ seule refusée)
-  maxMovieGb: 8,
+  maxMovieGb: 10,
   maxEpisodeGb: 2.5,
   minSeeders: 1,
   maxActive: 1, // téléchargements en même temps (un à la fois par défaut)
@@ -4239,6 +4239,12 @@ const autoProfile = () => {
   if (c.profile && !c.profileV4) {
     c.profileV4 = true;
     if (Array.isArray(c.profile.languages)) c.profile.languages = c.profile.languages.filter((l) => l !== 'vf2' && l !== 'vfq');
+    saveConfig();
+  }
+  // Films jusqu'à 10 Go (au lieu de 8 : les versions H.265 Atmos VF2 dépassent souvent 8 Go)
+  if (c.profile && !c.profileV7) {
+    c.profileV7 = true;
+    if (!c.profile.maxMovieGb || c.profile.maxMovieGb < 10) c.profile.maxMovieGb = 10;
     saveConfig();
   }
   // VF2 acceptée de nouveau : elle contient la VFF (une version VFF seule reste préférée)
