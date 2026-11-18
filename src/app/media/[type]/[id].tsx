@@ -417,8 +417,6 @@ export default function MediaScreen() {
               ) : (
                 <WatchlistButton item={wlItem} variant="pill" />
               )}
-              {/* Titre sur le serveur : « Streaming » reste proposé (icône), à côté de « Lire » */}
-              {jfItem && canWatchNow ? <StreamingButton type={details.kind} tmdbId={tmdbId} title={title} imdb={imdbId ?? undefined} ok={streamOk} /> : null}
               {/* Titre absent : « Demander » et « Streaming » côte à côte, juste en dessous */}
               {jfItem ? <WatchlistButton item={wlItem} variant="icon" /> : <View style={{ flex: 1 }} />}
               {/* Admin : « DL » → qualité (4K / 1080p), puis fichiers Wawacity téléchargés par le serveur (AllDebrid) */}
@@ -432,6 +430,10 @@ export default function MediaScreen() {
                 <MoveButton path={jfItem!.Path!} title={title} />
               ) : null}
             </View>
+          ) : null}
+          {/* Titre sur le serveur : « Streaming » en barre sous « Lire » */}
+          {!Platform.isTV && jfChecked && jfItem && canWatchNow ? (
+            <StreamingButton type={details.kind} tmdbId={tmdbId} title={title} imdb={imdbId ?? undefined} ok={streamOk} label small style={{ alignSelf: 'stretch', marginTop: -10 }} />
           ) : null}
 
           {/* ——— Demande façon Seerr (serveur Lumio) ——— */}

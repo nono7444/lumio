@@ -45,7 +45,7 @@ function probeOnce(settings: Settings, a: ProbeArgs) {
 }
 
 /** Bouton « Streaming » (icône seule ou avec texte) + son menu de qualité. */
-export function StreamingButton({ type, tmdbId, title, imdb, season, episode, label = false, style, ok }: { type: 'movie' | 'tv'; tmdbId: number; title: string; imdb?: string; season?: number; episode?: number; label?: boolean; style?: any; ok?: boolean | null }) {
+export function StreamingButton({ type, tmdbId, title, imdb, season, episode, label = false, style, ok, small }: { type: 'movie' | 'tv'; tmdbId: number; title: string; imdb?: string; season?: number; episode?: number; label?: boolean; style?: any; ok?: boolean | null; small?: boolean }) {
   const [open, setOpen] = useState(false);
   const { settings } = useSettings();
   // Recherche lancée dès l'affichage du bouton, sans attendre l'appui
@@ -60,7 +60,7 @@ export function StreamingButton({ type, tmdbId, title, imdb, season, episode, la
           title={label ? 'Streaming' : ''}
           icon="cloud-outline"
           variant="glass"
-          small={!label}
+          small={small ?? !label}
           onPress={() => setOpen(true)}
           style={style ? { flex: 1 } : { width: 46, paddingHorizontal: 0 }}
           accessibilityLabel={`Streaming${ok === false ? ' (en panne)' : ok ? ' (en ligne)' : ''}`}

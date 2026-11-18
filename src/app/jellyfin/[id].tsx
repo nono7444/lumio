@@ -383,6 +383,8 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                   style={{ flex: 1.3 }}
                 />
               </View>
+              {/* « Streaming » : même barre que « Lire », juste en dessous */}
+              {stream.can && tmdbId ? <StreamingButton type="movie" tmdbId={tmdbId} title={item.Name ?? ''} ok={stream.ok} label small style={{ alignSelf: 'stretch' }} /> : null}
               {/* Une seule ligne d'icônes : depuis le début, vu, favori, à voir, streaming (admin), signaler */}
               <View style={styles.iconRow}>
                 {resumeAt > 30 ? <Button title="" icon="refresh" variant="glass" small onPress={() => playJellyfin(item, true)} style={styles.iconBtn} accessibilityLabel="Depuis le début" /> : null}
@@ -400,7 +402,6 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                 />
                 <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" small onPress={toggleFav} style={styles.iconBtn} />
                 {wlItem ? <WatchlistButton item={wlItem} variant="icon" /> : null}
-                {stream.can && tmdbId ? <StreamingButton type="movie" tmdbId={tmdbId} title={item.Name ?? ''} ok={stream.ok} /> : null}
                 {settings.chatUrl && settings.jellyfin?.isAdmin === true && tmdbId ? <DlButton type="movie" tmdbId={tmdbId} title={item.Name} style={styles.iconBtn} /> : null}
                 {serverReq && tmdbId ? <ReportProblemButton icon type="movie" tmdbId={tmdbId} title={item.Name} poster={jfPoster(settings, item, 342)} /> : null}
               </View>
@@ -418,12 +419,12 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                   />
                 ) : null}
               </View>
+              {stream.can && tmdbId ? (
+                <StreamingButton type="tv" tmdbId={tmdbId} title={item.Name ?? ''} season={nextEpisode?.ParentIndexNumber ?? 1} episode={nextEpisode?.IndexNumber ?? 1} ok={stream.ok} label small style={{ alignSelf: 'stretch' }} />
+              ) : null}
               <View style={styles.iconRow}>
                 <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" small onPress={toggleFav} style={styles.iconBtn} />
                 {wlItem ? <WatchlistButton item={wlItem} variant="icon" /> : null}
-                {stream.can && tmdbId ? (
-                  <StreamingButton type="tv" tmdbId={tmdbId} title={item.Name ?? ''} season={nextEpisode?.ParentIndexNumber ?? 1} episode={nextEpisode?.IndexNumber ?? 1} ok={stream.ok} />
-                ) : null}
                 {settings.chatUrl && settings.jellyfin?.isAdmin === true && tmdbId ? <DlButton type="tv" tmdbId={tmdbId} title={item.Name} style={styles.iconBtn} /> : null}
                 {serverReq && tmdbId ? <ReportProblemButton icon type="tv" tmdbId={tmdbId} title={item.Name} poster={jfPoster(settings, item, 342)} /> : null}
               </View>

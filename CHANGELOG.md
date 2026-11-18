@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Fiches d'un titre déjà sur le serveur : « Streaming » devient une barre pleine largeur sous « Lire », au lieu de la petite icône.
+
 ## 1.0.183 — 18 novembre 2026
 
 - Fiche Jellyfin (affiches de la bibliothèque) : bouton « Streaming » ajouté, comme sur les fiches TMDB.
