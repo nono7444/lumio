@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.115.1';
+const VERSION = '3.116.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2774,11 +2774,59 @@ function watchPosition(user, type, tmdbId, season, episode) {
   if (!e || !(e.pos > 30) || (e.dur > 0 && e.pos / e.dur > 0.93)) return 0;
   return Math.floor(e.pos);
 }
-/** Reprise pour l'appli : position (secondes) et durée connue. */
-function watchResume(user, type, tmdbId, season, episode) {
-  const position = watchPosition(user, type, tmdbId, season, episode);
+/** Élément Jellyfin d'un film ou d'un épisode (numéro TMDB), gardé 6 h. */
+const jfItemIdCache = new Map();
+async function jfItemIdOf(token, e) {
+  const ck = watchKey(e.type, e.tmdbId, e.season, e.episode);
+  const hit = jfItemIdCache.get(ck);
+  if (hit && Date.now() - hit.at < 6 * 3600e3) return hit.id;
+  const find = async (types, extra = {}) => {
+    const q = new URLSearchParams({ Recursive: 'true', IncludeItemTypes: types, Fields: 'ProviderIds', EnableImages: 'false', AnyProviderIdEquals: `tmdb.${e.tmdbId}`, Limit: '5', ...extra });
+    let r = await fetch(`${JELLYFIN_URL}/Items?${q}`, { headers: jfHeaders(token) });
+    let items = r.ok ? (await r.json()).Items || [] : [];
+    let it = items.find((i) => String((i.ProviderIds || {}).Tmdb || '') === String(e.tmdbId));
+    if (!it && e.title) {
+      const q2 = new URLSearchParams({ Recursive: 'true', IncludeItemTypes: types, Fields: 'ProviderIds', EnableImages: 'false', searchTerm: e.title, Limit: '30' });
+      r = await fetch(`${JELLYFIN_URL}/Items?${q2}`, { headers: jfHeaders(token) });
+      items = r.ok ? (await r.json()).Items || [] : [];
+      it = items.find((i) => String((i.ProviderIds || {}).Tmdb || '') === String(e.tmdbId));
+    }
+    return it || null;
+  };
+  let id = null;
+  if (e.type === 'movie') id = ((await find('Movie')) || {}).Id || null;
+  else {
+    const show = await find('Series');
+    if (show) {
+      const r = await fetch(`${JELLYFIN_URL}/Shows/${show.Id}/Episodes?season=${e.season}&Fields=ProviderIds`, { headers: jfHeaders(token) });
+      const ep = r.ok ? ((await r.json()).Items || []).find((i) => i.IndexNumber === e.episode && i.ParentIndexNumber === e.season) : null;
+      id = ep ? ep.Id : null;
+    }
+  }
+  jfItemIdCache.set(ck, { at: Date.now(), id });
+  if (jfItemIdCache.size > 500) jfItemIdCache.delete(jfItemIdCache.keys().next().value);
+  return id;
+}
+/** Position Jellyfin de cette personne pour ce titre : { pos (s), dur (s), at (ms) } ou null. */
+async function jfUserPosition(user, type, tmdbId, season, episode) {
+  const token = process.env.JELLYFIN_API_KEY || jfAdminToken || user.token;
+  if (!token) return null;
+  const id = await jfItemIdOf(token, { type, tmdbId, season, episode }).catch(() => null);
+  if (!id) return null;
+  const r = await fetch(`${JELLYFIN_URL}/Users/${user.id}/Items/${id}`, { headers: jfHeaders(token) }).catch(() => null);
+  if (!r || !r.ok) return null;
+  const it = await r.json();
+  const ud = it.UserData || {};
+  return { pos: (Number(ud.PlaybackPositionTicks) || 0) / 1e7, dur: (Number(it.RunTimeTicks) || 0) / 1e7, at: Date.parse(ud.LastPlayedDate || '') || 0, played: Boolean(ud.Played) };
+}
+/** Reprise pour l'appli : la position la plus récente entre le streaming et Jellyfin (secondes) et la durée connue. */
+async function watchResume(user, type, tmdbId, season, episode) {
   const e = (watchPos[user.id] || {})[watchKey(type, tmdbId, season, episode)];
-  return { position, duration: position && e ? Number(e.dur) || 0 : 0 };
+  const j = await jfUserPosition(user, type, tmdbId, season, episode).catch(() => null);
+  const cands = [e ? { pos: e.pos, dur: Number(e.dur) || 0, at: e.at } : null, j && j.pos > 0 ? j : null].filter(Boolean).sort((a, b) => b.at - a.at);
+  const best = cands[0];
+  if (!best || !(best.pos > 30) || (best.dur > 0 && best.pos / best.dur > 0.93)) return { position: 0, duration: 0 };
+  return { position: Math.floor(best.pos), duration: best.dur || 0 };
 }
 function watchProgress(user, b) {
   const type = b.type === 'tv' || b.type === 'series' ? 'tv' : 'movie';
@@ -3149,7 +3197,7 @@ async function watchNow(user, b) {
   const ck = `${type}:${tmdbId}:${season}:${episode}:${quality || ''}`;
   const cachedOut = watchCache.get(ck);
   // Même titre relancé depuis un autre appareil (téléphone puis TV) : même lien pendant 1 h, à la position gardée
-  if (cachedOut && Date.now() - cachedOut.at < 60 * 60e3) return { ...cachedOut.out, ...watchResume(user, type, tmdbId, season, episode), download: await dlOf(true) };
+  if (cachedOut && Date.now() - cachedOut.at < 60 * 60e3) return { ...cachedOut.out, ...(await watchResume(user, type, tmdbId, season, episode)), download: await dlOf(true) };
   const tried = [];
   let out = null;
   try {
@@ -3234,7 +3282,7 @@ async function watchNow(user, b) {
   }
   // Titre absent : streaming lancé → le même torrent se télécharge tout seul (par le cache, puis partage) ; sinon une demande t'attend
   const dl = await dlOf(Boolean(out));
-  if (out) return { ...out, ...watchResume(user, type, tmdbId, season, episode), download: dl };
+  if (out) return { ...out, ...(await watchResume(user, type, tmdbId, season, episode)), download: dl };
   const dlNote = dl.state === 'already' ? '' : ' Pour l’avoir sur le serveur, utilise « Demander ».';
   throw new HttpError(404, `Pas de streaming${qLabel ? ` en ${qLabel}` : ''} pour l’instant${tried.length ? ` (${tried.slice(0, 2).join(' ; ')})` : ''}.${dlNote}`);
 }
@@ -3271,31 +3319,28 @@ async function watchApplyPositions() {
   let changed = false;
   for (const [userId, mine] of Object.entries(watchPos)) {
     for (const e of Object.values(mine)) {
-      if (e.applied || !(e.pos > 30) || Date.now() - e.at > 30 * 86400e3) continue;
+      // Nouvelle position du streaming depuis la dernière recopie (et pas trop vieille)
+      if ((e.appliedAt || 0) >= e.at || !(e.pos > 30) || Date.now() - e.at > 30 * 86400e3) continue;
       try {
-        const find = async (types, extra = {}) => {
-          const q = new URLSearchParams({ Recursive: 'true', IncludeItemTypes: types, Fields: 'ProviderIds', EnableImages: 'false', searchTerm: e.title || '', Limit: '30', ...extra });
-          const r = await fetch(`${JELLYFIN_URL}/Items?${q}`, { headers: jfHeaders(token) });
-          return r.ok ? ((await r.json()).Items || []).find((i) => String((i.ProviderIds || {}).Tmdb || '') === String(e.tmdbId)) : null;
-        };
-        let itemId = null;
-        if (e.type === 'movie') itemId = ((await find('Movie')) || {}).Id || null;
-        else {
-          const show = await find('Series');
-          if (show) {
-            const r = await fetch(`${JELLYFIN_URL}/Shows/${show.Id}/Episodes?season=${e.season}&Fields=ProviderIds`, { headers: jfHeaders(token) });
-            const ep = r.ok ? ((await r.json()).Items || []).find((i) => i.IndexNumber === e.episode && i.ParentIndexNumber === e.season) : null;
-            itemId = ep ? ep.Id : null;
-          }
-        }
+        const itemId = await jfItemIdOf(token, e);
         if (!itemId) continue;
-        const body = JSON.stringify({ PlaybackPositionTicks: Math.floor(e.pos * 1e7), Played: false });
+        // Jellyfin a été regardé plus récemment (TV, Infuse…) : on garde sa position
+        const cur = await fetch(`${JELLYFIN_URL}/Users/${userId}/Items/${itemId}`, { headers: jfHeaders(token) }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        const jfAt = cur && cur.UserData && Date.parse(cur.UserData.LastPlayedDate || '');
+        if (jfAt && jfAt > e.at) {
+          e.appliedAt = e.at;
+          changed = true;
+          continue;
+        }
+        const done = e.dur > 0 && e.pos / e.dur > 0.93;
+        const body = JSON.stringify({ PlaybackPositionTicks: done ? 0 : Math.floor(e.pos * 1e7), Played: done, LastPlayedDate: new Date(e.at).toISOString() });
         let r = await fetch(`${JELLYFIN_URL}/UserItems/${itemId}/UserData?userId=${userId}`, { method: 'POST', headers: { ...jfHeaders(token), 'Content-Type': 'application/json' }, body });
         if (!r.ok) r = await fetch(`${JELLYFIN_URL}/Users/${userId}/Items/${itemId}/UserData`, { method: 'POST', headers: { ...jfHeaders(token), 'Content-Type': 'application/json' }, body });
         if (r.ok) {
           e.applied = true;
+          e.appliedAt = e.at;
           changed = true;
-          console.log(`Lire en streaming : position de « ${e.title} » recopiée dans Jellyfin (${Math.round(e.pos / 60)} min)`);
+          console.log(`Streaming : position de « ${e.title} » recopiée dans Jellyfin (${Math.round(e.pos / 60)} min)`);
         }
       } catch {
         // Jellyfin injoignable : prochain passage
@@ -10179,7 +10224,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
     if (req.method === 'POST' && p === '/api/watch/progress') return send(res, 200, watchProgress(user, await readBody(req)));
     if (req.method === 'GET' && p === '/api/watch/progress') {
       const type = q.get('type') === 'tv' ? 'tv' : 'movie';
-      return send(res, 200, { position: watchPosition(user, type, Number(q.get('tmdbId')), Number(q.get('season')) || null, Number(q.get('episode')) || null) });
+      return send(res, 200, { position: (await watchResume(user, type, Number(q.get('tmdbId')), Number(q.get('season')) || null, Number(q.get('episode')) || null)).position });
     }
     // Admin : interrupteurs du streaming (la clé TorBox se règle dans Lumio Auto → Serveur)
     if (req.method === 'PUT' && p === '/api/watch/now') {
