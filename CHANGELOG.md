@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.185 — 18 novembre 2026
+
 - Streaming d'une série : le menu permet de choisir la saison et l'épisode à lancer, avec les sources de cet épisode.
 
 ## 1.0.184 — 18 novembre 2026
