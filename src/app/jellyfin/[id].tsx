@@ -30,7 +30,7 @@ import { WatchlistButton } from '@/components/watchlist-button';
 import { TvActionRow, TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { MetadataEditor } from '@/components/metadata-editor';
 import { MoveFolder } from '@/components/move-folder';
-import { DlButton, StreamingButton, useStreamStatus } from '@/components/quality-menu';
+import { DlButton } from '@/components/quality-menu';
 import { ReportProblemButton } from '@/components/report-problem';
 import { useServerRequests } from '@/lib/requests';
 import { hasTmdb, useSettings } from '@/lib/settings';
@@ -214,8 +214,6 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
   const serverReq = useServerRequests();
   const tmdbId = item.ProviderIds?.Tmdb ? Number(item.ProviderIds.Tmdb) : undefined;
   const { settings } = useSettings();
-  // « Streaming » aussi sur un titre de Jellyfin (même bouton que sur les fiches TMDB)
-  const stream = useStreamStatus(settings);
   const { width, height: screenH } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [similar, setSimilar] = useState<JfItem[]>([]);
@@ -383,8 +381,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                   style={{ flex: 1.3 }}
                 />
               </View>
-              {/* « Streaming » : même barre que « Lire », juste en dessous */}
-              {stream.can && tmdbId ? <StreamingButton type="movie" tmdbId={tmdbId} title={item.Name ?? ''} ok={stream.ok} label small style={{ alignSelf: 'stretch' }} /> : null}
+
               {/* Une seule ligne d'icônes : depuis le début, vu, favori, à voir, streaming (admin), signaler */}
               <View style={styles.iconRow}>
                 {resumeAt > 30 ? <Button title="" icon="refresh" variant="glass" small onPress={() => playJellyfin(item, true)} style={styles.iconBtn} accessibilityLabel="Depuis le début" /> : null}
@@ -419,9 +416,7 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                   />
                 ) : null}
               </View>
-              {stream.can && tmdbId ? (
-                <StreamingButton type="tv" tmdbId={tmdbId} title={item.Name ?? ''} season={nextEpisode?.ParentIndexNumber ?? 1} episode={nextEpisode?.IndexNumber ?? 1} ok={stream.ok} label small style={{ alignSelf: 'stretch' }} />
-              ) : null}
+
               <View style={styles.iconRow}>
                 <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" small onPress={toggleFav} style={styles.iconBtn} />
                 {wlItem ? <WatchlistButton item={wlItem} variant="icon" /> : null}

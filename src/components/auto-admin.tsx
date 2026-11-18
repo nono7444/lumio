@@ -12,7 +12,7 @@ import { Picker, Toggle } from '@/components/arr-section';
 import { toast } from '@/components/toast';
 import { Button, Field, ScreenTitle, Section, SectionCollapse, SegChip } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
-import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoBoost, type AutoBoostCandidate, type AutoSeedView, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant, palliApi, type PalliView } from '@/lib/auto';
+import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoBoost, type AutoBoostCandidate, type AutoSeedView, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant, palliApi, type PalliView, demandesApi } from '@/lib/auto';
 import { useSettings } from '@/lib/settings';
 import { IS_AUTO } from '@/lib/variant';
 import { PendingCard } from '@/components/server-requests';
@@ -2859,7 +2859,7 @@ export function AutoDemandesScreen() {
   const choose = by('choose');
   const busy = by('busy');
   const wait = by('wait');
-  const done = by('done');
+  const done = by('done').filter((r) => !r.i.cleared);
   const row = ({ i, s }: { i: AutoItem; s: ReturnType<typeof itemStatus> }) => (
     <Pressable key={i.id} onPress={() => setItemOpen(i.id)} style={styles.simpleRow}>
       <View style={{ flex: 1, gap: 2 }}>
@@ -2942,6 +2942,35 @@ export function AutoDemandesScreen() {
             <Fold id="dem-wait" title="En attente de sortie" count={wait.length} defaultOpen={false}>
               <View style={styles.list}>{wait.map(row)}</View>
             </Fold>
+          ) : null}
+          {done.length || failed.length ? (
+            <Pressable
+              onPress={() =>
+                Alert.alert('Effacer les demandes ?', 'Les demandes terminées et celles en échec disparaissent de la liste. Rien n’est supprimé du serveur.', [
+                  { text: 'Annuler', style: 'cancel' },
+                  {
+                    text: 'Terminées',
+                    onPress: () =>
+                      demandesApi
+                        .clear(settings, { done: true, failed: false, itemIds: done.map((r) => r.i.id) })
+                        .then(() => (toast('Demandes terminées effacées'), load(), loadReqs()))
+                        .catch((e) => toast(e.message, 'error')),
+                  },
+                  {
+                    text: 'Terminées et en échec',
+                    style: 'destructive',
+                    onPress: () =>
+                      demandesApi
+                        .clear(settings, { done: true, failed: true, itemIds: done.map((r) => r.i.id) })
+                        .then(() => (toast('Demandes effacées'), load(), loadReqs()))
+                        .catch((e) => toast(e.message, 'error')),
+                  },
+                ])
+              }
+              style={[styles.pill, { alignSelf: 'flex-start' }]}>
+              <Ionicons name="trash-outline" size={15} color={C.textDim} />
+              <Text style={styles.pillTxt}>Effacer les demandes terminées / en échec</Text>
+            </Pressable>
           ) : null}
           {done.length ? (
             <Fold id="dem-done" title="Terminés" count={done.length} defaultOpen={false}>

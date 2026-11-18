@@ -431,10 +431,6 @@ export default function MediaScreen() {
               ) : null}
             </View>
           ) : null}
-          {/* Titre sur le serveur : « Streaming » en barre sous « Lire » */}
-          {!Platform.isTV && jfChecked && jfItem && canWatchNow ? (
-            <StreamingButton type={details.kind} tmdbId={tmdbId} title={title} imdb={imdbId ?? undefined} ok={streamOk} label small style={{ alignSelf: 'stretch', marginTop: -10 }} />
-          ) : null}
 
           {/* ——— Demande façon Seerr (serveur Lumio) ——— */}
           {/* Film absent avec « Lire » en streaming : un seul bouton, pas de « Demander » (le suivi revient dès que le téléchargement est lancé) */}
@@ -444,7 +440,7 @@ export default function MediaScreen() {
               inJellyfin={Boolean(jfItem)}
               beside={
                 canWatchNow && !jfItem ? (
-                  <StreamingButton type={details.kind} tmdbId={tmdbId} title={title} imdb={imdbId ?? undefined} label style={{ flex: 1 }} ok={streamOk} />
+                  <StreamingButton type={details.kind} tmdbId={tmdbId} title={title} imdb={imdbId ?? undefined} label text="Lire" primary direct style={{ alignSelf: 'stretch' }} ok={streamOk} />
                 ) : undefined
               }
               onAvailable={refreshJf}

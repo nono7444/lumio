@@ -46,7 +46,7 @@ function probeOnce(settings: Settings, a: ProbeArgs) {
 }
 
 /** Bouton « Streaming » (icône seule ou avec texte) + son menu de qualité. */
-export function StreamingButton({ type, tmdbId, title, imdb, season, episode, label = false, style, ok, small }: { type: 'movie' | 'tv'; tmdbId: number; title: string; imdb?: string; season?: number; episode?: number; label?: boolean; style?: any; ok?: boolean | null; small?: boolean }) {
+export function StreamingButton({ type, tmdbId, title, imdb, season, episode, label = false, style, ok, small, text, primary, direct }: { type: 'movie' | 'tv'; tmdbId: number; title: string; imdb?: string; season?: number; episode?: number; label?: boolean; style?: any; ok?: boolean | null; small?: boolean; /** Texte du bouton (« Lire ») */ text?: string; primary?: boolean; /** Film : lecture directe, sans menu de qualité */ direct?: boolean }) {
   const [open, setOpen] = useState(false);
   const { settings } = useSettings();
   // Série : saison et épisode choisis dans le menu (au départ ceux proposés par la fiche)
@@ -71,11 +71,15 @@ export function StreamingButton({ type, tmdbId, title, imdb, season, episode, la
     <>
       <View style={style ?? undefined}>
         <Button
-          title={label ? 'Streaming' : ''}
-          icon="cloud-outline"
-          variant="glass"
+          title={label ? (text ?? 'Streaming') : ''}
+          icon={text ? 'play' : 'cloud-outline'}
+          variant={primary ? 'primary' : 'glass'}
           small={small ?? !label}
-          onPress={() => setOpen(true)}
+          onPress={() =>
+            direct && type === 'movie'
+              ? router.push({ pathname: '/watch', params: { type, tmdbId: String(tmdbId), imdb: imdb ?? '', title, stream: '1' } })
+              : setOpen(true)
+          }
           style={style ? { flex: 1 } : { width: 46, paddingHorizontal: 0 }}
           accessibilityLabel={`Streaming${ok === false ? ' (en panne)' : ok ? ' (en ligne)' : ''}`}
         />

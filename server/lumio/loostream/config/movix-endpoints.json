@@ -1,8 +1,0 @@
-{
-  "_comment": "Endpoints Movix auto-mis à jour par telegram-bot.js depuis t.me/movix_site. Hot-reloadé par le scraper.",
-  "api": "https://api.movix.dog",
-  "referer": "https://movix.luxe/",
-  "origin": "https://movix.luxe",
-  "lastCheckedAt": "2026-10-29T00:00:00.000Z",
-  "lastUpdatedAt": "2026-10-29T00:00:00.000Z"
-}

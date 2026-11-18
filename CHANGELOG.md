@@ -6,6 +6,11 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- LooStream retiré : le streaming repasse par les caches (TorBox, AllDebrid) et Wawacity en dernier recours. Admin : TorBox (lien direct) puis AllDebrid ; famille : AllDebrid relayé par le serveur, puis TorBox (serveur 3.117.0).
+- Titre absent : un seul bouton « Lire ». Il lance le streaming et demande le titre en même temps : chez l'admin, le téléchargement part tout de suite (cache d'abord) ; pour la famille, la demande est validée toute seule si le titre est en cache, sinon elle attend l'admin.
+- Titre déjà sur le serveur : plus de bouton « Streaming », « Lire » suffit.
+- Lumio Auto, onglet Demandes : bouton « Effacer les demandes terminées / en échec ».
+
 ## 1.0.185 — 18 novembre 2026
 
 - Streaming d'une série : le menu permet de choisir la saison et l'épisode à lancer, avec les sources de cet épisode.

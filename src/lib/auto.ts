@@ -89,6 +89,8 @@ export type AutoTry = { query: string; count: number; error: string | null; skip
 export type AutoEvent = { at: string; type: 'added' | 'found' | 'none' | 'sent' | 'imported' | 'failed'; msg: string; indexer?: string; size?: number; by?: string };
 export type AutoItem = {
   id: string;
+  /** Masqué de « Terminés » (bouton Effacer de l'onglet Demandes) */
+  cleared?: boolean;
   /** 4K H.265 demandée pour ce titre ; have4k : éléments déjà là en 4K */
   uhd?: boolean;
   have4k?: number;
@@ -359,4 +361,10 @@ export const palliApi = {
   save: (s: Settings, b: Partial<PalliSettings>) => serverCall<PalliView>(s, '/api/auto/palli', { method: 'PUT', body: JSON.stringify(b) }),
   run: (s: Settings) => serverCall<PalliView>(s, '/api/auto/palli/run', { method: 'POST', body: '{}' }),
   remove: (s: Settings, hash: string) => serverCall<PalliView>(s, `/api/auto/palli/${hash}`, { method: 'DELETE' }),
+};
+
+/** Onglet Demandes : effacer les demandes terminées et / ou en échec (les titres terminés sont masqués de la liste). */
+export const demandesApi = {
+  clear: (s: Settings, b: { done: boolean; failed: boolean; itemIds: string[] }) =>
+    serverCall<{ removed: number; hidden: number }>(s, '/api/auto/demandes/clear', { method: 'POST', body: JSON.stringify(b) }),
 };

@@ -204,6 +204,9 @@ export function RequestSection({
           label={isTv && status !== MediaStatus.UNKNOWN ? 'Autres saisons' : 'Demander'}
           onPress={() => setOpen(true)}
         />
+      ) : canRequest && !active && beside ? (
+        // Titre absent : « Lire » (streaming + demande en même temps) remplace « Demander »
+        beside
       ) : canRequest && !active ? (
         <View style={{ flexDirection: 'row', gap: 10 }}>
           <Button
