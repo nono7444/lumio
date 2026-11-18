@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.114.0';
+const VERSION = '3.115.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3076,6 +3076,57 @@ async function radarLoad(force = false) {
   return radarBusy;
 }
 
+
+// ——— Recherche tolérante aux fautes (Lumio TV ; même méthode que l'appli, src/lib/smart-search.ts) ———
+const sNorm = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+function sSimilar(a, b) {
+  const x = sNorm(a).replace(/ /g, '');
+  const y = sNorm(b).replace(/ /g, '');
+  if (!x || !y) return 0;
+  if (x === y) return 1;
+  if (y.startsWith(x) || x.startsWith(y)) return (0.9 * Math.min(x.length, y.length)) / Math.max(x.length, y.length) + 0.1;
+  const pairs = (t) => {
+    const m = new Map();
+    for (let i = 0; i < t.length - 1; i++) m.set(t.slice(i, i + 2), (m.get(t.slice(i, i + 2)) || 0) + 1);
+    return m;
+  };
+  const px = pairs(x);
+  const py = pairs(y);
+  let inter = 0;
+  for (const [k, n] of px) inter += Math.min(n, py.get(k) || 0);
+  return (2 * inter) / (x.length - 1 + y.length - 1 || 1);
+}
+function sTitleScore(q, r) {
+  const n = sNorm(q).split(' ').length;
+  const head = (t) => sNorm(t).split(' ').slice(0, n).join(' ');
+  return Math.max(...[r.title || r.name || '', r.original_title || r.original_name || ''].flatMap((t) => [sSimilar(q, t), sSimilar(q, head(t)) * 0.95]));
+}
+function sVariants(q) {
+  const words = sNorm(q).split(' ').filter(Boolean);
+  const cut = (w) => (w.length <= 3 ? w : w.slice(0, Math.max(3, Math.ceil(w.length * 0.55))));
+  const out = new Set([words.map(cut).join(' ')]);
+  for (const w of words.filter((w) => w.length >= 5).sort((a, b) => b.length - a.length).slice(0, 2)) out.add(cut(w));
+  out.add(words.map((w) => w.replace(/(.)\1+/g, '$1')).join(' '));
+  out.delete(sNorm(q));
+  return [...out].filter((v) => v.length >= 3).slice(0, 4);
+}
+async function smartTmdbSearch(type, query, page) {
+  const run = (qq) => tmdbGet(`/search/${type}`, { query: qq, include_adult: 'false', page }).then((d) => (d && d.results) || []);
+  const first = await run(query);
+  if (String(page) !== '1') return first;
+  const best = first.reduce((m, r) => Math.max(m, sTitleScore(query, r)), 0);
+  if (sNorm(query).length < 4 || (first.length >= 3 && best >= 0.7)) return first;
+  const more = (await Promise.all(sVariants(query).map((v) => run(v).catch(() => [])))).flat();
+  const seen = new Set();
+  const all = [];
+  for (const r of [...first, ...more]) {
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    all.push({ r, score: sTitleScore(query, r) + Math.min(0.15, Math.log10(1 + (r.popularity || 0)) / 20) });
+  }
+  return all.filter((x) => x.score >= 0.4 || first.includes(x.r)).sort((a, b) => b.score - a.score).map((x) => x.r);
+}
+
 async function watchNow(user, b) {
   if (config.watchNow === false) throw new HttpError(400, 'Le bouton « Lire » des titres absents est coupé sur le serveur');
   const type = b.type === 'tv' || b.type === 'series' ? 'tv' : 'movie';
@@ -3091,7 +3142,8 @@ async function watchNow(user, b) {
   const qLabel = quality ? (quality === 2160 ? '4K' : `${quality}p`) : null;
   // Déjà sur Jellyfin (streaming choisi pour une autre qualité) : rien à télécharger en arrière-plan
   const present = await watchPresent(type, tmdbId, season, episode).catch(() => false);
-  const dlOf = (streamed) => (present ? Promise.resolve({ state: 'already' }) : watchDownload(user, b, type, tmdbId, season, streamed));
+  // Le streaming n'envoie plus de demande : c'est le bouton « Demander » qui sert à ça
+  const dlOf = async () => ({ state: present ? 'already' : 'off' });
   const ck = `${type}:${tmdbId}:${season}:${episode}:${quality || ''}`;
   const cachedOut = watchCache.get(ck);
   // Même titre relancé depuis un autre appareil (téléphone puis TV) : même lien pendant 1 h, à la position gardée
@@ -3181,7 +3233,7 @@ async function watchNow(user, b) {
   // Titre absent : streaming lancé → le même torrent se télécharge tout seul (par le cache, puis partage) ; sinon une demande t'attend
   const dl = await dlOf(Boolean(out));
   if (out) return { ...out, ...watchResume(user, type, tmdbId, season, episode), download: dl };
-  const dlNote = dl.state === 'pending' ? ' La demande t’attend dans Lumio Auto → Demandes.' : dl.state === 'already' || dl.state === 'started' ? ' Il est déjà en cours de téléchargement sur le serveur.' : dl.state === 'declined' ? ' La demande a été refusée.' : dl.reason ? ` Demande impossible : ${dl.reason}` : '';
+  const dlNote = dl.state === 'already' ? '' : ' Pour l’avoir sur le serveur, utilise « Demander ».';
   throw new HttpError(404, `Pas de streaming${qLabel ? ` en ${qLabel}` : ''} pour l’instant${tried.length ? ` (${tried.slice(0, 2).join(' ; ')})` : ''}.${dlNote}`);
 }
 /** « Lire » ne télécharge rien tout seul : une demande en attente est créée (sans quota), pour tout le monde, admin compris.
@@ -9469,9 +9521,10 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       const type = q.get('type') === 'tv' ? 'tv' : 'movie';
       const query = String(q.get('q') || '').trim().slice(0, 200);
       if (!query) return send(res, 200, { results: [] });
-      const data = await tmdbGet(`/search/${type}`, { query, include_adult: 'false', page: q.get('page') || '1' });
+      // Fautes d'orthographe tolérées (« intersteler » → Interstellar)
+      const found = await smartTmdbSearch(type, query, q.get('page') || '1');
       const lib = await loadLibrary().catch(() => null);
-      const results = ((data && data.results) || []).map((r) => {
+      const results = found.map((r) => {
         const st = lib ? mediaStatus(lib, type, r.id, null, null).status : MediaStatus.UNKNOWN;
         return { ...r, lumioStatus: st };
       });

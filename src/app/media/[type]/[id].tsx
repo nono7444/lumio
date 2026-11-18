@@ -417,6 +417,8 @@ export default function MediaScreen() {
               ) : (
                 <WatchlistButton item={wlItem} variant="pill" />
               )}
+              {/* Titre sur le serveur : « Streaming » reste proposé (icône), à côté de « Lire » */}
+              {jfItem && canWatchNow ? <StreamingButton type={details.kind} tmdbId={tmdbId} title={title} imdb={imdbId ?? undefined} ok={streamOk} /> : null}
               {/* Titre absent : « Demander » et « Streaming » côte à côte, juste en dessous */}
               {jfItem ? <WatchlistButton item={wlItem} variant="icon" /> : <View style={{ flex: 1 }} />}
               {/* Admin : « DL » → qualité (4K / 1080p), puis fichiers Wawacity téléchargés par le serveur (AllDebrid) */}

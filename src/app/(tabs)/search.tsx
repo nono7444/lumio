@@ -10,6 +10,7 @@ import { C, R, TAB_SPACE } from '@/constants/theme';
 import { openMedia } from '@/lib/navigation';
 import { hasTmdb, useSettings } from '@/lib/settings';
 import { itemTitle, itemYear, tmdb, tmdbImg, type MediaType, type TmdbItem } from '@/lib/tmdb';
+import { smartSearch } from '@/lib/smart-search';
 import { useLibrary } from '@/lib/use-library';
 
 type Filter = 'all' | MediaType;
@@ -51,6 +52,8 @@ export default function Search() {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [results, setResults] = useState<TmdbItem[]>([]);
+  // Titre trouvé malgré une faute d'orthographe (« Résultats pour … »)
+  const [corrected, setCorrected] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const reqId = useRef(0);
@@ -118,14 +121,11 @@ export default function Search() {
     const t = setTimeout(async () => {
       setLoading(true);
       try {
-        const res =
-          filter === 'all'
-            ? await tmdb.search(settings, q)
-            : await tmdb.searchType(settings, filter, q).then((r) => ({
-                results: r.results.map((i) => ({ ...i, media_type: filter })),
-              }));
+        // Fautes d'orthographe tolérées : d'autres recherches si rien de proche, puis classement par ressemblance
+        const res = await smartSearch(settings, q, filter);
         if (id === reqId.current) {
           setResults(res.results);
+          setCorrected(res.corrected);
           setError(null);
         }
       } catch (e: any) {
@@ -204,6 +204,7 @@ export default function Search() {
         </Pressable>
       </Modal>
       {error ? <Text style={styles.msg}>Erreur : {error}</Text> : null}
+      {corrected && query.trim() ? <Text style={styles.msg}>Résultats pour « {corrected} »</Text> : null}
       {!error && !loading && query.trim().length >= 2 && results.length === 0 ? (
         <Text style={styles.msg}>Aucun résultat.</Text>
       ) : null}

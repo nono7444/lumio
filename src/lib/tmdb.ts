@@ -16,6 +16,9 @@ export type TmdbItem = {
   overview?: string;
   vote_average?: number;
   genre_ids?: number[];
+  original_title?: string;
+  original_name?: string;
+  popularity?: number;
 };
 
 /** Genres TMDB (films + séries), en français. */
