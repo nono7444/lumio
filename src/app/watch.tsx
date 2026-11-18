@@ -13,7 +13,7 @@ import { useSettings } from '@/lib/settings';
 import { resolveWatch } from '@/lib/smart-play';
 import { tmdb, tmdbImg } from '@/lib/tmdb';
 import { serverCall } from '@/lib/chat';
-import { watchNowApi } from '@/lib/watch-now';
+import { watchNowApi, watchOrigin } from '@/lib/watch-now';
 
 type Params = {
   type: 'movie' | 'tv';
@@ -107,16 +107,17 @@ export default function Watch() {
             backdrop: tmdbImg(details.backdrop_path, 'w1280') ?? undefined,
           });
           if (cancelled.current) return;
-          toast(`Streaming depuis ${w.source === 'wawacity' ? 'Wawacity' : w.service === 'torbox' ? 'TorBox' : 'AllDebrid'}${w.quality ? ` · ${w.quality}` : ''}`);
+          toast(`Streaming depuis ${watchOrigin(w)}${w.quality ? ` · ${w.quality}` : ''}`);
           router.replace({
             pathname: '/player',
             params: {
               kind: 'url',
               uri: w.url,
               title: type === 'tv' ? `${p.title} · S${season}E${episode}` : p.title,
-              subtitle: [w.source === 'wawacity' ? 'Wawacity' : w.service === 'torbox' ? 'TorBox' : 'AllDebrid', w.quality, w.language, w.download?.state === 'pending' ? 'demande envoyée à l’admin' : w.download?.state === 'started' ? 'téléchargement lancé sur le serveur' : null].filter(Boolean).join(' · '),
+              subtitle: [watchOrigin(w), w.quality, w.language, w.download?.state === 'pending' ? 'demande envoyée à l’admin' : w.download?.state === 'started' ? 'téléchargement lancé sur le serveur' : null].filter(Boolean).join(' · '),
               start: String(w.position ?? 0),
               stream: '1',
+              hls: w.hls ? '1' : undefined,
               tmdbId: String(tmdbId),
               imdb: imdb ?? '',
               series: type === 'tv' ? p.title : undefined,

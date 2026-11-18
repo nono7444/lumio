@@ -1,6 +1,6 @@
 // Bloc « demande » de la fiche, comme sur Seerr : statut du média, demandes en cours, boutons.
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, View, Platform } from 'react-native';
 
 import { TvPill } from '@/components/tv-actions';
@@ -30,6 +30,7 @@ export function RequestSection({
   onAvailable,
   onMedia,
   reloadKey,
+  beside,
 }: {
   target: RequestTarget;
   onChange?: () => void;
@@ -41,6 +42,8 @@ export function RequestSection({
   onMedia?: (m: MediaInfo) => void;
   /** Change quand la fiche a envoyé une demande (bouton « Demander » d'une saison) : on recharge */
   reloadKey?: number;
+  /** Bouton posé à côté de « Demander » (titre absent : « Streaming ») ; seul sous la progression sinon */
+  beside?: ReactNode;
 }) {
   const { settings } = useSettings();
   const [media, setMedia] = useState<MediaInfo | null>(null);
@@ -202,12 +205,18 @@ export function RequestSection({
           onPress={() => setOpen(true)}
         />
       ) : canRequest && !active ? (
-        <Button
-          title={isTv && status !== MediaStatus.UNKNOWN ? 'Demander d’autres saisons' : 'Demander'}
-          icon="paper-plane-outline"
-          variant={status === MediaStatus.UNKNOWN ? 'primary' : 'glass'}
-          onPress={() => setOpen(true)}
-        />
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <Button
+            title={isTv && status !== MediaStatus.UNKNOWN ? (beside ? 'Autres saisons' : 'Demander d’autres saisons') : 'Demander'}
+            icon="paper-plane-outline"
+            variant={status === MediaStatus.UNKNOWN ? 'primary' : 'glass'}
+            onPress={() => setOpen(true)}
+            style={{ flex: 1 }}
+          />
+          {beside ?? null}
+        </View>
+      ) : beside && !Platform.isTV ? (
+        beside
       ) : null}
 
       <RequestModal

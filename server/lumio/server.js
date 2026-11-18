@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.112.0';
+const VERSION = '3.113.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2721,7 +2721,8 @@ async function sendOrSecour(r) {
 // 2. Rien ne se télécharge tout seul : une demande en attente est créée, l'admin la valide ou la refuse dans Lumio Auto.
 //    La validation lance le téléchargement (cache AllDebrid / TorBox sous 2,0 de ratio, sinon torrent C411).
 // 3. La position de lecture est gardée ici, puis recopiée dans Jellyfin quand le fichier arrive : on reprend au même endroit.
-const watchNowOn = () => config.watchNow !== false && Boolean(torboxKey() || secourDebridKey()) && autoOn();
+const watchCacheOn = () => Boolean(torboxKey() || secourDebridKey()) && autoOn();
+const watchNowOn = () => config.watchNow !== false && (lsOn() || watchCacheOn());
 // enabled : le bouton « Lire » s'affiche sur un titre absent, même sans TorBox (il envoie alors seulement la demande)
 // streaming : bouton « Streaming » de l'admin (cache TorBox / AllDebrid, puis Wawacity)
 // État des services de streaming (pastille verte / rouge sur l'icône) : vérifié toutes les 5 min, jamais bloquant
@@ -2731,7 +2732,7 @@ function watchHealth() {
   const fresh = watchHealthCache && Date.now() - watchHealthCache.at < 5 * 60e3;
   if (!fresh && !watchHealthBusy) {
     watchHealthBusy = (async () => {
-      const out = { at: Date.now(), torbox: null, alldebrid: null, wawacity: null };
+      const out = { at: Date.now(), torbox: null, alldebrid: null, wawacity: null, loostream: lsWanted() ? lsOn() : null };
       await Promise.all([
         torboxKey() ? tb('/user/me').then((u) => (out.torbox = Boolean(u))).catch(() => (out.torbox = false)) : null,
         secourDebridKey() ? ad('/v4/user').then((r) => (out.alldebrid = Boolean(r && r.user && r.user.isPremium))).catch(() => (out.alldebrid = false)) : null,
@@ -2744,11 +2745,11 @@ function watchHealth() {
               .catch(() => (out.wawacity = false))
           : null,
       ]);
-      out.ok = [out.torbox, out.alldebrid, out.wawacity].some((x) => x === true);
+      out.ok = [out.loostream, out.torbox, out.alldebrid, out.wawacity].some((x) => x === true);
       watchHealthCache = out;
     })().finally(() => (watchHealthBusy = null));
   }
-  return watchHealthCache ? { ok: watchHealthCache.ok, torbox: watchHealthCache.torbox, alldebrid: watchHealthCache.alldebrid, wawacity: watchHealthCache.wawacity, at: new Date(watchHealthCache.at).toISOString() } : null;
+  return watchHealthCache ? { ok: watchHealthCache.ok || lsOn(), loostream: lsWanted() ? lsOn() : null, torbox: watchHealthCache.torbox, alldebrid: watchHealthCache.alldebrid, wawacity: watchHealthCache.wawacity, at: new Date(watchHealthCache.at).toISOString() } : null;
 }
 setInterval(() => {
   if (watchNowOn()) watchHealth();
@@ -2888,6 +2889,9 @@ async function watchProbe(user, b) {
   if (hit && Date.now() - hit.at < 15 * 60e3) return hit.out;
   const out = {};
   const qualities = [1080, 720];
+  // LooStream : recherche lancée tout de suite (le résultat sert aussi au clic sur « Streaming »)
+  const lsP = {};
+  for (const q of qualities) lsP[q] = lsOn() && b._base ? lsFind(type, tmdbId, season, episode, q, b._base).catch(() => []) : Promise.resolve([]);
   // Wawacity : une seule recherche pour toutes les qualités
   let wawa = [];
   if (secourUrl() && secourKey() && secourDebridKey()) {
@@ -2922,6 +2926,7 @@ async function watchProbe(user, b) {
         } catch {}
       }
     }
+    r0.loostream = (await lsP[q]).length > 0;
     out[q] = r0;
   }
   probeCache.set(ck, { at: Date.now(), out });
@@ -3018,9 +3023,22 @@ async function watchNow(user, b) {
   const tried = [];
   let out = null;
   try {
-    if (!watchNowOn()) throw new Error('streaming pas configuré sur le serveur (clé TorBox ou AllDebrid)');
+    // 1. LooStream en priorité (sites de streaming, lecture par le serveur) ; rien → les caches comme avant
+    if (lsOn()) {
+      try {
+        const l = (await lsFind(type, tmdbId, season, episode, quality, b._base))[0];
+        if (l) {
+          out = { url: l.url, service: 'loostream', sizeBytes: l.size || 0, source: l.site ? `LooStream · ${l.site}` : 'LooStream', hoster: l.site, name: l.name, quality: l.quality, language: l.language, hls: l.hls };
+          watchCache.set(ck, { at: Date.now(), out });
+          console.log(`Streaming : « ${b.title || tmdbId} » pour ${user.name} (LooStream${l.site ? `, ${l.site}` : ''})`);
+        } else tried.push('rien sur LooStream');
+      } catch (e) {
+        tried.push(`LooStream : ${e.message}`);
+      }
+    } else if (lsWanted() && lsError) tried.push(lsError);
+    if (!out && !watchCacheOn()) throw new Error(lsOn() ? 'aucun lien' : 'streaming pas configuré sur le serveur (LooStream, TorBox ou AllDebrid)');
     // Membres : Wawacity en premier (lien ouvert par AllDebrid, relayé par le serveur), puis les caches
-    if (member && secourUrl() && secourKey() && secourDebridKey()) {
+    if (!out && member && secourUrl() && secourKey() && secourDebridKey()) {
       try {
         const w = await watchWawacity(type, tmdbId, season, episode, quality);
         if (w) out = { url: `${b._base}/watch/s/${streamToken(w.url, user.name, w.name)}`, service: 'alldebrid', sizeBytes: w.size || 0, source: 'wawacity', hoster: w.hoster || null, name: w.name, quality: w.quality || null, language: w.language || null };
@@ -8606,6 +8624,181 @@ function streamRelay(target, req, res, pathname, hops = 0) {
   up.end();
 }
 
+
+// ——— LooStream intégré : streaming en priorité (37 sites français, anime, dramas…) ———
+// Code de LooStream (licence MIT, dossier loostream/) construit dans l'image Docker, lancé et surveillé par ce serveur sur
+// 127.0.0.1:7012 avec une clé d'accès tirée au hasard. Lumio lui demande les liens d'un titre (numéro TMDB) et relaie ses
+// seuls chemins de lecture (/proxy/…, /moviebox/…). Les domaines des sites changent souvent : ses réglages vivent dans
+// /data/loostream/config et sont repris chaque jour depuis le dépôt LooStream. Désactivable : LOOSTREAM_EMBEDDED=0.
+const LS_HOME = process.env.LOOSTREAM_HOME || '/opt/loostream';
+const LS_DIR = path.join(DATA_DIR, 'loostream');
+const LS_PORT = Number(process.env.LOOSTREAM_PORT || 7012);
+const LS_PATHS = /^\/(proxy|netmirror|moviebox|nabistream|kisskh|videasy|extsub|zenix|worldivx|nkstrm)\//;
+let lsProc = null;
+let lsRestarts = 0;
+let lsReady = false;
+let lsError = null;
+const lsWanted = () => process.env.LOOSTREAM_EMBEDDED !== '0' && config.loostream !== false;
+const lsInstalled = () => fs.existsSync(path.join(LS_HOME, 'dist', 'index.js'));
+const lsOn = () => lsWanted() && lsInstalled() && lsReady;
+function lsKey() {
+  if (!config.loostreamKey) {
+    config.loostreamKey = crypto.randomBytes(24).toString('hex');
+    saveConfig();
+  }
+  return config.loostreamKey;
+}
+/** Config LooStream de Lumio (encodée dans l'adresse, comme un addon Stremio) : VF / MULTi seulement, proxy local. */
+function lsCfg(quality) {
+  const c = { proxy: 'local', accessKey: lsKey(), pseudo: 'lumio', prefQuality: quality === 720 ? '720p' : '1080p', langOrder: ['MULTI', 'VF'], strictFilter: true, minStreams: 3, sortBy: 'language', excludeQualities: ['4K'], subs: false, extSubs: false };
+  return Buffer.from(JSON.stringify(c)).toString('base64');
+}
+/** Réglages de départ copiés dans /data/loostream/config (sans écraser ceux déjà là). */
+function lsSeedConfig() {
+  const src = path.join(LS_HOME, 'config');
+  const dst = path.join(LS_DIR, 'config');
+  fs.mkdirSync(dst, { recursive: true });
+  if (!fs.existsSync(src)) return;
+  for (const f of fs.readdirSync(src)) if (f.endsWith('.json') && !fs.existsSync(path.join(dst, f))) fs.copyFileSync(path.join(src, f), path.join(dst, f));
+}
+/** Domaines des sites à jour : reprise quotidienne des fichiers de réglages du dépôt LooStream (rechargés à chaud). */
+async function lsRefreshConfig() {
+  if (!lsWanted() || !lsInstalled()) return;
+  const dst = path.join(LS_DIR, 'config');
+  let changed = 0;
+  for (const f of fs.existsSync(dst) ? fs.readdirSync(dst) : []) {
+    if (!/(-endpoints|extractor-domains|allowed-domains)\.json$/.test(f)) continue;
+    try {
+      const r = await fetch(`https://raw.githubusercontent.com/Loo-stick/loostream/main/config/${f}`, { signal: AbortSignal.timeout(20000) });
+      if (!r.ok) continue;
+      const txt = await r.text();
+      JSON.parse(txt);
+      if (fs.readFileSync(path.join(dst, f), 'utf8') !== txt) {
+        fs.writeFileSync(path.join(dst, f), txt);
+        changed++;
+      }
+    } catch {}
+  }
+  if (changed) console.log(`LooStream : ${changed} fichier(s) de domaines mis à jour`);
+}
+setInterval(() => lsRefreshConfig().catch(() => {}), 24 * 3600e3);
+setTimeout(() => lsRefreshConfig().catch(() => {}), 5 * 60e3);
+
+function startLooStream() {
+  if (!lsWanted() || lsProc) return;
+  if (!lsInstalled()) {
+    lsError = 'LooStream n’est pas dans l’image : Profil → Serveur → Mettre à jour';
+    return;
+  }
+  fs.mkdirSync(LS_DIR, { recursive: true });
+  lsSeedConfig();
+  const env = {
+    PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
+    HOME: LS_DIR,
+    TZ: process.env.TZ || 'Europe/Paris',
+    NODE_ENV: 'production',
+    PORT: String(LS_PORT),
+    ACCESS_KEY: lsKey(),
+    CACHE_DB_PATH: path.join(LS_DIR, 'cache.db'),
+    USERS_DB: path.join(LS_DIR, 'users.db'),
+    // Nouveaux serveurs vidéo des sites acceptés tout seuls (les adresses privées restent bloquées)
+    AUTO_WHITELIST: 'true',
+  };
+  if (tmdbKey()) env.TMDB_API_KEY = tmdbKey();
+  for (const [k, v] of Object.entries(process.env)) if (k.startsWith('LOOSTREAM_') && !['LOOSTREAM_EMBEDDED', 'LOOSTREAM_HOME', 'LOOSTREAM_PORT'].includes(k)) env[k.slice(10)] = v;
+  const { spawn } = require('child_process');
+  const child = spawn(process.execPath, ['--max-old-space-size=384', path.join(LS_HOME, 'dist', 'index.js')], { cwd: LS_DIR, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  lsProc = child;
+  lsReady = false;
+  lsError = null;
+  let last = '';
+  const log = (buf) => {
+    for (const line of String(buf).split('\n')) {
+      if (!line.trim()) continue;
+      last = line.slice(0, 300);
+      if (process.env.LOOSTREAM_LOG === '1' || /error|erreur|listening|démarr|started/i.test(line)) console.log(`[LooStream] ${line.slice(0, 300)}`);
+    }
+  };
+  child.stdout.on('data', log);
+  child.stderr.on('data', log);
+  // Prêt dès que /api/stats répond
+  (async () => {
+    for (let i = 0; i < 60 && lsProc === child; i++) {
+      await sleep(2000);
+      try {
+        const r = await fetch(`http://127.0.0.1:${LS_PORT}/api/stats`, { signal: AbortSignal.timeout(3000) });
+        if (r.ok) {
+          lsReady = true;
+          lsRestarts = 0;
+          console.log(`LooStream prêt (port interne ${LS_PORT})`);
+          return;
+        }
+      } catch {}
+    }
+  })();
+  child.on('exit', (code) => {
+    lsProc = null;
+    lsReady = false;
+    lsError = `LooStream arrêté (code ${code}) : ${last}`;
+    console.log(lsError);
+    if (lsWanted()) setTimeout(startLooStream, Math.min(10 * 60e3, 5000 * 2 ** lsRestarts++));
+  });
+}
+setTimeout(startLooStream, 3000);
+process.on('exit', () => lsProc && lsProc.kill());
+
+/** Chemins de lecture de LooStream relayés tels quels (adresses publiques construites par LooStream lui-même). */
+function lsForward(req, res, url) {
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '');
+  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || (/"scheme":"https"/.test(String(req.headers['cf-visitor'] || '')) ? 'https' : /^(\d+\.\d+\.\d+\.\d+|localhost)(:\d+)?$/.test(host) ? 'http' : 'https');
+  const headers = { ...req.headers, 'x-forwarded-host': host, 'x-forwarded-proto': proto, host: `127.0.0.1:${LS_PORT}` };
+  delete headers['x-jellyfin-token'];
+  const up = http.request({ host: '127.0.0.1', port: LS_PORT, method: req.method, path: url.pathname + url.search, headers, agent: streamAgents['http:'] }, (ur) => {
+    res.writeHead(ur.statusCode || 502, ur.headers);
+    ur.pipe(res);
+  });
+  up.on('error', () => (res.headersSent ? res.destroy() : (res.writeHead(502), res.end())));
+  res.on('close', () => up.destroy());
+  req.pipe(up);
+}
+
+/** Liens LooStream d'un titre (meilleur en premier). Gardés 20 min par adresse publique. */
+const lsCache = new Map();
+const lsBusy = new Map();
+async function lsFind(type, tmdbId, season, episode, quality, base) {
+  if (!lsOn()) return [];
+  if (!base) throw new Error('adresse du serveur inconnue');
+  const u = new URL(base);
+  const ck = `${u.host}|${type}:${tmdbId}:${season}:${episode}:${quality || 1080}`;
+  const hit = lsCache.get(ck);
+  if (hit && Date.now() - hit.at < 20 * 60e3) return hit.list;
+  if (lsBusy.has(ck)) return lsBusy.get(ck);
+  const p = (async () => {
+    const id = type === 'tv' ? `tmdb:${tmdbId}:${season}:${episode}` : `tmdb:${tmdbId}`;
+    const r = await fetch(`http://127.0.0.1:${LS_PORT}/${lsCfg(quality)}/stream/${type === 'tv' ? 'series' : 'movie'}/${encodeURIComponent(id)}.json`, {
+      headers: { 'x-forwarded-host': u.host, 'x-forwarded-proto': u.protocol.replace(':', '') },
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!r.ok) throw new Error(`LooStream : HTTP ${r.status}`);
+    const j = await r.json();
+    const list = ((j && j.streams) || [])
+      .filter((s) => s && typeof s.url === 'string' && /^https?:\/\//.test(s.url))
+      .map((s) => {
+        const txt = `${s.name || ''} ${s.title || ''}`;
+        const q = /2160|4k/i.test(txt) ? '2160p' : /1080/.test(txt) ? '1080p' : /720/.test(txt) ? '720p' : /480/.test(txt) ? '480p' : null;
+        const lang = /multi/i.test(txt) ? 'MULTI' : /vostfr/i.test(txt) ? 'VOSTFR' : /\bvf/i.test(txt) ? 'VF' : null;
+        // Nom du site : 2e ligne du nom (« LooStream\nCoflix ») ou début du titre
+        const site = (String(s.name || '').split('\n')[1] || String(s.title || '').split('\n')[0] || '').replace(/[^\p{L}\p{N} .+-]/gu, '').trim().slice(0, 40) || null;
+        return { url: s.url, name: String(s.title || s.name || '').split('\n')[0].slice(0, 120), site, quality: q, language: lang, hls: /\/proxy\/manifest|\.m3u8/i.test(s.url), size: Number((s.behaviorHints && s.behaviorHints.videoSize) || 0) };
+      });
+    lsCache.set(ck, { at: Date.now(), list });
+    if (lsCache.size > 300) lsCache.delete(lsCache.keys().next().value);
+    return list;
+  })().finally(() => lsBusy.delete(ck));
+  lsBusy.set(ck, p);
+  return p;
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') return send(res, 204);
   const url = new URL(req.url, 'http://x');
@@ -8696,6 +8889,9 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
     res.writeHead(302, { Location: process.env.TV_APK_URL || 'https://github.com/nono7444/lumio-tv/releases/latest/download/lumio-tv-armeabi-v7a.apk' });
     return res.end();
   }
+
+  // LooStream : chemins de lecture (adresses construites par LooStream, clé d'accès dans le lien)
+  if ((LS_PATHS.test(url.pathname) || (config.loostreamKey && /^\/[A-Za-z0-9+/=_-]{40,}\/(zenix|worldivx)\/stream$/.test(url.pathname))) && lsWanted()) return lsForward(req, res, url);
 
   // Streaming AllDebrid relayé : /watch/s/<jeton>/video.mkv (jeton au hasard, 12 h), lecture par morceaux (Range)
   const streamM = url.pathname.match(/^\/watch\/s\/([a-f0-9]{36})(?:\/[^/]*)?$/);
@@ -9834,7 +10030,11 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
 
     // ——— « Lire » un titre absent (admin) : lien de streaming TorBox + téléchargement en arrière-plan + reprise ———
     if (req.method === 'GET' && p === '/api/watch/now') return send(res, 200, watchNowView(user));
-    if (req.method === 'POST' && p === '/api/watch/probe') return send(res, 200, await watchProbe(user, await readBody(req)));
+    if (req.method === 'POST' && p === '/api/watch/probe') {
+      const host = String(req.headers['x-forwarded-host'] || req.headers.host || '');
+      const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || (/^(\d+\.\d+\.\d+\.\d+|localhost)(:\d+)?$/.test(host) ? 'http' : 'https');
+      return send(res, 200, await watchProbe(user, { ...(await readBody(req)), _base: host ? `${proto}://${host}` : null }));
+    }
     if (req.method === 'POST' && p === '/api/watch/now') {
       const host = String(req.headers['x-forwarded-host'] || req.headers.host || '');
       const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || (/^(\d+\.\d+\.\d+\.\d+|localhost)(:\d+)?$/.test(host) ? 'http' : 'https');

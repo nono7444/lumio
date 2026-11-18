@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Streaming : LooStream (37 sites de streaming en VF, intégré au serveur Lumio) est essayé en premier ; s'il ne trouve rien, on repart sur les caches (TorBox, AllDebrid) et Wawacity comme avant. Les sources sont cherchées dès l'ouverture de la fiche, pour que le menu et la lecture soient presque immédiats. L'origine s'affiche (« LooStream · site »).
+- Fiche d'un titre absent : deux boutons côte à côte, « Demander » (au serveur) et « Streaming ».
+
 ## 1.0.178 — 18 novembre 2026
 
 - Lumio Auto, onglet Lecture : quand Jellyfin ne reconnaît plus la session de l'appli, un message clair et un bouton « Se reconnecter » remplacent « Identifiants refusés ou session expirée ».

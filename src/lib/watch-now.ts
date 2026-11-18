@@ -5,11 +5,13 @@ import { serverCall } from './chat';
 import type { Settings } from './settings';
 
 /** enabled : prêt à servir (interrupteur allumé + moteur + une clé) ; on : l'interrupteur seul */
-export type WatchNowStatus = { enabled: boolean; streaming?: boolean; health?: { ok: boolean; torbox: boolean | null; alldebrid: boolean | null; wawacity: boolean | null; at: string } | null; on?: boolean; torbox: boolean; alldebrid: boolean; download: boolean };
+export type WatchNowStatus = { enabled: boolean; streaming?: boolean; health?: { ok: boolean; loostream?: boolean | null; torbox: boolean | null; alldebrid: boolean | null; wawacity: boolean | null; at: string } | null; on?: boolean; torbox: boolean; alldebrid: boolean; download: boolean };
 export type WatchNowResult = {
   url: string;
-  service: 'torbox' | 'alldebrid';
+  service: 'torbox' | 'alldebrid' | 'loostream';
   source: string | null;
+  /** Flux HLS (LooStream) */
+  hls?: boolean;
   hoster: string | null;
   name: string | null;
   quality: string | null;
@@ -26,7 +28,7 @@ export const watchNowApi = {
     serverCall<WatchNowResult>(s, '/api/watch/now', { method: 'POST', body: JSON.stringify(body) }),
   /** Menu « Streaming » : d'où le flux peut venir, par qualité */
   probe: (s: Settings, body: { type: 'movie' | 'tv'; tmdbId: number; season?: number; episode?: number; title?: string }) =>
-    serverCall<Record<string, { torbox: boolean; alldebrid: boolean; wawacity: boolean }>>(s, '/api/watch/probe', { method: 'POST', body: JSON.stringify(body) }),
+    serverCall<Record<string, { torbox: boolean; alldebrid: boolean; wawacity: boolean; loostream?: boolean }>>(s, '/api/watch/probe', { method: 'POST', body: JSON.stringify(body) }),
   /** Position de lecture d'un streaming (gardée sur le serveur, recopiée dans Jellyfin quand le fichier arrive) */
   progress: (s: Settings, body: { type: 'movie' | 'tv'; tmdbId: number; season?: number; episode?: number; position: number; duration?: number; title?: string }) =>
     serverCall<{ ok: boolean }>(s, '/api/watch/progress', { method: 'POST', body: JSON.stringify(body) }).catch(() => null),
@@ -34,3 +36,7 @@ export const watchNowApi = {
   save: (s: Settings, body: { torboxKey?: string; enabled?: boolean; download?: boolean }) =>
     serverCall<WatchNowStatus>(s, '/api/watch/now', { method: 'PUT', body: JSON.stringify(body) }),
 };
+
+/** D'où vient le flux, en clair (« LooStream · Coflix », « TorBox », « Wawacity »…). */
+export const watchOrigin = (w: Pick<WatchNowResult, 'service' | 'source'>) =>
+  w.service === 'loostream' ? w.source || 'LooStream' : w.source === 'wawacity' ? 'Wawacity' : w.service === 'torbox' ? 'TorBox' : 'AllDebrid';

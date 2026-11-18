@@ -30,9 +30,29 @@ export function useStreamStatus(settings: Settings) {
   return st;
 }
 
+type ProbeArgs = { type: 'movie' | 'tv'; tmdbId: number; season?: number; episode?: number; title?: string };
+/** Sources par qualité, cherchées dès l'ouverture de la fiche (le serveur prépare aussi les liens LooStream) : le menu
+ *  et la lecture sont alors immédiats. Gardé 10 min. */
+const probeMemo = new Map<string, { at: number; p: Promise<Record<string, Sources>> }>();
+function probeOnce(settings: Settings, a: ProbeArgs) {
+  const k = `${a.type}:${a.tmdbId}:${a.season ?? ''}:${a.episode ?? ''}`;
+  const hit = probeMemo.get(k);
+  if (hit && Date.now() - hit.at < 10 * 60e3) return hit.p;
+  const p = watchNowApi.probe(settings, a).catch(() => ({}) as Record<string, Sources>);
+  probeMemo.set(k, { at: Date.now(), p });
+  if (probeMemo.size > 50) probeMemo.delete(probeMemo.keys().next().value as string);
+  return p;
+}
+
 /** Bouton « Streaming » (icône seule ou avec texte) + son menu de qualité. */
 export function StreamingButton({ type, tmdbId, title, imdb, season, episode, label = false, style, ok }: { type: 'movie' | 'tv'; tmdbId: number; title: string; imdb?: string; season?: number; episode?: number; label?: boolean; style?: any; ok?: boolean | null }) {
   const [open, setOpen] = useState(false);
+  const { settings } = useSettings();
+  // Recherche lancée dès l'affichage du bouton, sans attendre l'appui
+  useEffect(() => {
+    probeOnce(settings, { type, tmdbId, season, episode, title });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type, tmdbId, season, episode]);
   return (
     <>
       <View style={style ?? undefined}>
@@ -40,7 +60,7 @@ export function StreamingButton({ type, tmdbId, title, imdb, season, episode, la
           title={label ? 'Streaming' : ''}
           icon="cloud-outline"
           variant="glass"
-          small
+          small={!label}
           onPress={() => setOpen(true)}
           style={style ? { flex: 1 } : { width: 46, paddingHorizontal: 0 }}
           accessibilityLabel={`Streaming${ok === false ? ' (en panne)' : ok ? ' (en ligne)' : ''}`}
@@ -65,10 +85,11 @@ export function StreamingButton({ type, tmdbId, title, imdb, season, episode, la
 }
 
 /** Menu « Streaming » : choix de la qualité (le serveur prend la meilleure version de cette qualité). */
-type Sources = { torbox: boolean; alldebrid: boolean; wawacity: boolean };
+type Sources = { torbox: boolean; alldebrid: boolean; wawacity: boolean; loostream?: boolean };
 /** Pastilles « d'où vient le flux » : TorBox (lien direct), AllDebrid et Wawacity (passent par ton serveur). */
 function SourceBadges({ src }: { src: Sources }) {
   const items = [
+    src.loostream ? { label: 'LooStream', icon: 'server' as const, color: '#BF5AF2' } : null,
     src.torbox ? { label: 'TorBox', icon: 'flash' as const, color: '#30D158' } : null,
     src.alldebrid ? { label: 'AllDebrid', icon: 'server' as const, color: '#FFD60A' } : null,
     src.wawacity ? { label: 'Wawacity', icon: 'server' as const, color: '#64D2FF' } : null,
@@ -103,10 +124,7 @@ export function QualityMenu({
   useEffect(() => {
     if (!open || !probe) return;
     setSrc(null);
-    watchNowApi
-      .probe(settings, probe)
-      .then(setSrc)
-      .catch(() => setSrc({}));
+    probeOnce(settings, probe).then(setSrc);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
   const opts: { q: 1080 | 720; label: string }[] = [

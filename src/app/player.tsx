@@ -36,6 +36,8 @@ type Params = {
   start?: string;
   /** « 1 » : streaming d'un titre absent du serveur → la position est gardée sur le serveur Lumio */
   stream?: string;
+  /** « 1 » : flux HLS dont l'adresse ne finit pas par .m3u8 (LooStream) */
+  hls?: string;
   // Contexte d'une série en streaming (pour l'épisode suivant)
   tmdbId?: string;
   imdb?: string;
@@ -138,7 +140,7 @@ export default function Player() {
           setSource({ uri: t.uri, isHls: t.isHls });
         } else if (sources.current?.length) {
           const cur = sources.current[Math.min(altIdx, sources.current.length - 1)];
-          setSource({ uri: cur.uri, headers: cur.headers, isHls: /\.m3u8(\?|$)/i.test(cur.uri) });
+          setSource({ uri: cur.uri, headers: cur.headers, isHls: (p.hls === '1' && cur.uri === p.uri) || /\.m3u8(\?|$)|\/proxy\/manifest\?/i.test(cur.uri) });
         } else {
           throw new Error('Aucune source à lire');
         }

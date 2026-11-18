@@ -1,0 +1,4239 @@
+import express from 'express';
+import axios from 'axios';
+import path from 'path';
+import { rateLimit } from 'express-rate-limit';
+import { getNetmirrorStreams } from './scrapers/netmirror';
+import { getWiflixStreams } from './scrapers/wiflix';
+import { getVoirDramaStreams, reloadVoirDramaEndpoints, getVoirDramaEndpoints } from './scrapers/voirdrama';
+import { getMovieboxStreams, movieboxProbe, resolveMovieboxUrl, resolveMovieboxSubtitle, setMovieboxPoolEnabled, movieboxPoolStatus } from './scrapers/moviebox';
+import { getVoirAnimeStreams, getVoirAnimeEndpoints, reloadVoirAnimeEndpoints } from './scrapers/voiranime';
+import { getAnimeSamaStreams, getAnimesamaEndpoints, reloadAnimesamaEndpoints } from './scrapers/animesama';
+import { getAnimeAltTitles } from './anime-titles';
+import { getNabistreamStreams, getNabistreamEndpoints, reloadNabistreamEndpoints } from './scrapers/nabistream';
+import { getCoflixStreams, getCoflixEndpoints, reloadCoflixEndpoints } from './scrapers/coflix';
+import { getStreamFlixStreams, reloadStreamflixEndpoints, getStreamflixEndpoints } from './scrapers/streamflix';
+import { getVideasyStreams, reloadVideasyEndpoints, getVideasyEndpoints } from './scrapers/videasy';
+import { getMovixStreams, getMovixAnimeStreams, reloadMovixEndpoints, getMovixEndpoints } from './scrapers/movix';
+import { getWavewatchStreams, getWavewatchEndpoints, reloadWavewatchEndpoints } from './scrapers/wavewatch';
+import { getKordozStreams, getKordozEndpoints, reloadKordozEndpoints } from './scrapers/kordoz';
+import { getCinestreamStreams, cinestreamProbe, getCinestreamEndpoints, reloadCinestreamEndpoints } from './scrapers/cinestream';
+import { getDulourdStreams, dulourdProbe, getDulourdEndpoints, reloadDulourdEndpoints } from './scrapers/dulourd';
+import { getZenixStreams, resolveZenixStream, zenixProbe, getZenixEndpoints, reloadZenixEndpoints } from './scrapers/zenix';
+import { getKisskhStreams, kisskhProbe, getKisskhEndpoints, reloadKisskhEndpoints, isKisskhSubtitleUrl, isKisskhLanguage, KISSKH_PLAYBACK_REFERER, etatKisskh, rediscoverKisskh } from './scrapers/kisskh';
+import { getWorldivxStreams, resolveWorldivxStream, worldivxProbe, getWorldivxEndpoints, reloadWorldivxEndpoints } from './scrapers/worldivx';
+import { getTokyvideoStreams, tokyvideoProbe, getTokyvideoEndpoints, reloadTokyvideoEndpoints, TOKYVIDEO_REFERER } from './scrapers/tokyvideo';
+import { getYablomStreams, yablomProbe, getYablomEndpoints, reloadYablomEndpoints } from './scrapers/yablom';
+import { getIanimeStreams, ianimeProbe, getIanimeEndpoints, reloadIanimeEndpoints } from './scrapers/ianime';
+import { getLeizyStreams, leizyProbe, getLeizyEndpoints, reloadLeizyEndpoints } from './scrapers/leizy';
+import { getJour1filmStreams, jour1filmProbe, getJour1filmEndpoints, reloadJour1filmEndpoints } from './scrapers/jour1film';
+import { getWookafrStreams, wookafrProbe, getWookafrEndpoints, reloadWookafrEndpoints } from './scrapers/wookafr';
+import { getCinepulseStreams, cinepulseProbe, getCinepulseEndpoints, reloadCinepulseEndpoints } from './scrapers/cinepulse';
+import { getMavanimeStreams, mavanimeProbe, getMavanimeEndpoints, reloadMavanimeEndpoints } from './scrapers/mavanime';
+import { getAnimesiteStreams, animesiteProbe, getAnimesiteEndpoints, reloadAnimesiteEndpoints } from './scrapers/animesite';
+import { getAnimeUltimeStreams, animeUltimeProbe, getAnimeUltimeEndpoints, reloadAnimeUltimeEndpoints } from './scrapers/anime-ultime';
+import { getAnimoflixStreams, animoflixProbe, getAnimoflixEndpoints, reloadAnimoflixEndpoints } from './scrapers/animoflix';
+import { getCinexStreams, cinexProbe, getCinexEndpoints, reloadCinexEndpoints } from './scrapers/cinex';
+import { getMiawStreams, miawProbe, getMiawEndpoints, reloadMiawEndpoints } from './scrapers/miaw';
+import { getDocstreamStreams } from './scrapers/docstream';
+import { getZoneTelechargementStreams, getZoneTelechargementEndpoints, reloadZoneTelechargementEndpoints } from './scrapers/zonetelechargement';
+import { getNkstrmStreams, NkstrmAuthError, getNkstrmEndpoints, reloadNkstrmEndpoints } from './scrapers/nkstrm';
+import { getVostfreeStreams, getVostfreeEndpoints, reloadVostfreeEndpoints } from './scrapers/vostfree';
+import { getFrenchStreamStreams, reloadFrenchStreamEndpoints, getFrenchStreamEndpoints } from './scrapers/frenchstream';
+import { cached, getCacheStats, clearAll, clearScope } from './cache';
+import { recordOutcome, getAllMetrics } from './metrics';
+import { curlJson, isCloudflareChallenge } from './curl-fetch';
+import crypto from 'crypto';
+import proxyRouter, { isAllowedUrl, addAllowedDomain, getAllowedDomains } from './proxy';
+import { accessEnabled, keyMatches, signUrl, requireQueryKey, ownerKeyMatches, ownerKeyEnabled } from './access';
+import { verifyFileAdmin, listAdmins, addAdmin, removeAdmin, setAdminPassword, isRootUser } from './admins';
+import { installLogCapture, getLogs } from './logbuffer';
+import { getModeRaw, autoWhitelistEnabled, updateSettings, settingsView, netfreeSocksPoolEnabled, movieboxSocksPoolEnabled, isSourceEnabled, getDisabledSources, getDisabledExtractors, captureAllLogsEnabled } from './settings';
+import { sanitizePseudo, pseudoLabel } from './pseudo';
+import { tmdbReq, tmdbKeyType } from './tmdb-auth';
+import { runWithLogCapture, capturedLines } from './request-log';
+import { recordUserActivity, getUsersOverview, getUserRequests, getRequestLog, isPseudoTakenByOther, claimPseudo, deleteUser, getUserStats } from './user-activity';
+import { setPoolEnabled, poolStatus } from './netfree-pool';
+import { canDirect } from './deliver';
+import * as fsSync from 'fs';
+import * as zlib from 'zlib';
+import { getFrenchSubtitles, subtitleToVtt } from './subtitles';
+import { ExtractorConfig, reloadExtractorDomains, getExtractorDomains, detectExtractor, EXTRACTOR_IDS } from './extractors';
+import { recordDelivery, getExtractorHealth, getSourceHealth, getExtractorSample, getSourceSample } from './extractor-health';
+import { probeStream } from './probe-stream';
+import { getSceneMeta, buildFilename, providerLabel } from './filename';
+import { buildStreamName, buildStreamTitle } from './display';
+import { QUALITY_SCORES, passesPreferences, compareStreams } from './prefs';
+
+// Capture les console.* dans un ring mémoire pour la page Logs de l'admin, le
+// plus tôt possible (avant tout autre log de boot). Délègue ensuite à l'original,
+// donc les logs Docker restent intacts.
+installLogCapture();
+
+const app = express();
+
+// Trust proxy (for reverse proxies like Apache/Nginx)
+app.set('trust proxy', 1);
+
+// ============================================
+// STATS TRACKING
+// ============================================
+interface Stats {
+  startTime: number;
+  requests: {
+    total: number;
+    streams: number;
+    proxy: number;
+  };
+  sources: {
+    movix: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    netmirror: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    streamflix: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    frenchstream: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    wiflix: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    voirdrama: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    moviebox: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    voiranime: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    nabistream: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    coflix: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    videasy: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    animesama: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    nkstrm: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    vostfree: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    wavewatch: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    kordoz: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    docstream: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    ztstream: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    cinestream: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    dulourd: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    zenix: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    kisskh: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    worldivx: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    tokyvideo: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    yablom: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    ianime: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    leizy: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    jour1film: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    wookafr: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    cinepulse: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    mavanime: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    animesite: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    animeultime: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    animoflix: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    cinex: { requests: number; success: number; errors: number; lastSuccess: number | null };
+    miaw: { requests: number; success: number; errors: number; lastSuccess: number | null };
+  };
+  streamsServed: {
+    movix: number;
+    netmirror: number;
+    streamflix: number;
+    frenchstream: number;
+    wiflix: number;
+    voirdrama: number;
+    moviebox: number;
+    voiranime: number;
+    nabistream: number;
+    coflix: number;
+    videasy: number;
+    animesama: number;
+    nkstrm: number;
+    vostfree: number;
+    wavewatch: number;
+    kordoz: number;
+    docstream: number;
+    ztstream: number;
+    cinestream: number;
+    dulourd: number;
+    zenix: number;
+    kisskh: number;
+    worldivx: number;
+    tokyvideo: number;
+    yablom: number;
+    ianime: number;
+    leizy: number;
+    jour1film: number;
+    wookafr: number;
+    cinepulse: number;
+    mavanime: number;
+    animesite: number;
+    animeultime: number;
+    animoflix: number;
+    cinex: number;
+    miaw: number;
+  };
+}
+
+const stats: Stats = {
+  startTime: Date.now(),
+  requests: { total: 0, streams: 0, proxy: 0 },
+  sources: {
+    movix: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    netmirror: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    streamflix: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    frenchstream: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    wiflix: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    voirdrama: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    moviebox: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    voiranime: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    nabistream: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    coflix: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    videasy: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    animesama: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    nkstrm: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    vostfree: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    wavewatch: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    kordoz: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    docstream: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    ztstream: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    cinestream: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    dulourd: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    zenix: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    kisskh: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    worldivx: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    tokyvideo: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    yablom: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    ianime: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    leizy: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    jour1film: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    wookafr: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    cinepulse: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    mavanime: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    animesite: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    animeultime: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    animoflix: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    cinex: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+    miaw: { requests: 0, success: 0, errors: 0, lastSuccess: null },
+  },
+  streamsServed: { movix: 0, netmirror: 0, streamflix: 0, frenchstream: 0, wiflix: 0, voirdrama: 0, moviebox: 0, voiranime: 0, nabistream: 0, coflix: 0, videasy: 0, animesama: 0, nkstrm: 0, vostfree: 0, wavewatch: 0, kordoz: 0, docstream: 0, ztstream: 0, cinestream: 0, dulourd: 0, zenix: 0, kisskh: 0, worldivx: 0, tokyvideo: 0, yablom: 0, ianime: 0, leizy: 0, jour1film: 0, wookafr: 0, cinepulse: 0, mavanime: 0, animesite: 0, animeultime: 0, animoflix: 0, cinex: 0, miaw: 0 },
+};
+
+function trackSourceResult(source: 'movix' | 'netmirror' | 'streamflix' | 'frenchstream' | 'wiflix' | 'voirdrama' | 'moviebox' | 'voiranime' | 'nabistream' | 'coflix' | 'videasy' | 'animesama' | 'nkstrm' | 'vostfree' | 'wavewatch' | 'kordoz' | 'docstream' | 'ztstream' | 'cinestream' | 'dulourd' | 'zenix' | 'kisskh' | 'worldivx' | 'tokyvideo' | 'yablom' | 'ianime' | 'leizy' | 'jour1film' | 'wookafr' | 'cinepulse' | 'mavanime' | 'animesite' | 'animeultime' | 'animoflix' | 'cinex' | 'miaw', success: boolean, streamCount: number = 0) {
+  stats.sources[source].requests++;
+  if (success) {
+    stats.sources[source].success++;
+    stats.sources[source].lastSuccess = Date.now();
+    stats.streamsServed[source] += streamCount;
+  } else {
+    stats.sources[source].errors++;
+  }
+}
+
+// ============================================
+// SECURITY: Rate limiting (100 requests per minute per IP)
+// ============================================
+const apiLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 100, // 100 requests per minute per IP
+  message: { error: 'Too many requests, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => {
+    // Skip rate limiting for proxy segment requests (high volume during streaming)
+    return req.path.includes('/proxy/segment');
+  },
+});
+// Rate-limit STRICT dédié à la connexion admin (anti-brute-force sur les mots de
+// passe + anti-DoS CPU du scrypt). En plus du limiteur global. Keyé par IP (trust
+// proxy=1 -> vraie IP cliente). On ne compte QUE les tentatives échouées
+// (skipSuccessful) pour ne pas gêner un admin légitime.
+const adminLoginLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  max: 10,                   // 10 tentatives échouées / 10 min / IP
+  message: 'Trop de tentatives de connexion. Réessayez dans quelques minutes.',
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+});
+const PORT = process.env.PORT || 7002;
+
+// Default config from env
+const DEFAULT_USE_LOCAL_PROXY = process.env.USE_LOCAL_PROXY === 'true';
+const DEFAULT_MEDIAFLOW_URL = process.env.MEDIAFLOW_URL || '';
+const DEFAULT_MEDIAFLOW_PASSWORD = process.env.MEDIAFLOW_PASSWORD || '';
+
+// User config interface
+interface UserConfig {
+  proxy: 'local' | 'mediaflow' | 'direct';
+  mfUrl?: string;
+  mfPass?: string;
+  tmdbKey?: string;
+  accessKey?: string;    // clé d'accès (si l'hébergeur a activé ACCESS_KEY)
+  ownerKey?: string;     // clé propriétaire : bypasse le gate MODE (garde le proxy local)
+  prefQuality?: string;  // "1080p", "4K", "720p", "480p"
+  langOrder?: string[];  // ["MULTI", "VF", "VOSTFR", "VO"]
+  minStreams?: number;   // early exit: stop waiting once this many wanted streams are in (0 = wait for all)
+  sortBy?: 'language' | 'quality'; // priorité de tri : langue d'abord (défaut) ou qualité d'abord
+  pseudo?: string;       // libellé libre auto-déclaré (support) — optionnel, cf. src/pseudo.ts
+  excludeQualities?: string[]; // qualités à EXCLURE (ex. ["4K","360p"]) — filtre opt-in, cf. prefs.ts
+  strictFilter?: boolean; // true = exclusion STRICTE (liste vide si rien ne matche) ; false/absent
+                          // = souple (relâche la langue mais garde l'exclusion de qualité). cf. filterAndSortStreams
+  nkstrmToken?: string; // token de pairing nkstrm (per-user, opt-in) — cf. scrapers/nkstrm.ts
+  subs?: boolean;        // sous-titres LooStream (défaut true). false = LooStream n'expose AUCUN sous-titre
+                         // (ressource retirée du manifeste + handleSubtitles renvoie vide).
+  extSubs?: boolean;     // sous-titres externes OpenSubtitles FR (défaut true). false = uniquement les
+                         // sous-titres EMBARQUÉS (moviebox/videasy/nabistream/nkstrm), pas le flot externe.
+}
+
+// Stream with metadata for filtering/sorting
+interface StreamWithMeta {
+  name: string;
+  title: string;
+  url: string;
+  behaviorHints: { notWebReady: boolean; bingeGroup: string; filename?: string; videoSize?: number; proxyHeaders?: { request: Record<string, string> } };
+  subtitles?: { id: string; url: string; lang: string }[];
+  _meta: {
+    quality: string;
+    language: string;
+    source: string;
+    codec?: string;
+    server?: string;
+    platform?: string;
+    sizeBytes?: number;
+    subCount?: number;
+    frSubCount?: number; // nb de sous-titres FR externes (OpenSubtitles) dispo pour le titre
+  };
+}
+
+// ============================================
+// SECURITY: Config validation
+// ============================================
+function isValidUrl(str: string): boolean {
+  try {
+    const url = new URL(str);
+    return ['http:', 'https:'].includes(url.protocol);
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeString(str: string, maxLength: number = 200): string {
+  if (typeof str !== 'string') return '';
+  return str.slice(0, maxLength).replace(/[<>]/g, ''); // Remove potential XSS chars
+}
+
+// Modes de livraison PROPOSÉS/AUTORISÉS par l'hébergeur, via `MODE` du .env
+// (ex. "DIRECT;MFP;LOCAL"). Vide = les trois. Alias : MFP=mediaflow. L'ordre est
+// l'ordre de préférence (le 1er est le défaut dans /configure). Sert à la fois
+// à l'UI (/api/modes) et au garde de parseConfig.
+const MODE_ALIAS: Record<string, 'direct' | 'mediaflow' | 'local'> = {
+  direct: 'direct', mfp: 'mediaflow', mediaflow: 'mediaflow', local: 'local',
+};
+function allowedModes(): ('direct' | 'mediaflow' | 'local')[] {
+  // Défaut RESTRICTIF : sans MODE explicite, on N'AUTORISE PAS le proxy local — sinon un
+  // self-hoster sans MODE exposerait la bande passante de son serveur à TOUS ses users
+  // (le proxy local était offert par défaut = footgun). Le local ne s'active que si
+  // l'opérateur le met dans MODE (ex. `DIRECT;MFP;LOCAL`) ou via l'owner key (localProxyAllowed).
+  const raw = getModeRaw().trim();
+  if (!raw) return ['direct', 'mediaflow'];
+  const list = raw.split(/[;,]/).map(s => MODE_ALIAS[s.trim().toLowerCase()]).filter(Boolean);
+  return list.length ? [...new Set(list)] as ('direct' | 'mediaflow' | 'local')[] : ['direct', 'mediaflow'];
+}
+
+// Parse and validate config from base64 URL param
+function parseConfig(configStr: string): UserConfig | null {
+  try {
+    // Limit config string length to prevent DoS
+    if (configStr.length > 2000) {
+      console.warn('[Config] Config string too long');
+      return null;
+    }
+
+    const decoded = Buffer.from(configStr, 'base64').toString('utf-8');
+    const parsed = JSON.parse(decoded);
+
+    // Validate proxy type
+    if (!['local', 'mediaflow', 'direct'].includes(parsed.proxy)) {
+      console.warn('[Config] Invalid proxy type');
+      return null;
+    }
+    // Garde MODE : si l'hébergeur restreint les modes (env MODE) et que le config
+    // en demande un non autorisé, on le ramène au 1er mode autorisé. EXCEPTION : un
+    // config portant une `ownerKey` valide BYPASSE le gate (l'hébergeur garde ainsi
+    // le proxy local pour lui tout en n'offrant que DIRECT/MFP à ses partages).
+    const isOwner = ownerKeyMatches(parsed.ownerKey);
+    const allowed = allowedModes();
+    const proxy: 'local' | 'mediaflow' | 'direct' = (isOwner || allowed.includes(parsed.proxy)) ? parsed.proxy : allowed[0];
+
+    // Validate MediaFlow URL if provided
+    if (parsed.mfUrl && !isValidUrl(parsed.mfUrl)) {
+      console.warn('[Config] Invalid MediaFlow URL');
+      return null;
+    }
+
+    // Validate preferences
+    const validQualities = ['4K', '1080p', '720p', '480p'];
+    const validLangs = ['MULTI', 'VF', 'VOSTFR', 'VO'];
+
+    let prefQuality = parsed.prefQuality;
+    if (prefQuality && !validQualities.includes(prefQuality)) {
+      prefQuality = '1080p'; // Default
+    }
+
+    let langOrder = parsed.langOrder;
+    if (langOrder && Array.isArray(langOrder)) {
+      // Filter to valid languages only
+      langOrder = langOrder.filter((l: string) => validLangs.includes(l));
+      if (langOrder.length === 0) langOrder = undefined;
+    } else {
+      langOrder = undefined;
+    }
+
+    // 0 disables the early exit (wait for every source); cap it so a bogus value
+    // can't turn the fan-out into an unbounded wait.
+    let minStreams = Number(parsed.minStreams);
+    if (!Number.isFinite(minStreams) || minStreams < 0) minStreams = DEFAULT_MIN_STREAMS;
+    minStreams = Math.min(Math.round(minStreams), 30);
+
+    // Priorité de tri : 'quality' (qualité d'abord) sinon 'language' (défaut).
+    const sortBy: 'language' | 'quality' = parsed.sortBy === 'quality' ? 'quality' : 'language';
+
+    // Qualités à exclure (opt-in) : sous-ensemble des paliers offerts + 'unknown' (sources
+    // « HD »/non mesurées, traitées à part — cf. isUnknownQuality dans prefs.ts). Vide -> absent.
+    const validExclude = ['4K', '1080p', '720p', '480p', '360p', 'unknown'];
+    let excludeQualities = Array.isArray(parsed.excludeQualities)
+      ? parsed.excludeQualities.filter((q: unknown) => typeof q === 'string' && validExclude.includes(q))
+      : undefined;
+    if (excludeQualities && excludeQualities.length === 0) excludeQualities = undefined;
+
+    // Sanitize strings
+    return {
+      proxy,
+      mfUrl: parsed.mfUrl ? sanitizeString(parsed.mfUrl, 500) : undefined,
+      mfPass: parsed.mfPass ? sanitizeString(parsed.mfPass, 100) : undefined,
+      // ⚠️ 512, PAS 64 : un token v4 (« API Read Access Token ») est un JWT de ~240 car.
+      // Tronqué à 64 il perd ses 2e/3e parties -> tmdbKeyType ne le voit plus comme v4 ->
+      // repart en ?api_key= avec un token cassé -> 401 -> aucun flux. (v3 = 32 hex, OK.)
+      tmdbKey: parsed.tmdbKey ? sanitizeString(parsed.tmdbKey, 512) : undefined,
+      accessKey: parsed.accessKey ? sanitizeString(parsed.accessKey, 128) : undefined,
+      ownerKey: parsed.ownerKey ? sanitizeString(parsed.ownerKey, 128) : undefined,
+      prefQuality,
+      langOrder,
+      minStreams,
+      sortBy,
+      strictFilter: parsed.strictFilter === true,
+      pseudo: parsed.pseudo !== undefined ? (sanitizePseudo(parsed.pseudo) || undefined) : undefined,
+      excludeQualities,
+      // Compat : les URLs d'installation distribuées AVANT le renommage portent
+      // l'ancien nom de champ. On lit les deux et on n'écrit plus que le nouveau —
+      // sans ce repli, tout utilisateur déjà appairé serait déconnecté silencieusement.
+      nkstrmToken: (() => {
+        const v = (typeof parsed.nkstrmToken === 'string' ? parsed.nkstrmToken : undefined)
+          ?? (typeof parsed.nakastreamToken === 'string' ? parsed.nakastreamToken : undefined);
+        return (typeof v === 'string' && /^[A-Za-z0-9._-]{10,120}$/.test(v)) ? v : undefined;
+      })(),
+      // Sous-titres : activés par DÉFAUT (undefined -> true) pour ne rien changer aux configs
+      // existantes ; seul un `false` explicite désactive.
+      subs: parsed.subs !== false,
+      extSubs: parsed.extSubs !== false,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Garde des routes /:config/* : si ACCESS_KEY est active et que le config ne
+// porte pas la bonne clé, répond 401 et renvoie true (l'appelant doit `return`).
+function denyIfNoAccess(config: UserConfig | null, res: express.Response): boolean {
+  if (accessEnabled() && !keyMatches(config?.accessKey)) {
+    res.status(401).send("Non autorisé : clé d'accès requise ou invalide");
+    return true;
+  }
+  return false;
+}
+
+// ============================================
+// STREAM FILTERING AND SORTING
+// ============================================
+const DEFAULT_LANG_ORDER = ['MULTI', 'VF', 'VOSTFR', 'VO'];
+
+// ============================================
+// SOURCE FAN-OUT WITH EARLY EXIT
+// ============================================
+// Sources are queried in parallel, but the response used to wait for the very
+// last one — so a single slow source set the response time for everybody.
+// Instead we answer as soon as we hold enough streams in the languages the user
+// actually asked for. Sources still in flight are NOT cancelled: they keep
+// running and fill the cache, so the next request for the same title gets them
+// instantly.
+const DEFAULT_MIN_STREAMS = 5;
+const EARLY_EXIT_GRACE_MS = 1000;   // never answer before this — lets near-tied sources land
+const EARLY_EXIT_DEADLINE_MS = 20000; // hard ceiling, even if the target is never met
+
+interface SourceTask<T> {
+  name: string;
+  promise: Promise<T[]>;
+  /** How many of these results match the user's language preference. */
+  countWanted: (results: T[]) => number;
+}
+
+/**
+ * Resolves to one result array per task, in order. A task that hasn't settled
+ * when we stop waiting yields an empty array.
+ */
+function collectSources(
+  tasks: SourceTask<any>[],
+  minStreams: number,
+  onDone: (reason: string, elapsedMs: number) => void,
+  waitFor: number[] = []
+): Promise<any[][]> {
+  const results: any[][] = tasks.map(() => []);
+  // minStreams === 0 means the user opted out of the early exit.
+  if (minStreams <= 0) {
+    return Promise.all(tasks.map(t => t.promise)).then(all => {
+      onDone('toutes les sources', 0);
+      return all;
+    });
+  }
+
+  return new Promise<any[][]>(resolve => {
+    const started = Date.now();
+    let pending = tasks.length;
+    let wanted = 0;
+    let settled = false;
+    // Indices de tâches DÉJÀ réglées : l'early-exit est bloqué tant que toutes les
+    // tâches `waitFor` (sources anime, lentes mais essentielles) ne sont pas réglées.
+    const settledIdx = new Set<number>();
+    const mustWaitReady = () => waitFor.every(i => settledIdx.has(i));
+
+    const finish = (reason: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(graceTimer);
+      clearTimeout(deadlineTimer);
+      onDone(reason, Date.now() - started);
+      // Shallow copy: each slot is replaced wholesale, so this is a true snapshot
+      // even though late tasks keep writing into `results`.
+      resolve(results.slice());
+    };
+
+    const check = () => {
+      if (settled) return;
+      if (pending === 0) return finish('toutes les sources');
+      if (wanted >= minStreams && Date.now() - started >= EARLY_EXIT_GRACE_MS && mustWaitReady()) {
+        finish(`early exit (${wanted} streams voulus)`);
+      }
+    };
+
+    tasks.forEach((task, i) => {
+      task.promise
+        .then(r => {
+          results[i] = r;
+          wanted += task.countWanted(r);
+        })
+        .catch(() => { /* per-source catch already returns [] upstream */ })
+        .then(() => { pending--; settledIdx.add(i); check(); });
+    });
+
+    const graceTimer = setTimeout(check, EARLY_EXIT_GRACE_MS);
+    const deadlineTimer = setTimeout(() => finish('deadline atteinte'), EARLY_EXIT_DEADLINE_MS);
+  });
+}
+
+/**
+ * Would this stream survive the user's filters? Single source of truth, used
+ * both to decide when we have "enough" streams (early exit) and to do the final
+ * filtering — if the two ever disagreed we'd exit early on streams that then
+ * get dropped, and return fewer than the user asked for.
+ *
+ * Any accepted language and any accepted quality counts: 3 VF + 2 VOSTFR is
+ * five results, and so is 3×1080p + 2×720p.
+ */
+/** Counts a source's results that pass the user's LANGUAGE prefs + quality exclusion. */
+function wantedCounter(source: string, langOrder: string[], excludeQualities?: string[]) {
+  return (results: { language?: string; quality?: string }[]) =>
+    results.filter(r =>
+      passesPreferences({ quality: r.quality || '', language: r.language || '', source }, langOrder, excludeQualities)
+    ).length;
+}
+
+function filterAndSortStreams(streams: StreamWithMeta[], config: UserConfig | null): StreamWithMeta[] {
+  if (!config) return streams;
+
+  const prefQuality = config.prefQuality || '1080p';
+  const langOrder = config.langOrder || DEFAULT_LANG_ORDER;
+  const prefQualityScore = QUALITY_SCORES[prefQuality] || 3;
+
+  // Filter streams based on preferences (same predicate the early exit counts with).
+  // Langue + exclusion de qualité opt-in (excludeQualities) ; la qualité départage au tri.
+  let filtered = streams.filter(s => passesPreferences(s._meta, langOrder, config.excludeQualities));
+
+  // Filtre strict vide. Deux comportements au CHOIX de l'utilisateur (config.strictFilter) :
+  //  - STRICT (strictFilter=true) : on respecte les exclusions à la lettre -> liste VIDE assumée.
+  //  - SOUPLE (défaut) : dégradation gracieuse -> on relâche la LANGUE (préférence) mais on GARDE
+  //    l'exclusion de qualité (choix explicite -> jamais réafficher un palier exclu, ex. 360p/480p
+  //    sur Toy Story 5 non sorti). Dernier recours (rien ne passe même l'exclusion) : tout.
+  if (filtered.length === 0 && !config.strictFilter) {
+    filtered = streams.filter(s => passesPreferences(s._meta, DEFAULT_LANG_ORDER, config.excludeQualities));
+    if (filtered.length === 0) filtered = streams;
+  }
+
+  // Tri : langue d'abord (défaut) ou qualité d'abord, selon config.sortBy.
+  const sortBy = config.sortBy || 'language';
+  filtered.sort((a, b) => compareStreams(a._meta, b._meta, { langOrder, prefQualityScore, sortBy }));
+
+  return filtered;
+}
+
+// Check if HLS manifest needs transformer (has .jpg segments that are actually .ts)
+async function needsTransformer(hlsUrl: string): Promise<boolean> {
+  try {
+    const headers = {
+      'Referer': 'https://net52.cc/',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    };
+    const resp = await axios.get(hlsUrl, { headers, timeout: 5000 });
+    const manifest = resp.data;
+
+    // Check master manifest for .jpg
+    if (manifest.includes('.jpg')) {
+      return true;
+    }
+
+    // Check first variant playlist for .jpg segments
+    const variantMatch = manifest.match(/https?:\/\/[^\s]+\.m3u8[^\s]*/);
+    if (variantMatch) {
+      try {
+        const variantResp = await axios.get(variantMatch[0], { headers, timeout: 5000 });
+        if (variantResp.data.includes('.jpg')) {
+          return true;
+        }
+      } catch {
+        // Ignore variant check errors
+      }
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+// Check if URL is HLS or direct file
+function isHlsUrl(url: string): boolean {
+  return url.includes('.m3u8');
+}
+
+// Build proxy URL (local or MediaFlow)
+function buildProxyUrl(
+  streamUrl: string,
+  headers: Record<string, string>,
+  useTransformer: boolean = false,
+  req?: express.Request,
+  config?: UserConfig | null,
+  forceLocal: boolean = false,
+  forceHls: boolean = false
+): string | null {
+  // AUTO_WHITELIST (côté serveur, sûr) : ce domaine sort de NOTRE pipeline
+  // d'extraction (pas d'une requête client), on l'apprend AVANT le contrôle
+  // d'allowlist pour qu'un nouveau CDN de source passe sans intervention. Le
+  // blocage des IP privées (dans isAllowedUrl) reste la garde SSRF.
+  if (autoWhitelistEnabled()) {
+    try { addAllowedDomain(new URL(streamUrl).hostname); } catch { /* url invalide -> isAllowedUrl tranche */ }
+  }
+
+  // SECURITY: Validate stream URL before proxying (applies to both local and MediaFlow)
+  const validation = isAllowedUrl(streamUrl);
+  if (!validation.allowed) {
+    console.warn(`[BuildProxy] Blocked URL: ${validation.reason} - ${streamUrl}`);
+    return null; // Return null for blocked URLs
+  }
+
+  // forceLocal: some sources (NetMirror netfree HLS) require the local proxy —
+  // their segment token is bound to the fetcher's IP and segments are .jpg-disguised
+  // mpeg-ts that only the local /proxy transformer rewrites to video/mp2t.
+  const useLocal = forceLocal || (config ? config.proxy === 'local' : DEFAULT_USE_LOCAL_PROXY);
+  const mfUrl = config?.mfUrl || DEFAULT_MEDIAFLOW_URL;
+  const mfPass = config?.mfPass || DEFAULT_MEDIAFLOW_PASSWORD;
+
+  if (useLocal && req) {
+    // Use local proxy
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    const baseUrl = `${proto}://${host}`;
+
+    // Choose endpoint based on stream type
+    const endpoint = (forceHls || isHlsUrl(streamUrl)) ? '/proxy/manifest' : '/proxy/stream';
+    const proxyUrl = new URL(endpoint, baseUrl);
+    proxyUrl.searchParams.set('url', streamUrl);
+
+    if (useTransformer) {
+      proxyUrl.searchParams.set('transformer', 'ts_stream');
+    }
+
+    // NetMirror (forceLocal) masters carry 20+ audio tracks; trim to the useful
+    // languages so the player doesn't fetch every rendition before playback.
+    // The DEFAULT track (original/VO) is always kept by the proxy on top of these.
+    if (forceLocal) {
+      proxyUrl.searchParams.set('audio', 'fr,en,und');
+    }
+
+    for (const [key, value] of Object.entries(headers)) {
+      proxyUrl.searchParams.set(`h_${key.toLowerCase()}`, value);
+    }
+
+    return signUrl(proxyUrl).toString();
+  } else {
+    // Use MediaFlow
+    if (!mfUrl) {
+      console.error('[Proxy] MediaFlow URL not configured!');
+      return streamUrl; // Fallback to direct URL
+    }
+
+    // HLS -> MediaFlow HLS proxy; direct files (mp4/mkv) -> MediaFlow stream proxy
+    // (forwards Range for seeking). Sending an mp4 to the HLS endpoint 403s.
+    const endpoint = (forceHls || isHlsUrl(streamUrl)) ? '/proxy/hls/manifest.m3u8' : '/proxy/stream';
+    const proxyUrl = new URL(endpoint, mfUrl);
+    proxyUrl.searchParams.set('api_password', mfPass);
+    proxyUrl.searchParams.set('d', streamUrl);
+
+    if (useTransformer) {
+      proxyUrl.searchParams.set('transformer', 'ts_stream');
+    }
+
+    for (const [key, value] of Object.entries(headers)) {
+      proxyUrl.searchParams.set(`h_${key.toLowerCase()}`, value);
+    }
+
+    return proxyUrl.toString();
+  }
+}
+
+// Décide comment livrer un flux. En mode `direct` (hôte directable, pas
+// forceLocal), renvoie l'URL CDN BRUTE + les headers -> le draft posera
+// behaviorHints.proxyHeaders et Stremio fetch en direct (0 bande passante
+// serveur). Sinon, comportement actuel via buildProxyUrl (proxy local/mediaflow).
+// `null` = URL bloquée (SSRF) côté proxy.
+// Un hôte exige-t-il des en-têtes (Referer/Origin) pour livrer, ou le token dans
+// l'URL suffit-il ? Caché par hôte (6h). Détermine, en direct, si on peut servir
+// l'URL BRUTE (notWebReady:false -> lecteur natif Stremio, rapide + parallèle) ou
+// s'il faut proxyHeaders (notWebReady:true -> serveur interne Stremio, plus lent).
+// UA navigateur injecté dans les proxyHeaders des hôtes header-gatés.
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
+// Hôtes qui servent une MIRE (/troll/ de ~18s) selon l'User-Agent : ils exigent
+// un UA « navigateur » et trollent les UA de lecteur. PROUVÉ pour fsvid : même URL
+// index, UA navigateur -> vrai film (650 seg) ; ExoPlayerLib/okhttp/VLC -> mire
+// (9 seg / 18s). Nuvio lit via ExoPlayer -> troll en URL brute. Ces hôtes doivent
+// donc être servis AVEC proxyHeaders (UA navigateur), jamais en URL brute — le
+// lecteur injecte alors le bon UA. Onyx fait pareil (headers navigateur complets).
+// AUSSI les hôtes gatés par REFERER (même logique : servir AVEC proxyHeaders, jamais
+// en URL brute) : la sonde hostNeedsHeaders est bernée sinon — sans Referer, ces CDN
+// renvoient 200 sur une page-gate (ex. citron-edge de StreamFlix -> redirige vers un
+// lien Telegram t.me) que la sonde prend pour "header-free". PROUVÉ citron-edge :
+// sans Referer -> gate t.me ; avec Referer streamflix.mom -> 206 video/mp4.
+// mailru (my.mail.ru, VoirAnime) : la sonde 2-octets voit un 206 sans Referer, mais le
+// CDN BRIDE le download soutenu sans lui (mesuré : 7,3 Mbps sans Referer vs 10,7 avec).
+// Livré en URL brute -> le client rame sur un 1080p ~5,8 Mbps. Reste DIRECT (0 bande
+// passante serveur), juste servi AVEC le Referer d'extraction en proxyHeaders.
+const UA_GATED_HOSTS = ['fsvid', 'citron-edge', 'my.mail.ru'];
+function isUaGatedHost(host: string): boolean {
+  return UA_GATED_HOSTS.some(p => host.includes(p));
+}
+
+const HOSTHDR_TTL_MS = 6 * 60 * 60 * 1000;
+async function hostNeedsHeaders(streamUrl: string): Promise<boolean> {
+  let host: string;
+  try { host = new URL(streamUrl).hostname; } catch { return true; }
+  // Hôte qui troll selon l'UA -> exige des headers (UA navigateur), pas d'URL brute.
+  if (isUaGatedHost(host)) return true;
+  return cached<boolean>(
+    `hosthdr:${host}`,
+    HOSTHDR_TTL_MS,
+    async () => {
+      try {
+        const r = await axios.get(streamUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0', Range: 'bytes=0-1' },
+          validateStatus: () => true, timeout: 4000, maxRedirects: 3, responseType: 'arraybuffer',
+        });
+        return !(r.status === 200 || r.status === 206); // 200/206 sans Referer -> header-free
+      } catch { return true; } // doute -> chemin sûr (avec headers)
+    },
+    { scope: 'hosthdr', shouldCache: () => true },
+  );
+}
+
+// Hôtes « directables » à relayer quand un PROXY est actif (local/mediaflow) car
+// injouables depuis une IP cliente — en direct pur, best-effort (direct+Referer).
+// Vérifié sur ligne stable (2026-08-06) : SEUL mail.ru rame vraiment en direct (CDN
+// russe, gros fichiers ~5,8 Mbps, peering lointain). fsvid/vidzy (troll UA, réglé) et
+// sibnet (chaîne 302 résolue) jouent NICKEL en direct -> volontairement absents ici.
+// mail.ru retiré (test 2026-08-07) : Stick veut le tester en DIRECT (économise la bande
+// MFP). Le CDN russe peut ramer sur du gros fichier -> réintégrer ici si ça pose souci.
+const PREFER_PROXY_HOSTS: string[] = [];
+function isPreferProxyHost(streamUrl: string): boolean {
+  let host: string;
+  try { host = new URL(streamUrl).hostname; } catch { return false; }
+  return PREFER_PROXY_HOSTS.some(d => host === d || host.endsWith('.' + d));
+}
+
+async function deliver(
+  streamUrl: string,
+  headers: Record<string, string>,
+  opts: { forceLocal?: boolean; forceHls?: boolean; useTransformer?: boolean; forceProxy?: boolean; fixAudioHls?: boolean },
+  req: express.Request,
+  config: UserConfig | null,
+): Promise<{ url: string; proxyHeaders?: Record<string, string> } | null> {
+  // vidzy.cc : JA3-gaté (fingerprinting TLS, ~mi-oct. 2026). Jouable UNIQUEMENT via
+  // notre proxy LOCAL, qui délègue le fetch au sidecar curl_cffi (empreinte Chrome).
+  // NI le direct (Nuvio okhttp -> leurre bouclé) NI MediaFlow (httpx -> leurre) ne
+  // marchent -> on force le proxy local quel que soit le mode, gaté owner/local
+  // (sinon on écarte : mieux qu'un flux mort). Doit passer AVANT canDirect/forceProxy.
+  if (/vidzy\.cc/i.test(streamUrl)) {
+    const localAllowed = allowedModes().includes('local') || ownerKeyMatches(config?.ownerKey);
+    if (!localAllowed) return null;
+    const purl = buildProxyUrl(streamUrl, headers, false, req, config, true, opts.forceHls ?? false);
+    return purl ? { url: purl } : null;
+  }
+
+  // Hôte russe + l'utilisateur a un proxy (local/mediaflow) : relayer plutôt que servir
+  // en direct (qui rame côté client). En direct pur, on retombe sur le direct+Referer.
+  const preferProxy = isPreferProxyHost(streamUrl) && !!config && config.proxy !== 'direct';
+
+  // forceProxy : le flux DOIT passer par le proxy DU MODE (Videasy header-gaté) — jamais
+  // en direct. En MFP -> MediaFlow, en local -> proxy local, en direct pur -> écarté
+  // (return null plus bas). Contrairement à forceLocal, il NE force PAS le proxy local :
+  // il respecte le mode -> pas de fuite « proxy local » quand seul MFP/direct est autorisé.
+  if (!opts.forceProxy && !preferProxy && canDirect(streamUrl, !!opts.forceLocal)) {
+    // Master HLS multi-audio livré en direct : beaucoup déclarent des pistes audio
+    // séparées sans DEFAULT=YES -> « vidéo sans son » sur les players stricts, et un
+    // stream direct ne peut PAS être réécrit côté player. On sert le master corrigé via
+    // /proxy/fixaudio (injecte DEFAULT=YES), les enfants restent en ABSOLU CDN -> segments
+    // toujours en direct (pas de bande passante chez nous). Reste « direct » pour le badge.
+    if (opts.fixAudioHls && (opts.forceHls || isHlsUrl(streamUrl))) {
+      const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+      const host = (req.headers['x-forwarded-host'] as string) || req.headers.host;
+      const u = new URL('/proxy/fixaudio', `${proto}://${host}`);
+      u.searchParams.set('url', streamUrl);
+      for (const [k, v] of Object.entries(headers)) u.searchParams.set(`h_${k.toLowerCase()}`, v);
+      return { url: signUrl(u).toString() };
+    }
+    // Hôte header-free -> URL brute (lecteur natif Stremio, rapide). Sinon
+    // proxyHeaders (nécessaire, mais passe par le serveur interne Stremio, lent).
+    const needsHdr = await hostNeedsHeaders(streamUrl);
+    if (!needsHdr) return { url: streamUrl };
+    // Header-gaté : garantir un UA navigateur dans les proxyHeaders (fsvid & co
+    // trollent les UA de lecteur ExoPlayer/okhttp). Un UA explicite de l'extracteur
+    // reste prioritaire ; sinon on force le navigateur.
+    return { url: streamUrl, proxyHeaders: { 'User-Agent': BROWSER_UA, ...headers } };
+  }
+  // Flux NON-directable (NetMirror / hôte bloqué) : le mode choisit le fallback.
+  // 'direct' = « sans proxy » -> on n'offre pas ce flux du tout.
+  if (config?.proxy === 'direct') return null;
+  const url = buildProxyUrl(
+    streamUrl, headers, opts.useTransformer ?? false, req, config,
+    opts.forceLocal ?? false, opts.forceHls ?? false,
+  );
+  return url ? { url } : null;
+}
+
+// Déduit le mode de livraison d'un flux finalisé (pour le badge d'affichage) :
+// direct (CDN->client, 0 relais), local (notre /proxy ou /netmirror) ou mediaflow.
+// Un proxy est-il réellement disponible pour ce config ? `proxy: 'local'` n'arrive ici que
+// s'il est autorisé (parseConfig rabat sinon sur le 1er mode permis) ; en `mediaflow`, il
+// faut une URL MediaFlow, faute de quoi buildProxyUrl renverrait l'URL BRUTE.
+function proxyAvailable(config: UserConfig | null): boolean {
+  if (config?.proxy === 'direct') return false;
+  if (config?.proxy === 'local') return true;
+  return !!(config?.mfUrl || DEFAULT_MEDIAFLOW_URL) || (!config && DEFAULT_USE_LOCAL_PROXY);
+}
+
+function computeDelivery(url: string, hasProxyHeaders: boolean, config: UserConfig | null): 'direct' | 'local' | 'mediaflow' {
+  if (hasProxyHeaders) return 'direct';
+  // MediaFlow d'ABORD : ses URLs contiennent /proxy/hls/ dans le chemin, il ne
+  // faut pas les confondre avec notre proxy local (distinction par l'hôte).
+  const mfUrl = config?.mfUrl || DEFAULT_MEDIAFLOW_URL;
+  if (mfUrl) {
+    try { if (new URL(url).hostname.includes(new URL(mfUrl).hostname)) return 'mediaflow'; } catch { /* ignore */ }
+  }
+  if (url.includes('/proxy/fixaudio')) return 'direct'; // master corrigé, segments en direct CDN
+  if (url.includes('/proxy/') || url.includes('/netmirror/')) return 'local';
+  // /zenix/ : notre endpoint rejoue la chaîne puis REDIRIGE vers le proxy du mode
+  // (MFP ou local) — le cookie de session étant exigé au téléchargement, ce flux
+  // n'est jamais servi en direct. Le badge suit donc le mode configuré.
+  if (url.includes('/zenix/')) return (config?.mfUrl || DEFAULT_MEDIAFLOW_URL) ? 'mediaflow' : 'local';
+  // /worldivx/ : même principe (résolution au clic puis proxy du mode).
+  if (url.includes('/worldivx/')) return (config?.mfUrl || DEFAULT_MEDIAFLOW_URL) ? 'mediaflow' : 'local';
+  if (url.includes('/moviebox/')) return 'direct'; // 302 -> CDN, aucun relais serveur
+  return 'direct'; // URL CDN brute sans en-têtes = pas de relais
+}
+
+// CORS for Stremio
+app.use((_req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  next();
+});
+
+// Apply global rate limiting (100 req/min for API, applies to all routes)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+app.use(apiLimiter as any);
+
+// Local HLS proxy (has its own higher limit via proxyLimiter applied internally if needed)
+app.use('/proxy', proxyRouter);
+
+// Clé d'accès : les endpoints de flux auto-générés (appelés directement par le
+// player, hors chaîne /:config) exigent `?k=` quand ACCESS_KEY est active.
+// (Le proxy gère sa propre garde en interne pour épargner /proxy/domains au bot.)
+app.use(['/netmirror', '/moviebox', '/nabistream'], requireQueryKey);
+
+// Manifest generator. Config-aware : si l'utilisateur a coupé les sous-titres LooStream
+// (config.subs === false), on RETIRE la ressource 'subtitles' du manifeste -> LooStream
+// disparaît carrément du sélecteur de sous-titres de Stremio (il n'est même plus interrogé).
+function getManifest(req: express.Request, config?: UserConfig | null) {
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  const baseUrl = `${proto}://${host}`;
+
+  const resources = config?.subs === false ? ['stream'] : ['stream', 'subtitles'];
+
+  return {
+    id: 'community.loostream.stremio',
+    version: '1.31.0',
+    name: 'LooStream',
+    logo: `${baseUrl}/logo.png`,
+    description: 'Netflix, Prime, Disney+ mirrors + StreamFlix + Movix VF/VOSTFR',
+    resources,
+    types: ['movie', 'series'],
+    catalogs: [],
+    idPrefixes: ['tt', 'tmdb:'],
+    behaviorHints: {
+      configurable: true,
+      configurationRequired: false,
+    },
+  };
+}
+
+// Configure page
+app.get('/configure', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'configure.html'));
+});
+
+// Configure page with existing config (allows reconfiguration)
+app.get('/:config/configure', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'configure.html'));
+});
+
+// Cible de l'entrée-nudge « nkstrm déconnecté » (voir handleStream). L'entrée porte
+// cette `url` pour être visible sur les clients url-only (Nuvio, qui ignorent externalUrl) ;
+// au tap on redirige (302) vers la page configure pré-remplie pour re-pairer le token.
+// Pas un flux -> hors du gate requireQueryKey (qui ne couvre que /netmirror /moviebox /nabistream).
+app.get('/nkstrm/reconnect', (req, res) => {
+  const c = typeof req.query.c === 'string' ? req.query.c : '';
+  res.redirect(302, c ? `/${c}/configure` : '/configure');
+});
+
+// Test d'une clé TMDB (v3 api_key OU v4 Bearer) — utilisé par le wizard configure
+// (bouton « Tester » + validation à la génération). Public : ne teste que la clé fournie.
+app.get('/api/tmdb/check', async (req, res) => {
+  const key = String(req.query.key || '').trim();
+  if (!key) return res.json({ valid: false, type: 'unknown' });
+  const type = tmdbKeyType(key);
+  if (type === 'unknown') return res.json({ valid: false, type });
+  try {
+    const rq = tmdbReq('configuration', key);
+    const r = await axios.get(rq.url, { headers: rq.headers, timeout: 8000, validateStatus: () => true });
+    return res.json({ valid: r.status === 200, type, status: r.status });
+  } catch (e: any) {
+    return res.json({ valid: false, type, error: e?.message || 'réseau' });
+  }
+});
+
+// Test de la clé d'accès (si l'hébergeur en exige une). Pas de nouvel oracle : la route
+// /:config/manifest.json valide déjà la clé (200/401), et la clé est à haute entropie.
+app.get('/api/access/check', (req, res) => {
+  if (!accessEnabled()) return res.json({ valid: true, required: false });
+  const key = String(req.query.key || '');
+  return res.json({ valid: keyMatches(key), required: true });
+});
+
+// Unicité du pseudo : déjà utilisé par une clé TMDB DIFFÉRENTE ? (une clé peut avoir
+// plusieurs pseudos ; la re-config pré-remplit clé+pseudo -> même hash -> pas de collision).
+app.get('/api/pseudo/check', (req, res) => {
+  const pseudo = sanitizePseudo(String(req.query.pseudo || ''));
+  if (!pseudo) return res.json({ taken: false });
+  const taken = isPseudoTakenByOther(pseudo, tmdbKeyHash(String(req.query.key || '')));
+  return res.json({ taken });
+});
+// Revendique le pseudo à la GÉNÉRATION du lien (réserve pour cette clé si libre).
+app.post('/api/pseudo/claim', express.json({ limit: '4kb' }), (req, res) => {
+  const b = req.body || {};
+  const pseudo = sanitizePseudo(String(b.pseudo || ''));
+  if (!pseudo) return res.json({ ok: true });
+  const ok = claimPseudo(pseudo, tmdbKeyHash(String(b.key || '')));
+  return res.json({ ok, taken: !ok });
+});
+
+// Manifest without config (uses env defaults)
+app.get('/manifest.json', (req, res) => {
+  // Sans config, aucune clé possible : refusé si la protection est active.
+  if (accessEnabled()) return res.status(401).send("Non autorisé : clé d'accès requise");
+  res.json(getManifest(req));
+});
+
+// Manifest with config
+app.get('/:config/manifest.json', (req, res) => {
+  const config = parseConfig(req.params.config);
+  if (!config) {
+    return res.status(400).json({ error: 'Invalid configuration' });
+  }
+  if (denyIfNoAccess(config, res)) return;
+  res.json(getManifest(req, config));
+});
+
+// TMDB API helper
+const DEFAULT_TMDB_KEY = process.env.TMDB_API_KEY || '';
+
+// Hash court de la clé TMDB : identifie « le même utilisateur » pour l'unicité du pseudo
+// (une clé peut porter PLUSIEURS pseudos ; un pseudo ne peut appartenir qu'à UNE clé).
+function tmdbKeyHash(key: string): string {
+  const k = (key || '').trim();
+  return k ? crypto.createHash('sha256').update(k).digest('hex').slice(0, 16) : '';
+}
+
+const TMDB_TTL_MS = 12 * 60 * 60 * 1000;
+
+// isAnimation : genre TMDB Animation (16). Distingue l'anime d'un drama japonais en
+// prises de vues réelles (Iryu…) — `ja` seul envoyait ces dramas aux sources anime.
+// Optionnel : absent des entrées tmdb:info déjà en cache -> traité comme « inconnu ».
+type MediaInfo = { title: string; originalTitle: string; frenchTitle: string; year: string; tmdbId: string; imdbId: string; originalLanguage: string; posters: string[]; isAnimation?: boolean };
+
+// Repli Cinemeta (métadonnées IMDB de Stremio) quand TMDB ne connaît pas l'IMDB — FRÉQUENT
+// pour l'anime à entrée IMDB séparée (ex. « Bleach: Thousand-Year Blood War » tt14986406,
+// que TMDB range sous la série d'origine). On récupère titre + année et on détecte l'anime
+// (genre Animation + pays Japon) pour que les scrapers titre-keyés (VoirAnime/AnimeSama)
+// tournent. tmdbId reste vide -> les sources tmdb-keyées renvoient simplement vide.
+async function cinemetaInfo(type: string, id: string): Promise<MediaInfo | null> {
+  try {
+    const kind = type === 'movie' ? 'movie' : 'series';
+    const { data } = await axios.get(`https://v3-cinemeta.strem.io/meta/${kind}/${id}.json`, { timeout: 8000 });
+    const m = data?.meta;
+    if (!m?.name) return null;
+    const year = (String(m.year || m.releaseInfo || '').match(/\d{4}/) || [''])[0];
+    const genres = Array.isArray(m.genres) ? m.genres.map((g: any) => String(g).toLowerCase()) : [];
+    const isAnime = genres.includes('animation') && /japan|jp/i.test(String(m.country || ''));
+    console.log(`[Stream] TMDB manquant -> repli Cinemeta: "${m.name}" (${year})${isAnime ? ' [anime]' : ''}`);
+    return {
+      title: m.name, originalTitle: m.name, frenchTitle: '', year,
+      tmdbId: '', imdbId: id, originalLanguage: isAnime ? 'ja' : '', posters: [], isAnimation: isAnime,
+    };
+  } catch { return null; }
+}
+
+// Season-mapping ANIME pour les sources tmdb-keyées (Movix…). Nuvio traite un cour d'anime
+// comme SA propre série (ex. « Bleach: TYBW » S1E1), alors que TMDB le range sous la série
+// parente avec des saisons décalées (Bleach tmdb 30984, TYBW = saison 2, 50 ép). On mappe
+// par DATE DE DIFFUSION : date de l'épisode demandé (Cinemeta) -> série parente (recherche
+// titre) -> saison+épisode TMDB de même date. Caché (résultat stable).
+async function resolveAnimeTmdbMapping(imdbId: string, title: string, season: number, episode: number, tmdbKey: string): Promise<{ tmdbId: string; season: number; episode: number } | null> {
+  if (!imdbId || !tmdbKey) return null;
+  return cached(`animemap:${imdbId}:${season}:${episode}`, TMDB_TTL_MS, async () => {
+    try {
+      const { data: cine } = await axios.get(`https://v3-cinemeta.strem.io/meta/series/${imdbId}.json`, { timeout: 8000 });
+      const vid = (cine?.meta?.videos || []).find((v: any) => Number(v.season) === season && Number(v.episode) === episode);
+      const air = String(vid?.released || vid?.firstAired || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(air)) return null;
+      const airT = Date.parse(air);
+      const base = (title.split(/\s*[:–—-]\s+/)[0] || title).trim();
+      const rq1 = tmdbReq(`search/tv?query=${encodeURIComponent(base)}`, tmdbKey);
+      const { data: search } = await axios.get(rq1.url, { headers: rq1.headers, timeout: 8000 });
+      const cand = (search?.results || [])[0];
+      if (!cand) return null;
+      const rq2 = tmdbReq(`tv/${cand.id}`, tmdbKey);
+      const { data: det } = await axios.get(rq2.url, { headers: rq2.headers, timeout: 8000 });
+      const seasons = (det?.seasons || []).filter((s: any) => s.season_number > 0 && s.air_date)
+        .sort((a: any, b: any) => Date.parse(a.air_date) - Date.parse(b.air_date));
+      let target: any = null;
+      for (const s of seasons) if (Date.parse(s.air_date) <= airT + 2 * 864e5) target = s; // dernière saison commençant avant la date
+      if (!target) return null;
+      const rq3 = tmdbReq(`tv/${cand.id}/season/${target.season_number}`, tmdbKey);
+      const { data: sd } = await axios.get(rq3.url, { headers: rq3.headers, timeout: 8000 });
+      const ep = (sd?.episodes || []).find((e: any) => e.air_date && Math.abs(Date.parse(e.air_date) - airT) <= 2 * 864e5);
+      if (!ep) return null;
+      console.log(`[Stream] Anime mapping: ${imdbId} S${season}E${episode} -> tmdb ${cand.id} S${target.season_number}E${ep.episode_number} (${air})`);
+      return { tmdbId: String(cand.id), season: target.season_number, episode: ep.episode_number };
+    } catch { return null; }
+  }, { scope: 'tmdb', shouldCache: r => r !== null });
+}
+
+async function getTmdbInfo(type: string, id: string, config?: UserConfig | null): Promise<MediaInfo | null> {
+  const tmdbKey = config?.tmdbKey || DEFAULT_TMDB_KEY;
+
+  if (!tmdbKey) {
+    console.error('[TMDB] No API key configured!');
+    return null;
+  }
+
+  return cached(
+    `tmdb:info:${type}:${id}`,
+    TMDB_TTL_MS,
+    async () => {
+      try {
+        let tmdbId = id;
+
+        if (id.startsWith('tt')) {
+          const rqf = tmdbReq(`find/${id}?external_source=imdb_id`, tmdbKey);
+          const findResp = await axios.get(rqf.url, { headers: rqf.headers });
+          const results = type === 'movie' ? findResp.data.movie_results : findResp.data.tv_results;
+          if (!results || results.length === 0) return await cinemetaInfo(type, id); // TMDB ne mappe pas cet IMDB
+          tmdbId = String(results[0].id);
+        } else if (id.startsWith('tmdb:')) {
+          tmdbId = id.replace('tmdb:', '').split(':')[0];
+        }
+
+        const endpoint = type === 'movie' ? 'movie' : 'tv';
+        // Détails EN + FR en parallèle : les sites FR indexent par titre français,
+        // mais on ne veut pas payer un aller-retour TMDB séquentiel de plus.
+        const rqEn = tmdbReq(`${endpoint}/${tmdbId}`, tmdbKey);
+        const rqFr = tmdbReq(`${endpoint}/${tmdbId}?language=fr-FR`, tmdbKey);
+        const [resp, frResp] = await Promise.all([
+          axios.get(rqEn.url, { headers: rqEn.headers }),
+          axios.get(rqFr.url, { headers: rqFr.headers }).catch(() => null),
+        ]);
+
+        const title = resp.data.title || resp.data.name;
+        // Original (romaji) title — anime often lives under it on FR sites
+        // (jigokuraku, shingeki-no-kyojin) rather than the English title.
+        const originalTitle = resp.data.original_title || resp.data.original_name || '';
+        const year = (resp.data.release_date || resp.data.first_air_date || '').split('-')[0];
+
+        let imdbId = id.startsWith('tt') ? id : (resp.data.imdb_id || '');
+        if (!imdbId) {
+          try {
+            const rqx = tmdbReq(`${endpoint}/${tmdbId}/external_ids`, tmdbKey);
+            const ext = await axios.get(rqx.url, { headers: rqx.headers });
+            imdbId = ext.data?.imdb_id || '';
+          } catch { /* imdbId optional */ }
+        }
+
+        const originalLanguage = String(resp.data.original_language || '').toLowerCase();
+        const isAnimation = Array.isArray(resp.data.genres) && resp.data.genres.some((g: any) => g?.id === 16);
+
+        // Titre FR (récupéré en parallèle plus haut) : les sites FR indexent
+        // par le titre français, pas l'anglais/original.
+        const frenchTitle = frResp?.data?.title || frResp?.data?.name || '';
+
+        // Posters TMDB (basename, sans le slash) EN + FR : servent aux sources qui
+        // affichent le poster TMDB dans leur recherche (leizy) pour un rapprochement
+        // EXACT par tmdbId, insensible aux homonymes. FR parfois différent de EN.
+        const posters = [...new Set(
+          [resp.data.poster_path, frResp?.data?.poster_path]
+            .filter(Boolean)
+            .map((p: string) => p.replace(/^\//, '')),
+        )];
+
+        return { title, originalTitle, frenchTitle, year, tmdbId, imdbId, originalLanguage, posters, isAnimation };
+      } catch (e) {
+        console.error('[TMDB] Error:', e);
+        return null;
+      }
+    },
+    { scope: 'tmdb', shouldCache: r => r !== null }
+  );
+}
+
+// Parse Stremio ID
+function parseStremioId(id: string): { baseId: string; season?: number; episode?: number } {
+  // Format: tt1234567 or tt1234567:1:1 or tmdb:12345 or tmdb:12345:1:1
+  const parts = id.split(':');
+
+  if (id.startsWith('tmdb:')) {
+    return {
+      baseId: `tmdb:${parts[1]}`,
+      season: parts[2] ? parseInt(parts[2]) : undefined,
+      episode: parts[3] ? parseInt(parts[3]) : undefined,
+    };
+  }
+
+  // IMDB format: tt1234567 or tt1234567:1:1
+  return {
+    baseId: parts[0], // Just the tt1234567 part
+    season: parts[1] ? parseInt(parts[1]) : undefined,
+    episode: parts[2] ? parseInt(parts[2]) : undefined,
+  };
+}
+
+// Stream handler (shared logic)
+async function handleStream(req: express.Request, res: express.Response, type: string, id: string, config: UserConfig | null) {
+  console.log(`[Stream] Request for ${type}/${id} (proxy: ${config?.proxy || 'default'})`);
+
+  // Pseudo OBLIGATOIRE : sans pseudo dans la config, l'addon ne sert AUCUN flux. On
+  // renvoie une entrée informative (externalUrl) qui ouvre /configure — avec la config
+  // actuelle pré-remplie quand elle existe — pour que l'utilisateur ajoute son pseudo.
+  if (!sanitizePseudo(config?.pseudo)) {
+    const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+    const host = (req.headers['x-forwarded-host'] as string) || req.headers.host;
+    const base = `${proto}://${host}`;
+    const cfgParam = (req.params as { config?: string }).config;
+    const cfgUrl = cfgParam ? `${base}/${cfgParam}/configure` : `${base}/configure`;
+    console.log('[Stream] ⛔ Pseudo requis — aucun flux servi (config sans pseudo)');
+    return res.json({ streams: [{
+      name: 'LooStream ⚠️',
+      title: 'Pseudo requis\nOuvre la configuration et ajoute un pseudo pour activer l\'addon.',
+      externalUrl: cfgUrl,
+    }] });
+  }
+
+  // Tracking Users (logs détaillés par utilisateur). `recTitle`/`perSourceSummary` sont hors
+  // du try pour rester lisibles dans le catch. `record` ne LIT PAS `info` (sinon on perd le
+  // narrowing de `const info`) : le titre passe par `recTitle`. `log` complet stocké pour les
+  // problèmes (empty/error) ou si captureAllLogs, sinon rien (échelle).
+  const who = pseudoLabel(config?.pseudo);
+  const whoKeyHash = tmdbKeyHash(config?.tmdbKey || DEFAULT_TMDB_KEY);
+  let recTitle: string | undefined;
+  const perSourceSummary: Record<string, number> = {};
+  const record = (streams: number, outcome: 'ok' | 'empty' | 'error') => {
+    const logForOutcome = (outcome !== 'ok' || captureAllLogsEnabled()) ? capturedLines() : null;
+    recordUserActivity(who, {
+      mediaType: type, contentId: id, title: recTitle,
+      streams, outcome, detail: JSON.stringify(perSourceSummary), log: logForOutcome,
+    }, whoKeyHash);
+  };
+
+  try {
+    const parsed = parseStremioId(decodeURIComponent(id));
+    const info = await getTmdbInfo(type, parsed.baseId, config);
+
+    if (!info) {
+      console.log('[Stream] Could not get TMDB info');
+      record(0, 'empty');
+      return res.json({ streams: [] });
+    }
+    recTitle = info.title;
+    // Anime = japonais ET animation. `!== false` : une entrée tmdb:info d'avant le champ
+    // (undefined) garde l'ancien comportement jusqu'à expiration du cache.
+    const isJaAnime = info.originalLanguage === 'ja' && info.isAnimation !== false;
+
+    console.log(`[Stream] 👤 ${who} · Title: ${info.title} (${info.year})`);
+
+    // Sous-titres FR externes (OpenSubtitles) : nombre dispo pour le titre, calculé
+    // EN PARALLÈLE des scrapers (caché 12h) et affiché sur chaque carte (🇫🇷 N).
+    const frSubsPromise = info.imdbId
+      ? getFrenchSubtitles(info.imdbId, type === 'series' ? parsed.season : undefined, type === 'series' ? parsed.episode : undefined).catch(() => [])
+      : Promise.resolve([]);
+
+    // Fetch from all sources in parallel (with stats tracking)
+    stats.requests.total++;
+    stats.requests.streams++;
+
+    // Build extractor config based on user settings. MediaFlow SEULEMENT en mode
+    // 'mediaflow' : en 'direct' (comme en 'local') on extrait localement, sinon
+    // voe/doodstream ressortent en URL MediaFlow qu'on servirait à tort en direct.
+    const extractorConfig: ExtractorConfig = {
+      useMediaFlow: config?.proxy === 'mediaflow',
+      mediaFlowUrl: config?.mfUrl || DEFAULT_MEDIAFLOW_URL,
+      mediaFlowPassword: config?.mfPass || DEFAULT_MEDIAFLOW_PASSWORD,
+    };
+
+    const langOrder = config?.langOrder || DEFAULT_LANG_ORDER;
+    const minStreams = config?.minStreams ?? DEFAULT_MIN_STREAMS;
+
+    // Titre ROMAJI (AniList, keyless) pour l'anime : les sites FR indexent souvent en
+    // romaji. Lancé EN PARALLÈLE du fan-out (seuls VoirAnime/AnimeSama l'attendent),
+    // gaté ja -> zéro coût pour le reste. [] si non-anime ou lookup KO.
+    const animeAltsPromise: Promise<string[]> = isJaAnime
+      ? getAnimeAltTitles(info.title, info.originalTitle).catch(() => [])
+      : Promise.resolve([]);
+
+    // Le proxy LOCAL est-il autorisé pour ce config ? local ∈ MODE OU ownerKey valide.
+    // NetMirror (livrable QUE en local) n'est même pas SCRAPÉ si non — inutile (jusqu'à
+    // 9 aller-retours). RÈGLE : jamais de proxy local si seuls MFP/direct sont permis (hors owner).
+    const localProxyAllowed = allowedModes().includes('local') || ownerKeyMatches(config?.ownerKey);
+
+    // nkstrm : token expiré/révoqué -> on lève NkstrmAuthError dans le .catch et
+    // on pose ce flag ; en fin de handler on ajoute UNE entrée « reconnecte » NON-bloquante.
+    let nkstrmAuthFailed = false;
+
+    // Sources désactivées manuellement (admin) -> skippées ici (Promise.resolve([]),
+    // zéro latence, absentes des résultats). isSourceEnabled lit le réglage à chaud.
+    const sourcePromises = [
+      (isSourceEnabled('netmirror') && localProxyAllowed
+        ? getNetmirrorStreams(info.title, info.year, type as 'movie' | 'series', parsed.season, parsed.episode, info.originalLanguage)
+        : Promise.resolve([]))
+        .then(r => { trackSourceResult('netmirror', true, r.length); recordOutcome('netmirror', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[NetMirror] Error:', e); trackSourceResult('netmirror', false); recordOutcome('netmirror', 'error', e?.message); return []; }),
+      (isSourceEnabled('streamflix') ? getStreamFlixStreams(info.tmdbId, type as 'movie' | 'series', parsed.season, parsed.episode, config?.tmdbKey || DEFAULT_TMDB_KEY, info.title) : Promise.resolve([]))
+        .then(r => { trackSourceResult('streamflix', true, r.length); recordOutcome('streamflix', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[StreamFlix] Error:', e); trackSourceResult('streamflix', false); recordOutcome('streamflix', 'error', e?.message); return []; }),
+      (isSourceEnabled('movix') ? (async () => {
+        const isAnime = isJaAnime && type === 'series' && !!parsed.season && !!parsed.episode;
+        // Anime sans tmdb direct (repli Cinemeta) : mappe vers (tmdb parent, saison, ép) par
+        // date de diffusion pour atteindre le Movix (purstream/cpasmal…) rangé sous la série parente.
+        let mvId = info.tmdbId, mvS = parsed.season, mvE = parsed.episode;
+        if (!info.tmdbId && isAnime) {
+          const map = await resolveAnimeTmdbMapping(info.imdbId, info.title, parsed.season!, parsed.episode!, config?.tmdbKey || DEFAULT_TMDB_KEY);
+          if (map) { mvId = map.tmdbId; mvS = map.season; mvE = map.episode; }
+        }
+        // En plus des providers tmdb-keyés : l'API anime de Movix (anime-sama) — atteint les
+        // arcs (TYBW Partie N) qu'anime-sama range sous la franchise, avec sibnet/ansembed VOSTFR+VF.
+        const animePart = isAnime
+          ? animeAltsPromise.then(alts => getMovixAnimeStreams([info.title, info.originalTitle, info.frenchTitle, ...alts].filter(Boolean) as string[], type as 'movie' | 'series', parsed.season, parsed.episode, extractorConfig))
+          : Promise.resolve([] as Awaited<ReturnType<typeof getMovixStreams>>);
+        const tmdbPart = mvId ? getMovixStreams(mvId, type as 'movie' | 'series', mvS, mvE, extractorConfig) : Promise.resolve([] as Awaited<ReturnType<typeof getMovixStreams>>);
+        const [a, b] = await Promise.all([tmdbPart, animePart]);
+        return [...a, ...b];
+      })() : Promise.resolve([]))
+        .then(r => { trackSourceResult('movix', true, r.length); recordOutcome('movix', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[Movix] Error:', e); trackSourceResult('movix', false); recordOutcome('movix', 'error', e?.message); return []; }),
+      (isSourceEnabled('frenchstream') ? getFrenchStreamStreams(info.tmdbId, type as 'movie' | 'series', extractorConfig, config?.tmdbKey || DEFAULT_TMDB_KEY, parsed.season, parsed.episode) : Promise.resolve([]))
+        .then(r => { trackSourceResult('frenchstream', true, r.length); recordOutcome('frenchstream', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[FrenchStream] Error:', e); trackSourceResult('frenchstream', false); recordOutcome('frenchstream', 'error', e?.message); return []; }),
+      (isSourceEnabled('wiflix') ? getWiflixStreams(info.tmdbId, type as 'movie' | 'series', extractorConfig, parsed.season, parsed.episode) : Promise.resolve([]))
+        .then(r => { trackSourceResult('wiflix', true, r.length); recordOutcome('wiflix', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[Wiflix] Error:', e); trackSourceResult('wiflix', false); recordOutcome('wiflix', 'error', e?.message); return []; }),
+      (isSourceEnabled('voirdrama') ? getVoirDramaStreams(info.tmdbId, type as 'movie' | 'series', extractorConfig, parsed.season, parsed.episode, info.title, info.originalLanguage) : Promise.resolve([]))
+        .then(r => { trackSourceResult('voirdrama', true, r.length); recordOutcome('voirdrama', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[VoirDrama] Error:', e); trackSourceResult('voirdrama', false); recordOutcome('voirdrama', 'error', e?.message); return []; }),
+      (isSourceEnabled('moviebox') ? getMovieboxStreams(info.tmdbId, type as 'movie' | 'series', info.title, info.year, parsed.season, parsed.episode) : Promise.resolve([]))
+        .then(r => { trackSourceResult('moviebox', true, r.length); recordOutcome('moviebox', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[MovieBox] Error:', e); trackSourceResult('moviebox', false); recordOutcome('moviebox', 'error', e?.message); return []; }),
+      // VoirAnime : anime uniquement (originalLanguage japonais).
+      (isSourceEnabled('voiranime') && isJaAnime
+        ? animeAltsPromise.then(alts => getVoirAnimeStreams(parsed.baseId, type as 'movie' | 'series', extractorConfig, parsed.season, parsed.episode, info.title, info.originalTitle, alts))
+        : Promise.resolve([]))
+        .then(r => { if (isJaAnime) { trackSourceResult('voiranime', true, r.length); recordOutcome('voiranime', r.length > 0 ? 'success' : 'empty'); } return r; })
+        .catch(e => { console.log('[VoirAnime] Error:', e); trackSourceResult('voiranime', false); recordOutcome('voiranime', 'error', e?.message); return []; }),
+      // Nabistream : dramas coréens/asiatiques VOSTFR (API keyée TMDB).
+      (isSourceEnabled('nabistream') ? getNabistreamStreams(info.tmdbId, type as 'movie' | 'series', parsed.season, parsed.episode) : Promise.resolve([]))
+        .then(r => { trackSourceResult('nabistream', true, r.length); recordOutcome('nabistream', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[Nabistream] Error:', e); trackSourceResult('nabistream', false); recordOutcome('nabistream', 'error', e?.message); return []; }),
+      // Coflix : films/séries FR généralistes (titre FR d'abord, anglais en repli).
+      (isSourceEnabled('coflix') ? getCoflixStreams(type as 'movie' | 'series', extractorConfig, parsed.season, parsed.episode, info.frenchTitle || info.title, info.title, info.year ? Number(info.year) : undefined) : Promise.resolve([]))
+        .then(r => { trackSourceResult('coflix', true, r.length); recordOutcome('coflix', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[Coflix] Error:', e); trackSourceResult('coflix', false); recordOutcome('coflix', 'error', e?.message); return []; }),
+      // Videasy : agrégateur VO (anglais) + sous-titres, keyé TMDB.
+      (isSourceEnabled('videasy') ? getVideasyStreams(info.tmdbId, type as 'movie' | 'series', parsed.season, parsed.episode, config?.tmdbKey || DEFAULT_TMDB_KEY) : Promise.resolve([]))
+        .then(r => { trackSourceResult('videasy', true, r.length); recordOutcome('videasy', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[Videasy] Error:', e); trackSourceResult('videasy', false); recordOutcome('videasy', 'error', e?.message); return []; }),
+      // AnimeSama : anime uniquement (originalLanguage japonais).
+      (isSourceEnabled('animesama') && isJaAnime
+        ? animeAltsPromise.then(alts => getAnimeSamaStreams(type as 'movie' | 'series', [info.title, info.originalTitle, info.frenchTitle, ...alts].filter(Boolean) as string[], parsed.season, parsed.episode, extractorConfig))
+        : Promise.resolve([]))
+        .then(r => { if (isJaAnime) { trackSourceResult('animesama', true, r.length); recordOutcome('animesama', r.length > 0 ? 'success' : 'empty'); } return r; })
+        .catch(e => { console.log('[AnimeSama] Error:', e); trackSourceResult('animesama', false); recordOutcome('animesama', 'error', e?.message); return []; }),
+      // nkstrm : source OPT-IN par utilisateur (token de pairing dans la config).
+      (isSourceEnabled('nkstrm') && config?.nkstrmToken
+        ? getNkstrmStreams(config.nkstrmToken, info.tmdbId, type as 'movie' | 'series', parsed.season, parsed.episode, info.title)
+        : Promise.resolve([]))
+        .then(r => { if (config?.nkstrmToken) { trackSourceResult('nkstrm', true, r.length); recordOutcome('nkstrm', r.length > 0 ? 'success' : 'empty'); } return r; })
+        .catch(e => {
+          if (e instanceof NkstrmAuthError) { nkstrmAuthFailed = true; recordOutcome('nkstrm', 'error', 'auth'); }
+          else { console.log('[Nkstrm] Error:', e); trackSourceResult('nkstrm', false); recordOutcome('nkstrm', 'error', e?.message); }
+          return [];
+        }),
+      // Vostfree : anime VF/VOSTFR uniquement (originalLanguage japonais), keyé titre.
+      (isSourceEnabled('vostfree') && isJaAnime
+        ? animeAltsPromise.then(alts => getVostfreeStreams(parsed.baseId, type as 'movie' | 'series', extractorConfig, parsed.season, parsed.episode, [info.title, info.originalTitle, info.frenchTitle, ...alts].filter(Boolean) as string[]))
+        : Promise.resolve([]))
+        .then(r => { if (isJaAnime) { trackSourceResult('vostfree', true, r.length); recordOutcome('vostfree', r.length > 0 ? 'success' : 'empty'); } return r; })
+        .catch(e => { console.log('[Vostfree] Error:', e); trackSourceResult('vostfree', false); recordOutcome('vostfree', 'error', e?.message); return []; }),
+      // WaveWatch / ToFlix : agrégateur d'embeds keyé par tmdbId (finepulfe m3u8 direct +
+      // hôtes vidzy/uqload/vidara/fsvid…). Skippé sans tmdbId (return [] interne).
+      (isSourceEnabled('wavewatch') && info.tmdbId
+        ? getWavewatchStreams(info.tmdbId, type as 'movie' | 'series', parsed.season, parsed.episode, extractorConfig)
+        : Promise.resolve([]))
+        .then(r => { if (info.tmdbId) { trackSourceResult('wavewatch', true, r.length); recordOutcome('wavewatch', r.length > 0 ? 'success' : 'empty'); } return r; })
+        .catch(e => { console.log('[Wavewatch] Error:', e); trackSourceResult('wavewatch', false); recordOutcome('wavewatch', 'error', e?.message); return []; }),
+      // Kordoz : catalogue FILMS FR (VF+VOSTFR), keyé titre (titre FR d'abord). Hôte
+      // sharecloudy -> m3u8 directable. Séries non couvertes (return [] interne).
+      (isSourceEnabled('kordoz') ? getKordozStreams(type as 'movie' | 'series', extractorConfig, info.frenchTitle || info.title, info.title, info.year ? Number(info.year) : undefined) : Promise.resolve([]))
+        .then(r => { trackSourceResult('kordoz', true, r.length); recordOutcome('kordoz', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[Kordoz] Error:', e); trackSourceResult('kordoz', false); recordOutcome('kordoz', 'error', e?.message); return []; }),
+      // Docstream : documentaires FR (titre FR d'abord). MFP-ONLY (streamtape via MediaFlow) —
+      // return [] interne sans MediaFlow. Films uniquement.
+      (isSourceEnabled('docstream') ? getDocstreamStreams(type as 'movie' | 'series', extractorConfig, info.frenchTitle || info.title, info.title, info.year ? Number(info.year) : undefined) : Promise.resolve([]))
+        .then(r => { trackSourceResult('docstream', true, r.length); recordOutcome('docstream', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[Docstream] Error:', e); trackSourceResult('docstream', false); recordOutcome('docstream', 'error', e?.message); return []; }),
+      // Zone-Téléchargement (streaming) : gros catalogue FR WEB-DL (titre FR d'abord).
+      // Hôtes lulustream/embedseek via le protecteur zoneurs. Films uniquement pour l'instant.
+      (isSourceEnabled('ztstream') ? getZoneTelechargementStreams(type as 'movie' | 'series', extractorConfig, info.frenchTitle || info.title, info.title, info.year ? Number(info.year) : undefined, parsed.season, parsed.episode) : Promise.resolve([]))
+        .then(r => { trackSourceResult('ztstream', true, r.length); recordOutcome('ztstream', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[ZT-Stream] Error:', e); trackSourceResult('ztstream', false); recordOutcome('ztstream', 'error', e?.message); return []; }),
+      // CineStream : ~25 000 FILMS FR (VF+VOSTFR), keyé tmdbId — le titre ne sert
+      // qu'à bâtir le slug de la fiche, qui est le Referer exigé par /player/.
+      // Séries non couvertes (return [] interne : leur catalogue est 100 % films).
+      (isSourceEnabled('cinestream') ? getCinestreamStreams(type as 'movie' | 'series', extractorConfig, info.tmdbId, info.frenchTitle || info.title, info.title, info.year ? Number(info.year) : undefined) : Promise.resolve([]))
+        .then(r => { trackSourceResult('cinestream', true, r.length); recordOutcome('cinestream', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[CineStream] Error:', e); trackSourceResult('cinestream', false); recordOutcome('cinestream', 'error', e?.message); return []; }),
+      // dulourd : SÉRIES FR (VF+VOSTFR), moteur DLE. Keyé titre (titre FR d'abord) ;
+      // l'URL d'épisode se construit, la langue est déclarée par le site.
+      // Films non couverts (return [] interne : leur catalogue est 100 % séries).
+      (isSourceEnabled('dulourd') ? getDulourdStreams(type as 'movie' | 'series', extractorConfig, info.frenchTitle || info.title, info.title, info.year ? Number(info.year) : undefined, parsed.season, parsed.episode) : Promise.resolve([]))
+        .then(r => { trackSourceResult('dulourd', true, r.length); recordOutcome('dulourd', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[Dulourd] Error:', e); trackSourceResult('dulourd', false); recordOutcome('dulourd', 'error', e?.message); return []; }),
+      // Zenix : catalogue FR VF (films + séries) qui relaie StreamFlix — dont NOS flux
+      // rendent 403. Keyé titre (recherche maison). PROXY OBLIGATOIRE : le cookie de
+      // session est exigé au téléchargement, donc jamais de livraison directe.
+      (isSourceEnabled('zenix') && proxyAvailable(config) ? getZenixStreams(type as 'movie' | 'series', info.frenchTitle || info.title, info.title, info.year ? Number(info.year) : undefined, parsed.season, parsed.episode) : Promise.resolve([]))
+        .then(r => { trackSourceResult('zenix', true, r.length); recordOutcome('zenix', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[Zenix] Error:', e); trackSourceResult('zenix', false); recordOutcome('zenix', 'error', e?.message); return []; }),
+      // KissKH : dramas/films asiatiques, flux direct + sous-titres multi-langues. Keyé
+      // titre (TMDB anglais puis original) ; chez eux chaque saison est une fiche distincte.
+      // Interrogé seulement pour les titres d'origine asiatique : c'est tout son catalogue.
+      (isSourceEnabled('kisskh') && isKisskhLanguage(info.originalLanguage) ? getKisskhStreams(type as 'movie' | 'series', [info.title, info.originalTitle], parsed.season, parsed.episode) : Promise.resolve([]))
+        .then(r => { trackSourceResult('kisskh', true, r.length); recordOutcome('kisskh', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[KissKH] Error:', e?.message || e); trackSourceResult('kisskh', false); recordOutcome('kisskh', 'error', e?.message); return []; }),
+      // worldivx : films + épisodes FR récents via le lecteur Byse. Keyé TITRE FRANÇAIS (les
+      // noms de release sont en français), puis original et TMDB. Proxy obligatoire (jeton
+      // lié au réseau) -> rien à proposer en direct pur. La langue d'origine sert à étiqueter
+      // les releases MULTi : Byse n'en garde que la 1re piste (la VO).
+      (isSourceEnabled('worldivx') && proxyAvailable(config) ? getWorldivxStreams(type as 'movie' | 'series', [info.frenchTitle, info.originalTitle, info.title], info.year ? Number(info.year) : undefined, parsed.season, parsed.episode, info.originalLanguage) : Promise.resolve([]))
+        .then(r => { trackSourceResult('worldivx', true, r.length); recordOutcome('worldivx', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[Worldivx] Error:', e?.message || e); trackSourceResult('worldivx', false); recordOutcome('worldivx', 'error', e?.message); return []; }),
+      // Tokyvideo : vieux films/séries VF (MP4 direct). Keyé titre FR (index public,
+      // sans identifiant TMDB) ; jeton du MP4 valable ~24 h -> résolu ici.
+      (isSourceEnabled('tokyvideo') ? getTokyvideoStreams(type as 'movie' | 'series', [info.frenchTitle, info.title, info.originalTitle], info.year ? Number(info.year) : undefined, parsed.season, parsed.episode) : Promise.resolve([]))
+        .then(r => { trackSourceResult('tokyvideo', true, r.length); recordOutcome('tokyvideo', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[Tokyvideo] Error:', e?.message || e); trackSourceResult('tokyvideo', false); recordOutcome('tokyvideo', 'error', e?.message); return []; }),
+      // Yablom : films FR (ShareCloudy). Keyé titre FR ; films uniquement.
+      (isSourceEnabled('yablom') ? getYablomStreams(type as 'movie' | 'series', extractorConfig, info.frenchTitle || info.title, info.title, info.year ? Number(info.year) : undefined) : Promise.resolve([]))
+        .then(r => { trackSourceResult('yablom', true, r.length); recordOutcome('yablom', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[Yablom] Error:', e?.message || e); trackSourceResult('yablom', false); recordOutcome('yablom', 'error', e?.message); return []; }),
+      // IAnime : anime FR VF+VOSTFR (originalLanguage japonais). Recherche POST, hôtes
+      // vidmoly/voe/streamtape/mail.ru déjà extraits. Titres alternatifs (romaji) comme VoirAnime.
+      (isSourceEnabled('ianime') && isJaAnime
+        ? animeAltsPromise.then(alts => getIanimeStreams(parsed.baseId, type as 'movie' | 'series', extractorConfig, parsed.season, parsed.episode, info.title, info.originalTitle, alts))
+        : Promise.resolve([]))
+        .then(r => { if (isJaAnime) { trackSourceResult('ianime', true, r.length); recordOutcome('ianime', r.length > 0 ? 'success' : 'empty'); } return r; })
+        .catch(e => { console.log('[IAnime] Error:', e?.message || e); trackSourceResult('ianime', false); recordOutcome('ianime', 'error', e?.message); return []; }),
+      // Leizy : films + séries FR (VF+VOSTFR), app PHP maison. Keyé titre FR ; ad-gate 2
+      // étapes déverrouillé sans pub ; hôtes vidmoly/mail.ru/sibnet (mailru/sibnet local-only).
+      (isSourceEnabled('leizy') ? getLeizyStreams(type as 'movie' | 'series', extractorConfig, info.frenchTitle || info.title, info.title, info.year ? Number(info.year) : undefined, parsed.season, parsed.episode, info.tmdbId, info.posters) : Promise.resolve([]))
+        .then(r => { trackSourceResult('leizy', true, r.length); recordOutcome('leizy', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[Leizy] Error:', e?.message || e); trackSourceResult('leizy', false); recordOutcome('leizy', 'error', e?.message); return []; }),
+      // 1Jour1Film (annuaire « wow-films ») : films + séries FR VF/VOSTFR, WordPress
+      // DooPlay standard, domaine daté rotatif. Recherche via WP REST (le /?s= est CF-gaté) ;
+      // transport curl (mur CF empreinte-TLS). Keyé titre FR + tmdbId de la fiche.
+      (isSourceEnabled('jour1film') ? getJour1filmStreams(type as 'movie' | 'series', extractorConfig, info.frenchTitle || info.title, info.title, info.year ? Number(info.year) : undefined, parsed.season, parsed.episode, info.tmdbId) : Promise.resolve([]))
+        .then(r => { trackSourceResult('jour1film', true, r.length); recordOutcome('jour1film', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[1Jour1Film] Error:', e?.message || e); trackSourceResult('jour1film', false); recordOutcome('jour1film', 'error', e?.message); return []; }),
+      // Cinepulse (cinepulse.live) : FILMS FR VF/VOSTFR uniquement. App Laravel Livewire
+      // (recherche POST /livewire/update, serveurs dans la fiche). Hôtes vidzy/uqload/livavid.
+      // Keyé titre FR + poster TMDB (pas d'id TMDB dans la fiche).
+      (isSourceEnabled('cinepulse') ? getCinepulseStreams(type as 'movie' | 'series', extractorConfig, info.frenchTitle || info.title, info.title, info.posters) : Promise.resolve([]))
+        .then(r => { trackSourceResult('cinepulse', true, r.length); recordOutcome('cinepulse', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[Cinepulse] Error:', e?.message || e); trackSourceResult('cinepulse', false); recordOutcome('cinepulse', 'error', e?.message); return []; }),
+      // Mavanime : anime uniquement (originalLanguage japonais). WordPress/Madara (même
+      // thème que VoirAnime) ; simulcast VOSTFR très à jour (+ un peu de VF). Sélecteur de
+      // serveur par navigation ?host= ; hôtes VOE/voembed/streamtape. Alts romaji (AniList).
+      (isSourceEnabled('mavanime') && isJaAnime
+        ? animeAltsPromise.then(alts => getMavanimeStreams(parsed.baseId, type as 'movie' | 'series', extractorConfig, parsed.season, parsed.episode, info.title, info.originalTitle, alts))
+        : Promise.resolve([]))
+        .then(r => { if (isJaAnime) { trackSourceResult('mavanime', true, r.length); recordOutcome('mavanime', r.length > 0 ? 'success' : 'empty'); } return r; })
+        .catch(e => { console.log('[Mavanime] Error:', e?.message || e); trackSourceResult('mavanime', false); recordOutcome('mavanime', 'error', e?.message); return []; }),
+      // AnimeSite : anime uniquement (originalLanguage japonais). Next.js FR VF/VOSTFR,
+      // catalogue via sitemap (slug->idAndSlug), flux via /api/stream/token (Origin) -> /v/
+      // -> hôtes sibnet/vidmoly/voe… (ou HLS direct). Alts romaji (AniList).
+      (isSourceEnabled('animesite') && isJaAnime
+        ? animeAltsPromise.then(alts => getAnimesiteStreams(parsed.baseId, type as 'movie' | 'series', extractorConfig, parsed.season, parsed.episode, info.title, info.originalTitle, alts))
+        : Promise.resolve([]))
+        .then(r => { if (isJaAnime) { trackSourceResult('animesite', true, r.length); recordOutcome('animesite', r.length > 0 ? 'success' : 'empty'); } return r; })
+        .catch(e => { console.log('[AnimeSite] Error:', e?.message || e); trackSourceResult('animesite', false); recordOutcome('animesite', 'error', e?.message); return []; }),
+      // WookaFR (annuaire « wow-films », #1) : films + séries FR VF/VOSTFR, DooPlay
+      // somosmovies. Recherche DooPlay + embed lecteurvideo (hôtes base64). Keyé titre FR
+      // + poster TMDB.
+      (isSourceEnabled('wookafr') ? getWookafrStreams(type as 'movie' | 'series', extractorConfig, info.frenchTitle || info.title, info.title, parsed.season, parsed.episode, info.posters) : Promise.resolve([]))
+        .then(r => { trackSourceResult('wookafr', true, r.length); recordOutcome('wookafr', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[WookaFR] Error:', e?.message || e); trackSourceResult('wookafr', false); recordOutcome('wookafr', 'error', e?.message); return []; }),
+      // Anime-Ultime : anime uniquement (originalLanguage japonais). FR VOSTFR, self-hosté
+      // (MP4 direct). Catalogue via recherche plein-texte (slug romaji -> id fiche), flux
+      // /playlist-<id>.xml -> /stream-<mediaId>.mp4 (302 -> CDN signé). Alts romaji (AniList).
+      (isSourceEnabled('animeultime') && isJaAnime
+        ? animeAltsPromise.then(alts => getAnimeUltimeStreams(parsed.baseId, type as 'movie' | 'series', extractorConfig, parsed.season, parsed.episode, info.title, info.originalTitle, alts))
+        : Promise.resolve([]))
+        .then(r => { if (isJaAnime) { trackSourceResult('animeultime', true, r.length); recordOutcome('animeultime', r.length > 0 ? 'success' : 'empty'); } return r; })
+        .catch(e => { console.log('[AnimeUltime] Error:', e?.message || e); trackSourceResult('animeultime', false); recordOutcome('animeultime', 'error', e?.message); return []; }),
+      // Animoflix : anime uniquement (originalLanguage japonais). FR VF ET VOSTFR, pages
+      // season-aware (langue dans l'URL), serveurs filemoon/ansembed/filelions… en clair
+      // -> extractStream. Alts romaji (AniList).
+      (isSourceEnabled('animoflix') && isJaAnime
+        ? animeAltsPromise.then(alts => getAnimoflixStreams(parsed.baseId, type as 'movie' | 'series', extractorConfig, parsed.season, parsed.episode, info.title, info.originalTitle, alts))
+        : Promise.resolve([]))
+        .then(r => { if (isJaAnime) { trackSourceResult('animoflix', true, r.length); recordOutcome('animoflix', r.length > 0 ? 'success' : 'empty'); } return r; })
+        .catch(e => { console.log('[Animoflix] Error:', e?.message || e); trackSourceResult('animoflix', false); recordOutcome('animoflix', 'error', e?.message); return []; }),
+      // Cinex : agrégateur FR keyé TMDB, API JSON ouverte. On garde la source FR (zen-blk/
+      // falzey MP4 pour les films, finepulfe HLS pour les séries), gatée Referer cinex.buzz.
+      // Films + séries (pas anime-spécifique).
+      (isSourceEnabled('cinex') ? getCinexStreams(info.tmdbId, type as 'movie' | 'series', parsed.season, parsed.episode) : Promise.resolve([]))
+        .then(r => { trackSourceResult('cinex', true, r.length); recordOutcome('cinex', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[Cinex] Error:', e?.message || e); trackSourceResult('cinex', false); recordOutcome('cinex', 'error', e?.message); return []; }),
+      // Miaw : agrégateur FR keyé TMDB, API JSON ouverte. Lecteurs blink (natif miaw ->
+      // zen-blk, directable) + vidzy/sharecloudy (extraits). Films + séries, VF + VOSTFR.
+      (isSourceEnabled('miaw') ? getMiawStreams(info.tmdbId, type as 'movie' | 'series', extractorConfig, parsed.season, parsed.episode) : Promise.resolve([]))
+        .then(r => { trackSourceResult('miaw', true, r.length); recordOutcome('miaw', r.length > 0 ? 'success' : 'empty'); return r; })
+        .catch(e => { console.log('[Miaw] Error:', e?.message || e); trackSourceResult('miaw', false); recordOutcome('miaw', 'error', e?.message); return []; }),
+    ];
+
+    const SOURCE_NAMES = ['netmirror', 'streamflix', 'movix', 'frenchstream', 'wiflix', 'voirdrama', 'moviebox', 'voiranime', 'nabistream', 'coflix', 'videasy', 'animesama', 'nkstrm', 'vostfree', 'wavewatch', 'kordoz', 'docstream', 'ztstream', 'cinestream', 'dulourd', 'zenix', 'kisskh', 'worldivx', 'tokyvideo', 'yablom', 'ianime', 'leizy', 'jour1film', 'cinepulse', 'mavanime', 'animesite', 'wookafr', 'animeultime', 'animoflix', 'cinex', 'miaw'];
+    const collected = await collectSources(
+      sourcePromises.map((promise, i) => ({
+        name: SOURCE_NAMES[i],
+        promise,
+        countWanted: wantedCounter(SOURCE_NAMES[i], langOrder, config?.excludeQualities),
+      })),
+      minStreams,
+      (reason, ms) => console.log(`[Stream] Fan-out terminé: ${reason}${ms ? ` en ${(ms / 1000).toFixed(2)}s` : ''}`),
+      // Anime : les sources anime (VoirAnime/AnimeSama) sont LENTES (scraping) mais
+      // c'est TOUT l'intérêt pour un anime -> l'early-exit doit les attendre, sinon
+      // Videasy (3 flux instantanés) atteint le quota et les coupe. Plafonné par le
+      // deadline (20s). Aucun effet hors anime.
+      // Drama asiatique : KissKH est LA source du genre (flux direct + sous-titres FR).
+      // Rapide (recherche + fiche + signature, en cache), mais on ne laisse pas des
+      // sources instantanées remplir le quota avant qu'elle réponde.
+      [
+        ...(isJaAnime
+          ? [SOURCE_NAMES.indexOf('voiranime'), SOURCE_NAMES.indexOf('animesama'), SOURCE_NAMES.indexOf('vostfree'), SOURCE_NAMES.indexOf('ianime'), SOURCE_NAMES.indexOf('mavanime'), SOURCE_NAMES.indexOf('animesite'), SOURCE_NAMES.indexOf('animeultime'), SOURCE_NAMES.indexOf('animoflix')]
+          : []),
+        ...(isKisskhLanguage(info.originalLanguage) ? [SOURCE_NAMES.indexOf('kisskh')] : []),
+      ]
+    );
+
+    // Construction des drafts extraite en closure ré-exécutable. Raison : l'early-exit
+    // compte les flux passant langue/qualité mais IGNORE la livrabilité (le mode
+    // direct/MFP écarte forceProxy/forceLocal dans deliver()). On bâtit d'abord sur le
+    // snapshot de l'early-exit ; si trop peu de flux LIVRABLES en sortent alors que des
+    // sources tournent encore, on attend le reste et on reconstruit (cf. plus bas).
+    const assembleDrafts = async (
+      collected: any[][],
+    ): Promise<Omit<StreamWithMeta, 'name' | 'title'>[]> => {
+    // collectSources is order-preserving but untyped (heterogeneous tuple), so
+    // restore each source's real element type here.
+    const netmirrorResults = collected[0] as Awaited<ReturnType<typeof getNetmirrorStreams>>;
+    const streamflixResults = collected[1] as Awaited<ReturnType<typeof getStreamFlixStreams>>;
+    const movixResults = collected[2] as Awaited<ReturnType<typeof getMovixStreams>>;
+    const frenchstreamResults = collected[3] as Awaited<ReturnType<typeof getFrenchStreamStreams>>;
+    const wiflixResults = collected[4] as Awaited<ReturnType<typeof getWiflixStreams>>;
+    const voirdramaResults = collected[5] as Awaited<ReturnType<typeof getVoirDramaStreams>>;
+    const movieboxResults = collected[6] as Awaited<ReturnType<typeof getMovieboxStreams>>;
+    const voiranimeResults = collected[7] as Awaited<ReturnType<typeof getVoirAnimeStreams>>;
+    const nabistreamResults = collected[8] as Awaited<ReturnType<typeof getNabistreamStreams>>;
+    const coflixResults = collected[9] as Awaited<ReturnType<typeof getCoflixStreams>>;
+    const videasyResults = collected[10] as Awaited<ReturnType<typeof getVideasyStreams>>;
+    const animesamaResults = collected[11] as Awaited<ReturnType<typeof getAnimeSamaStreams>>;
+    const nkstrmResults = collected[12] as Awaited<ReturnType<typeof getNkstrmStreams>>;
+    const vostfreeResults = collected[13] as Awaited<ReturnType<typeof getVostfreeStreams>>;
+    const wavewatchResults = collected[14] as Awaited<ReturnType<typeof getWavewatchStreams>>;
+    const kordozResults = collected[15] as Awaited<ReturnType<typeof getKordozStreams>>;
+    const docstreamResults = collected[16] as Awaited<ReturnType<typeof getDocstreamStreams>>;
+    const ztstreamResults = collected[17] as Awaited<ReturnType<typeof getZoneTelechargementStreams>>;
+    const cinestreamResults = collected[18] as Awaited<ReturnType<typeof getCinestreamStreams>>;
+    const dulourdResults = collected[19] as Awaited<ReturnType<typeof getDulourdStreams>>;
+    const zenixResults = collected[20] as Awaited<ReturnType<typeof getZenixStreams>>;
+    const kisskhResults = collected[21] as Awaited<ReturnType<typeof getKisskhStreams>>;
+    const worldivxResults = collected[22] as Awaited<ReturnType<typeof getWorldivxStreams>>;
+    const tokyvideoResults = collected[23] as Awaited<ReturnType<typeof getTokyvideoStreams>>;
+    const yablomResults = collected[24] as Awaited<ReturnType<typeof getYablomStreams>>;
+    const ianimeResults = collected[25] as Awaited<ReturnType<typeof getIanimeStreams>>;
+    const leizyResults = collected[26] as Awaited<ReturnType<typeof getLeizyStreams>>;
+    const jour1filmResults = collected[27] as Awaited<ReturnType<typeof getJour1filmStreams>>;
+    const cinepulseResults = collected[28] as Awaited<ReturnType<typeof getCinepulseStreams>>;
+    const mavanimeResults = collected[29] as Awaited<ReturnType<typeof getMavanimeStreams>>;
+    const animesiteResults = collected[30] as Awaited<ReturnType<typeof getAnimesiteStreams>>;
+    const wookafrResults = collected[31] as Awaited<ReturnType<typeof getWookafrStreams>>;
+    const animeultimeResults = collected[32] as Awaited<ReturnType<typeof getAnimeUltimeStreams>>;
+    const animoflixResults = collected[33] as Awaited<ReturnType<typeof getAnimoflixStreams>>;
+    const cinexResults = collected[34] as Awaited<ReturnType<typeof getCinexStreams>>;
+    const miawResults = collected[35] as Awaited<ReturnType<typeof getMiawStreams>>;
+
+    // On accumule des "drafts" (streams sans name/title). name/title sont posés
+    // en UNE passe centralisée plus bas (src/display.ts), pour un rendu uniforme.
+    type StreamDraft = Omit<StreamWithMeta, 'name' | 'title'>;
+    const drafts: StreamDraft[] = [];
+
+    // Process Movix results
+    for (const mv of movixResults) {
+      let finalUrl: string;
+      let proxyHdrs: Record<string, string> | undefined; // posé si livraison directe
+
+      // Check if URL is already a MediaFlow URL (from extractor)
+      const mfUrl = config?.mfUrl || DEFAULT_MEDIAFLOW_URL;
+      const isMediaFlowUrl = mfUrl && mv.url.includes(new URL(mfUrl).hostname);
+
+      if (isMediaFlowUrl) {
+        // Already a MediaFlow URL, use directly
+        finalUrl = mv.url;
+      } else {
+        // Need to proxy (Purstream direct URLs or local extraction results)
+        // Merge default headers with extractor-provided headers
+        const proxyHeaders: Record<string, string> = {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          ...mv.headers, // Headers from extractor (e.g., Referer)
+        };
+        // Purstream masters live at .../watch/hls/master?u=… — no .m3u8 extension,
+        // so URL sniffing routes them to the passthrough proxy, which does NOT
+        // rewrite the manifest. Their subtitle URIs are relative ("sub?u=…"), so
+        // the player resolves them against the proxy host and gets a 404: the
+        // stream plays but every subtitle track is silently missing. The API
+        // already tells us the format — trust it over the extension.
+        const isHls = mv.format === 'm3u8';
+        // Un embed RÉSOLU par extracteur (fsvid/streamwish/premium…) se livre en DIRECT,
+        // comme FrenchStream : fixaudio re-fetch le master CÔTÉ SERVEUR, ce qui mint des
+        // tokens fsvid IP/rate-bound -> le player (IP résidentielle) se fait ensuite
+        // TROLLER (/troll/ FSTREAM.TOP). Seuls les masters purstream PROPRES à Movix
+        // (CDN non reconnu comme extracteur, multi-audio à pistes séparées sans DEFAULT=YES)
+        // passent par fixaudio -> on sert alors le master corrigé (segments directs).
+        const isResolvedEmbed = detectExtractor(mv.url) !== null;
+        const opts = isResolvedEmbed ? {} : { forceHls: isHls, fixAudioHls: isHls };
+        const d = await deliver(mv.url, proxyHeaders, opts, req, config);
+
+        if (!d) continue; // Skip blocked URLs
+        finalUrl = d.url;
+        proxyHdrs = d.proxyHeaders;
+      }
+
+      drafts.push({
+        url: finalUrl,
+        behaviorHints: {
+          notWebReady: !!proxyHdrs,
+          bingeGroup: 'movix',
+          ...(proxyHdrs ? { proxyHeaders: { request: proxyHdrs } } : {}),
+        },
+        _meta: {
+          quality: mv.quality,
+          language: mv.language,
+          source: 'movix',
+          server: mv.server,
+        },
+      });
+    }
+
+    // Process WaveWatch results (agrégateur tmdbId). Deux types :
+    //  - direct (finepulfe m3u8 multi-audio) : le CDN 403 tout refetch serveur (Cloudflare)
+    //    -> livraison DIRECTE stricte (opts={}), surtout PAS fixaudio (qui refetch le master).
+    //  - embed résolu (vidzy/uqload/vidara/vidsonic…) : même logique que Movix.
+    for (const wv of wavewatchResults) {
+      let finalUrl: string;
+      let proxyHdrs: Record<string, string> | undefined;
+
+      const mfUrl = config?.mfUrl || DEFAULT_MEDIAFLOW_URL;
+      const isMediaFlowUrl = mfUrl && wv.url.includes(new URL(mfUrl).hostname);
+
+      if (isMediaFlowUrl) {
+        finalUrl = wv.url;
+      } else if (wv.forceProxy) {
+        // m3u8 direct UA-gaté (finepulfe) : segments 403 sur l'UA du player -> DOIT passer par un
+        // proxy qui fetch avec CDN_UA + réécrit le manifeste (multi-audio + subs). deliver() renvoie
+        // null en mode 'direct' -> on construit l'URL nous-mêmes, comme NetMirror. MFP -> MediaFlow
+        // (offload) ; sinon proxy LOCAL, gaté `localProxyAllowed` (owner/local) pour ne pas faire
+        // tirer 200 users publics sur notre bande passante. Ni l'un ni l'autre -> non offert.
+        const mfU = config?.mfUrl || DEFAULT_MEDIAFLOW_URL;
+        let purl: string | null = null;
+        if (config?.proxy === 'mediaflow' && mfU) {
+          purl = buildProxyUrl(wv.url, { ...wv.headers }, false, req, config, false, true);
+        } else if (localProxyAllowed) {
+          purl = buildProxyUrl(wv.url, { ...wv.headers }, false, req, config, true, true);
+        }
+        if (!purl) continue;
+        finalUrl = purl;
+      } else {
+        const proxyHeaders: Record<string, string> = {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          ...wv.headers,
+        };
+        const isHls = wv.format === 'm3u8';
+        // Embed résolu (fsvid/vidara/…) : livraison DIRECTE comme Movix (fixaudio refetch = troll).
+        // EXCEPTION vidsonic : son CDN résolu (encoder-fin.vidsonic.net) matche encore son propre
+        // extracteur -> serait vu comme « résolu » et livré brut. Or Nuvio ne lit PAS le HLS brut
+        // (les flux qui MARCHENT passent par le proxy) -> on le route via fixaudio (master proxifié).
+        const isResolvedEmbed = detectExtractor(wv.url) !== null && !/vidsonic\.net/i.test(wv.url);
+        const opts = isResolvedEmbed ? {} : { forceHls: isHls, fixAudioHls: isHls };
+        const d = await deliver(wv.url, proxyHeaders, opts, req, config);
+        if (!d) continue;
+        finalUrl = d.url;
+        proxyHdrs = d.proxyHeaders;
+      }
+
+      drafts.push({
+        url: finalUrl,
+        behaviorHints: {
+          notWebReady: !!proxyHdrs,
+          bingeGroup: 'wavewatch',
+          ...(proxyHdrs ? { proxyHeaders: { request: proxyHdrs } } : {}),
+        },
+        _meta: {
+          quality: wv.quality,
+          language: wv.language,
+          source: 'wavewatch',
+          server: wv.server,
+        },
+      });
+    }
+
+    // Process NetMirror results (netfree multi-audio HLS master). MUST go through
+    // the LOCAL proxy: the segment token is IP-bound to the fetcher and the .jpg
+    // segments need the local transformer -> video/mp2t. One adaptive stream per
+    // platform; the player picks the audio track (VO + VF when available).
+    // NetMirror ne peut être livré QUE par le proxy LOCAL (manifeste reconstruit +
+    // segments .jpg->TS ; MediaFlow incapable). Déjà écarté en amont si le proxy local
+    // n'est pas autorisé (localProxyAllowed) -> netmirrorResults est vide dans ce cas.
+    for (const r of netmirrorResults) {
+      // UNE ENTRÉE PAR QUALITÉ réellement présente (au lieu d'un master adaptatif unique).
+      // Chaque entrée porte une vraie résolution -> le filtre d'exclusion de qualité et le
+      // tri par qualité s'appliquent naturellement, et l'utilisateur choisit sa résolution.
+      // L'audio (VF+VO) et les sous-titres restent dans CHAQUE entrée (le player bascule la
+      // piste) : le master reconstruit avec un seul `q` embarque quand même toutes les pistes.
+      for (const q of r.qualities) {
+        const mu = new URL('/netmirror/master.m3u8', nmSegBase(req));
+        mu.searchParams.set('h', r.cdnHost);
+        mu.searchParams.set('id', r.contentId);
+        mu.searchParams.set('p', r.prefix);
+        mu.searchParams.set('n', String(r.segments));
+        mu.searchParams.set('d', r.avgDur.toFixed(3));
+        mu.searchParams.set('q', q); // une seule résolution par entrée
+        mu.searchParams.set('a', r.audioLangs.map(a => `${a.index}:${a.code}:${encodeURIComponent(a.name)}`).join(','));
+        if (r.subtitles?.length) {
+          mu.searchParams.set('s', r.subtitles
+            .map(t => `${t.code}:${encodeURIComponent(t.name)}:${encodeURIComponent(t.uri)}`).join(','));
+        }
+        const proxiedUrl = signUrl(mu).toString(); // &k= si ACCESS_KEY active
+
+        drafts.push({
+          url: proxiedUrl,
+          behaviorHints: {
+            notWebReady: false,
+            bingeGroup: `netmirror-${r.platform}-${q}`, // binge par plateforme + qualité
+          },
+          _meta: {
+            quality: q,
+            language: r.language,
+            source: 'netmirror',
+            platform: r.platform,
+          },
+        });
+      }
+    }
+
+    // Process StreamFlix results.
+    // StreamFlix a ajouté une couche proxy falzey.lol : l'URL mp4 fait un DOUBLE 302 signé
+    // (mp4 -> falzey/video_proxy.php -> mp4?ff=<token temporaire> -> 206). Stremio ne suit
+    // pas cette chaîne en direct -> flux qui apparaît mais ne joue pas. On force donc le
+    // PROXY du mode (MediaFlow/local), qui suit les redirections ET reforge un token frais
+    // à chaque lecture. En direct pur -> écarté (de toute façon injouable en direct).
+    for (const sf of streamflixResults) {
+      const d = await deliver(sf.url, {
+        ...(sf.headers || {}), // Referer streamflix.mom (V2)
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      }, { forceProxy: true }, req, config);
+
+      if (!d) continue; // Skip blocked URLs
+
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: 'streamflix',
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: {
+          quality: sf.quality,
+          language: sf.language,
+          source: 'streamflix',
+        },
+      });
+    }
+
+    // Process Wiflix results (API Movix, tmdbId-keyed — pas de scraping).
+    for (const wf of wiflixResults) {
+      const d = await deliver(wf.url, {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        ...(wf.headers || {}), // l'UA spécifique de l'extracteur (ex. mobile pour luluvdo/tnmr) prime
+      }, {}, req, config);
+
+      if (!d) continue; // Skip blocked URLs
+
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `wiflix-${wf.server}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: {
+          quality: wf.quality,
+          language: wf.language,
+          source: 'wiflix',
+          server: wf.server,
+        },
+      });
+    }
+
+    // Process VoirDrama results (dramas asiatiques, API Movix, séries seulement).
+    for (const vd of voirdramaResults) {
+      const d = await deliver(vd.url, {
+        ...(vd.headers || {}),
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      }, {}, req, config);
+
+      if (!d) continue; // Skip blocked URLs
+
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `voirdrama-${vd.server}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: {
+          quality: vd.quality,
+          language: vd.language,
+          source: 'voirdrama',
+          server: vd.server,
+        },
+      });
+    }
+
+    // Process VoirAnime results (anime VF/VOSTFR, scraping voir-anime.to).
+    for (const va of voiranimeResults) {
+      const d = await deliver(va.url, {
+        ...(va.headers || {}),
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      }, {}, req, config);
+
+      if (!d) continue; // Skip blocked URLs
+
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `voiranime-${va.server}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: {
+          quality: va.quality,
+          language: va.language,
+          source: 'voiranime',
+          server: va.server,
+        },
+      });
+    }
+
+    // IAnime : anime FR VF/VOSTFR (hôtes vidmoly/voe/streamtape/mail.ru), livraison comme VoirAnime.
+    for (const ia of ianimeResults) {
+      const d = await deliver(ia.url, {
+        ...(ia.headers || {}),
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      }, {}, req, config);
+      if (!d) continue;
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `ianime-${ia.server}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: { quality: ia.quality, language: ia.language, source: 'ianime', server: ia.server },
+      });
+    }
+
+    // Leizy : films + séries FR VF/VOSTFR. vidmoly (HLS) passe par le proxy du MODE
+    // (MediaFlow en MFP) ; mail.ru/sibnet -> direct (MediaFlow ne les gère pas, direct
+    // OK et sans bande passante serveur), comme ianime/vostfree -> deliver() décide.
+    for (const lz of leizyResults) {
+      const d = await deliver(lz.url, {
+        ...(lz.headers || {}),
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      }, { forceHls: /\.m3u8/i.test(lz.url) }, req, config);
+      if (!d) continue;
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `leizy-${lz.server}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: { quality: lz.quality, language: lz.language, source: 'leizy', server: lz.server },
+      });
+    }
+
+    // 1Jour1Film : films + séries FR VF/VOSTFR (DooPlay ; hôtes vidara/luluvdo/vidmoly…).
+    // deliver() décide (HLS luluvdo/tnmr -> proxy du mode ; vidara -> direct si joignable).
+    for (const jf of jour1filmResults) {
+      const d = await deliver(jf.url, {
+        ...(jf.headers || {}),
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      }, { forceHls: /\.m3u8/i.test(jf.url) }, req, config);
+      if (!d) continue;
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `jour1film-${jf.server}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: { quality: jf.quality, language: jf.language, source: 'jour1film', server: jf.server },
+      });
+    }
+
+    // WookaFR : films + séries FR VF/VOSTFR (DooPlay ; hôtes lulustream/voe/uqload/vidmoly).
+    // ⚠️ Deux pièges du token lulustream/tnmr : (1) LIÉ À L'UA de l'extracteur (UA Android)
+    // -> on NE l'écrase PAS (UA de repli AVANT le spread), sinon 403 ; (2) LIÉ À L'IP du
+    // serveur d'extraction -> MediaFlow (IP distante) renvoie « Stream unavailable ». Seul le
+    // proxy LOCAL (même serveur) a le bon IP. Donc : proxy local si permis (owner/local),
+    // sinon deliver() en secours (MediaFlow/direct, best-effort pour les hôtes non IP-liés).
+    for (const wk of wookafrResults) {
+      const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        ...(wk.headers || {}),
+      };
+      let url: string;
+      let proxyHeaders: Record<string, string> | undefined;
+      if (localProxyAllowed) {
+        const purl = buildProxyUrl(wk.url, headers, false, req, config, true, /\.m3u8/i.test(wk.url));
+        if (!purl) continue;
+        url = purl;
+      } else {
+        const d = await deliver(wk.url, headers, { forceHls: /\.m3u8/i.test(wk.url) }, req, config);
+        if (!d) continue;
+        url = d.url; proxyHeaders = d.proxyHeaders;
+      }
+      drafts.push({
+        url,
+        behaviorHints: {
+          notWebReady: !!proxyHeaders,
+          bingeGroup: `wookafr-${wk.server}`,
+          ...(proxyHeaders ? { proxyHeaders: { request: proxyHeaders } } : {}),
+        },
+        _meta: { quality: wk.quality, language: wk.language, source: 'wookafr', server: wk.server },
+      });
+    }
+
+    // Cinepulse : FILMS FR VF/VOSTFR (hôtes vidzy/uqload/livavid). vidzy joue en direct,
+    // uqload passe par le proxy du MODE (MediaFlow) -> deliver() décide. MAIS livavid résout
+    // vers tnmr, dont le token est LIÉ À L'IP du serveur d'extraction : MediaFlow (IP distante)
+    // le rejette. Donc : proxy LOCAL forcé pour tnmr quand permis (owner/local) ;
+    // sinon deliver() en secours. UA de repli AVANT le spread (l'UA de l'extracteur gagne).
+    for (const cp of cinepulseResults) {
+      const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        ...(cp.headers || {}),
+      };
+      const ipBound = /tnmr\.org/i.test(cp.url) || /[?&]asn=/i.test(cp.url);
+      let url: string;
+      let proxyHeaders: Record<string, string> | undefined;
+      if (ipBound && localProxyAllowed) {
+        const purl = buildProxyUrl(cp.url, headers, false, req, config, true, /\.m3u8/i.test(cp.url));
+        if (!purl) continue;
+        url = purl;
+      } else {
+        const d = await deliver(cp.url, headers, { forceHls: /\.m3u8/i.test(cp.url) }, req, config);
+        if (!d) continue;
+        url = d.url; proxyHeaders = d.proxyHeaders;
+      }
+      drafts.push({
+        url,
+        behaviorHints: {
+          notWebReady: !!proxyHeaders,
+          bingeGroup: `cinepulse-${cp.server}`,
+          ...(proxyHeaders ? { proxyHeaders: { request: proxyHeaders } } : {}),
+        },
+        _meta: { quality: cp.quality, language: cp.language, source: 'cinepulse', server: cp.server },
+      });
+    }
+
+    // Mavanime : anime VOSTFR (+ un peu de VF). Hôtes VOE/voembed/streamtape -> deliver()
+    // décide (voe.sx/vmpx PROXY_FORCED -> proxy du mode ; streamtape MP4 direct+Range).
+    // Même schéma que VoirAnime (thème/hôtes identiques).
+    for (const mv of mavanimeResults) {
+      const d = await deliver(mv.url, {
+        ...(mv.headers || {}),
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      }, {}, req, config);
+      if (!d) continue;
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `mavanime-${mv.server}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: { quality: mv.quality, language: mv.language, source: 'mavanime', server: mv.server },
+      });
+    }
+
+    // AnimeSite : anime VF/VOSTFR. Hôtes sibnet (mp4 direct) / vidmoly (vmpx asn-locké) /
+    // voe… -> deliver() décide (direct / proxy du mode), comme VoirAnime/Mavanime.
+    for (const as of animesiteResults) {
+      const d = await deliver(as.url, {
+        ...(as.headers || {}),
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      }, { forceHls: /\.m3u8/i.test(as.url) }, req, config);
+      if (!d) continue;
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `animesite-${as.server}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: { quality: as.quality, language: as.language, source: 'animesite', server: as.server },
+      });
+    }
+
+    // Anime-Ultime : anime VOSTFR, MP4 self-hosté (stream-<id>.mp4 -> 302 CDN signé).
+    // deliver() décide direct/proxy du mode ; le proxy suit le 302.
+    for (const au of animeultimeResults) {
+      const d = await deliver(au.url, {
+        ...(au.headers || {}),
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      }, { forceHls: /\.m3u8/i.test(au.url) }, req, config);
+      if (!d) continue;
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `animeultime-${au.server}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: { quality: au.quality, language: au.language, source: 'animeultime', server: au.server },
+      });
+    }
+
+    // Animoflix : anime VF/VOSTFR, embeds filemoon/ansembed/filelions… (HLS après extraction).
+    for (const af of animoflixResults) {
+      const d = await deliver(af.url, {
+        ...(af.headers || {}),
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      }, { forceHls: /\.m3u8/i.test(af.url) }, req, config);
+      if (!d) continue;
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `animoflix-${af.server}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: { quality: af.quality, language: af.language, source: 'animoflix', server: af.server },
+      });
+    }
+
+    // Cinex : source FR keyée TMDB (zen-blk/falzey MP4 films, finepulfe HLS séries). Gatée
+    // Referer cinex.buzz -> on le pose en proxyHeaders et on laisse DIRECTABLE : Nuvio propage
+    // le referer (leçon fsvid). Si un jour ça ne joue pas en direct, basculer zen-blk/falzey
+    // en PROXY_FORCED_HOSTS.
+    for (const cx of cinexResults) {
+      const d = await deliver(cx.url, {
+        ...(cx.headers || {}),
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      }, { forceHls: /\.m3u8|m3u8-proxy/i.test(cx.url) }, req, config);
+      if (!d) continue;
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `cinex-${cx.server}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: { quality: cx.quality, language: cx.language, source: 'cinex', server: cx.server },
+      });
+    }
+
+    // Miaw : source FR keyée TMDB. blink = URL /api/blink/v (miaw.tv, directable, joue sans
+    // referer) ; vidzy/sharecloudy = déjà extraits. DIRECT-FIRST : on NE pose PAS de referer
+    // (un referer étranger casse le ?ff zen-blk). Si Nuvio ne suit pas le 302 ou ?ff IP-lié
+    // -> basculer miaw.tv en PROXY_FORCED_HOSTS.
+    for (const mw of miawResults) {
+      const d = await deliver(mw.url, {
+        ...(mw.headers || {}),
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      }, { forceHls: /\.m3u8|m3u8-proxy/i.test(mw.url) }, req, config);
+      if (!d) continue;
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `miaw-${mw.server}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: { quality: mw.quality, language: mw.language, source: 'miaw', server: mw.server },
+      });
+    }
+
+    // Vostfree : anime VF/VOSTFR (principalement Sibnet mp4 direct).
+    for (const vf of vostfreeResults) {
+      const d = await deliver(vf.url, {
+        ...(vf.headers || {}),
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      }, {}, req, config);
+      if (!d) continue;
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `vostfree-${vf.server}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: { quality: vf.quality, language: vf.language, source: 'vostfree', server: vf.server },
+      });
+    }
+
+    // Process Nabistream results (dramas asiatiques VOSTFR — HLS master direct).
+    // Les sous-titres NE sont PAS attachés au stream : ils sont servis via la
+    // ressource /subtitles (handleSubtitles), seul mécanisme que Nuvio consomme.
+    // Un double-listage (stream + ressource) faisait empiler les pistes.
+    for (const nb of nabistreamResults) {
+      const d = await deliver(nb.url, {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      }, { forceHls: true }, req, config);
+
+      if (!d) continue; // Skip blocked URLs
+
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: 'nabistream',
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: {
+          quality: nb.quality,
+          language: nb.language,
+          source: 'nabistream',
+          subCount: nb.subtitles.length,
+        },
+      });
+    }
+
+    // nkstrm : master HLS direct tokené (FR audio DEFAULT, token ~6h), Referer requis.
+    // Referer = le domaine nkstrm COURANT (config admin, domaine rotatif) -> ne périme plus.
+    const nkRef = getNkstrmEndpoints().base.replace(/\/+$/, '') + '/';
+    for (const nk of nkstrmResults) {
+      const d = await deliver(nk.url, { 'User-Agent': BROWSER_UA, 'Referer': nkRef }, { forceHls: true }, req, config);
+      if (!d) continue;
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: 'nkstrm',
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: { quality: nk.quality, language: nk.language, source: 'nkstrm', subCount: nk.subtitles.length },
+      });
+    }
+
+    // Process Coflix results (films/séries FR VF+VOSTFR, HLS extrait des hôtes).
+    for (const cf of coflixResults) {
+      // livavid/tnmr : injouable en DIRECT (le player n'applique pas l'UA mobile aux
+      // segments -> 302) ET via MEDIAFLOW (mangle les headers -> « Stream unavailable »).
+      // SEUL le proxy LOCAL marche (forwarde l'UA exact). On ne l'offre donc qu'aux configs
+      // qui peuvent l'utiliser (owner key / mode local) -> sinon flux mort, on l'écarte.
+      // tnmr est anti-datacenter -> ne jouera de toute façon que sur un serveur résidentiel.
+      const needsLocalProxy = /tnmr/i.test(cf.url);
+      if (needsLocalProxy && !localProxyAllowed) continue;
+      // UA par défaut D'ABORD, headers du stream ENSUITE : si l'extracteur a fixé un UA
+      // précis (livavid = LULU_UA mobile), il gagne. Les hôtes sans UA (fsvid/vidzy)
+      // gardent l'UA navigateur par défaut.
+      const d = await deliver(cf.url, {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        ...(cf.headers || {}),
+      }, { forceHls: true, forceLocal: needsLocalProxy }, req, config);
+
+      if (!d) continue; // Skip blocked URLs
+
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `coflix-${cf.server}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: {
+          quality: cf.quality,
+          language: cf.language,
+          source: 'coflix',
+          server: cf.server,
+        },
+      });
+    }
+
+    // Process Kordoz results (films FR VF+VOSTFR ; sharecloudy -> m3u8 directable,
+    // CORS ouvert + pas d'asn -> joue en direct ET via proxy).
+    for (const kz of kordozResults) {
+      const d = await deliver(kz.url, {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        ...(kz.headers || {}),
+      }, { forceHls: true }, req, config);
+
+      if (!d) continue; // Skip blocked URLs
+
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `kordoz-${kz.server}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: {
+          quality: kz.quality,
+          language: kz.language,
+          source: 'kordoz',
+          server: kz.server,
+        },
+      });
+    }
+
+    // Process Docstream results (documentaires FR ; streamtape résolu via MediaFlow ->
+    // URL MediaFlow déjà jouable, mp4 le plus souvent). MFP-only en amont.
+    for (const ds of docstreamResults) {
+      const isHls = /\.m3u8/i.test(ds.url);
+      const d = await deliver(ds.url, {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        ...(ds.headers || {}),
+      }, { forceHls: isHls }, req, config);
+
+      if (!d) continue; // Skip blocked URLs
+
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `docstream-${ds.server}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: {
+          quality: ds.quality,
+          language: ds.language,
+          source: 'docstream',
+          server: ds.server,
+        },
+      });
+    }
+
+    // Process Zone-Téléchargement results (gros catalogue FR WEB-DL, HLS extrait des hôtes).
+    // Comme Coflix : lulustream résout vers tnmr (proxy-forcé + anti-datacenter) -> injouable
+    // en direct/MediaFlow, SEUL le proxy local (UA exact) marche -> forceLocal + réservé aux
+    // configs qui peuvent l'utiliser (owner key / mode local).
+    for (const zt of ztstreamResults) {
+      const needsLocalProxy = /tnmr/i.test(zt.url);
+      if (needsLocalProxy && !localProxyAllowed) continue;
+      const d = await deliver(zt.url, {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        ...(zt.headers || {}),
+      }, { forceHls: true, forceLocal: needsLocalProxy }, req, config);
+
+      if (!d) continue; // Skip blocked URLs
+
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `ztstream-${zt.server}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: {
+          quality: zt.quality,
+          language: zt.language,
+          source: 'ztstream',
+          server: zt.server,
+        },
+      });
+    }
+
+    // CineStream : mêmes familles d'hôtes que ZT (lulustream/tnmr, vidara) -> le CDN
+    // tnmr refuse les datacenters en direct, d'où le proxy local forcé.
+    for (const cs of cinestreamResults) {
+      const needsLocalProxy = /tnmr/i.test(cs.url);
+      if (needsLocalProxy && !localProxyAllowed) continue;
+      const d = await deliver(cs.url, {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        ...(cs.headers || {}),
+      }, { forceHls: /\.m3u8/i.test(cs.url), forceLocal: needsLocalProxy }, req, config);
+
+      if (!d) continue;
+
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `cinestream-${cs.server}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: {
+          quality: cs.quality,
+          language: cs.language,
+          source: 'cinestream',
+          server: cs.server,
+        },
+      });
+    }
+
+    // Zenix : le jeton de leur CDN meurt en ~3 MINUTES (vérifié : 403 à 180 s, même
+    // avec son cookie d'origine). Résoudre au listing donnerait donc des liens morts
+    // avant le clic -> on annonce NOTRE endpoint, qui rejoue la chaîne à la lecture
+    // puis redirige vers le proxy du mode. Même principe que /moviebox/stream, à ceci
+    // près que zenix exige le cookie AUSSI au téléchargement : pas de 302 vers le CDN.
+    // PROXY OBLIGATOIRE (comme worldivx) : sans proxy disponible, le flux ne serait pas
+    // livrable -> on ne le propose pas (sinon il s'afficherait en mode direct et échouerait).
+    if (proxyAvailable(config)) {
+      const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+      const host = req.headers['x-forwarded-host'] || req.headers.host;
+      const cfgPrefix = req.params.config ? `/${req.params.config}` : '';
+      for (const zx of zenixResults) {
+        const u = new URL(`${cfgPrefix}/zenix/stream`, `${proto}://${host}`);
+        u.searchParams.set('slug', zx.slug);
+        u.searchParams.set('type', zx.mediaType);
+        if (zx.mediaType === 'series') {
+          u.searchParams.set('se', String(zx.se));
+          u.searchParams.set('ep', String(zx.ep));
+        }
+        drafts.push({
+          url: signUrl(u).toString(),
+          behaviorHints: { notWebReady: false, bingeGroup: `zenix-${zx.quality}` },
+          _meta: { quality: zx.quality, language: zx.language, source: 'zenix', server: zx.server },
+        });
+      }
+    }
+
+    // KissKH : livré comme dramallyu, où il joue — URL CDN brute + Referer en
+    // proxyHeaders, c'est le serveur interne du lecteur qui télécharge. Ni fixaudio ni
+    // proxy : playlist mono-audio à segments déguisés (.PNG = MPEG-TS) et plages
+    // d'octets selon les titres ; notre réécriture de manifeste la cassait.
+    for (const kk of kisskhResults) {
+      drafts.push({
+        url: kk.url,
+        behaviorHints: { notWebReady: true, bingeGroup: `kisskh-${kk.quality}`, proxyHeaders: { request: kk.headers } },
+        _meta: { quality: kk.quality, language: kk.language, source: 'kisskh', server: 'kisskh' },
+      });
+    }
+
+    // worldivx : la réponse Byse chiffrée expire en 15 min et le jeton du flux est lié au
+    // réseau du serveur -> on annonce NOTRE endpoint, qui résout au clic puis redirige vers
+    // le proxy du mode. Jamais de direct (vérifié : 404 depuis une autre connexion).
+    if (proxyAvailable(config)) {
+      const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+      const host = req.headers['x-forwarded-host'] || req.headers.host;
+      const cfgPrefix = req.params.config ? `/${req.params.config}` : '';
+      for (const wx of worldivxResults) {
+        const u = new URL(`${cfgPrefix}/worldivx/stream`, `${proto}://${host}`);
+        u.searchParams.set('code', wx.code);
+        drafts.push({
+          url: signUrl(u).toString(),
+          behaviorHints: { notWebReady: false, bingeGroup: `worldivx-${wx.quality}-${wx.language}`, filename: wx.release },
+          _meta: { quality: wx.quality, language: wx.language, source: 'worldivx', server: wx.server },
+        });
+      }
+    }
+
+    // Tokyvideo : MP4 direct, header-gaté (Referer exigé). Livraison standard via deliver()
+    // -> direct (proxyHeaders Referer) ou proxy selon le mode. Jeton non lié au réseau.
+    for (const tv of tokyvideoResults) {
+      const d = await deliver(tv.url, { Referer: TOKYVIDEO_REFERER, 'User-Agent': BROWSER_UA }, { forceHls: false }, req, config);
+      if (!d) continue;
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `tokyvideo-${tv.quality}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: { quality: tv.quality, language: tv.language, source: 'tokyvideo', server: tv.server },
+      });
+    }
+
+    // Yablom : m3u8 ShareCloudy (CDN vromov/dotrab, header-gaté). Livraison comme Coflix.
+    for (const yb of yablomResults) {
+      const d = await deliver(yb.url, {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        ...(yb.headers || {}),
+      }, { forceHls: /\.m3u8/i.test(yb.url) }, req, config);
+      if (!d) continue;
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `yablom-${yb.quality}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: { quality: yb.quality, language: yb.language, source: 'yablom', server: yb.server },
+      });
+    }
+
+    // dulourd : HLS Voe (CDN derrière des domaines jetables) — même livraison que ZT.
+    for (const dl of dulourdResults) {
+      const needsLocalProxy = /tnmr/i.test(dl.url);
+      if (needsLocalProxy && !localProxyAllowed) continue;
+      const d = await deliver(dl.url, {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        ...(dl.headers || {}),
+      }, { forceHls: /\.m3u8/i.test(dl.url), forceLocal: needsLocalProxy }, req, config);
+
+      if (!d) continue;
+
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `dulourd-${dl.server}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: {
+          quality: dl.quality,
+          language: dl.language,
+          source: 'dulourd',
+          server: dl.server,
+        },
+      });
+    }
+
+    // Process AnimeSama results (anime VOSTFR/VF, HLS ansembed ou MP4 sibnet).
+    // Le HLS ansembed (vmpx) a un token IP/ASN-bound -> non-directable (PROXY_FORCED).
+    // Le MP4 sibnet : sa chaîne 302 est résolue côté extracteur -> URL finale directable
+    // (sans header). Repassé en DIRECT le temps de re-tester sur ligne stable (un souci
+    // de ligne cliente peut avoir mimé le « buffer après 2s »). Réintégrable au proxy
+    // via PREFER_PROXY_HOSTS si le peering russe rame vraiment.
+    for (const as of animesamaResults) {
+      const isHls = /\.m3u8/i.test(as.url);
+      const d = await deliver(as.url, {
+        ...(as.headers || {}),
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      }, { forceHls: isHls }, req, config);
+
+      if (!d) continue; // Skip blocked URLs (ex. vmpx en mode direct : non-directable)
+
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `animesama-${as.language}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: {
+          quality: as.quality,
+          language: as.language,
+          source: 'animesama',
+        },
+      });
+    }
+
+    // Process Videasy results (agrégateur VO anglais + sous-titres). HLS header-gaté
+    // (segments .m4s sur emberforge, 403 sans Referer) -> doit passer par un PROXY, mais
+    // celui DU MODE (forceProxy), pas forcément le local : en MFP -> MediaFlow, en local
+    // -> proxy local, en direct pur -> écarté. Ça évite la fuite « proxy local » quand
+    // seul MFP/direct est autorisé. (Le MP4 progressif éventuel reste directable.)
+    for (const vd of videasyResults) {
+      const isHls = /\.m3u8/i.test(vd.url);
+      const d = await deliver(vd.url, {
+        ...(vd.headers || {}),
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      }, isHls ? { forceHls: true, forceProxy: true } : { forceHls: false }, req, config);
+
+      if (!d) continue; // Skip blocked URLs
+
+      drafts.push({
+        url: d.url,
+        behaviorHints: {
+          notWebReady: !!d.proxyHeaders,
+          bingeGroup: `videasy-${vd.server}`,
+          ...(d.proxyHeaders ? { proxyHeaders: { request: d.proxyHeaders } } : {}),
+        },
+        _meta: {
+          quality: vd.quality,
+          language: vd.language,
+          source: 'videasy',
+          server: vd.server,
+          subCount: (vd.subtitles || []).length,
+        },
+      });
+    }
+
+    // Process MovieBox results (aoneroom mobile API — direct signed MP4s). The
+    // signed URL is time-limited, so instead of embedding it we point at our own
+    // /moviebox/stream endpoint which resolves a fresh URL and 302-redirects at
+    // play time. Direct MP4 → no proxy bandwidth, always fresh.
+    {
+      const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+      const host = req.headers['x-forwarded-host'] || req.headers.host;
+      const baseUrl = `${proto}://${host}`;
+      for (const mb of movieboxResults) {
+        const u = new URL('/moviebox/stream', baseUrl);
+        u.searchParams.set('sid', mb.subjectId);
+        u.searchParams.set('se', String(mb.se));
+        u.searchParams.set('ep', String(mb.ep));
+        u.searchParams.set('rid', mb.resourceId);
+        u.searchParams.set('q', String(parseInt(mb.quality, 10) || 0)); // résolution -> résolution tv-bff
+        drafts.push({
+          url: signUrl(u).toString(), // &k= si ACCESS_KEY active
+          behaviorHints: {
+            notWebReady: false,
+            bingeGroup: `moviebox-${mb.quality}`,
+            ...(mb.sizeBytes ? { videoSize: mb.sizeBytes } : {}),
+          },
+          // Sous-titres servis via la ressource /subtitles (handleSubtitles), pas
+          // au niveau du stream — évite le double-listage dans Nuvio.
+          _meta: {
+            quality: mb.quality,
+            language: mb.language,
+            source: 'moviebox',
+            codec: mb.codec,
+            sizeBytes: mb.sizeBytes,
+            subCount: (mb.subLangs || []).length,
+          },
+        });
+      }
+    }
+
+
+    // Process FrenchStream results
+    for (const fr of frenchstreamResults) {
+      let finalUrl: string;
+      let proxyHdrs: Record<string, string> | undefined; // posé si livraison directe
+
+      const mfUrl = config?.mfUrl || DEFAULT_MEDIAFLOW_URL;
+      const isMediaFlowUrl = mfUrl && fr.url.includes(new URL(mfUrl).hostname);
+
+      if (isMediaFlowUrl) {
+        finalUrl = fr.url;
+      } else {
+        const proxyHeaders: Record<string, string> = {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          ...fr.headers,
+        };
+        const d = await deliver(fr.url, proxyHeaders, {}, req, config);
+        if (!d) continue;
+        finalUrl = d.url;
+        proxyHdrs = d.proxyHeaders;
+      }
+
+      drafts.push({
+        url: finalUrl,
+        behaviorHints: {
+          notWebReady: !!proxyHdrs,
+          bingeGroup: 'frenchstream',
+          ...(proxyHdrs ? { proxyHeaders: { request: proxyHdrs } } : {}),
+        },
+        _meta: {
+          quality: fr.quality,
+          language: fr.language,
+          source: 'frenchstream',
+          server: fr.server,
+        },
+      });
+    }
+
+      return drafts;
+    }; // fin assembleDrafts
+
+    // 1ʳᵉ passe : on bâtit les drafts sur le snapshot de l'early-exit.
+    let finalResults: any[][] = collected;
+    let drafts = await assembleDrafts(collected);
+
+    // Filet de sécurité « livrabilité » : si l'early-exit a rendu trop peu de flux
+    // LIVRABLES (< minStreams) alors que des sources n'avaient pas fini, on attend le
+    // reste puis on reconstruit — mieux vaut un poil plus lent qu'un « No streams found »
+    // à tort (le compteur early-exit ne voit pas les flux jetés par le mode direct/MFP).
+    // Promise.all sur des promesses DÉJÀ réglées revient tout de suite : aucune pénalité
+    // quand toutes les sources étaient prêtes au moment de l'early-exit.
+    if (minStreams > 0 && drafts.length < minStreams) {
+      const full = await Promise.all(sourcePromises);
+      const grew = full.some(
+        (r, i) => (Array.isArray(r) ? r.length : 0) !== (Array.isArray(collected[i]) ? collected[i].length : 0),
+      );
+      if (grew) {
+        const retry = await assembleDrafts(full);
+        if (retry.length > drafts.length) { drafts = retry; finalResults = full; }
+      }
+    }
+
+    // Résumé par source (tracking Users) calculé sur les résultats FINAUX,
+    // après l'éventuelle attente complémentaire ci-dessus.
+    SOURCE_NAMES.forEach((n, i) => {
+      const r = finalResults[i];
+      if (Array.isArray(r) && r.length) perSourceSummary[n] = r.length;
+    });
+
+    if (drafts.length === 0) {
+      console.log('[Stream] No streams found');
+      record(0, 'empty');
+      return res.json({ streams: [] });
+    }
+
+    // Nom de fichier scène (AIOStreams parse title/year/S-E/resolution/lang).
+    // Titre depuis Cinemeta (anglais/scène) plutôt que le site source (souvent
+    // FR/traduit). Calculé AVANT la passe d'affichage pour l'afficher aussi
+    // (ligne 💾) dans Stremio direct.
+    const sceneMeta = await getSceneMeta(
+      type === 'series' ? 'series' : 'movie',
+      parsed.baseId,
+      { title: info.title, year: info.year }
+    );
+
+    // Passe centralisée : filename (AIOStreams) + name/title enrichis depuis
+    // _meta (src/display.ts). originalLanguage résout le cas "VO" (drapeau).
+    // Ne jamais laisser OpenSubtitles retarder la liste : cap à 2,5s (sinon 0 -> pas
+    // de badge). En pratique la promesse a tourné pendant tout le fan-out -> déjà prête.
+    const frSubs = await Promise.race([
+      frSubsPromise,
+      new Promise<any[]>(resolve => setTimeout(() => resolve([]), 2500)),
+    ]);
+    const frSubCount = frSubs.length;
+    const streams: StreamWithMeta[] = drafts.map(d => {
+      // Videasy = agrégateur anglophone : son audio « VO » est TOUJOURS anglais (le
+      // flux ne porte aucune langue). Pour le drapeau, sa vraie langue d'origine est
+      // donc l'anglais, pas celle de TMDB — sinon on colle « 🇯🇵 VO » sur un doublage
+      // anglais (ex. anime). On force 'en' pour ces flux uniquement.
+      const streamOrigLang = d._meta.source === 'videasy' ? 'en' : info.originalLanguage;
+      const filename = buildFilename({
+        title: sceneMeta.title,
+        year: sceneMeta.year,
+        isSeries: type === 'series',
+        season: parsed.season,
+        episode: parsed.episode,
+        lang: d._meta.language,
+        originalLanguage: streamOrigLang,
+        resolution: d._meta.quality,
+        codec: d._meta.codec,
+        provider: providerLabel(d._meta.source),
+      });
+      const delivery = computeDelivery(d.url, !!d.behaviorHints?.proxyHeaders, config);
+      // Santé extracteurs + sources (trafic réel) : mode de livraison + échantillon re-sondable.
+      recordDelivery(d.url, delivery, d._meta?.source, d.behaviorHints?.proxyHeaders?.request);
+      const meta = { ...d._meta, delivery, frSubCount };
+      return {
+        ...d,
+        behaviorHints: { ...d.behaviorHints, filename },
+        name: buildStreamName(meta),
+        title: buildStreamTitle(meta, streamOrigLang, filename),
+      };
+    });
+
+    // Apply user preferences (filter + sort)
+    const sortedStreams = filterAndSortStreams(streams, config);
+
+    // Remove _meta before sending to Stremio (internal use only)
+    const cleanStreams = sortedStreams.map(({ _meta, ...rest }) => rest);
+
+    // Ventilation par source sur les flux RÉELLEMENT renvoyés (post-filtrage), pour
+    // que la somme colle au total. Dynamique : toutes les sources présentes, triées
+    // par nombre décroissant — plus de liste figée sur 3 scrapers.
+    const bySource = new Map<string, number>();
+    for (const s of sortedStreams) {
+      const src = s._meta?.source || 'inconnu';
+      bySource.set(src, (bySource.get(src) || 0) + 1);
+    }
+    const breakdown = [...bySource.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([src, n]) => `${src}: ${n}`)
+      .join(', ');
+
+    // nkstrm déconnecté (token 401) : entrée informative NON-bloquante en fin de liste,
+    // qui ouvre le configure pré-rempli pour reconnecter. Les autres flux restent normaux.
+    // On pose une VRAIE `url` (vers /nkstrm/reconnect -> 302 configure) EN PLUS de
+    // `externalUrl` : les clients url-only (Nuvio) ignorent externalUrl et ne rendaient donc
+    // pas l'entrée -> le nudge était invisible. Stremio garde externalUrl (ouvre le navigateur).
+    const outStreams: any[] = cleanStreams;
+    if (nkstrmAuthFailed) {
+      const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+      const host = (req.headers['x-forwarded-host'] as string) || req.headers.host;
+      const base = `${proto}://${host}`;
+      const cfgParam = (req.params as { config?: string }).config;
+      const cfgUrl = cfgParam ? `${base}/${cfgParam}/configure` : `${base}/configure`;
+      const reconnectUrl = cfgParam
+        ? `${base}/nkstrm/reconnect?c=${encodeURIComponent(cfgParam)}`
+        : `${base}/nkstrm/reconnect`;
+      outStreams.push({
+        name: 'nkstrm ⚠️',
+        title: 'nkstrm déconnecté\nReconnecte-le dans la configuration.',
+        url: reconnectUrl,     // visible sur les clients url-only (Nuvio)
+        externalUrl: cfgUrl,   // Stremio : ouvre configure dans le navigateur
+      });
+    }
+
+    console.log(`[Stream] Returning ${cleanStreams.length} streams${breakdown ? ` (${breakdown})` : ''}`);
+    record(cleanStreams.length, cleanStreams.length > 0 ? 'ok' : 'empty');
+    res.json({ streams: outStreams });
+  } catch (e) {
+    console.error('[Stream] Error:', e);
+    record(0, 'error');
+    res.json({ streams: [] });
+  }
+}
+
+// Stream endpoint (without config - uses env defaults)
+app.get('/stream/:type/:id.json', async (req, res) => {
+  if (accessEnabled()) return res.status(401).send("Non autorisé : clé d'accès requise");
+  const { type, id } = req.params;
+  await runWithLogCapture(pseudoLabel(null), () => handleStream(req, res, type, id, null));
+});
+
+// Stream endpoint (with config)
+app.get('/:config/stream/:type/:id.json', async (req, res) => {
+  const { config, type, id } = req.params;
+  const userConfig = parseConfig(config);
+  if (!userConfig) {
+    return res.status(400).json({ error: 'Invalid configuration' });
+  }
+  if (denyIfNoAccess(userConfig, res)) return;
+  await runWithLogCapture(pseudoLabel(userConfig?.pseudo), () => handleStream(req, res, type, id, userConfig));
+});
+
+// Subtitles resource — mécanisme canonique Stremio/Nuvio (les subs de niveau-stream
+// ne s'affichent pas dans tous les clients). Résout l'id TMDB puis renvoie les
+// sous-titres des sources qui en fournissent (Nabistream), servis par nos propres
+// endpoints en text/vtt.
+async function handleSubtitles(req: express.Request, res: express.Response, type: string, id: string, config: UserConfig | null) {
+  try {
+    // Sous-titres LooStream coupés par l'utilisateur -> aucune piste. La ressource est aussi
+    // retirée du manifeste (getManifest config-aware), mais un client déjà installé avant le
+    // changement peut encore appeler cet endpoint -> on court-circuite ici aussi.
+    if (config?.subs === false) { res.json({ subtitles: [] }); return; }
+    const parsed = parseStremioId(decodeURIComponent(id));
+    const info = await getTmdbInfo(type, parsed.baseId, config);
+    if (!info) { res.json({ subtitles: [] }); return; }
+
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    const baseUrl = `${proto}://${host}`;
+    const subtitles: { id: string; url: string; lang: string }[] = [];
+
+    // Nabistream : dramas asiatiques VOSTFR, sous-titres FR/EN.
+    try {
+      const nbs = await getNabistreamStreams(info.tmdbId, type as 'movie' | 'series', parsed.season, parsed.episode);
+      (nbs[0]?.subtitles || []).forEach((s, i) => {
+        const label = s.lang === 'fre' ? 'Français' : s.lang === 'eng' ? 'English' : s.lang;
+        const su = new URL(`/nabistream/subtitle/${encodeURIComponent(label)}.vtt`, baseUrl);
+        su.searchParams.set('u', s.url);
+        subtitles.push({ id: `nabistream-${i}-${s.lang}`, url: signUrl(su).toString(), lang: s.lang });
+      });
+    } catch (e: any) {
+      console.log('[Subtitles] Nabistream:', (e?.message || '').slice(0, 80));
+    }
+
+    // KissKH : sous-titres multi-langues (SRT) de l'épisode, servis via /kisskh/subtitle
+    // (SRT->VTT). Re-résolus ici : recherche, fiche et pistes sont en cache.
+    if (isKisskhLanguage(info.originalLanguage)) {
+      try {
+        const kks = await getKisskhStreams(type as 'movie' | 'series', [info.title, info.originalTitle], parsed.season, parsed.episode);
+        (kks[0]?.subtitles || []).forEach((s, i) => {
+          const label = s.lang === 'fre' ? 'Français' : s.lang === 'eng' ? 'English' : s.label;
+          const su = new URL(`/kisskh/subtitle/${encodeURIComponent(label)}.vtt`, baseUrl);
+          su.searchParams.set('u', s.url);
+          subtitles.push({ id: `kisskh-${i}-${s.lang}`, url: signUrl(su).toString(), lang: s.lang });
+        });
+      } catch (e: any) {
+        console.log('[Subtitles] KissKH:', (e?.message || '').slice(0, 80));
+      }
+    }
+
+    // nkstrm : sous-titres FR/EN (WebVTT) tokénés (~6h), servis en direct (opt-in).
+    // Re-résolus frais ; NkstrmAuthError -> juste ignoré ici (pas de subs, non-bloquant).
+    if (config?.nkstrmToken) {
+      try {
+        const nks = await getNkstrmStreams(config.nkstrmToken, info.tmdbId, type as 'movie' | 'series', parsed.season, parsed.episode, info.title);
+        (nks[0]?.subtitles || []).forEach((s, i) => {
+          subtitles.push({ id: `nkstrm-${i}-${s.lang}`, url: s.url, lang: s.lang });
+        });
+      } catch (e: any) {
+        console.log('[Subtitles] Nkstrm:', (e?.message || '').slice(0, 80));
+      }
+    }
+
+    // MovieBox : films/séries, sous-titres multi-langues résolus FRAIS à la lecture
+    // (endpoint /moviebox/subtitle, SRT->VTT). Dédoublonné par langue.
+    try {
+      const mbs = await getMovieboxStreams(info.tmdbId, type as 'movie' | 'series', info.title, info.year, parsed.season, parsed.episode);
+      const seenLang = new Set<string>();
+      for (const mb of mbs) {
+        for (const lang of (mb.subLangs || [])) {
+          if (seenLang.has(lang)) continue;
+          seenLang.add(lang);
+          const label = lang === 'fre' ? 'Français' : lang === 'eng' ? 'English' : lang;
+          const s = new URL(`/moviebox/subtitle/${encodeURIComponent(label)}.vtt`, baseUrl);
+          s.searchParams.set('sid', mb.subjectId);
+          s.searchParams.set('se', String(mb.se));
+          s.searchParams.set('ep', String(mb.ep));
+          s.searchParams.set('rid', mb.resourceId);
+          s.searchParams.set('lang', lang);
+          subtitles.push({ id: `moviebox-${lang}`, url: signUrl(s).toString(), lang });
+        }
+      }
+    } catch (e: any) {
+      console.log('[Subtitles] MovieBox:', (e?.message || '').slice(0, 80));
+    }
+
+    // Videasy : sous-titres .vtt (VO anglais + autres langues si dispo, dont FR ->
+    // VOSTFR), servis via /videasy/subtitle (ajoute le Referer, sert text/vtt).
+    try {
+      const vds = await getVideasyStreams(info.tmdbId, type as 'movie' | 'series', parsed.season, parsed.episode, config?.tmdbKey || DEFAULT_TMDB_KEY);
+      const seenLang = new Set<string>();
+      for (const s of (vds[0]?.subtitles || [])) { // subs identiques entre serveurs
+        if (seenLang.has(s.lang)) continue;
+        seenLang.add(s.lang);
+        const label = /^fr/i.test(s.lang) ? 'Français' : /^en/i.test(s.lang) ? 'English' : s.lang;
+        const su = new URL(`/videasy/subtitle/${encodeURIComponent(label)}.vtt`, baseUrl);
+        su.searchParams.set('u', s.url);
+        subtitles.push({ id: `videasy-${s.lang}`, url: signUrl(su).toString(), lang: s.lang });
+      }
+    } catch (e: any) {
+      console.log('[Subtitles] Videasy:', (e?.message || '').slice(0, 80));
+    }
+
+    // Sous-titres FR EXTERNES (OpenSubtitles legacy) — complètent les flux VO
+    // (Videasy…) qui ne portent pas de FR. Proposés par défaut ; coupables via config.extSubs
+    // (= false -> on garde seulement les sous-titres EMBARQUÉS, sans le flot externe).
+    try {
+      if (config?.extSubs !== false && info.imdbId) {
+        const ext = await getFrenchSubtitles(
+          info.imdbId,
+          type === 'series' ? parsed.season : undefined,
+          type === 'series' ? parsed.episode : undefined,
+        );
+        ext.forEach((s, i) => {
+          const su = new URL('/extsub/subtitle', baseUrl);
+          su.searchParams.set('url', s.url);
+          subtitles.push({ id: `opensubtitles-fr-${i}`, url: signUrl(su).toString(), lang: 'fre' });
+        });
+      }
+    } catch (e: any) {
+      console.log('[Subtitles] OpenSubtitles:', (e?.message || '').slice(0, 80));
+    }
+
+    console.log(`[Subtitles] ${type}/${id} -> ${subtitles.length} piste(s)`);
+    res.json({ subtitles });
+  } catch (e) {
+    console.error('[Subtitles] Error:', e);
+    res.json({ subtitles: [] });
+  }
+}
+
+// Stremio peut appendre un segment "extra" (videoHash/videoSize) avant .json :
+//   /subtitles/{type}/{id}.json   ou   /subtitles/{type}/{id}/{extra}.json
+app.get('/subtitles/:type/:id.json', (req, res) => {
+  if (accessEnabled()) return res.status(401).send("Non autorisé : clé d'accès requise");
+  handleSubtitles(req, res, req.params.type, req.params.id, null);
+});
+app.get('/subtitles/:type/:id/:extra.json', (req, res) => {
+  if (accessEnabled()) return res.status(401).send("Non autorisé : clé d'accès requise");
+  handleSubtitles(req, res, req.params.type, req.params.id, null);
+});
+app.get('/:config/subtitles/:type/:id.json', (req, res) => {
+  const cfg = parseConfig(req.params.config);
+  if (denyIfNoAccess(cfg || null, res)) return;
+  handleSubtitles(req, res, req.params.type, req.params.id, cfg || null);
+});
+app.get('/:config/subtitles/:type/:id/:extra.json', (req, res) => {
+  const cfg = parseConfig(req.params.config);
+  if (denyIfNoAccess(cfg || null, res)) return;
+  handleSubtitles(req, res, req.params.type, req.params.id, cfg || null);
+});
+
+// Logo
+app.get('/logo.png', (_req, res) => {
+  res.sendFile('loostream.png', { root: process.cwd() });
+});
+
+// Home redirect
+app.get('/', (_req, res) => {
+  res.redirect('/manifest.json');
+});
+
+// ============================================
+// ADMIN DASHBOARD — session cookie auth
+// ============================================
+
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const SESSION_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+const ADMIN_COOKIE = 'loostream_admin';
+
+// Égalité de chaînes en TEMPS CONSTANT : on compare des SHA-256 (longueur fixe ->
+// timingSafeEqual ne jette pas et la longueur des secrets ne fuit pas).
+function safeStrEq(a: string, b: string): boolean {
+  const ha = crypto.createHash('sha256').update(a, 'utf8').digest();
+  const hb = crypto.createHash('sha256').update(b, 'utf8').digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
+
+function signSession(payload: string): string {
+  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('hex');
+  return `${payload}.${sig}`;
+}
+
+function verifySession(token: string | undefined): { user: string; exp: number } | null {
+  if (!token) return null;
+  const dot = token.lastIndexOf('.');
+  if (dot < 0) return null;
+  const payload = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  const expected = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('hex');
+  if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, 'base64').toString());
+    if (!parsed.user || !parsed.exp || parsed.exp < Date.now()) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function createSession(user: string): string {
+  const payload = Buffer.from(JSON.stringify({ user, exp: Date.now() + SESSION_MAX_AGE_MS })).toString('base64');
+  return signSession(payload);
+}
+
+function parseCookies(header: string | undefined): Record<string, string> {
+  if (!header) return {};
+  const out: Record<string, string> = {};
+  for (const part of header.split(';')) {
+    const [k, ...v] = part.trim().split('=');
+    if (k) out[k] = decodeURIComponent(v.join('='));
+  }
+  return out;
+}
+
+function requireAdminSession(req: express.Request, res: express.Response, next: express.NextFunction): void {
+  if (!process.env.ADMIN_USER || !process.env.ADMIN_PASS) {
+    res.status(503).send('Admin dashboard not configured. Set ADMIN_USER and ADMIN_PASS in .env');
+    return;
+  }
+  const cookies = parseCookies(req.headers.cookie);
+  const session = verifySession(cookies[ADMIN_COOKIE]);
+  if (!session) {
+    res.redirect('/admin/login' + (cookies[ADMIN_COOKIE] ? '?error=expired' : ''));
+    return;
+  }
+  next();
+}
+
+// Réservé au compte RACINE (env ADMIN_USER). La gestion des comptes admin n'est
+// accessible qu'à lui : un admin secondaire ne peut ni voir ni gérer les autres.
+function requireRootAdmin(req: express.Request, res: express.Response, next: express.NextFunction): void {
+  if (!process.env.ADMIN_USER || !process.env.ADMIN_PASS) {
+    res.status(503).json({ error: 'Admin non configuré' });
+    return;
+  }
+  const session = verifySession(parseCookies(req.headers.cookie)[ADMIN_COOKIE]);
+  if (!session) { res.status(401).json({ error: 'Session requise' }); return; }
+  if (!isRootUser(session.user)) { res.status(403).json({ error: 'Réservé au compte principal' }); return; }
+  next();
+}
+
+app.get('/admin/login', (req, res) => {
+  const cookies = parseCookies(req.headers.cookie);
+  if (verifySession(cookies[ADMIN_COOKIE])) {
+    res.redirect('/admin');
+    return;
+  }
+  res.sendFile('login.html', { root: path.join(__dirname) });
+});
+
+app.post('/admin/login', adminLoginLimiter as any, express.urlencoded({ extended: false, limit: '4kb' }), (req, res) => {
+  if (!process.env.ADMIN_USER || !process.env.ADMIN_PASS) {
+    res.redirect('/admin/login?error=notconfig');
+    return;
+  }
+  const { user, pass } = req.body || {};
+  // Root env (ADMIN_USER/ADMIN_PASS) OU un compte supplémentaire de config/admins.json.
+  // Comparaison root en temps constant, SANS court-circuit (on calcule les deux
+  // égalités avant de combiner) -> pas de fuite de timing sur l'identifiant/mot de passe.
+  const uOk = safeStrEq(String(user || ''), process.env.ADMIN_USER || '');
+  const pOk = safeStrEq(String(pass || ''), process.env.ADMIN_PASS || '');
+  const rootOk = !!process.env.ADMIN_USER && !!process.env.ADMIN_PASS && uOk && pOk;
+  const fileOk = !rootOk && verifyFileAdmin(String(user || ''), String(pass || ''));
+  if (rootOk || fileOk) {
+    const token = createSession(user);
+    const secure = (req.headers['x-forwarded-proto'] || req.protocol) === 'https';
+    res.cookie(ADMIN_COOKIE, token, {
+      httpOnly: true,
+      secure,
+      sameSite: 'lax',
+      maxAge: SESSION_MAX_AGE_MS,
+      path: '/',
+    });
+    res.redirect('/admin');
+    return;
+  }
+  res.redirect('/admin/login?error=invalid');
+});
+
+app.post('/admin/logout', (_req, res) => {
+  res.clearCookie(ADMIN_COOKIE, { path: '/' });
+  res.redirect('/admin/login');
+});
+
+// User de la session admin courante (pour createdBy / anti-auto-suppression).
+function currentAdminUser(req: express.Request): string {
+  const cookies = parseCookies(req.headers.cookie);
+  return verifySession(cookies[ADMIN_COOKIE])?.user || '';
+}
+
+app.get('/admin', requireAdminSession, (_req, res) => {
+  res.sendFile('admin.html', { root: path.join(__dirname) });
+});
+
+// ============================================
+// ADMIN API (for Telegram bot)
+// ============================================
+
+// Movix endpoints admin (read + reload)
+app.get('/api/movix/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  const current = reload ? reloadMovixEndpoints() : getMovixEndpoints();
+  res.json({ ...current, reloaded: reload });
+});
+
+
+// FrenchStream endpoints admin (read + reload)
+app.get('/api/frenchstream/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  const current = reload ? reloadFrenchStreamEndpoints() : getFrenchStreamEndpoints();
+  res.json({ ...current, reloaded: reload });
+});
+
+// Extractor domains admin (read + reload)
+app.get('/api/extractor-domains', (req, res) => {
+  const reload = req.query.reload === 'true';
+  const current = reload ? reloadExtractorDomains() : getExtractorDomains();
+  res.json({ ...current, reloaded: reload });
+});
+
+// StreamFlix / VoirDrama base URLs (read + reload). Files are
+// hot-reloaded on edit; this endpoint forces a reload on demand.
+app.get('/api/streamflix/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadStreamflixEndpoints() : getStreamflixEndpoints()), reloaded: reload });
+});
+app.get('/api/videasy/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadVideasyEndpoints() : getVideasyEndpoints()), reloaded: reload });
+});
+app.get('/api/animesama/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadAnimesamaEndpoints() : getAnimesamaEndpoints()), reloaded: reload });
+});
+app.get('/api/voirdrama/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadVoirDramaEndpoints() : getVoirDramaEndpoints()), reloaded: reload });
+});
+app.get('/api/voiranime/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadVoirAnimeEndpoints() : getVoirAnimeEndpoints()), reloaded: reload });
+});
+app.get('/api/nabistream/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadNabistreamEndpoints() : getNabistreamEndpoints()), reloaded: reload });
+});
+app.get('/api/coflix/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadCoflixEndpoints() : getCoflixEndpoints()), reloaded: reload });
+});
+app.get('/api/kordoz/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadKordozEndpoints() : getKordozEndpoints()), reloaded: reload });
+});
+app.get('/api/wavewatch/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadWavewatchEndpoints() : getWavewatchEndpoints()), reloaded: reload });
+});
+app.get('/api/ztstream/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadZoneTelechargementEndpoints() : getZoneTelechargementEndpoints()), reloaded: reload });
+});
+app.get('/api/cinestream/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadCinestreamEndpoints() : getCinestreamEndpoints()), reloaded: reload });
+});
+app.get('/api/dulourd/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadDulourdEndpoints() : getDulourdEndpoints()), reloaded: reload });
+});
+app.get('/api/zenix/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadZenixEndpoints() : getZenixEndpoints()), reloaded: reload });
+});
+app.get('/api/worldivx/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadWorldivxEndpoints() : getWorldivxEndpoints()), reloaded: reload });
+});
+app.get('/api/tokyvideo/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadTokyvideoEndpoints() : getTokyvideoEndpoints()), reloaded: reload });
+});
+app.get('/api/yablom/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadYablomEndpoints() : getYablomEndpoints()), reloaded: reload });
+});
+app.get('/api/ianime/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadIanimeEndpoints() : getIanimeEndpoints()), reloaded: reload });
+});
+app.get('/api/leizy/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadLeizyEndpoints() : getLeizyEndpoints()), reloaded: reload });
+});
+app.get('/api/jour1film/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadJour1filmEndpoints() : getJour1filmEndpoints()), reloaded: reload });
+});
+app.get('/api/wookafr/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadWookafrEndpoints() : getWookafrEndpoints()), reloaded: reload });
+});
+app.get('/api/cinepulse/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadCinepulseEndpoints() : getCinepulseEndpoints()), reloaded: reload });
+});
+app.get('/api/mavanime/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadMavanimeEndpoints() : getMavanimeEndpoints()), reloaded: reload });
+});
+app.get('/api/animesite/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadAnimesiteEndpoints() : getAnimesiteEndpoints()), reloaded: reload });
+});
+app.get('/api/animeultime/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadAnimeUltimeEndpoints() : getAnimeUltimeEndpoints()), reloaded: reload });
+});
+app.get('/api/animoflix/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadAnimoflixEndpoints() : getAnimoflixEndpoints()), reloaded: reload });
+});
+app.get('/api/cinex/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadCinexEndpoints() : getCinexEndpoints()), reloaded: reload });
+});
+app.get('/api/miaw/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadMiawEndpoints() : getMiawEndpoints()), reloaded: reload });
+});
+app.get('/api/kisskh/endpoints', (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadKisskhEndpoints() : getKisskhEndpoints()), reloaded: reload });
+});
+app.get(['/api/nkstrm/endpoints', '/api/nakastream/endpoints'], (req, res) => {
+  const reload = req.query.reload === 'true';
+  res.json({ ...(reload ? reloadNkstrmEndpoints() : getNkstrmEndpoints()), reloaded: reload });
+});
+
+// ── Écriture des endpoints depuis l'admin (authentifié) ────────────────────
+// Écrit un fichier config/<name> en préservant son _comment, puis appelle le
+// reload de la source pour appliquer à chaud.
+function configFilePath(fileName: string): string {
+  return fsSync.existsSync('/app/config')
+    ? `/app/config/${fileName}`
+    : path.join(process.cwd(), 'config', fileName);
+}
+function writeConfigFile(fileName: string, patch: Record<string, unknown>): Record<string, unknown> {
+  const p = configFilePath(fileName);
+  let current: Record<string, unknown> = {};
+  try { if (fsSync.existsSync(p)) current = JSON.parse(fsSync.readFileSync(p, 'utf-8')); } catch { /* start fresh */ }
+  const next = { ...current, ...patch };
+  fsSync.writeFileSync(p, JSON.stringify(next, null, 2));
+  return next;
+}
+// Valide et nettoie une base URL (http/https, sans slash final superflu).
+function cleanBaseUrl(v: unknown): string | null {
+  if (typeof v !== 'string' || !isValidUrl(v)) return null;
+  return v.trim().replace(/\/+$/, '');
+}
+
+const jsonBody = express.json({ limit: '8kb' });
+
+// Identité de l'admin connecté (pour l'UI : afficher l'onglet Admins au root seul).
+app.get('/api/whoami', requireAdminSession, (req, res) => {
+  const user = currentAdminUser(req);
+  res.json({ user, isRoot: isRootUser(user) });
+});
+
+// ---- Gestion des comptes admin — RÉSERVÉE AU COMPTE PRINCIPAL (root) ----
+// requireRootAdmin : un admin secondaire ne peut ni lister ni créer/supprimer de comptes.
+// Le root (env) est protégé (isRootUser) et absent du fichier -> jamais de verrouillage.
+app.get('/api/admins', requireRootAdmin, (req, res) => {
+  res.json({ accounts: listAdmins(), root: process.env.ADMIN_USER || null, current: currentAdminUser(req) });
+});
+
+app.post('/api/admins', requireRootAdmin, jsonBody, (req, res) => {
+  const { user, pass } = req.body || {};
+  const r = addAdmin(String(user || ''), String(pass || ''), currentAdminUser(req));
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.json({ ok: true });
+});
+
+app.post('/api/admins/:user/password', requireRootAdmin, jsonBody, (req, res) => {
+  const r = setAdminPassword(String(req.params.user || ''), String((req.body || {}).pass || ''));
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.json({ ok: true });
+});
+
+app.delete('/api/admins/:user', requireRootAdmin, (req, res) => {
+  const target = String(req.params.user || '');
+  const r = removeAdmin(target);
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.json({ ok: true });
+});
+
+// Movix : {api, referer, origin}
+app.post('/api/movix/endpoints', requireAdminSession, jsonBody, (req, res) => {
+  const api = cleanBaseUrl(req.body?.api);
+  if (!api) return res.status(400).json({ ok: false, error: 'api URL invalide' });
+  const patch: Record<string, unknown> = { api };
+  if (typeof req.body?.referer === 'string' && isValidUrl(req.body.referer)) patch.referer = req.body.referer;
+  if (typeof req.body?.origin === 'string' && isValidUrl(req.body.origin)) patch.origin = req.body.origin;
+  writeConfigFile('movix-endpoints.json', patch);
+  return res.json({ ok: true, ...reloadMovixEndpoints() });
+});
+
+// Sources à base unique : {base}
+const singleBaseSources: Array<{ path: string; file: string; reload: () => unknown }> = [
+  { path: 'frenchstream', file: 'frenchstream-endpoints.json', reload: reloadFrenchStreamEndpoints },
+  { path: 'streamflix', file: 'streamflix-endpoints.json', reload: reloadStreamflixEndpoints },
+  { path: 'voirdrama', file: 'voirdrama-endpoints.json', reload: reloadVoirDramaEndpoints },
+  { path: 'voiranime', file: 'voiranime-endpoints.json', reload: reloadVoirAnimeEndpoints },
+  { path: 'nabistream', file: 'nabistream-endpoints.json', reload: reloadNabistreamEndpoints },
+  { path: 'coflix', file: 'coflix-endpoints.json', reload: reloadCoflixEndpoints },
+  { path: 'videasy', file: 'videasy-endpoints.json', reload: reloadVideasyEndpoints },
+  { path: 'animesama', file: 'animesama-endpoints.json', reload: reloadAnimesamaEndpoints },
+  { path: 'wavewatch', file: 'wavewatch-endpoints.json', reload: reloadWavewatchEndpoints },
+  { path: 'ztstream', file: 'zonetelechargement-endpoints.json', reload: reloadZoneTelechargementEndpoints },
+  { path: 'cinestream', file: 'cinestream-endpoints.json', reload: reloadCinestreamEndpoints },
+  { path: 'dulourd', file: 'dulourd-endpoints.json', reload: reloadDulourdEndpoints },
+  { path: 'zenix', file: 'zenix-endpoints.json', reload: reloadZenixEndpoints },
+  { path: 'yablom', file: 'yablom-endpoints.json', reload: reloadYablomEndpoints },
+  { path: 'ianime', file: 'ianime-endpoints.json', reload: reloadIanimeEndpoints },
+  { path: 'leizy', file: 'leizy-endpoints.json', reload: reloadLeizyEndpoints },
+  { path: 'jour1film', file: 'jour1film-endpoints.json', reload: reloadJour1filmEndpoints },
+  { path: 'wookafr', file: 'wookafr-endpoints.json', reload: reloadWookafrEndpoints },
+  { path: 'cinepulse', file: 'cinepulse-endpoints.json', reload: reloadCinepulseEndpoints },
+  { path: 'mavanime', file: 'mavanime-endpoints.json', reload: reloadMavanimeEndpoints },
+  { path: 'animesite', file: 'animesite-endpoints.json', reload: reloadAnimesiteEndpoints },
+  { path: 'animeultime', file: 'anime-ultime-endpoints.json', reload: reloadAnimeUltimeEndpoints },
+  { path: 'animoflix', file: 'animoflix-endpoints.json', reload: reloadAnimoflixEndpoints },
+  { path: 'cinex', file: 'cinex-endpoints.json', reload: reloadCinexEndpoints },
+  { path: 'miaw', file: 'miaw-endpoints.json', reload: reloadMiawEndpoints },
+  { path: 'nkstrm', file: 'nkstrm-endpoints.json', reload: reloadNkstrmEndpoints },
+];
+for (const src of singleBaseSources) {
+  app.post(`/api/${src.path}/endpoints`, requireAdminSession, jsonBody, (req, res) => {
+    const base = cleanBaseUrl(req.body?.base);
+    if (!base) return res.status(400).json({ ok: false, error: 'base URL invalide' });
+    writeConfigFile(src.file, { base });
+    return res.json({ ok: true, ...(src.reload() as object) });
+  });
+}
+
+// Tokyvideo : {base, index}. base = site ; index = URL de l'index public (dépôt qui
+// bouge : xdata-mix/nx-data -> rikital/onyxia-data…). index facultatif (garde le défaut).
+app.post('/api/tokyvideo/endpoints', requireAdminSession, jsonBody, (req, res) => {
+  const base = cleanBaseUrl(req.body?.base);
+  if (!base) return res.status(400).json({ ok: false, error: 'base URL invalide' });
+  const patch: Record<string, unknown> = { base };
+  if (typeof req.body?.index === 'string' && isValidUrl(req.body.index)) patch.index = req.body.index.trim();
+  writeConfigFile('tokyvideo-endpoints.json', patch);
+  return res.json({ ok: true, ...(reloadTokyvideoEndpoints() as object) });
+});
+
+// WorldiVX : {base, byse}. base = site ; byse = lecteur chiffré (domaine rotatif,
+// bysezoxexe.com -> mega-stream.cc…). byse facultatif (garde le défaut si omis/vide).
+app.post('/api/worldivx/endpoints', requireAdminSession, jsonBody, (req, res) => {
+  const base = cleanBaseUrl(req.body?.base);
+  if (!base) return res.status(400).json({ ok: false, error: 'base URL invalide' });
+  const patch: Record<string, unknown> = { base };
+  const byse = cleanBaseUrl(req.body?.byse);
+  if (byse) patch.byse = byse;
+  writeConfigFile('worldivx-endpoints.json', patch);
+  return res.json({ ok: true, ...(reloadWorldivxEndpoints() as object) });
+});
+
+// Kordoz : liste de domaines miroirs (essayés dans l'ordre), pas une base unique.
+app.post('/api/kordoz/endpoints', requireAdminSession, jsonBody, (req, res) => {
+  const raw = Array.isArray(req.body?.domains) ? req.body.domains : [];
+  const domains = raw.map(cleanBaseUrl).filter((d: string | null): d is string => !!d);
+  if (!domains.length) return res.status(400).json({ ok: false, error: 'au moins un domaine valide requis' });
+  writeConfigFile('kordoz-endpoints.json', { domains });
+  return res.json({ ok: true, ...reloadKordozEndpoints() });
+});
+
+// KissKH : {base, miroirs}. Les miroirs sont essayés dans l'ordre, bascule automatique
+// après 3 échecs d'affilée ; `base` (facultatif, vide = aucun) force un domaine en tête.
+app.post('/api/kisskh/endpoints', requireAdminSession, jsonBody, (req, res) => {
+  const rawBase = typeof req.body?.base === 'string' ? req.body.base.trim() : '';
+  const base = rawBase ? cleanBaseUrl(rawBase) : '';
+  if (base === null) return res.status(400).json({ ok: false, error: 'base URL invalide' });
+  const raw = Array.isArray(req.body?.miroirs) ? req.body.miroirs : [];
+  const miroirs = raw.map(cleanBaseUrl).filter((d: string | null): d is string => !!d);
+  if (!miroirs.length) return res.status(400).json({ ok: false, error: 'au moins un miroir valide requis' });
+  writeConfigFile('kisskh-endpoints.json', { base, miroirs });
+  return res.json({ ok: true, ...reloadKisskhEndpoints() });
+});
+// État en direct (miroir courant, échecs, signature) et re-découverte à la demande.
+app.get('/api/kisskh/status', requireAdminSession, (_req, res) => {
+  res.json(etatKisskh());
+});
+app.post('/api/kisskh/rediscover', requireAdminSession, async (_req, res) => {
+  try {
+    res.json({ ok: true, ...(await rediscoverKisskh()) });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message || 'échec' });
+  }
+});
+
+// Whitelist des domaines : lecture (+ statut auto), ajout manuel (authentifié).
+app.get('/api/whitelist', (_req, res) => {
+  res.json({ domains: getAllowedDomains(), autoWhitelist: autoWhitelistEnabled() });
+});
+app.post('/api/whitelist', requireAdminSession, jsonBody, (req, res) => {
+  const domain = typeof req.body?.domain === 'string' ? req.body.domain.trim().toLowerCase() : '';
+  if (!domain || !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) {
+    return res.status(400).json({ ok: false, error: 'domaine invalide' });
+  }
+  const added = addAllowedDomain(domain);
+  return res.json({ ok: true, added, domains: getAllowedDomains() });
+});
+
+// Réglages runtime (Paramétrage > Partage). GET non sensible (aucune clé en clair,
+// cf. settingsView) ; POST derrière la session admin. Applique à chaud : mode,
+// autoWhitelist et ownerKey sont relus par leurs getters à chaque usage.
+app.get('/api/settings', (_req, res) => {
+  // accessKeyConfigured : ACCESS_KEY est gérée uniquement dans le .env (garde
+  // l'accès) ; l'admin l'affiche en lecture seule, jamais sa valeur.
+  res.json({ ...settingsView(), accessKeyConfigured: accessEnabled(), netfreePool: poolStatus(), movieboxPool: movieboxPoolStatus() });
+});
+app.post('/api/settings', requireAdminSession, jsonBody, async (req, res) => {
+  const b = req.body || {};
+  const patch: { mode?: string | null; ownerKey?: string | null; autoWhitelist?: boolean | null; netfreeSocksPool?: boolean | null; movieboxSocksPool?: boolean | null; captureAllLogs?: boolean | null; cacheMultStreams?: number | null; cacheMultNetmirror?: number | null; cacheMultEmpty?: number | null; matrixAccessToken?: string | null } = {};
+  let matrixUser: string | undefined;
+
+  if ('mode' in b) {
+    if (b.mode === null) patch.mode = null;
+    else if (typeof b.mode === 'string') {
+      // valide : sous-ensemble de {DIRECT,MFP,LOCAL} séparé par ; ou ,
+      const toks = b.mode.split(/[;,]/).map((s: string) => s.trim().toLowerCase()).filter(Boolean);
+      if (!toks.length || !toks.every((t: string) => t in MODE_ALIAS)) {
+        return res.status(400).json({ ok: false, error: 'mode invalide (DIRECT/MFP/LOCAL)' });
+      }
+      // Normalise vers les libellés canoniques via MODE_ALIAS (direct/mediaflow/local),
+      // puis re-affiche en étiquettes utilisateur.
+      const LABEL: Record<string, string> = { direct: 'DIRECT', mediaflow: 'MFP', local: 'LOCAL' };
+      patch.mode = [...new Set(toks.map((t: string) => LABEL[MODE_ALIAS[t]]))].join(';');
+    }
+  }
+  if ('autoWhitelist' in b) {
+    if (b.autoWhitelist === null) patch.autoWhitelist = null;
+    else if (typeof b.autoWhitelist === 'boolean') patch.autoWhitelist = b.autoWhitelist;
+    else return res.status(400).json({ ok: false, error: 'autoWhitelist doit être un booléen' });
+  }
+  if ('ownerKey' in b) {
+    if (b.ownerKey === null || b.ownerKey === '') patch.ownerKey = null;
+    else if (typeof b.ownerKey === 'string' && b.ownerKey.length >= 8 && b.ownerKey.length <= 128) {
+      patch.ownerKey = b.ownerKey;
+    } else return res.status(400).json({ ok: false, error: 'ownerKey : 8 à 128 caractères' });
+  }
+  if ('netfreeSocksPool' in b) {
+    if (b.netfreeSocksPool === null) patch.netfreeSocksPool = null;
+    else if (typeof b.netfreeSocksPool === 'boolean') patch.netfreeSocksPool = b.netfreeSocksPool;
+    else return res.status(400).json({ ok: false, error: 'netfreeSocksPool doit être un booléen' });
+  }
+  if ('movieboxSocksPool' in b) {
+    if (b.movieboxSocksPool === null) patch.movieboxSocksPool = null;
+    else if (typeof b.movieboxSocksPool === 'boolean') patch.movieboxSocksPool = b.movieboxSocksPool;
+    else return res.status(400).json({ ok: false, error: 'movieboxSocksPool doit être un booléen' });
+  }
+  if ('captureAllLogs' in b) {
+    if (b.captureAllLogs === null) patch.captureAllLogs = null;
+    else if (typeof b.captureAllLogs === 'boolean') patch.captureAllLogs = b.captureAllLogs;
+    else return res.status(400).json({ ok: false, error: 'captureAllLogs doit être un booléen' });
+  }
+  if ('matrixAccessToken' in b) {
+    if (b.matrixAccessToken === null || b.matrixAccessToken === '') patch.matrixAccessToken = null;
+    else if (typeof b.matrixAccessToken === 'string' && /^\S{10,512}$/.test(b.matrixAccessToken.trim())) {
+      // Vérifié auprès du homeserver avant d'enregistrer : un jeton faux ne se verrait sinon
+      // qu'au prochain passage du bot (jusqu'à 6 h plus tard).
+      const token = b.matrixAccessToken.trim();
+      try {
+        const r = await axios.get('https://matrix.org/_matrix/client/v3/account/whoami', {
+          headers: { Authorization: `Bearer ${token}` }, timeout: 10000, validateStatus: () => true,
+        });
+        if (r.status !== 200 || !r.data?.user_id) {
+          return res.status(400).json({ ok: false, error: `jeton Matrix refusé par matrix.org (HTTP ${r.status})` });
+        }
+        matrixUser = r.data.user_id;
+      } catch (e: any) {
+        return res.status(502).json({ ok: false, error: `matrix.org injoignable (${e.code || e.message})` });
+      }
+      patch.matrixAccessToken = token;
+    } else return res.status(400).json({ ok: false, error: 'jeton Matrix invalide' });
+  }
+  for (const k of ['cacheMultStreams', 'cacheMultNetmirror', 'cacheMultEmpty'] as const) {
+    if (k in b) {
+      if (b[k] === null) patch[k] = null;
+      else if (typeof b[k] === 'number' && b[k] > 0) patch[k] = b[k];
+      else return res.status(400).json({ ok: false, error: `${k} doit être un nombre > 0 (borné 0.25–8)` });
+    }
+  }
+
+  updateSettings(patch);
+  // Applique le toggle du pool À CHAUD (démarre/arrête le scan en fond).
+  if ('netfreeSocksPool' in b) setPoolEnabled(netfreeSocksPoolEnabled());
+  if ('movieboxSocksPool' in b) setMovieboxPoolEnabled(movieboxSocksPoolEnabled());
+  return res.json({ ok: true, ...settingsView(), netfreePool: poolStatus(), movieboxPool: movieboxPoolStatus(), ...(matrixUser ? { matrixUser } : {}) });
+});
+
+// ── Cache : stats + purge manuelle ─────────────────────────────────────────────
+// GET  /api/cache        → stats (entrées vivantes par scope, taille, hit rate).
+// POST /api/cache/clear  → vide tout, ou un scope précis ({ scope: 'movix' }).
+app.get('/api/cache', (_req, res) => {
+  res.json(getCacheStats());
+});
+app.post('/api/cache/clear', requireAdminSession, jsonBody, (req, res) => {
+  const scope = (req.body || {}).scope;
+  if (scope !== undefined && (typeof scope !== 'string' || !scope)) {
+    return res.status(400).json({ ok: false, error: 'scope doit être une chaîne non vide (ou absent pour tout vider)' });
+  }
+  const removed = scope ? clearScope(scope) : clearAll();
+  console.log(`[Cache] Vidé ${scope ? `scope "${scope}"` : 'TOUT'} depuis l'admin : ${removed} entrées`);
+  return res.json({ ok: true, scope: scope || null, removed });
+});
+
+// ── Contrôle des sources : santé (metrics) + état activé/désactivé ──────────────
+// GET : une entrée par source avec statut, fenêtre 20 (recent) et enabled. POST : toggle.
+app.get('/api/sources', (_req, res) => {
+  const metrics = getAllMetrics();
+  const disabled = getDisabledSources();
+  const health = getSourceHealth();
+  const sources = Object.entries(metrics).map(([name, m]) => {
+    const h = health[name];
+    return { name, enabled: !disabled.includes(name), ...m, modes: h?.modes || null, hasSample: !!h?.hasSample };
+  });
+  const on = sources.filter(s => s.enabled);
+  res.json({
+    sources,
+    summary: {
+      total: sources.length,
+      ok: on.filter(s => s.status === 'ok').length,
+      warning: on.filter(s => s.status === 'warning').length,
+      down: on.filter(s => s.status === 'down').length,
+      off: sources.length - on.length,
+    },
+  });
+});
+app.post('/api/sources/:name', requireAdminSession, jsonBody, (req, res) => {
+  const name = String(req.params.name || '');
+  if (!Object.keys(getAllMetrics()).includes(name)) return res.status(404).json({ ok: false, error: 'source inconnue' });
+  const enabled = (req.body || {}).enabled;
+  if (typeof enabled !== 'boolean') return res.status(400).json({ ok: false, error: 'enabled doit être un booléen' });
+  const set = new Set(getDisabledSources());
+  if (enabled) set.delete(name); else set.add(name);
+  updateSettings({ disabledSources: [...set] });
+  return res.json({ ok: true, name, enabled });
+});
+
+// ── Extracteurs : liste + toggle ON/OFF (calqué sur /api/sources) ──────────────
+// Le statut santé (par mode) vient de la capture du trafic réel : getExtractorHealth().
+app.get('/api/extractors', (_req, res) => {
+  const disabled = new Set(getDisabledExtractors());
+  const health = getExtractorHealth();
+  const extractors = EXTRACTOR_IDS.map(id => ({
+    id,
+    enabled: !disabled.has(id),
+    ...(health[id] || { seen: 0, lastSeen: null, modes: {} }),
+  }));
+  res.json({
+    extractors,
+    summary: { total: extractors.length, off: [...disabled].filter(d => EXTRACTOR_IDS.includes(d as any)).length },
+  });
+});
+app.post('/api/extractors/:id', requireAdminSession, jsonBody, (req, res) => {
+  const id = String(req.params.id || '');
+  if (!EXTRACTOR_IDS.includes(id as any)) return res.status(404).json({ ok: false, error: 'extracteur inconnu' });
+  const enabled = (req.body || {}).enabled;
+  if (typeof enabled !== 'boolean') return res.status(400).json({ ok: false, error: 'enabled doit être un booléen' });
+  const set = new Set(getDisabledExtractors());
+  if (enabled) set.delete(id); else set.add(id);
+  updateSettings({ disabledExtractors: [...set] });
+  return res.json({ ok: true, id, enabled });
+});
+
+// ── Sonde manuelle : rejoue le dernier flux capturé d'une source/extracteur côté serveur ──
+// (admin). Attrape CDN mort/403/502/décoy ; ne voit PAS les soucis spécifiques au client.
+async function handleProbe(sample: { url: string; headers: Record<string, string> } | undefined, res: express.Response) {
+  if (!sample) return res.status(404).json({ ok: false, error: 'aucun échantillon capturé — lance d\'abord un stream qui l\'utilise' });
+  const r = await probeStream(sample.url, sample.headers);
+  return res.json({ ok: true, ...r, host: (() => { try { return new URL(sample.url).hostname; } catch { return ''; } })() });
+}
+app.post('/api/probe/extractor/:id', requireAdminSession, (req, res) => {
+  handleProbe(getExtractorSample(String(req.params.id || '')), res).catch(() => res.status(500).json({ ok: false, error: 'sonde échouée' }));
+});
+app.post('/api/probe/source/:name', requireAdminSession, (req, res) => {
+  handleProbe(getSourceSample(String(req.params.name || '')), res).catch(() => res.status(500).json({ ok: false, error: 'sonde échouée' }));
+});
+
+// ── NetMirror : manifestes RECONSTRUITS (méthode Onyx) ─────────────────────────
+// Le master d'origine ne renvoie que le placeholder invité ; on génère nous-mêmes
+// le master (pistes audio réelles + variantes vidéo) et les playlists vidéo, en
+// pointant les segments .jpg (MPEG-TS déguisé) sur /proxy/segment?transform=ts.
+const NM_REFERER = 'https://net52.cc/';
+
+function nmSegBase(req: express.Request): string {
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  return `${proto}://${host}`;
+}
+
+// `ts` = appliquer le transformer MPEG-TS (.jpg -> video/mp2t). À NE PAS activer
+// pour les sous-titres : leurs segments sont du WebVTT, pas de la vidéo.
+function nmProxy(base: string, target: string, kind: 'segment' | 'manifest', ts = true): string {
+  const u = new URL(`/proxy/${kind}`, base);
+  u.searchParams.set('url', target);
+  u.searchParams.set('h_referer', NM_REFERER);
+  u.searchParams.set('h_user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+  if (ts) {
+    if (kind === 'segment') u.searchParams.set('transform', 'ts');
+    else u.searchParams.set('transformer', 'ts_stream');
+  }
+  return signUrl(u).toString(); // &k= si ACCESS_KEY active (route /proxy gardée)
+}
+
+// Master généré : /netmirror/master.m3u8?h&id&p&n&d&q=1080p,720p&a=0,1
+app.get('/netmirror/master.m3u8', (req, res) => {
+  const { h, id, p, n, d } = req.query as Record<string, string>;
+  const qualities = String(req.query.q || '').split(',').filter(Boolean);
+  const audio = String(req.query.a || '').split(',').filter(x => x !== '');
+  if (!h || !id || !p || !qualities.length) return res.status(400).send('paramètres manquants');
+
+  const base = nmSegBase(req);
+  const self = (q: string) => {
+    const u = new URL('/netmirror/video.m3u8', base);
+    u.searchParams.set('h', h); u.searchParams.set('id', id); u.searchParams.set('p', p);
+    u.searchParams.set('n', String(n || 0)); u.searchParams.set('d', String(d || 10)); u.searchParams.set('q', q);
+    return signUrl(u).toString(); // &k= si ACCESS_KEY active
+  };
+  // `a` = "index:code:nom" par piste (langues issues du master d'origine).
+  const lines = ['#EXTM3U', '#EXT-X-VERSION:3'];
+  audio.forEach((spec, k) => {
+    const [idx, code = 'und', ...rest] = spec.split(':');
+    const name = decodeURIComponent(rest.join(':') || code);
+    const url = nmProxy(base, `https://${h}/files/${id}/a/${idx}/${idx}.m3u8`, 'manifest');
+    lines.push(`#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aac",LANGUAGE="${code}",NAME="${name}",DEFAULT=${k === 0 ? 'YES' : 'NO'},AUTOSELECT=${k === 0 ? 'YES' : 'NO'},URI="${url}"`);
+  });
+  // Sous-titres : `s` = "code:nom:uriEncodée" (listés par le master, sur subscdn.top).
+  const subs = String(req.query.s || '').split(',').filter(Boolean);
+  subs.forEach((spec, k) => {
+    const [code = 'und', nameEnc = '', uriEnc = ''] = spec.split(':');
+    if (!uriEnc) return;
+    const name = decodeURIComponent(nameEnc) || code;
+    const url = nmProxy(base, decodeURIComponent(uriEnc), 'manifest', false); // pas de transformer TS
+    lines.push(`#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",LANGUAGE="${code}",NAME="${name}",DEFAULT=NO,AUTOSELECT=${k === 0 ? 'YES' : 'NO'},FORCED=NO,URI="${url}"`);
+  });
+
+  const BW: Record<string, [number, string]> = { '1080p': [3000000, '1920x1080'], '720p': [1500000, '1280x720'], '480p': [800000, '854x480'] };
+  for (const q of qualities) {
+    const [bw, resn] = BW[q] || [1000000, '1280x720'];
+    lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${bw},RESOLUTION=${resn}${audio.length ? ',AUDIO="aac"' : ''}${subs.length ? ',SUBTITLES="subs"' : ''}`);
+    lines.push(self(q));
+  }
+  res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.send(lines.join('\n') + '\n');
+});
+
+// Playlist vidéo générée : segments {prefix}_NNN.jpg proxifiés + transform ts.
+app.get('/netmirror/video.m3u8', (req, res) => {
+  const { h, id, p, q } = req.query as Record<string, string>;
+  const n = parseInt(String(req.query.n || '0'), 10);
+  const d = parseFloat(String(req.query.d || '10')) || 10;
+  if (!h || !id || !p || !q || !n) return res.status(400).send('paramètres manquants');
+
+  const base = nmSegBase(req);
+  const target = Math.max(12, Math.ceil(d));
+  const out = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-PLAYLIST-TYPE:VOD',
+    `#EXT-X-TARGETDURATION:${target}`, '#EXT-X-MEDIA-SEQUENCE:0'];
+  for (let i = 0; i < n; i++) {
+    out.push(`#EXTINF:${d.toFixed(3)},`);
+    out.push(nmProxy(base, `https://${h}/files/${id}/${q}/${p}_${String(i).padStart(3, '0')}.jpg`, 'segment'));
+  }
+  out.push('#EXT-X-ENDLIST');
+  res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.send(out.join('\n') + '\n');
+});
+
+// Modes de livraison proposés (pilotés par MODE du .env) — lu par /configure.
+// Une `ownerKey` valide en query débloque les 3 modes (le propriétaire garde le
+// proxy local même si MODE le restreint pour les partages). `ownerKeyRequired`
+// indique à l'UI d'afficher le champ (seulement si OWNER_KEY est configurée).
+app.get('/api/modes', (req, res) => {
+  const isOwner = ownerKeyMatches(req.query.ownerKey);
+  const modes = isOwner ? ['direct', 'mediaflow', 'local'] : allowedModes();
+  res.json({ modes, default: modes[0], owner: isOwner, ownerKeyAvailable: ownerKeyEnabled() });
+});
+
+// Pairing nkstrm (public, support configure) : l'utilisateur génère un code sur
+// nkstrm.tv, le colle dans le wizard ; on l'échange ici côté serveur (pas de CORS)
+// contre un token de session device. Le token ne transite qu'en réponse (jamais loggué).
+// L'ancien chemin reste servi : une page /configure encore ouverte dans un
+// navigateur l'appellerait et prendrait un 404 sans ce filet.
+app.post(['/api/nkstrm/claim', '/api/nakastream/claim'], jsonBody, async (req, res) => {
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim().toUpperCase() : '';
+  if (!/^[A-Z0-9]{4,12}$/.test(code)) { res.status(400).json({ ok: false, error: 'Code invalide' }); return; }
+  const base = getNkstrmEndpoints().base.replace(/\/+$/, '');
+  // Via CURL : Cloudflare bloque les requêtes Node vers leur domaine (cf. curl-fetch.ts).
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { status, data, body } = await curlJson<any>(`${base}/api/v1/auth/pair/claim`, {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+      headers: {
+        'Content-Type': 'application/json', 'Accept': 'application/json',
+        'User-Agent': BROWSER_UA, 'Origin': base, 'Referer': `${base}/`,
+      },
+      timeoutMs: 12000,
+    });
+    if (status === 0 && attempt === 0) { await new Promise(r => setTimeout(r, 600)); continue; }
+
+    // Un défi anti-bot n'est PAS un code invalide : le dire, sinon le message accuse
+    // l'utilisateur alors que le serveur est bloqué (ça a coûté des codes brûlés pour rien).
+    if (isCloudflareChallenge(body, status)) {
+      res.status(502).json({ ok: false, error: 'nkstrm bloque le serveur (protection anti-bot). Ton code est intact.' });
+      return;
+    }
+    if (status === 0) {
+      res.status(502).json({ ok: false, error: 'nkstrm injoignable, réessaie.' });
+      return;
+    }
+
+    const token = data?.token;
+    if (status >= 200 && status < 300 && typeof token === 'string' && token.length >= 10) {
+      res.json({ ok: true, token });
+    } else {
+      res.status(400).json({ ok: false, error: data?.message || 'Code invalide ou expiré.' });
+    }
+    return;
+  }
+});
+
+// Stats endpoint
+app.get('/api/stats', (_req, res) => {
+  const uptime = Date.now() - stats.startTime;
+  const uptimeHours = Math.floor(uptime / 3600000);
+  const uptimeMinutes = Math.floor((uptime % 3600000) / 60000);
+
+  res.json({
+    uptime: `${uptimeHours}h ${uptimeMinutes}m`,
+    uptimeMs: uptime,
+    requests: stats.requests,
+    sources: stats.sources,
+    streamsServed: stats.streamsServed,
+    metrics: getAllMetrics(),
+    cache: getCacheStats(),
+  });
+});
+
+// Cache stats standalone
+app.get('/api/cache/stats', (_req, res) => {
+  res.json(getCacheStats());
+});
+
+// Logs live pour l'admin — lit le ring mémoire (secrets déjà masqués à l'écriture).
+app.get('/api/logs', requireAdminSession, (req, res) => {
+  const num = (v: unknown) => (typeof v === 'string' && /^\d+$/.test(v) ? parseInt(v, 10) : undefined);
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+  res.json(getLogs({
+    sinceSeq: num(req.query.sinceSeq),
+    source: str(req.query.source),
+    level: str(req.query.level),
+    q: str(req.query.q),
+    limit: num(req.query.limit),
+  }));
+});
+
+// Tracking Users (admin). Vue d'ensemble triée (problèmes récents en tête), requêtes d'un
+// pseudo, et trace de logs détaillée d'une requête (chargée au clic). `/request/:id` déclaré
+// AVANT `/:pseudo` sinon "request" serait capturé comme un pseudo.
+app.get('/api/users', requireAdminSession, (_req, res) => {
+  res.json({ users: getUsersOverview() });
+});
+// Stats agrégées utilisateurs (compteurs, en ligne ~10 min, outcomes, top titres).
+// DÉCLARÉ AVANT `/:pseudo` sinon "stats" serait capturé comme un pseudo.
+app.get('/api/users/stats', requireAdminSession, (_req, res) => {
+  res.json(getUserStats());
+});
+app.get('/api/users/request/:id', requireAdminSession, (req, res) => {
+  res.json({ log: getRequestLog(Number(req.params.id)) });
+});
+app.get('/api/users/:pseudo', requireAdminSession, (req, res) => {
+  res.json({ requests: getUserRequests(req.params.pseudo) });
+});
+// Supprime un utilisateur : toute son activité + libère son pseudo (re-revendicable ensuite).
+app.delete('/api/users/:pseudo', requireAdminSession, (req, res) => {
+  const pseudo = String(req.params.pseudo || '');
+  if (!pseudo) return res.status(400).json({ ok: false, error: 'pseudo manquant' });
+  const removed = deleteUser(pseudo);
+  console.log(`[Admin] Utilisateur supprimé: "${pseudo}" (${removed} requête(s))`);
+  return res.json({ ok: true, pseudo, removed });
+});
+
+// Retry a probe request on transient network/TLS errors. Some CDN edge nodes
+// intermittently return a TLS internal_error (alert 80) or serve an incomplete
+// cert chain (-> "unable to get local issuer certificate"); a single blip must
+// not be reported as "down". Retries only on transient errors, not on HTTP status.
+async function probeGet(url: string, opts: any, attempts = 3): Promise<any> {
+  let lastErr: any;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await axios.get(url, opts);
+    } catch (e: any) {
+      lastErr = e;
+      const code = e?.code || '';
+      const transient =
+        ['EPROTO', 'ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED', 'EAI_AGAIN',
+         'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE'].includes(code) ||
+        /unable to get local issuer certificate|socket hang up|alert|EPROTO/i.test(e?.message || '');
+      if (!transient || i === attempts - 1) throw e;
+      await new Promise(r => setTimeout(r, 500 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
+// Health check endpoint - tests each source
+app.get('/api/health', async (_req, res) => {
+  const results: Record<string, { status: 'up' | 'down' | 'degraded'; latency?: number; error?: string }> = {};
+
+  // Test NetMirror. The scraper's front door is verify.php handing out a guest
+  // t_hash_t cookie (the old tv/p.php probe tested a pre-v3 endpoint that now
+  // 403s behind Cloudflare — a false "degraded"). Base is env-overridable, same
+  // as the scraper, so this follows a domain rotation.
+  const nmBase = process.env.NETMIRROR_API_BASE || 'https://net52.cc';
+  const nmUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0 /OS.GatuNewTV v1.0';
+  const netmirrorStart = Date.now();
+  try {
+    const uuid = `${Math.random().toString(16).slice(2)}-${Date.now().toString(16)}`;
+    const resp = await axios.post(`${nmBase}/verify.php`, `g-recaptcha-response=${uuid}`, {
+      timeout: 10000,
+      headers: { 'User-Agent': nmUA, 'Referer': `${nmBase}/`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      maxRedirects: 0,
+      validateStatus: (s: number) => s < 400 || s === 301 || s === 302,
+    });
+    const setCookie = (resp.headers['set-cookie'] as string[]) || [];
+    const hasCookie = setCookie.some(c => /t_hash_t=/.test(c));
+    results.netmirror = {
+      status: hasCookie ? 'up' : 'degraded',
+      latency: Date.now() - netmirrorStart,
+    };
+  } catch (e: any) {
+    results.netmirror = { status: 'down', error: e.message };
+  }
+
+  // Test Movix (hit its current API from hot-reloaded config)
+  const movixEndpoints = getMovixEndpoints();
+  const movixStart = Date.now();
+  try {
+    const resp = await probeGet(`${movixEndpoints.api}/api/purstream/movie/550/stream`, {
+      timeout: 10000,
+      headers: { 'Referer': movixEndpoints.referer },
+      validateStatus: (s: number) => s < 500,
+    });
+    results.movix = {
+      status: resp.status === 200 ? 'up' : 'degraded',
+      latency: Date.now() - movixStart,
+    };
+  } catch (e: any) {
+    results.movix = { status: 'down', error: e.message };
+  }
+
+  // Test StreamFlix
+  const streamflixStart = Date.now();
+  try {
+    const resp = await probeGet('https://api.streamflix.app/config/config-streamflixapp.json', {
+      timeout: 10000,
+      validateStatus: (s: number) => s < 500,
+    });
+    results.streamflix = {
+      status: resp.status === 200 ? 'up' : 'degraded',
+      latency: Date.now() - streamflixStart,
+    };
+  } catch (e: any) {
+    results.streamflix = { status: 'down', error: e.message };
+  }
+
+
+  // FrenchStream, Wiflix and VoirDrama are all served by the Movix API — probe
+  // each endpoint against the hot-reloaded Movix base. 200 = the endpoint is
+  // alive (a title with no players still returns 200 {success:false}).
+  const movixApiProbe = async (name: string, path: string) => {
+    const start = Date.now();
+    try {
+      const resp = await probeGet(`${movixEndpoints.api}/api/${path}`, {
+        timeout: 10000,
+        headers: { 'Referer': movixEndpoints.referer, 'Origin': movixEndpoints.origin },
+        validateStatus: (s: number) => s < 500,
+      });
+      results[name] = { status: resp.status === 200 ? 'up' : 'degraded', latency: Date.now() - start };
+    } catch (e: any) {
+      results[name] = { status: 'down', error: e.message };
+    }
+  };
+  await Promise.all([
+    movixApiProbe('frenchstream', 'fstream/movie/155'),
+    movixApiProbe('wiflix', 'wiflix/movie/155'),
+    movixApiProbe('voirdrama', 'drama/tv/93405?season=1&episode=1'),
+  ]);
+
+  // MovieBox : la santé = obtenir un Bearer (signature + hosts OK).
+  const mbStart = Date.now();
+  try {
+    const ok = await movieboxProbe();
+    results.moviebox = { status: ok ? 'up' : 'degraded', latency: Date.now() - mbStart };
+  } catch (e: any) {
+    results.moviebox = { status: 'down', error: e.message };
+  }
+
+  // VoirAnime : le site répond et sert des fiches /anime/.
+  const vaStart = Date.now();
+  try {
+    const base = getVoirAnimeEndpoints().base;
+    const resp = await probeGet(`${base}/`, { timeout: 10000, validateStatus: (s: number) => s < 500 });
+    const ok = resp.status === 200 && /\/anime\//.test(String(resp.data || ''));
+    results.voiranime = { status: ok ? 'up' : 'degraded', latency: Date.now() - vaStart };
+  } catch (e: any) {
+    results.voiranime = { status: 'down', error: e.message };
+  }
+
+  // Nabistream : l'API publique répond avec du JSON (collection movies).
+  const nbStart = Date.now();
+  try {
+    const base = getNabistreamEndpoints().base;
+    const resp = await probeGet(`${base}/proxy/api/movies?limit=1`, { timeout: 10000, validateStatus: (s: number) => s < 500 });
+    const ok = resp.status === 200 && Array.isArray((resp.data as any)?.docs);
+    results.nabistream = { status: ok ? 'up' : 'degraded', latency: Date.now() - nbStart };
+  } catch (e: any) {
+    results.nabistream = { status: 'down', error: e.message };
+  }
+
+  // Coflix : l'ajax suggest répond avec du JSON {html}.
+  const cofStart = Date.now();
+  try {
+    const base = getCoflixEndpoints().base;
+    const resp = await probeGet(`${base}/ajax/search/suggest?keyword=film`, {
+      timeout: 10000, headers: { 'X-Requested-With': 'XMLHttpRequest' }, validateStatus: (s: number) => s < 500,
+    });
+    const ok = resp.status === 200 && typeof (resp.data as any)?.html === 'string';
+    results.coflix = { status: ok ? 'up' : 'degraded', latency: Date.now() - cofStart };
+  } catch (e: any) {
+    results.coflix = { status: 'down', error: e.message };
+  }
+
+  // WaveWatch : le resolver zeus.php sert la page player (200 + <title>) pour un tmdbId connu.
+  const wwStart = Date.now();
+  try {
+    const resp = await probeGet(`${getWavewatchEndpoints().base}/zeus.php?type=movie&id=550`, {
+      timeout: 10000, validateStatus: (s: number) => s < 500,
+    });
+    const ok = resp.status === 200 && /<title/i.test(String(resp.data || ''));
+    results.wavewatch = { status: ok ? 'up' : 'degraded', latency: Date.now() - wwStart };
+  } catch (e: any) {
+    results.wavewatch = { status: 'down', error: e.message };
+  }
+
+  // Kordoz : la racine expose le token de session dans un <a href="…"> alphanumérique.
+  const kzStart = Date.now();
+  try {
+    const resp = await probeGet('https://www.kordoz.com/', {
+      timeout: 10000, headers: { 'Cookie': 'g=true' }, validateStatus: (s: number) => s < 500,
+    });
+    const ok = resp.status === 200 && /href="[a-z0-9]{8,}"/i.test(String(resp.data || ''));
+    results.kordoz = { status: ok ? 'up' : 'degraded', latency: Date.now() - kzStart };
+  } catch (e: any) {
+    results.kordoz = { status: 'down', error: e.message };
+  }
+
+  // Docstream : la home embarque le catalogue inline (const CATALOG = [ … streamtape … ]).
+  const dsStart = Date.now();
+  try {
+    const resp = await probeGet('https://docstream.fr/', {
+      timeout: 10000, validateStatus: (s: number) => s < 500,
+    });
+    const ok = resp.status === 200 && /streamtape:/i.test(String(resp.data || ''));
+    results.docstream = { status: ok ? 'up' : 'degraded', latency: Date.now() - dsStart };
+  } catch (e: any) {
+    results.docstream = { status: 'down', error: e.message };
+  }
+
+  // Zone-Téléchargement : la recherche ajax renvoie des fiches /NNNNN-slug.html.
+  const ztStart = Date.now();
+  try {
+    const base = getZoneTelechargementEndpoints().base.replace(/\/$/, '');
+    const resp = await probeGet(`${base}/engine/ajax/controller.php?mod=filter&catid=0&q=avatar&categorie%5B%5D=2&art=0&AiffchageMode=0&inputTirePar=0&cstart=0`, {
+      timeout: 10000, headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': `${base}/` }, validateStatus: (s: number) => s < 500,
+    });
+    const ok = resp.status === 200 && /\/\d+-[^"]+\.html/i.test(String(resp.data || ''));
+    results.ztstream = { status: ok ? 'up' : 'degraded', latency: Date.now() - ztStart };
+  } catch (e: any) {
+    results.ztstream = { status: 'down', error: e.message };
+  }
+
+  const csStart = Date.now();
+  try {
+    const ok = await cinestreamProbe();
+    results.cinestream = { status: ok ? 'up' : 'degraded', latency: Date.now() - csStart };
+  } catch (e: any) {
+    results.cinestream = { status: 'down', error: e.message };
+  }
+
+  const dlStart = Date.now();
+  try {
+    const ok = await dulourdProbe();
+    results.dulourd = { status: ok ? 'up' : 'degraded', latency: Date.now() - dlStart };
+  } catch (e: any) {
+    results.dulourd = { status: 'down', error: e.message };
+  }
+
+  const zxStart = Date.now();
+  try {
+    const ok = await zenixProbe();
+    results.zenix = { status: ok ? 'up' : 'degraded', latency: Date.now() - zxStart };
+  } catch (e: any) {
+    results.zenix = { status: 'down', error: e.message };
+  }
+
+  const kkStart = Date.now();
+  try {
+    const ok = await kisskhProbe();
+    results.kisskh = { status: ok ? 'up' : 'degraded', latency: Date.now() - kkStart };
+  } catch (e: any) {
+    results.kisskh = { status: 'down', error: e.message };
+  }
+
+  const wxStart = Date.now();
+  try {
+    const ok = await worldivxProbe();
+    results.worldivx = { status: ok ? 'up' : 'degraded', latency: Date.now() - wxStart };
+  } catch (e: any) {
+    results.worldivx = { status: 'down', error: e.message };
+  }
+
+  const tvStart = Date.now();
+  try {
+    const ok = await tokyvideoProbe();
+    results.tokyvideo = { status: ok ? 'up' : 'degraded', latency: Date.now() - tvStart };
+  } catch (e: any) {
+    results.tokyvideo = { status: 'down', error: e.message };
+  }
+
+  const ybStart = Date.now();
+  try {
+    const ok = await yablomProbe();
+    results.yablom = { status: ok ? 'up' : 'degraded', latency: Date.now() - ybStart };
+  } catch (e: any) {
+    results.yablom = { status: 'down', error: e.message };
+  }
+
+  const iaStart = Date.now();
+  try {
+    const ok = await ianimeProbe();
+    results.ianime = { status: ok ? 'up' : 'degraded', latency: Date.now() - iaStart };
+  } catch (e: any) {
+    results.ianime = { status: 'down', error: e.message };
+  }
+
+  const lzStart = Date.now();
+  try {
+    const ok = await leizyProbe();
+    results.leizy = { status: ok ? 'up' : 'degraded', latency: Date.now() - lzStart };
+  } catch (e: any) {
+    results.leizy = { status: 'down', error: e.message };
+  }
+
+  const jfStart = Date.now();
+  try {
+    const ok = await jour1filmProbe();
+    results.jour1film = { status: ok ? 'up' : 'degraded', latency: Date.now() - jfStart };
+  } catch (e: any) {
+    results.jour1film = { status: 'down', error: e.message };
+  }
+
+  const wkStart = Date.now();
+  try {
+    const ok = await wookafrProbe();
+    results.wookafr = { status: ok ? 'up' : 'degraded', latency: Date.now() - wkStart };
+  } catch (e: any) {
+    results.wookafr = { status: 'down', error: e.message };
+  }
+
+  const cpStart = Date.now();
+  try {
+    const ok = await cinepulseProbe();
+    results.cinepulse = { status: ok ? 'up' : 'degraded', latency: Date.now() - cpStart };
+  } catch (e: any) {
+    results.cinepulse = { status: 'down', error: e.message };
+  }
+
+  const mvStart = Date.now();
+  try {
+    const ok = await mavanimeProbe();
+    results.mavanime = { status: ok ? 'up' : 'degraded', latency: Date.now() - mvStart };
+  } catch (e: any) {
+    results.mavanime = { status: 'down', error: e.message };
+  }
+
+  const asStart = Date.now();
+  try {
+    const ok = await animesiteProbe();
+    results.animesite = { status: ok ? 'up' : 'degraded', latency: Date.now() - asStart };
+  } catch (e: any) {
+    results.animesite = { status: 'down', error: e.message };
+  }
+
+  const auStart = Date.now();
+  try {
+    const ok = await animeUltimeProbe();
+    results.animeultime = { status: ok ? 'up' : 'degraded', latency: Date.now() - auStart };
+  } catch (e: any) {
+    results.animeultime = { status: 'down', error: e.message };
+  }
+
+  const afStart = Date.now();
+  try {
+    const ok = await animoflixProbe();
+    results.animoflix = { status: ok ? 'up' : 'degraded', latency: Date.now() - afStart };
+  } catch (e: any) {
+    results.animoflix = { status: 'down', error: e.message };
+  }
+
+  const cxStart = Date.now();
+  try {
+    const ok = await cinexProbe();
+    results.cinex = { status: ok ? 'up' : 'degraded', latency: Date.now() - cxStart };
+  } catch (e: any) {
+    results.cinex = { status: 'down', error: e.message };
+  }
+
+  const mwStart = Date.now();
+  try {
+    const ok = await miawProbe();
+    results.miaw = { status: ok ? 'up' : 'degraded', latency: Date.now() - mwStart };
+  } catch (e: any) {
+    results.miaw = { status: 'down', error: e.message };
+  }
+
+  // Une source coupée dans l'admin ne compte plus : ni dans l'état global, ni pour
+  // les alertes « DOWN » du bot Telegram (qui itère sur `sources`).
+  for (const name of getDisabledSources()) delete results[name];
+
+  const allUp = Object.values(results).every(r => r.status === 'up');
+  const allDown = Object.values(results).every(r => r.status === 'down');
+
+  res.json({
+    overall: allDown ? 'down' : (allUp ? 'healthy' : 'degraded'),
+    sources: results,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// MovieBox : sert un sous-titre CDN converti SRT->VTT avec le bon content-type.
+// Le CDN renvoie du SRT en application/octet-stream sans extension, que Stremio
+// ne reconnaît pas ; VTT + text/vtt marche partout (web + desktop).
+// MovieBox : sous-titre matché à l'encode (même resourceId), résolu FRAIS puis
+// converti SRT->VTT. Le CDN sert du SRT en octet-stream sans extension que
+// Stremio ignore ; VTT + text/vtt marche partout. :label est cosmétique.
+// Nabistream : re-sert le .vtt (déjà en VTT chez tanastream) depuis notre origine,
+// en text/vtt — Nuvio n'affiche pas les sous-titres d'un host tiers direct.
+// Videasy : sous-titre .vtt sur le CDN rotatif (moon/premiumvacations/winterforest…).
+// Anti-SSRF : chemin Videasy `/vd/.../subs/*.vtt` + hôte autorisé + pas d'IP privée
+// (isAllowedUrl). Ajoute le Referer player.videasy.to (exigé par le CDN).
+app.get('/videasy/subtitle/:label', async (req, res) => {
+  const u = String(req.query.u || '');
+  try {
+    const parsed = new URL(u);
+    if (parsed.protocol !== 'https:' || !/\/vd\/.+\/subs\/.+\.vtt$/i.test(parsed.pathname) || !isAllowedUrl(u).allowed) {
+      res.status(404).end();
+      return;
+    }
+    const resp = await axios.get(u, { responseType: 'text', timeout: 15000, transformResponse: v => v, headers: { Referer: 'https://player.videasy.to/' } });
+    let vtt = String(resp.data).replace(/\r+/g, '');
+    if (!/^﻿?WEBVTT/.test(vtt)) vtt = 'WEBVTT\n\n' + vtt;
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(vtt);
+  } catch {
+    res.status(502).end();
+  }
+});
+
+// Sous-titres FR externes (OpenSubtitles legacy) : télécharge le SRT (gzippé),
+// gunzip, convertit SRT->VTT, sert text/vtt. SSRF : uniquement *.opensubtitles.org.
+app.get('/extsub/subtitle', async (req, res) => {
+  const u = String(req.query.url || '');
+  let parsed: URL;
+  try { parsed = new URL(u); } catch { res.status(400).end(); return; }
+  if (parsed.protocol !== 'https:' || !/(^|\.)opensubtitles\.org$/i.test(parsed.hostname)) {
+    res.status(403).end();
+    return;
+  }
+  try {
+    const resp = await axios.get<ArrayBuffer>(u, {
+      responseType: 'arraybuffer', timeout: 15000,
+      headers: { 'User-Agent': 'LooStream/1.0 (+subtitles)' },
+      maxContentLength: 5 * 1024 * 1024, maxBodyLength: 5 * 1024 * 1024,
+    });
+    let buf = Buffer.from(resp.data);
+    if (buf[0] === 0x1f && buf[1] === 0x8b) { try { buf = zlib.gunzipSync(buf); } catch { /* pas gzip */ } }
+    // Décodage : UTF-8 par défaut ; si caractères de remplacement (fréquent sur les
+    // .srt/.ass FR encodés en Windows-1252), on retente en 1252.
+    let text = buf.toString('utf-8');
+    if (text.includes('�')) { try { text = new TextDecoder('windows-1252').decode(buf); } catch { /* garde utf-8 */ } }
+    // SRT -> VTT (existant) OU ASS/SSA -> VTT (anime). Détection au contenu.
+    const vtt = subtitleToVtt(text);
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(vtt);
+  } catch {
+    res.status(502).end();
+  }
+});
+
+app.get('/nabistream/subtitle/:label', async (req, res) => {
+  const u = String(req.query.u || '');
+  try {
+    const parsed = new URL(u);
+    // Anti-SSRF : uniquement le CDN de sous-titres de Nabistream.
+    if (parsed.protocol !== 'https:' || !/(^|\.)tanastream\.space$/i.test(parsed.hostname)) {
+      res.status(404).end();
+      return;
+    }
+    const resp = await axios.get(u, { responseType: 'text', timeout: 15000, transformResponse: v => v });
+    let vtt = String(resp.data).replace(/\r+/g, '');
+    if (!/^﻿?WEBVTT/.test(vtt)) vtt = 'WEBVTT\n\n' + vtt; // filet de sécurité
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(vtt);
+  } catch {
+    res.status(502).end();
+  }
+});
+
+// KissKH : pistes SRT sur leur CDN, converties en VTT (text/vtt, reconnu partout).
+// Anti-SSRF : uniquement les hôtes de KissKH.
+app.get('/kisskh/subtitle/:label', async (req, res) => {
+  const u = String(req.query.u || '');
+  if (!isKisskhSubtitleUrl(u)) { res.status(404).end(); return; }
+  try {
+    const resp = await axios.get<ArrayBuffer>(u, {
+      responseType: 'arraybuffer', timeout: 15000,
+      headers: { Referer: KISSKH_PLAYBACK_REFERER, 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      maxContentLength: 5 * 1024 * 1024, maxBodyLength: 5 * 1024 * 1024,
+    });
+    const buf = Buffer.from(resp.data);
+    let text = buf.toString('utf-8');
+    if (text.includes('\uFFFD')) { try { text = new TextDecoder('windows-1252').decode(buf); } catch { /* garde utf-8 */ } }
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(subtitleToVtt(text));
+  } catch {
+    res.status(502).end();
+  }
+});
+
+app.get('/moviebox/subtitle/:label', async (req, res) => {
+  const sid = String(req.query.sid || '');
+  const se = Number(req.query.se || 0);
+  const ep = Number(req.query.ep || 0);
+  const rid = String(req.query.rid || '');
+  const lang = String(req.query.lang || 'fre');
+  if (!sid || !rid) { res.status(400).end(); return; }
+  try {
+    const url = await resolveMovieboxSubtitle(sid, se, ep, rid, lang);
+    if (!url || !/^https:\/\/[a-z0-9.-]*hakunaymatata\.com\//i.test(url)) { res.status(404).end(); return; }
+    const resp = await axios.get(url, { responseType: 'text', timeout: 15000, transformResponse: v => v });
+    const srt = String(resp.data).replace(/\r+/g, '');
+    const vtt = 'WEBVTT\n\n' + srt
+      .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2')  // décimales SRT (virgule) -> VTT (point)
+      .replace(/[ \t]*-->[ \t]*/g, ' --> ');
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(vtt);
+  } catch {
+    res.status(502).end();
+  }
+});
+
+// MovieBox : résout le MP4 signé FRAIS (par resourceId) et redirige (302).
+// Appelé à la lecture — l'URL signée (t=/sign=) est toujours valide.
+app.get('/moviebox/stream', async (req, res) => {
+  const sid = String(req.query.sid || '');
+  const se = Number(req.query.se || 0);
+  const ep = Number(req.query.ep || 0);
+  const rid = String(req.query.rid || '');
+  if (!sid || !rid) { res.status(400).send('missing sid/rid'); return; }
+  try {
+    const url = await resolveMovieboxUrl(sid, se, ep, rid, Number(req.query.q) || undefined);
+    if (!url) { res.status(502).send('MovieBox: resolve failed'); return; }
+    res.redirect(302, url);
+  } catch (e: any) {
+    res.status(502).send('MovieBox: ' + (e?.message || 'error'));
+  }
+});
+
+// Zenix : résolution AU CLIC. Leur jeton vit ~3 min et le cookie de session est
+// exigé au téléchargement -> on ne peut pas rediriger le client vers le CDN. On
+// rejoue donc la chaîne ici, puis on redirige vers le proxy DU MODE (MFP ou local),
+// qui refera la requête avec le cookie. En mode direct pur : rien à offrir (502).
+async function handleZenixStream(req: express.Request, res: express.Response, config: UserConfig | null) {
+  const slug = String(req.query.slug || '');
+  const mediaType = req.query.type === 'series' ? 'series' : 'movie';
+  const se = Number(req.query.se || 0);
+  const ep = Number(req.query.ep || 0);
+  if (!slug) { res.status(400).send('missing slug'); return; }
+  try {
+    const r = await resolveZenixStream(slug, mediaType, se, ep);
+    if (!r) { res.status(502).send('Zenix: resolve failed'); return; }
+    const proxied = buildProxyUrl(
+      r.url,
+      { Cookie: r.cookie, Referer: r.referer, 'User-Agent': BROWSER_UA },
+      false, req, config, false, r.isHls,
+    );
+    if (!proxied) { res.status(502).send('Zenix: proxy requis (mode direct)'); return; }
+    res.redirect(302, proxied);
+  } catch (e: any) {
+    res.status(502).send('Zenix: ' + (e?.message || 'error'));
+  }
+}
+app.get('/:config/zenix/stream', async (req, res) => {
+  const config = parseConfig(req.params.config);
+  if (denyIfNoAccess(config, res)) return;
+  await handleZenixStream(req, res, config);
+});
+app.get('/zenix/stream', requireQueryKey, async (req, res) => {
+  await handleZenixStream(req, res, null);
+});
+
+// worldivx : déchiffre le lecteur Byse au clic (réponse valable 15 min), puis redirige vers
+// le proxy du mode. Un hôte CDN au certificat TLS expiré n'est PAS servi : ni notre proxy
+// ni MediaFlow ne désactivent la vérification des certificats.
+async function handleWorldivxStream(req: express.Request, res: express.Response, config: UserConfig | null) {
+  const code = String(req.query.code || '');
+  if (!/^[A-Za-z0-9]+$/.test(code)) { res.status(400).send('missing code'); return; }
+  try {
+    const r = await resolveWorldivxStream(code);
+    if (!r) { res.status(502).send('Worldivx: résolution Byse impossible'); return; }
+    if (r.insecureTls) {
+      console.log(`[Worldivx] ${code} : certificat TLS expiré sur ${new URL(r.url).hostname} — non servi`);
+      res.status(502).send('Worldivx: certificat du serveur vidéo expiré');
+      return;
+    }
+    const proxied = buildProxyUrl(r.url, { 'User-Agent': BROWSER_UA }, false, req, config, false, true);
+    // buildProxyUrl retombe sur l'URL BRUTE quand aucun MediaFlow n'est configuré : ici
+    // ce serait un lien mort (jeton lié au réseau du serveur) -> on refuse clairement.
+    if (!proxied || proxied === r.url) {
+      console.log(`[Worldivx] ${code} : aucun proxy disponible (mode ${config?.proxy || 'défaut'}) — non servi`);
+      res.status(502).send('Worldivx: proxy requis (MediaFlow ou proxy local)');
+      return;
+    }
+    res.redirect(302, proxied);
+  } catch (e: any) {
+    res.status(502).send('Worldivx: ' + (e?.message || 'error'));
+  }
+}
+app.get('/:config/worldivx/stream', async (req, res) => {
+  const config = parseConfig(req.params.config);
+  if (denyIfNoAccess(config, res)) return;
+  await handleWorldivxStream(req, res, config);
+});
+app.get('/worldivx/stream', requireQueryKey, async (req, res) => {
+  await handleWorldivxStream(req, res, null);
+});
+
+app.listen(PORT, () => {
+  console.log(`LooStream Addon running at http://localhost:${PORT}`);
+  console.log(`Install in Stremio: http://localhost:${PORT}/manifest.json`);
+  console.log(`Proxy mode: ${DEFAULT_USE_LOCAL_PROXY ? 'LOCAL' : 'MEDIAFLOW (configurable)'}`);
+  // Pool SOCKS netfree : démarre le scan en fond s'il est activé (persisté). OFF = résidentiel.
+  if (netfreeSocksPoolEnabled()) { console.log('[NetfreePool] activé au démarrage'); setPoolEnabled(true); }
+  // Pool SOCKS MovieBox : idem pour la recherche aoneroom en datacenter. OFF = résidentiel.
+  if (movieboxSocksPoolEnabled()) { console.log('[MovieBoxPool] activé au démarrage'); setMovieboxPoolEnabled(true); }
+});
