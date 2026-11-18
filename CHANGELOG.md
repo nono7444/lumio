@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Accueil : nouvelle rangée « 🎬 Films du moment », juste sous le haut de l'accueil : films à l'affiche, sorties des 4 derniers mois bien notées et tendances de la semaine, mélangés.
+
 - Streaming : il n'envoie plus de demande au serveur, c'est le rôle du bouton « Demander ». Le bouton « Streaming » reste aussi sur un titre déjà sur le serveur, à côté de « Lire » (serveur 3.115.0).
 - Recherche : les fautes d'orthographe sont tolérées (« intersteler » trouve Interstellar), avec « Résultats pour … » quand le titre a été corrigé.
 

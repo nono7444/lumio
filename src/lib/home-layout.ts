@@ -8,7 +8,7 @@ import { useSeason } from './seasons';
 import { hasTmdb, useSettings, type Addon, type HomeRow, type Settings, type TabPref } from './settings';
 import { catalogKey, fetchManifest, isBrowsable, type StremioCatalog } from './stremio';
 
-export type RowKind = 'hero' | 'season-jf' | 'season-tmdb' | 'continue' | 'nextup' | 'favorites' | 'trending' | 'jf-latest' | 'jf-reco' | 'family-top' | 'catalog';
+export type RowKind = 'hero' | 'season-jf' | 'season-tmdb' | 'continue' | 'nextup' | 'favorites' | 'trending' | 'jf-latest' | 'jf-reco' | 'family-top' | 'catalog' | 'fresh';
 
 export type RowDef = {
   id: string;
@@ -36,6 +36,8 @@ export function useAvailableRows(nonce = 0) {
     (async () => {
       const out: RowDef[] = [];
       if (hasTmdb(settings) || settings.jellyfin) out.push({ id: 'hero', label: 'À la une', kind: 'hero' });
+      // Films du moment : à l'affiche, sorties récentes, bien notés récemment
+      if (hasTmdb(settings)) out.push({ id: 'fresh', label: '🎬 Films du moment', kind: 'fresh' });
 
       // Sélections de la période en cours (Halloween, Noël…)
       if (season) {
@@ -100,7 +102,8 @@ export function orderRows(available: RowDef[], layout: HomeRow[]): (RowDef & { h
     .map((r, i) => ({
       ...r,
       hidden: hiddenPref.has(r.id) ? hiddenPref.get(r.id)! : HIDDEN_BY_DEFAULT.includes(r.kind),
-      order: pos.has(r.id) ? pos.get(r.id)! : 10_000 + i,
+      // Nouvelle rangée « Films du moment » : juste sous le haut de l'accueil, même avec un ordre déjà choisi
+      order: pos.has(r.id) ? pos.get(r.id)! : r.kind === 'fresh' ? (pos.get('hero') ?? -1) + 0.5 : 10_000 + i,
     }))
     .sort((a, b) => a.order - b.order);
 }

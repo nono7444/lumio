@@ -26,7 +26,7 @@ import { orderRows, useAvailableRows } from '@/lib/home-layout';
 import { nextMovieNight, type Reco } from '@/lib/recommend';
 import { ratingsApi, type TopRated } from '@/lib/ratings';
 import { Addon, hasTmdb, useSettings } from '@/lib/settings';
-import { itemTitle, itemYear, tmdb, tmdbImg, type MediaType } from '@/lib/tmdb';
+import { itemTitle, itemYear, tmdb, tmdbCall, tmdbImg, type MediaType, type TmdbItem } from '@/lib/tmdb';
 import { useLibrary } from '@/lib/use-library';
 import { catalogKey, fetchCatalog, metaYear, type StremioCatalog, type StremioMeta } from '@/lib/stremio';
 
@@ -233,6 +233,50 @@ function SeasonJfRow({ nonce }: { nonce: number }) {
 }
 
 /** Sélection de saison à découvrir (TMDB), du plus récent au plus ancien. */
+/** « Films du moment » : à l'affiche en France, sorties des 4 derniers mois bien notées, et tendances de la semaine, mélangés. */
+function FreshRow({ nonce }: { nonce: number }) {
+  const { settings } = useSettings();
+  const badge = useLibrary();
+  const { data, loading, error } = useAsync(async () => {
+    const day = (d: number) => new Date(Date.now() - d * 86400e3).toISOString().slice(0, 10);
+    const empty = { results: [] as TmdbItem[] };
+    const [now, rated, trend] = await Promise.all([
+      tmdbCall<{ results: TmdbItem[] }>(settings, '/movie/now_playing', { region: 'FR', page: 1 }).catch(() => empty),
+      tmdbCall<{ results: TmdbItem[] }>(settings, '/discover/movie', {
+        sort_by: 'popularity.desc',
+        'primary_release_date.gte': day(120),
+        'primary_release_date.lte': day(0),
+        'vote_average.gte': 6.8,
+        'vote_count.gte': 80,
+      }).catch(() => empty),
+      tmdbCall<{ results: TmdbItem[] }>(settings, '/trending/movie/week').catch(() => empty),
+    ]);
+    const lists: (TmdbItem & { _cinema?: boolean })[][] = [rated.results, now.results.map((r) => ({ ...r, _cinema: true })), trend.results];
+    const seen = new Set<number>();
+    const out: (TmdbItem & { _cinema?: boolean })[] = [];
+    for (let i = 0; i < 20; i++)
+      for (const l of lists) {
+        const r = l[i];
+        if (r && r.poster_path && !seen.has(r.id)) {
+          seen.add(r.id);
+          out.push(r);
+        }
+      }
+    return out.slice(0, 45);
+  }, [settings.tmdbKey, nonce]);
+  const items: PosterItem[] = (data ?? []).map((r) => ({
+    key: `movie:${r.id}`,
+    title: itemTitle(r),
+    poster: tmdbImg(r.poster_path),
+    backdrop: r.backdrop_path ? tmdbImg(r.backdrop_path, 'w1280') : undefined,
+    ids: { tmdb: r.id, type: 'movie' },
+    subtitle: r._cinema ? 'Au cinéma' : r.vote_average ? `★ ${r.vote_average.toLocaleString('fr-FR', { maximumFractionDigits: 1 })}` : itemYear(r),
+    badge: badge('movie', r.id),
+    onPress: () => openMedia('movie', r.id),
+  }));
+  return <Row title="🎬 Films du moment" subtitle="À l'affiche, sorties récentes et films bien notés" items={items} loading={loading} error={error} />;
+}
+
 function SeasonTmdbRow({ nonce }: { nonce: number }) {
   const { settings } = useSettings();
   const season = useSeason();
@@ -383,6 +427,9 @@ function Home() {
                 case 'season-tmdb':
                   el = <SeasonTmdbRow nonce={nonce} />;
                   break;
+                case 'fresh':
+                  el = <FreshRow nonce={nonce} />;
+                  break;
                 case 'trending':
                   el = <Trending part="row" nonce={nonce} />;
                   break;
@@ -433,6 +480,9 @@ function Home() {
               break;
             case 'season-tmdb':
               el = <SeasonTmdbRow nonce={nonce} />;
+              break;
+            case 'fresh':
+              el = <FreshRow nonce={nonce} />;
               break;
             case 'trending':
               el = <Trending part="row" nonce={nonce} />;
