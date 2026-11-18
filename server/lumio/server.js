@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.113.0';
+const VERSION = '3.114.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3000,6 +3000,82 @@ const watchPreferOf = (item) => {
   const p0 = watchPrefer.get(`${item.type}:${item.tmdbId}`);
   return p0 && Date.now() - p0.at < 3 * 86400e3 ? p0 : null;
 };
+
+// ——— Calendrier : radar des sorties VOD d'amtVOD (amtvod.fr, addon Stremio) ———
+// Les catalogues de l'addon (« Disponible en VOD », « Sorties VOD confirmées », « Au cinéma & prédictions ») sont relus
+// toutes les heures et renvoyés à l'appli, avec le numéro TMDB de chaque film pour ouvrir sa fiche.
+// Adresse de l'addon : config.radarUrl (manifest.json), amtvod.fr par défaut.
+const RADAR_DEFAULT = 'https://amtvod.fr/addon/manifest.json';
+let radarCache = null;
+let radarBusy = null;
+const radarTmdb = new Map(); // tt… → numéro TMDB
+function radarStatusOf(cat) {
+  const t = `${cat.id || ''} ${cat.name || ''}`;
+  if (/dispo|available|vod[-_ ]?ready/i.test(t) && !/confirm|pr[ée]vu|upcoming/i.test(t)) return 'available';
+  if (/confirm|upcoming|sorties?[-_ ]?vod|date/i.test(t) && !/cin[ée]/i.test(t)) return 'confirmed';
+  if (/cin[ée]|theat|pr[ée]dict/i.test(t)) return 'cinema';
+  return 'other';
+}
+async function radarTmdbId(meta) {
+  const m = String(meta.id || '').match(/^tmdb:(\d+)/) || String(meta.moviedb_id || '').match(/^(\d+)$/);
+  if (m) return Number(m[1]);
+  const imdb = String(meta.imdb_id || meta.id || '').match(/tt\d{5,}/);
+  if (!imdb) return null;
+  if (radarTmdb.has(imdb[0])) return radarTmdb.get(imdb[0]);
+  const f = await tmdbGet(`/find/${imdb[0]}`, { external_source: 'imdb_id' }).catch(() => null);
+  const hit = f && ((f.movie_results || [])[0] || (f.tv_results || [])[0]);
+  const id = hit ? hit.id : null;
+  radarTmdb.set(imdb[0], id);
+  return id;
+}
+async function radarLoad(force = false) {
+  if (!force && radarCache && Date.now() - radarCache.at < 3600e3) return radarCache;
+  if (radarBusy) return radarBusy;
+  radarBusy = (async () => {
+    const manifestUrl = String(config.radarUrl || RADAR_DEFAULT);
+    const base = manifestUrl.replace(/\/manifest\.json(\?.*)?$/, '');
+    const get = async (u) => {
+      const r = await fetch(u, { headers: { 'User-Agent': 'Lumio', Accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
+      if (!r.ok) throw new Error(`amtVOD : HTTP ${r.status}`);
+      return r.json();
+    };
+    const man = await get(manifestUrl);
+    const cats = (man.catalogs || []).filter((c) => !(c.extra || []).some((e) => e && e.isRequired) && !(c.extraRequired || []).length);
+    const sections = [];
+    for (const c of cats) {
+      try {
+        const j = await get(`${base}/catalog/${encodeURIComponent(c.type)}/${encodeURIComponent(c.id)}.json`);
+        const items = [];
+        for (const m of (j.metas || []).slice(0, 120)) {
+          items.push({
+            id: String(m.id || ''),
+            type: m.type === 'series' ? 'tv' : 'movie',
+            tmdbId: await radarTmdbId(m).catch(() => null),
+            name: String(m.name || '').trim(),
+            poster: m.poster || null,
+            background: m.background || null,
+            releaseInfo: m.releaseInfo != null ? String(m.releaseInfo) : null,
+            description: m.description ? String(m.description).trim().slice(0, 600) : null,
+            genres: Array.isArray(m.genres) ? m.genres.slice(0, 3) : [],
+            badges: Array.isArray(m.links) ? m.links.filter((l) => l && l.name && /badge|statut|status|langue|audio|qualit/i.test(String(l.category || ''))).map((l) => String(l.name)).slice(0, 6) : [],
+          });
+        }
+        sections.push({ id: c.id, name: c.name || c.id, status: radarStatusOf(c), items });
+      } catch (e) {
+        sections.push({ id: c.id, name: c.name || c.id, status: radarStatusOf(c), items: [], error: e.message });
+      }
+    }
+    radarCache = { at: Date.now(), source: man.name || 'amtVOD', sections, error: null };
+    return radarCache;
+  })()
+    .catch((e) => {
+      radarCache = { at: Date.now() - 3000e3, source: 'amtVOD', sections: (radarCache && radarCache.sections) || [], error: e.message };
+      return radarCache;
+    })
+    .finally(() => (radarBusy = null));
+  return radarBusy;
+}
+
 async function watchNow(user, b) {
   if (config.watchNow === false) throw new HttpError(400, 'Le bouton « Lire » des titres absents est coupé sur le serveur');
   const type = b.type === 'tv' || b.type === 'series' ? 'tv' : 'movie';
@@ -10029,6 +10105,11 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
     }
 
     // ——— « Lire » un titre absent (admin) : lien de streaming TorBox + téléchargement en arrière-plan + reprise ———
+    // Calendrier : radar amtVOD (sorties VOD)
+    if (req.method === 'GET' && p === '/api/radar') {
+      const r = await radarLoad(q.get('refresh') === '1');
+      return send(res, 200, { ...r, at: new Date(r.at).toISOString() });
+    }
     if (req.method === 'GET' && p === '/api/watch/now') return send(res, 200, watchNowView(user));
     if (req.method === 'POST' && p === '/api/watch/probe') {
       const host = String(req.headers['x-forwarded-host'] || req.headers.host || '');

@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Calendrier : remplacé par le radar des sorties VOD d'amtVOD (disponible en VOD, sortie confirmée avec le compte à rebours, au cinéma avec la prédiction), lu par le serveur Lumio. Un appui ouvre la fiche du film (serveur 3.114.0).
+
 ## 1.0.179 — 18 novembre 2026
 
 - Streaming : LooStream (37 sites de streaming en VF, intégré au serveur Lumio) est essayé en premier ; s'il ne trouve rien, on repart sur les caches (TorBox, AllDebrid) et Wawacity comme avant. Les sources sont cherchées dès l'ouverture de la fiche, pour que le menu et la lecture soient presque immédiats. L'origine s'affiche (« LooStream · site »).
