@@ -1,12 +1,13 @@
 // « Streaming » (admin) : menu du choix de la qualité, puis écran de lecture en mode streaming.
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { ActivityIndicator, Modal, Pressable as RNPressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable as RNPressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Button } from '@/components/ui';
 import { useSettings, type Settings } from '@/lib/settings';
 import { watchNowApi } from '@/lib/watch-now';
+import { tmdb } from '@/lib/tmdb';
 
 /** Le serveur permet-il le streaming à ce compte (admin, ou membre si l'admin l'a ouvert) ? */
 export function useCanStream(settings: Settings) {
@@ -48,6 +49,19 @@ function probeOnce(settings: Settings, a: ProbeArgs) {
 export function StreamingButton({ type, tmdbId, title, imdb, season, episode, label = false, style, ok, small }: { type: 'movie' | 'tv'; tmdbId: number; title: string; imdb?: string; season?: number; episode?: number; label?: boolean; style?: any; ok?: boolean | null; small?: boolean }) {
   const [open, setOpen] = useState(false);
   const { settings } = useSettings();
+  // Série : saison et épisode choisis dans le menu (au départ ceux proposés par la fiche)
+  const [se, setSe] = useState<{ s: number; e: number }>({ s: season ?? 1, e: episode ?? 1 });
+  const [seasons, setSeasons] = useState<{ n: number; count: number }[]>([]);
+  useEffect(() => setSe({ s: season ?? 1, e: episode ?? 1 }), [season, episode]);
+  useEffect(() => {
+    if (!open || type !== 'tv' || seasons.length) return;
+    tmdb
+      .tv(settings, tmdbId)
+      .then((t) => setSeasons((t.seasons ?? []).filter((x) => x.season_number > 0 && x.episode_count > 0).map((x) => ({ n: x.season_number, count: x.episode_count }))))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, type, tmdbId]);
+  const epCount = seasons.find((x) => x.n === se.s)?.count ?? 0;
   // Recherche lancée dès l'affichage du bouton, sans attendre l'appui
   useEffect(() => {
     probeOnce(settings, { type, tmdbId, season, episode, title });
@@ -70,13 +84,33 @@ export function StreamingButton({ type, tmdbId, title, imdb, season, episode, la
       </View>
       <QualityMenu
         open={open}
-        probe={{ type, tmdbId, season, episode, title }}
+        probe={type === 'tv' ? { type, tmdbId, season: se.s, episode: se.e, title } : { type, tmdbId, title }}
         onClose={() => setOpen(false)}
+        header={
+          type === 'tv' && seasons.length ? (
+            <View style={{ gap: 8, marginBottom: 6 }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                {seasons.map((x) => (
+                  <RNPressable key={x.n} onPress={() => setSe({ s: x.n, e: 1 })} style={[qm.chip, se.s === x.n && qm.chipOn]}>
+                    <Text style={[qm.chipTxt, se.s === x.n && qm.chipTxtOn]}>Saison {x.n}</Text>
+                  </RNPressable>
+                ))}
+              </ScrollView>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                {Array.from({ length: epCount }, (_, i) => i + 1).map((n) => (
+                  <RNPressable key={n} onPress={() => setSe((o) => ({ ...o, e: n }))} style={[qm.chip, qm.epChip, se.e === n && qm.chipOn]}>
+                    <Text style={[qm.chipTxt, se.e === n && qm.chipTxtOn]}>É{n}</Text>
+                  </RNPressable>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null
+        }
         onPick={(q) => {
           setOpen(false);
           router.push({
             pathname: '/watch',
-            params: { type, tmdbId: String(tmdbId), imdb: imdb ?? '', title, stream: '1', quality: String(q), ...(season != null ? { season: String(season), episode: String(episode ?? 1) } : {}) },
+            params: { type, tmdbId: String(tmdbId), imdb: imdb ?? '', title, stream: '1', quality: String(q), ...(type === 'tv' ? { season: String(se.s), episode: String(se.e) } : {}) },
           });
         }}
       />
@@ -113,10 +147,13 @@ export function QualityMenu({
   onClose,
   onPick,
   probe,
+  header,
 }: {
   open: boolean;
   onClose: () => void;
   onPick: (q: 1080 | 720) => void;
+  /** Au-dessus des qualités : choix de la saison et de l'épisode (série) */
+  header?: ReactNode;
   probe?: { type: 'movie' | 'tv'; tmdbId: number; season?: number; episode?: number; title?: string };
 }) {
   const { settings } = useSettings();
@@ -126,7 +163,7 @@ export function QualityMenu({
     setSrc(null);
     probeOnce(settings, probe).then(setSrc);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, probe?.season, probe?.episode]);
   const opts: { q: 1080 | 720; label: string }[] = [
     { q: 1080, label: '1080p' },
     { q: 720, label: '720p' },
@@ -136,6 +173,7 @@ export function QualityMenu({
       <RNPressable style={qm.backdrop} onPress={onClose}>
         <View style={qm.sheet}>
           <Text style={qm.title}>Streaming</Text>
+          {header ?? null}
           <View style={qm.legend}>
             <Ionicons name="flash" size={11} color="#30D158" />
             <Text style={qm.help}>direct</Text>
@@ -197,6 +235,11 @@ export function DlButton({ type, tmdbId, title, imdb, style }: { type: 'movie' |
   );
 }
 const qm = StyleSheet.create({
+  chip: { paddingHorizontal: 12, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' },
+  epChip: { minWidth: 44, paddingHorizontal: 8 },
+  chipOn: { backgroundColor: '#fff' },
+  chipTxt: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  chipTxtOn: { color: '#000' },
   legend: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 },
   badges: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginTop: 6, alignItems: 'center' },
   badge: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 3 },
