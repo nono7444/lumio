@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.115.0';
+const VERSION = '3.115.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -1520,7 +1520,9 @@ function downloadOf(r, lib) {
       via: 'secour',
       progress: r.secour.total > 1 ? Math.round(((r.secour.done + (pct || 0) / 100) / r.secour.total) * 100) : pct,
       count: r.secour.total > 1 ? r.secour.total - r.secour.done : undefined,
-      title: cur ? `Lumio Secour${cur.label ? ` · ${cur.label}` : ''}${cur.status === 'searching' ? ' · recherche' : ''}` : 'Lumio Secour · en attente',
+      title: cur ? `Lumio Secour${cur.label ? ` · ${cur.label}` : ''}${cur.status === 'searching' ? ' · recherche' : ''}` : 'Lumio Secour · en file d’attente',
+      // Pourquoi Lumio Secour (Wawacity) : 4K choisie, bouton « DL »… (plus de « Radarr ne répond pas » d'office)
+      reason: r.secour.reason || null,
     };
   }
   if (!lib || !lib.queue || r.status !== RequestStatus.APPROVED) return undefined;

@@ -250,7 +250,7 @@ function ProgressButton({ r, label, progress, color, spinner }: { r?: Req; label
       // Groupe de secours : Lumio Secour télécharge à la place de Radarr / Sonarr
       pct = d.progress ?? 0;
       text = d.progress != null ? `Lumio Secour · ${d.progress} %` : 'Lumio Secour…';
-      note = `${app} ne répond pas : ${d.title ?? 'Lumio Secour'}${d.count && d.count > 1 ? ` · ${d.count} épisodes restants` : ''}`;
+      note = `${d.reason ?? 'Wawacity'} · ${(d.title ?? 'Lumio Secour').replace(/^Lumio Secour( · )?/, '') || 'en file d’attente'}${d.count && d.count > 1 ? ` · ${d.count} épisodes restants` : ''}`;
       tint = C.success;
       spin = d.progress == null;
       icon = 'medkit';

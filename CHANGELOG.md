@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Fiche : un téléchargement par Lumio Secour (Wawacity) affiche sa vraie raison (« Wawacity d’abord (4K) », « DL »…) au lieu de « Radarr ne répond pas » (serveur 3.115.1).
+
 ## 1.0.181 — 18 novembre 2026
 
 - Accueil : nouvelle rangée « 🎬 Films du moment », juste sous le haut de l'accueil : films à l'affiche, sorties des 4 derniers mois bien notées et tendances de la semaine, mélangés.

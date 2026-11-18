@@ -45,6 +45,8 @@ export type Req = {
     /** Groupe de secours : Radarr / Sonarr hors service, Lumio Secour télécharge à leur place */
     via?: 'secour' | 'auto';
     title?: string;
+    /** Lumio Secour : pourquoi il télécharge (« Wawacity d’abord (4K) », bouton DL…) */
+    reason?: string | null;
     message?: string;
     release?: string;
     count?: number;
