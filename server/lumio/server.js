@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.111.3';
+const VERSION = '3.112.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -8554,6 +8554,58 @@ async function approveRequest(admin, r, b) {
 process.on('unhandledRejection', (e) => console.log('Erreur ignorée (promesse) :', e && e.stack ? e.stack : e));
 process.on('uncaughtException', (e) => console.log('Erreur ignorée :', e && e.stack ? e.stack : e));
 
+
+// ——— Relais du streaming : flux AllDebrid → lecteur, sans conversion ———
+const streamAgents = { 'https:': new (require('https').Agent)({ keepAlive: true, maxSockets: 32 }), 'http:': new http.Agent({ keepAlive: true, maxSockets: 32 }) };
+/** Débit maximum par lecture (octets/s) : config.streamMaxMbps (40 par défaut). */
+const streamRate = () => Math.max(8, Number(config.streamMaxMbps) || 40) * 125000;
+/** Flux limité en débit (seau de jetons) : laisse passer une avance de 4 s d'un coup, puis lisse. */
+function throttle(rate) {
+  const { Transform } = require('stream');
+  let tokens = rate * 4;
+  let last = Date.now();
+  return new Transform({
+    highWaterMark: 1 << 20,
+    transform(chunk, _enc, cb) {
+      const now = Date.now();
+      tokens = Math.min(rate * 4, tokens + ((now - last) / 1000) * rate);
+      last = now;
+      tokens -= chunk.length;
+      if (tokens >= 0) return cb(null, chunk);
+      setTimeout(() => cb(null, chunk), Math.min(2000, (-tokens / rate) * 1000));
+    },
+  });
+}
+function streamRelay(target, req, res, pathname, hops = 0) {
+  let u;
+  try {
+    u = new URL(target);
+  } catch {
+    res.writeHead(502);
+    return res.end();
+  }
+  const mod = u.protocol === 'https:' ? require('https') : http;
+  const headers = { 'User-Agent': 'Lumio' };
+  if (req.headers.range) headers.Range = req.headers.range;
+  const up = mod.request(u, { method: req.method, headers, agent: streamAgents[u.protocol] }, (ur) => {
+    if (ur.statusCode >= 300 && ur.statusCode < 400 && ur.headers.location && hops < 5) {
+      ur.resume();
+      return streamRelay(new URL(ur.headers.location, u).toString(), req, res, pathname, hops + 1);
+    }
+    const h = {};
+    for (const k of ['content-type', 'content-length', 'content-range', 'last-modified', 'etag']) if (ur.headers[k]) h[k] = ur.headers[k];
+    h['accept-ranges'] = 'bytes';
+    if (!h['content-type'] || /octet-stream/.test(h['content-type'])) h['content-type'] = /\.mp4$|\.m4v$/i.test(pathname) ? 'video/mp4' : 'video/x-matroska';
+    res.writeHead(ur.statusCode, h);
+    if (req.method === 'HEAD') return (ur.resume(), res.end());
+    ur.on('error', () => res.destroy());
+    ur.pipe(throttle(streamRate())).on('error', () => res.destroy()).pipe(res);
+  });
+  up.on('error', () => (res.headersSent ? res.destroy() : (res.writeHead(502), res.end())));
+  res.on('close', () => up.destroy());
+  up.end();
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') return send(res, 204);
   const url = new URL(req.url, 'http://x');
@@ -8653,29 +8705,9 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
       return res.end('Lien expiré : relance la lecture');
     }
-    const ac = new AbortController();
-    res.on('close', () => ac.abort());
-    let up;
-    try {
-      up = await fetch(st0.url, { method: req.method, headers: req.headers.range ? { Range: req.headers.range } : {}, signal: ac.signal });
-    } catch {
-      res.writeHead(502);
-      return res.end();
-    }
-    const h = {};
-    for (const k of ['content-type', 'content-length', 'content-range', 'last-modified', 'etag']) {
-      const v = up.headers.get(k);
-      if (v) h[k] = v;
-    }
-    h['accept-ranges'] = 'bytes';
-    if (!h['content-type'] || /octet-stream/.test(h['content-type'])) h['content-type'] = /\.mp4$|\.m4v$/i.test(url.pathname) ? 'video/mp4' : 'video/x-matroska';
-    res.writeHead(up.status, h);
-    if (req.method === 'HEAD' || !up.body) return res.end();
-    const { Readable } = require('stream');
-    Readable.fromWeb(up.body)
-      .on('error', () => res.destroy())
-      .pipe(res);
-    return;
+    // Relais direct (https natif + connexions gardées ouvertes) et débit plafonné : le lecteur remplit sa mémoire tampon
+    // à toute vitesse sinon, et le serveur (TLS + tunnel) chauffe pour rien. 40 Mb/s par défaut ≫ un film 1080p (5–15 Mb/s).
+    return streamRelay(st0.url, req, res, url.pathname);
   }
 
   // Lumio TV (fork de NuvioTV, dépôt nono7444/lumio-tv) : /tvnuvio = 32 bits (toutes les box), /tvnuvio64 = 64 bits
