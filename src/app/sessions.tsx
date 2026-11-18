@@ -8,7 +8,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FocusPressable as Pressable } from '@/components/tv';
 import { C, R } from '@/constants/theme';
-import { jf, jfImage, type JfSession } from '@/lib/jellyfin';
+import { Button } from '@/components/ui';
+import { jf, jfImage, logout as logoutJellyfin, JellyfinError, type JfSession } from '@/lib/jellyfin';
 import { useSettings } from '@/lib/settings';
 import { WatchStats } from '@/components/watch-stats';
 
@@ -117,17 +118,22 @@ function SessionCard({ s }: { s: JfSession }) {
 
 /** Qui regarde quoi (cartes), connectés récemment et statistiques : utilisé par l'écran et par l'onglet « Lecture » de Lumio Auto. */
 export function SessionsBody({ stats = true }: { stats?: boolean }) {
-  const { settings } = useSettings();
+  const { settings, update } = useSettings();
   const [list, setList] = useState<JfSession[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [expired, setExpired] = useState(false);
 
   const load = useCallback(() => {
     jf.sessions(settings)
       .then((l) => {
         setList(l);
         setError(null);
+        setExpired(false);
       })
-      .catch((e) => setError(e?.message ?? String(e)));
+      .catch((e) => {
+        setError(e?.message ?? String(e));
+        setExpired(e instanceof JellyfinError && e.status === 401);
+      });
   }, [settings]);
 
   // Rafraîchi toutes les 5 s tant que l'écran est ouvert
@@ -145,7 +151,22 @@ export function SessionsBody({ stats = true }: { stats?: boolean }) {
   return (
     <>
       {error ? (
-        <Text style={[styles.dim, { textAlign: 'center', marginTop: 20 }]}>{error}</Text>
+        <View style={{ gap: 12, marginTop: 20 }}>
+          <Text style={[styles.dim, { textAlign: 'center' }]}>
+            {expired ? 'Jellyfin ne reconnaît plus la connexion de cette appli (session fermée côté Jellyfin). Reconnecte-toi pour la renouveler.' : error}
+          </Text>
+          {expired ? (
+            <Button
+              title="Se reconnecter"
+              icon="log-in-outline"
+              onPress={async () => {
+                await logoutJellyfin(settings).catch(() => {});
+                await update({ jellyfin: null, household: null, skipJellyfin: false });
+                router.replace('/login');
+              }}
+            />
+          ) : null}
+        </View>
       ) : !list ? (
         <ActivityIndicator color={C.text} style={{ marginTop: 30 }} />
       ) : (
@@ -170,7 +191,7 @@ export function SessionsBody({ stats = true }: { stats?: boolean }) {
           ) : null}
         </>
       )}
-      {stats ? (
+      {stats && !expired ? (
         <>
           <Text style={styles.statsTitle}>Statistiques</Text>
           <WatchStats />
