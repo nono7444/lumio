@@ -30,7 +30,7 @@ import { WatchlistButton } from '@/components/watchlist-button';
 import { TvActionRow, TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { MetadataEditor } from '@/components/metadata-editor';
 import { MoveFolder } from '@/components/move-folder';
-import { DlButton } from '@/components/quality-menu';
+import { DlButton, StreamingButton, useStreamStatus } from '@/components/quality-menu';
 import { ReportProblemButton } from '@/components/report-problem';
 import { useServerRequests } from '@/lib/requests';
 import { hasTmdb, useSettings } from '@/lib/settings';
@@ -214,6 +214,8 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
   const serverReq = useServerRequests();
   const tmdbId = item.ProviderIds?.Tmdb ? Number(item.ProviderIds.Tmdb) : undefined;
   const { settings } = useSettings();
+  // « Streaming » aussi sur un titre de Jellyfin (même bouton que sur les fiches TMDB)
+  const stream = useStreamStatus(settings);
   const { width, height: screenH } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [similar, setSimilar] = useState<JfItem[]>([]);
@@ -398,7 +400,8 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
                 />
                 <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" small onPress={toggleFav} style={styles.iconBtn} />
                 {wlItem ? <WatchlistButton item={wlItem} variant="icon" /> : null}
-                                {settings.chatUrl && settings.jellyfin?.isAdmin === true && tmdbId ? <DlButton type="movie" tmdbId={tmdbId} title={item.Name} style={styles.iconBtn} /> : null}
+                {stream.can && tmdbId ? <StreamingButton type="movie" tmdbId={tmdbId} title={item.Name ?? ''} ok={stream.ok} /> : null}
+                {settings.chatUrl && settings.jellyfin?.isAdmin === true && tmdbId ? <DlButton type="movie" tmdbId={tmdbId} title={item.Name} style={styles.iconBtn} /> : null}
                 {serverReq && tmdbId ? <ReportProblemButton icon type="movie" tmdbId={tmdbId} title={item.Name} poster={jfPoster(settings, item, 342)} /> : null}
               </View>
             </View>
@@ -418,6 +421,9 @@ function ItemDetail({ item, reload }: { item: JfItem; reload: () => void }) {
               <View style={styles.iconRow}>
                 <Button title="" icon={fav ? 'heart' : 'heart-outline'} variant="glass" small onPress={toggleFav} style={styles.iconBtn} />
                 {wlItem ? <WatchlistButton item={wlItem} variant="icon" /> : null}
+                {stream.can && tmdbId ? (
+                  <StreamingButton type="tv" tmdbId={tmdbId} title={item.Name ?? ''} season={nextEpisode?.ParentIndexNumber ?? 1} episode={nextEpisode?.IndexNumber ?? 1} ok={stream.ok} />
+                ) : null}
                 {settings.chatUrl && settings.jellyfin?.isAdmin === true && tmdbId ? <DlButton type="tv" tmdbId={tmdbId} title={item.Name} style={styles.iconBtn} /> : null}
                 {serverReq && tmdbId ? <ReportProblemButton icon type="tv" tmdbId={tmdbId} title={item.Name} poster={jfPoster(settings, item, 342)} /> : null}
               </View>
