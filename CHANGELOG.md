@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.178 — 18 novembre 2026
+
 - Lumio Auto, onglet Lecture : quand Jellyfin ne reconnaît plus la session de l'appli, un message clair et un bouton « Se reconnecter » remplacent « Identifiants refusés ou session expirée ».
 
 ## 1.0.177 — 17 novembre 2026
