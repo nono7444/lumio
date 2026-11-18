@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.183 — 18 novembre 2026
+
 - Fiche Jellyfin (affiches de la bibliothèque) : bouton « Streaming » ajouté, comme sur les fiches TMDB.
 
 - Fiche : un téléchargement par Lumio Secour (Wawacity) affiche sa vraie raison (« Wawacity d’abord (4K) », « DL »…) au lieu de « Radarr ne répond pas » (serveur 3.115.1).
