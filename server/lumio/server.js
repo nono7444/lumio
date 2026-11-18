@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.111.1';
+const VERSION = '3.111.2';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4213,7 +4213,7 @@ const AUTO_PROFILE = {
   h265: 'preferred', // 'required' | 'preferred' | 'any'
   h265Wait: 48, // sortie récente : on attend une version H.265 pendant ce nombre d'heures avant de prendre du H.264
   upgradeDays: 30, // version H.264 rangée : on cherche encore du H.265 (plus léger) pendant ce nombre de jours, puis on remplace
-  languages: ['multi', 'vff', 'truefrench', 'french'], // ordre de préférence (VFQ et VF2 = piste québécoise : refusées sauf si on les ajoute)
+  languages: ['multi', 'vff', 'truefrench', 'vf2', 'french'], // ordre de préférence (VF2 = VFF + VFQ : acceptée, une VFF seule passe devant ; VFQ seule refusée)
   maxMovieGb: 8,
   maxEpisodeGb: 2.5,
   minSeeders: 1,
@@ -4239,6 +4239,15 @@ const autoProfile = () => {
   if (c.profile && !c.profileV4) {
     c.profileV4 = true;
     if (Array.isArray(c.profile.languages)) c.profile.languages = c.profile.languages.filter((l) => l !== 'vf2' && l !== 'vfq');
+    saveConfig();
+  }
+  // VF2 acceptée de nouveau : elle contient la VFF (une version VFF seule reste préférée)
+  if (c.profile && !c.profileV6) {
+    c.profileV6 = true;
+    if (Array.isArray(c.profile.languages) && !c.profile.languages.includes('vf2')) {
+      const i = c.profile.languages.indexOf('french');
+      c.profile.languages.splice(i >= 0 ? i : c.profile.languages.length, 0, 'vf2');
+    }
     saveConfig();
   }
   // Profil 1080p : H.265 de préférence (un ancien réglage « peu importe » ne le privilégiait presque pas)
