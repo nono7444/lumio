@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Lecture : quand un film a deux versions sur le serveur (4K et 1080p), « Lire » prend la 4K au lieu de la 1080p.
+
 ## 1.0.186 — 18 novembre 2026
 
 - LooStream retiré : le streaming repasse par les caches (TorBox, AllDebrid) et Wawacity en dernier recours. Admin : TorBox (lien direct) puis AllDebrid ; famille : AllDebrid relayé par le serveur, puis TorBox (serveur 3.117.0).

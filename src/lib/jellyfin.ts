@@ -53,6 +53,8 @@ export type JfMediaSource = {
   SupportsTranscoding?: boolean;
   TranscodingUrl?: string;
   RunTimeTicks?: number;
+  Name?: string;
+  MediaStreams?: { Type?: string; Height?: number; Width?: number }[];
 };
 
 export class JellyfinError extends Error {
@@ -979,7 +981,11 @@ export async function getPlayback(
     MaxStreamingBitrate: forced?.bitrate ?? (engine === 'cast' ? 20_000_000 : 120_000_000),
     ...(forced ? { EnableDirectPlay: false, EnableDirectStream: false, AllowVideoStreamCopy: false } : {}),
   });
-  const src = info.MediaSources?.[0];
+  // Plusieurs versions (« - 2160p » et « - 1080p ») : Jellyfin met la 1080p en premier (ordre des noms) ; on prend la meilleure
+  // définition, sauf si une qualité réduite est demandée (le serveur transcode alors depuis la version la plus légère)
+  const height = (m: JfMediaSource) => Math.max(0, ...(m.MediaStreams ?? []).filter((x) => x.Type === 'Video').map((x) => x.Height ?? 0));
+  const sources = [...(info.MediaSources ?? [])].sort((a, b) => (forced ? height(a) - height(b) : height(b) - height(a)));
+  const src = sources[0];
   if (!src) throw new JellyfinError('Aucune source vidéo pour cet élément');
 
   const common = { itemId, mediaSourceId: src.Id, playSessionId: info.PlaySessionId };
