@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.121.0';
+const VERSION = '3.121.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -7134,14 +7134,9 @@ async function autoSeedTick() {
       // Après 72 h de partage : un torrent resté à 1 de ratio ou moins ne rapporte pas, il est retiré (le fichier de la bibliothèque reste)
       if (!why && g.seedTime >= HR_SEED_S && g.ratio <= 1) why = `72 h de partage, ratio ${g.ratio}`;
       if (why && !hrSafe(g.seedTime, g.ratio)) why = null; // règle C411 : 72 h ou ratio 1 avant tout retrait
-      if (why) {
-        cleanNote(g.title, why, g.ratio, g.uploaded, false);
-        await qbitFetch('/api/v2/torrents/delete', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ hashes: g.hash, deleteFiles: 'true' }) }).catch(() => {});
-        g.seeding = false;
-        g.seedEnd = why;
-        g.seedNote = null;
-        autoLog(`${g.title} : partage terminé (${why}), torrent retiré`);
-      }
+      // Demande de Norman : plus aucun retrait automatique, tous les torrents restent en partage.
+      // L'objectif atteint est seulement affiché (retrait possible à la main dans l'onglet Seed).
+      if (why) g.seedNote = `objectif atteint (${why}), gardé en partage`;
     }
     autoSave();
   } catch (e) {
@@ -7345,8 +7340,9 @@ async function palliTick(force = false) {
       if (/^(paused|stopped)UP$/i.test(state)) await palliPost('/api/v2/torrents/start', { hashes: it.hash }).catch(() => palliPost('/api/v2/torrents/resume', { hashes: it.hash }).catch(() => {}));
       // En partage : au bout de 3 h, un torrent qui a déjà ses sources (et personne qui attend) n'a pas besoin de soins
       const age = Date.now() - (it.seedAt || it.since);
-      if (age > 3 * 3600e3 && it.seeders >= PALLI_HEALTHY && it.leechers === 0) await palliRemove(it, `${it.seeders} sources : il va bien`);
-      else if (age > s.keepDays * 86400e3) await palliRemove(it, `${s.keepDays} j de partage`);
+      // Plus de retrait automatique (« on laisse tout ») : seulement une note quand il va bien
+      if (age > 3 * 3600e3 && it.seeders >= PALLI_HEALTHY && it.leechers === 0) it.note = `${it.seeders} sources : il va bien, gardé`;
+      else if (age > s.keepDays * 86400e3) it.note = `${s.keepDays} j de partage, gardé`;
       else it.note = it.seeders === 0 ? 'seule source' : `${it.seeders} autre${it.seeders > 1 ? 's' : ''} source${it.seeders > 1 ? 's' : ''}`;
     }
     // 2. Nouveaux : quelques anciens torrents par passage
