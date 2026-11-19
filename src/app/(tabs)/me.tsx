@@ -1,4 +1,4 @@
-// Lumio Audio → onglet « Profil » : compte Jellyfin, serveur Lumio, statistiques d'écoute, déconnexion.
+// Lumio Audio et Lumio Livres → onglet « Profil » : compte Jellyfin, serveur Lumio, statistiques, déconnexion.
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -10,24 +10,50 @@ import { C, TAB_SPACE } from '@/constants/theme';
 import { stop, useAudio } from '@/lib/audio-player';
 import { logout as logoutJellyfin } from '@/lib/jellyfin';
 import { useSettings } from '@/lib/settings';
-import { IS_AUDIO } from '@/lib/variant';
+import { useEbooks } from '@/lib/ebooks';
+import { IS_AUDIO, IS_BOOKS } from '@/lib/variant';
 
 export default function MeRoute() {
-  return IS_AUDIO ? <Me /> : null;
+  return IS_AUDIO ? <MeAudio /> : IS_BOOKS ? <MeBooks /> : null;
 }
 
-function Me() {
-  const { settings, update } = useSettings();
+function MeAudio() {
   const { lib, reload } = useAudioLibrary();
   const a = useAudio();
+  return (
+    <Me
+      books={lib?.books ?? []}
+      reload={() => reload(true)}
+      bottom={a.book ? 70 : 0}
+      labels={['livres', 'commencés', 'terminés']}
+      about="Lumio Audio, l'appli des livres audio de la maison. Lecture en arrière-plan et sur l'écran verrouillé, vitesse, minuterie, reprise là où tu t'étais arrêté sur tous tes appareils."
+    />
+  );
+}
+
+function MeBooks() {
+  const { lib, reload } = useEbooks();
+  return (
+    <Me
+      books={lib?.books ?? []}
+      reload={reload}
+      bottom={0}
+      labels={['livres', 'en cours', 'lus']}
+      about="Lumio Livres, la bibliothèque de livres, BD et mangas de la maison. Liseuse intégrée (EPUB, BD, PDF), thème et taille du texte, reprise à la bonne page sur tous tes appareils."
+    />
+  );
+}
+
+type Item = { progress: { done: boolean } | null };
+function Me({ books, reload, bottom, labels, about }: { books: Item[]; reload: () => void; bottom: number; labels: [string, string, string]; about: string }) {
+  const { settings, update } = useSettings();
   const [url, setUrl] = useState(settings.chatUrl ?? '');
-  const books = lib?.books ?? [];
   const started = books.filter((b) => b.progress).length;
   const done = books.filter((b) => b.progress?.done).length;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingBottom: TAB_SPACE + (a.book ? 70 : 0) }} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ paddingBottom: TAB_SPACE + bottom }} keyboardShouldPersistTaps="handled">
         <ScreenTitle title="Profil" />
         <View style={styles.card}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
@@ -40,9 +66,9 @@ function Me() {
             </View>
           </View>
           <View style={styles.stats}>
-            <Stat n={books.length} label="livres" />
-            <Stat n={started} label="commencés" />
-            <Stat n={done} label="terminés" />
+            <Stat n={books.length} label={labels[0]} />
+            <Stat n={started} label={labels[1]} />
+            <Stat n={done} label={labels[2]} />
           </View>
         </View>
 
@@ -64,15 +90,14 @@ function Me() {
             variant="secondary"
             onPress={async () => {
               await update({ chatUrl: url.trim().replace(/\/+$/, '') || undefined });
-              setTimeout(() => reload(true), 100);
+              setTimeout(reload, 100);
             }}
           />
         </View>
 
         <View style={[styles.card, { gap: 10 }]}>
           <Text style={styles.s}>
-            Lumio Audio, l'appli des livres audio de la maison. Lecture en arrière-plan et sur l'écran verrouillé, vitesse, minuterie, reprise là où
-            tu t'étais arrêté sur tous tes appareils.
+            {about}
           </Text>
           <Button
             title="Se déconnecter"

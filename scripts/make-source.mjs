@@ -74,25 +74,45 @@ if (!beta && existsSync(autoIpa)) {
   });
 }
 
-// Lumio Audio (livres audio de la maison) : dans la même source quand son IPA existe
-const audioIpa = 'lumio-audio-unsigned.ipa';
-if (!beta && existsSync(audioIpa)) {
-  const audioSize = statSync(audioIpa).size;
-  const audioURL = `https://github.com/${repo}/releases/download/${tag}/${audioIpa}`;
-  source.apps.push({
+// Lumio Audio et Lumio Livres : dans la même source quand leur IPA existe
+const EXTRA = [
+  {
+    ipa: 'lumio-audio-unsigned.ipa',
     name: 'Lumio Audio',
-    bundleIdentifier: 'lol.wawanono.lumio.audio',
-    developerName: 'Norman',
+    id: 'lol.wawanono.lumio.audio',
+    dir: 'audio',
+    tint: '#9B6BFF',
     subtitle: 'Les livres audio de la maison',
-    localizedDescription: 'Lumio Audio : bibliothèque de livres audio du serveur Lumio, lecture en arrière-plan, vitesse, minuterie, reprise sur tous les appareils.',
-    iconURL: `https://raw.githubusercontent.com/${repo}/main/assets/images/audio/icon.png`,
-    tintColor: '#9B6BFF',
+    about: 'Lumio Audio : bibliothèque de livres audio du serveur Lumio, lecture en arrière-plan, vitesse, minuterie, reprise sur tous les appareils.',
+  },
+  {
+    ipa: 'lumio-livres-unsigned.ipa',
+    name: 'Lumio Livres',
+    id: 'lol.wawanono.lumio.livres',
+    dir: 'books',
+    tint: '#2FD3A8',
+    subtitle: 'Livres, BD et mangas de la maison',
+    about: 'Lumio Livres : bibliothèque de livres, BD et mangas du serveur Lumio, liseuse intégrée (EPUB, BD, PDF), reprise à la bonne page sur tous les appareils.',
+  },
+];
+for (const x of EXTRA) {
+  if (beta || !existsSync(x.ipa)) continue;
+  const size = statSync(x.ipa).size;
+  const url = `https://github.com/${repo}/releases/download/${tag}/${x.ipa}`;
+  source.apps.push({
+    name: x.name,
+    bundleIdentifier: x.id,
+    developerName: 'Norman',
+    subtitle: x.subtitle,
+    localizedDescription: x.about,
+    iconURL: `https://raw.githubusercontent.com/${repo}/main/assets/images/${x.dir}/icon.png`,
+    tintColor: x.tint,
     category: 'entertainment',
     version,
     versionDate: date,
-    downloadURL: audioURL,
-    size: audioSize,
-    versions: [{ version, buildVersion: version.split('.').pop(), date, size: audioSize, downloadURL: audioURL, minOSVersion: '16.4', localizedDescription: notes || `Build ${tag}` }],
+    downloadURL: url,
+    size,
+    versions: [{ version, buildVersion: version.split('.').pop(), date, size, downloadURL: url, minOSVersion: '16.4', localizedDescription: notes || `Build ${tag}` }],
     appPermissions: { entitlements: [], privacy: {} },
   });
 }

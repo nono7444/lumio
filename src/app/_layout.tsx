@@ -67,6 +67,8 @@ function Root() {
       <Stack.Screen name="watch" options={{ animation: 'fade', presentation: 'fullScreenModal' }} />
       <Stack.Screen name="profiles" options={{ animation: 'fade', presentation: 'fullScreenModal' }} />
       <Stack.Screen name="profile-edit" options={{ presentation: 'modal' }} />
+      <Stack.Screen name="ebook/[id]" options={{ animation: 'fade_from_bottom' }} />
+      <Stack.Screen name="reader" options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom', gestureEnabled: false }} />
       <Stack.Screen name="audiobook/[id]" options={{ animation: 'fade_from_bottom' }} />
       <Stack.Screen name="listening" options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }} />
       <Stack.Screen name="player" options={{ animation: 'fade', presentation: 'fullScreenModal', gestureEnabled: false }} />

@@ -6,7 +6,7 @@ import { FloatingTabBar } from '@/components/tab-bar';
 import { C } from '@/constants/theme';
 import { fetchIsAdmin } from '@/lib/jellyfin';
 import { useSettings } from '@/lib/settings';
-import { IS_AUDIO, IS_AUTO } from '@/lib/variant';
+import { IS_AUDIO, IS_AUTO, IS_BOOKS } from '@/lib/variant';
 import { AutoAdminOnly } from '@/components/auto-server';
 import { MiniPlayer } from '@/components/audio-ui';
 
@@ -18,7 +18,7 @@ export default function TabsLayout() {
 
   useEffect(() => {
     const h = settings.household;
-    if (askedThisLaunch || IS_AUTO || IS_AUDIO || Platform.isTV || !h || !h.askOnLaunch || !h.count || !settings.jellyfin) return;
+    if (askedThisLaunch || IS_AUTO || IS_AUDIO || IS_BOOKS || Platform.isTV || !h || !h.askOnLaunch || !h.count || !settings.jellyfin) return;
     askedThisLaunch = true;
     const t = setTimeout(() => router.push('/profiles'), 300);
     return () => clearTimeout(t);
@@ -51,6 +51,36 @@ export default function TabsLayout() {
   // Premier lancement : écran de connexion Jellyfin (on peut le passer)
   if (!settings.jellyfin && !settings.skipJellyfin) return <Redirect href="/login" />;
 
+  // Lumio Livres : la bibliothèque de livres, BD et mangas (Bibliothèque, Trouver pour l'admin, Profil)
+  if (IS_BOOKS) {
+    return (
+      <Tabs
+        tabBar={(props) => <FloatingTabBar {...props} />}
+        initialRouteName="shelf"
+        screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: C.bg } }}>
+        <Tabs.Screen name="shelf" options={{ title: 'Bibliothèque' }} />
+        <Tabs.Screen name="findbook" options={{ title: 'Trouver', href: settings.jellyfin?.isAdmin ? undefined : null }} />
+        <Tabs.Screen name="me" options={{ title: 'Profil' }} />
+        <Tabs.Screen name="index" options={{ href: null }} />
+        <Tabs.Screen name="search" options={{ href: null }} />
+        <Tabs.Screen name="library" options={{ href: null }} />
+        <Tabs.Screen name="live" options={{ href: null }} />
+        <Tabs.Screen name="calendar" options={{ href: null }} />
+        <Tabs.Screen name="chat" options={{ href: null }} />
+        <Tabs.Screen name="activity" options={{ href: null }} />
+        <Tabs.Screen name="auto" options={{ href: null }} />
+        <Tabs.Screen name="qbit" options={{ href: null }} />
+        <Tabs.Screen name="disks" options={{ href: null }} />
+        <Tabs.Screen name="server" options={{ href: null }} />
+        <Tabs.Screen name="playing" options={{ href: null }} />
+        <Tabs.Screen name="watchlist" options={{ href: null }} />
+        <Tabs.Screen name="settings" options={{ href: null }} />
+        <Tabs.Screen name="listen" options={{ href: null }} />
+        <Tabs.Screen name="find" options={{ href: null }} />
+      </Tabs>
+    );
+  }
+
   // Lumio Audio : les livres audio de la maison (Bibliothèque, Trouver pour l'admin, Profil) + mini-lecteur
   if (IS_AUDIO) {
     return (
@@ -80,6 +110,8 @@ export default function TabsLayout() {
         <Tabs.Screen name="playing" options={{ href: null }} />
         <Tabs.Screen name="watchlist" options={{ href: null }} />
         <Tabs.Screen name="settings" options={{ href: null }} />
+        <Tabs.Screen name="shelf" options={{ href: null }} />
+        <Tabs.Screen name="findbook" options={{ href: null }} />
       </Tabs>
     );
   }
@@ -108,6 +140,8 @@ export default function TabsLayout() {
         <Tabs.Screen name="chat" options={{ href: null }} />
         <Tabs.Screen name="watchlist" options={{ href: null }} />
         <Tabs.Screen name="listen" options={{ href: null }} />
+        <Tabs.Screen name="shelf" options={{ href: null }} />
+        <Tabs.Screen name="findbook" options={{ href: null }} />
         <Tabs.Screen name="find" options={{ href: null }} />
         <Tabs.Screen name="me" options={{ href: null }} />
       </Tabs>
@@ -140,6 +174,8 @@ export default function TabsLayout() {
       <Tabs.Screen name="watchlist" options={{ title: 'À voir', href: Platform.isTV ? null : undefined }} />
       <Tabs.Screen name="settings" options={{ title: 'Profil' }} />
       <Tabs.Screen name="listen" options={{ href: null }} />
+      <Tabs.Screen name="shelf" options={{ href: null }} />
+      <Tabs.Screen name="findbook" options={{ href: null }} />
       <Tabs.Screen name="find" options={{ href: null }} />
       <Tabs.Screen name="me" options={{ href: null }} />
     </Tabs>

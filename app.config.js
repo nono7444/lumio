@@ -1,7 +1,8 @@
-// Trois applis à partir du même code :
+// Quatre applis à partir du même code :
 // - Lumio (par défaut) : l'appli de la famille ;
 // - Lumio Auto (APP_VARIANT=auto) : l'appli de l'admin (Lumio Auto, torrents, serveur, mises à jour) ;
-// - Lumio Audio (APP_VARIANT=audio) : les livres audio de la maison (bibliothèque du serveur Lumio, lecture en arrière-plan).
+// - Lumio Audio (APP_VARIANT=audio) : les livres audio de la maison (bibliothèque du serveur Lumio, lecture en arrière-plan) ;
+// - Lumio Livres (APP_VARIANT=books) : livres, BD et mangas de la maison (bibliothèque du serveur Lumio, liseuse).
 const VARIANTS = {
   auto: {
     name: 'Lumio Auto',
@@ -20,6 +21,14 @@ const VARIANTS = {
     local: 'Lumio Audio se connecte à ton serveur Lumio sur ton réseau local.',
     // Lecture en arrière-plan et sur l'écran verrouillé ; pas de micro
     plugins: [['expo-audio', { enableBackgroundPlayback: true, recordAudioAndroid: false }]],
+  },
+  books: {
+    name: 'Lumio Livres',
+    scheme: 'lumiolivres',
+    id: 'lol.wawanono.lumio.livres',
+    dir: 'books',
+    bg: '#06201C',
+    local: 'Lumio Livres se connecte à ton serveur Lumio sur ton réseau local.',
   },
 };
 

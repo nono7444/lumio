@@ -3,7 +3,7 @@ import { PlatformsRow } from '@/components/platforms-row';
 import { ProfileRank } from '@/components/rank-shield';
 import { Redirect, router, useFocusEffect } from 'expo-router';
 import { AutoPerfScreen } from '@/components/auto-admin';
-import { IS_AUDIO, IS_AUTO } from '@/lib/variant';
+import { IS_AUDIO, IS_AUTO, IS_BOOKS } from '@/lib/variant';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useCached } from '@/lib/cached';
 import { StatusBar } from 'expo-status-bar';
@@ -378,6 +378,7 @@ export default function HomeTab() {
   if (IS_AUTO) return <AutoPerfScreen />;
   // Lumio Audio : pas d'accueil, on va à la bibliothèque
   if (IS_AUDIO) return <Redirect href="/listen" />;
+  if (IS_BOOKS) return <Redirect href="/shelf" />;
   return <Home />;
 }
 

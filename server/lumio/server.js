@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.119.1';
+const VERSION = '3.120.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4032,7 +4032,17 @@ async function epubBook(file) {
   }
   const chapters = [...opf.matchAll(/<itemref\b[^>]*idref="([^"]+)"/gi)].map((m) => manifest[m[1]]).filter(Boolean);
   const title = textOf((opf.match(/<dc:title[^>]*>([\s\S]*?)<\/dc:title>/i) || [])[1] || '');
-  return { entries, chapters, title };
+  const author = textOf((opf.match(/<dc:creator[^>]*>([\s\S]*?)<\/dc:creator>/i) || [])[1] || '') || null;
+  // Couverture : <meta name="cover">, item « cover-image » (EPUB 3), sinon une image nommée « cover »
+  const metaCover = (opf.match(/<meta\b[^>]*name="cover"[^>]*>/i) || [''])[0].match(/content="([^"]+)"/i);
+  let cover = metaCover ? manifest[metaCover[1]] : null;
+  if (!cover) {
+    const it = [...opf.matchAll(/<item\b[^>]*>/gi)].map((m) => m[0]).find((x) => /properties="[^"]*cover-image/i.test(x));
+    const href = it && (it.match(/\bhref="([^"]+)"/i) || [])[1];
+    if (href) cover = path.posix.normalize((dir ? `${dir}/` : '') + decodeURIComponent(href));
+  }
+  if (!cover || !isImage(cover)) cover = (entries.find((e) => isImage(e.name) && /cover|couv/i.test(e.name)) || {}).name || null;
+  return { entries, chapters, title, author, cover };
 }
 
 function bookTitle(name) {
@@ -4043,6 +4053,42 @@ function bookTitle(name) {
     .replace(/\b(FRENCH|FR|VF|MULTi|CBZ|CBR|EPUB|PDF|Digital|NoTag)\b.*$/i, '')
     .replace(/\s{2,}/g, ' ')
     .trim() || name;
+}
+
+// Lumio Livres : position de lecture par personne, titre / auteur des EPUB (lus dans le fichier) en cache
+const BOOKS_STATE_FILE = path.join(DATA_DIR, 'books-state.json');
+const BOOK_COVERS_DIR = path.join(DATA_DIR, 'book-covers');
+let booksState = { progress: {}, meta: {} };
+try {
+  booksState = { ...booksState, ...JSON.parse(fs.readFileSync(BOOKS_STATE_FILE, 'utf8')) };
+} catch {}
+let booksStateTimer = null;
+const saveBooksState = () => {
+  clearTimeout(booksStateTimer);
+  booksStateTimer = setTimeout(() => fs.promises.writeFile(BOOKS_STATE_FILE, JSON.stringify(booksState)).catch(() => {}), 1000);
+};
+const bookId = (rel) => crypto.createHash('sha1').update(rel).digest('hex').slice(0, 16);
+/** Titre et auteur : ceux de l'EPUB, sinon « Auteur - Titre » du nom de fichier. */
+async function bookInfo(file, name, st) {
+  const id = bookId(file);
+  const sig = `${st.size}-${Math.round(st.mtimeMs)}`;
+  const c = booksState.meta[id];
+  if (c && c.sig === sig) return c;
+  let title = bookTitle(name);
+  let author = null;
+  const m = title.match(/^(.+?)\s+-\s+(.+)$/);
+  if (m && !/\b(t(ome)?\s*\d|vol)/i.test(m[1])) [author, title] = [m[1].trim(), m[2].trim()];
+  if (/\.epub$/i.test(name)) {
+    try {
+      const b = await epubBook(file);
+      if (b.title) title = b.title;
+      if (b.author) author = b.author;
+    } catch {}
+  }
+  const out = { sig, title, author };
+  booksState.meta[id] = out;
+  saveBooksState();
+  return out;
 }
 
 async function bookLibrary() {
@@ -4065,15 +4111,20 @@ async function bookLibrary() {
     }
   };
   await walk('', 0);
+  const infos = new Map();
+  for (const f of found) infos.set(f.rel, await bookInfo(path.join(full, f.rel), f.name, f.st));
   return {
     dir,
     books: found
       .sort((a, b) => b.st.mtimeMs - a.st.mtimeMs)
       .map((f) => {
         const rel = dir.folder ? `${dir.folder}/${f.rel}` : f.rel;
+        const info = infos.get(f.rel);
         return {
+          id: bookId(path.join(full, f.rel)),
           name: f.name,
-          title: bookTitle(f.name),
+          title: info.title,
+          author: info.author,
           folder: f.rel.includes('/') ? f.rel.replace(/\/[^/]*$/, '') : '',
           path: rel,
           format: BOOK_EXT[path.extname(f.name).toLowerCase()],
@@ -4085,9 +4136,43 @@ async function bookLibrary() {
   };
 }
 
+/** Couverture d'un livre : celle de l'EPUB, 1re planche d'un CBZ, sinon cherchée en ligne (gardée sur le serveur). */
+async function bookCover(file) {
+  const ext = path.extname(file).toLowerCase();
+  try {
+    if (ext === '.epub') {
+      const b = await epubBook(file);
+      const e = b.cover && b.entries.find((x) => x.name === b.cover);
+      if (e) return { buf: await zipRead(file, e), type: imgType(e.name) };
+    } else if (ext === '.cbz' || ext === '.zip') {
+      const e = (await zipEntries(file)).filter((x) => isImage(x.name)).sort((a, b) => natural(a.name, b.name))[0];
+      if (e) return { buf: await zipRead(file, e), type: imgType(e.name) };
+    }
+  } catch {}
+  // En ligne (Apple Books, Google Books, Open Library), une fois par semaine au plus si rien n'est trouvé
+  const id = bookId(file);
+  const cached = path.join(BOOK_COVERS_DIR, `${id}.jpg`);
+  try {
+    return { buf: await fs.promises.readFile(cached), type: 'image/jpeg' };
+  } catch {}
+  const miss = path.join(BOOK_COVERS_DIR, `${id}.none`);
+  try {
+    if (Date.now() - (await fs.promises.stat(miss)).mtimeMs < 7 * 86400e3) return null;
+  } catch {}
+  await fs.promises.mkdir(BOOK_COVERS_DIR, { recursive: true }).catch(() => {});
+  const info = booksState.meta[id] || { title: bookTitle(path.basename(file)), author: null };
+  const buf = await audioCoverSearch(info.title, info.author, 'ebook').catch(() => null);
+  if (!buf) {
+    await fs.promises.writeFile(miss, '').catch(() => {});
+    return null;
+  }
+  await fs.promises.writeFile(cached, buf).catch(() => {});
+  return { buf, type: 'image/jpeg' };
+}
+
 /** Routes de lecture par lien signé (sans jeton Jellyfin). Renvoie true si la requête est traitée. */
 async function bookFileRoutes(req, res, p, q) {
-  const m = p.match(/^\/api\/books\/f\/([A-Za-z0-9_.-]+)\/(file|pages|page\/\d+|epub|epub\/\d+|res)$/);
+  const m = p.match(/^\/api\/books\/f\/([A-Za-z0-9_.-]+)\/(file|cover|pages|page\/\d+|epub|epub\/\d+|res)$/);
   if (!m || req.method !== 'GET') return false;
   const file = bookVerify(m[1]);
   if (!file) {
@@ -4096,6 +4181,17 @@ async function bookFileRoutes(req, res, p, q) {
   }
   const what = m[2];
   try {
+    if (what === 'cover') {
+      const img = await bookCover(file);
+      if (!img) {
+        res.writeHead(404, { 'Cache-Control': 'private, max-age=3600' });
+        res.end();
+        return true;
+      }
+      res.writeHead(200, { 'Content-Type': img.type, 'Content-Length': img.buf.length, 'Cache-Control': 'private, max-age=604800' });
+      res.end(img.buf);
+      return true;
+    }
     if (what === 'file') {
       const st = await fs.promises.stat(file);
       const ext = path.extname(file).toLowerCase();
@@ -4305,7 +4401,23 @@ async function bookRoutes(req, res, p, q, user) {
     return true;
   }
   if (req.method === 'GET' && p === '/api/books/library') {
-    send(res, 200, await bookLibrary());
+    const lib = await bookLibrary();
+    const mine = booksState.progress[user.name] || {};
+    for (const b of lib.books) b.progress = mine[b.id] || null;
+    lib.admin = Boolean(user.admin);
+    lib.downloading = downloads.filter((j) => j.book && ['queued', 'debrid', 'downloading'].includes(j.status)).length;
+    send(res, 200, lib);
+    return true;
+  }
+  // Position de lecture : { chapter, scroll } (EPUB), { page } (BD), pourcentage, terminé
+  const pm = p.match(/^\/api\/books\/progress\/([a-f0-9]{16})$/);
+  if (req.method === 'PUT' && pm) {
+    const b = await readBody(req);
+    const mine = (booksState.progress[user.name] = booksState.progress[user.name] || {});
+    const num = (v, max) => (Number.isFinite(Number(v)) ? Math.max(0, Math.min(max, Number(v))) : 0);
+    mine[pm[1]] = { chapter: num(b.chapter, 1e5), scroll: num(b.scroll, 1), page: num(b.page, 1e5), pct: num(b.pct, 1), done: Boolean(b.done), at: Date.now() };
+    saveBooksState();
+    send(res, 200, { ok: true });
     return true;
   }
   if (req.method === 'POST' && p === '/api/books/delete') {
@@ -4406,10 +4518,10 @@ async function audioProbe(file) {
   return { tags, pic };
 }
 const coverWords = (t) => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9]+/).filter((w) => w.length > 2);
-async function audioCoverSearch(title, author) {
-  return (await audioCoverSearchOnce(title, author)) || (author ? await audioCoverSearchOnce(title, null) : null);
+async function audioCoverSearch(title, author, media = 'audiobook') {
+  return (await audioCoverSearchOnce(title, author, media)) || (author ? await audioCoverSearchOnce(title, null, media) : null);
 }
-async function audioCoverSearchOnce(title, author) {
+async function audioCoverSearchOnce(title, author, media = 'audiobook') {
   const want = coverWords(title);
   const fits = (name) => {
     const got = coverWords(name || '');
@@ -4417,7 +4529,7 @@ async function audioCoverSearchOnce(title, author) {
   };
   const tries = [
     async () => {
-      const q = new URLSearchParams({ term: `${title} ${author || ''}`.trim(), media: 'audiobook', entity: 'audiobook', country: 'fr', limit: '10' });
+      const q = new URLSearchParams({ term: `${title} ${author || ''}`.trim(), media, entity: media, country: 'fr', limit: '10' });
       const j = await (await fetch(`https://itunes.apple.com/search?${q}`, { signal: AbortSignal.timeout(10000) })).json();
       const r = (j.results || []).find((x) => fits(x.collectionName)) || null;
       return r && r.artworkUrl100 ? r.artworkUrl100.replace(/\/\d+x\d+bb\./, '/1000x1000bb.') : null;

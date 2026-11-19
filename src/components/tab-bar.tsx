@@ -18,7 +18,7 @@ import { orderTabs } from '@/lib/home-layout';
 import { useSeason } from '@/lib/seasons';
 import { useAppUpdate } from '@/lib/app-update';
 import { useSettings } from '@/lib/settings';
-import { IS_AUDIO, IS_AUTO } from '@/lib/variant';
+import { IS_AUDIO, IS_AUTO, IS_BOOKS } from '@/lib/variant';
 
 type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>>[0];
 
@@ -41,6 +41,9 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   // Lumio Audio
   listen: 'headset',
   find: 'search',
+  // Lumio Livres
+  shelf: 'library',
+  findbook: 'search',
   me: 'person-circle',
 };
 
@@ -62,6 +65,8 @@ const SHORT: Record<string, string> = {
   settings: IS_AUTO ? 'Réglages' : 'Profil',
   listen: 'Livres',
   find: 'Trouver',
+  shelf: 'Livres',
+  findbook: 'Trouver',
   me: 'Profil',
 };
 
@@ -108,7 +113,7 @@ function PhoneTabBar({ state, descriptors, navigation }: TabBarProps) {
   const order = orderTabs(
     visible.map((r) => r.name),
     // Lumio Auto : onglets fixes, dans l'ordre du code
-    IS_AUTO || IS_AUDIO ? [] : settings.tabsLayout
+    IS_AUTO || IS_AUDIO || IS_BOOKS ? [] : settings.tabsLayout
   );
   // TV : expérience épurée, seulement Accueil, Bibliothèque, Recherche, Demandes (et le profil)
   const TV_TABS = ['index', 'library', 'search', 'activity', 'settings'];

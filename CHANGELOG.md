@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Nouvelle appli **Lumio Livres** (iPhone et Android) : les livres, BD et mangas de la maison. Bibliothèque avec couvertures, « Continuer la lecture », recherche, filtres et tri ; liseuse intégrée : EPUB chapitre par chapitre (thème sombre, clair ou sépia, taille du texte), BD et mangas page par page (sens manga, zoom), PDF. La page où tu t'es arrêté est gardée sur le serveur, on reprend sur n'importe quel appareil.
+- Lumio Livres, admin : onglet « Trouver » pour chercher un livre, une BD, un manga ou un comics sur C411, Tr4ker et Wawacity et le télécharger sur le serveur.
+
 ## 1.0.191 — 19 novembre 2026
 
 - Plus de retour à l'écran de connexion après avoir fermé l'appli : la session est gardée à trois endroits (mémoire de l'appli, fichier, trousseau iOS) et réécrite dès que l'appli passe en arrière-plan.
