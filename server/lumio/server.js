@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.118.2';
+const VERSION = '3.119.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4334,7 +4334,7 @@ const AUDIO_EXT = /\.(mp3|m4b|m4a|aac|ogg|oga|opus|flac|wav)$/i;
 const AUDIO_ARCHIVE = /\.(zip|rar|7z)$/i;
 const AUDIO_FILE = path.join(DATA_DIR, 'audiobooks.json');
 const audioState = readJson(AUDIO_FILE, {});
-for (const k of ['progress', 'covers', 'pending']) if (!audioState[k] || typeof audioState[k] !== 'object') audioState[k] = {};
+for (const k of ['progress', 'covers', 'pending', 'meta']) if (!audioState[k] || typeof audioState[k] !== 'object') audioState[k] = {};
 const saveAudio = () => writeJson(AUDIO_FILE, audioState);
 
 function audioDir() {
@@ -4346,41 +4346,141 @@ function audioDir() {
 }
 const audioId = (rel) => crypto.createHash('sha1').update(rel).digest('hex').slice(0, 16);
 
-/** « Auteur - Titre », « Titre - Auteur [Livre audio] », dossier parent = auteur… → { title, author } */
-function audioMeta(dirRel) {
-  const parts = dirRel.split('/').filter(Boolean);
-  const raw = (parts[parts.length - 1] || 'Livre audio')
+/** Nom de dossier ou de fichier nettoyé (points, crochets, format, « > » de Wawacity…). */
+const audioClean = (n) =>
+  String(n || '')
+    .replace(/\.(m4b|mp3|m4a|flac)$/i, '')
     .replace(/[._]+/g, ' ')
-    .replace(/\[[^\]]*\]|\((?:mp3|m4b|flac|\d+\s*k(?:bps)?|livre audio|audiobook|lu par[^)]*)\)/gi, ' ')
-    .replace(/\b(mp3|m4b|flac|aac|\d{2,3}\s?kbps|livre audio|audiobook|french|fr|multi)\b/gi, ' ')
+    .replace(/\[[^\]]*\]|\((?:mp3|m4b|flac|\d+\s*k(?:bps)?|livre audio|audiobooks?|lu par[^)]*|int[eé]gral[e]?|unabridged)\)/gi, ' ')
+    .replace(/\b(mp3|m4b|flac|aac|\d{2,3}\s?kbps|livres? audio|audiobooks?|french|fr|multi|notag|\d{4})\b/gi, ' ')
+    .replace(/^[\s>|:-]+|[\s|:-]+$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+/** « Auteur - Titre », dossier parent = auteur, parent « Titre Auteur » (téléchargement) → { title, author, narrator } */
+function audioMeta(dirRel) {
+  const parts = dirRel.split('/').filter(Boolean);
+  const raw = audioClean(parts[parts.length - 1] || 'Livre audio') || 'Livre audio';
   let title = raw;
   let author = null;
   const m = raw.match(/^(.+?)\s+-\s+(.+)$/);
   if (m) [author, title] = [m[1].trim(), m[2].trim()];
-  else if (parts.length >= 2) author = parts[parts.length - 2].replace(/[._]+/g, ' ').trim();
+  else if (parts.length >= 2) {
+    const parent = audioClean(parts[parts.length - 2]);
+    const pm = parent.match(/^(.+?)\s+-\s+(.+)$/);
+    const low = (x) => x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    // « Le Hobbit J R R Tolkien / Le Hobbit » : ce qui reste après le titre est l'auteur
+    if (low(parent).startsWith(low(title)) && parent.length > title.length + 2) author = parent.slice(title.length).replace(/^[\s-]+/, '').trim();
+    else if (pm && low(pm[2]).includes(low(title))) author = pm[1].trim();
+    else if (pm && low(pm[1]).includes(low(title))) author = pm[2].trim();
+    else if (low(parent) !== low(title)) author = parent;
+  }
   const narr = dirRel.match(/lu par ([^\]\)\/]+)/i);
-  return { title: title || raw, author, narrator: narr ? narr[1].trim() : null };
+  return { title: title || raw, author: author || null, narrator: narr ? narr[1].trim() : null };
 }
 
-/** Couverture Open Library (gardée), pour les livres sans image dans leur dossier. */
-async function audioCoverUrl(title, author) {
-  const k = `${title}|${author || ''}`.toLowerCase();
-  if (k in audioState.covers) return audioState.covers[k];
-  let url = null;
-  try {
-    const q = new URLSearchParams({ title, limit: '1', fields: 'cover_i' });
-    if (author) q.set('author', author);
-    const j = await fetch(`https://openlibrary.org/search.json?${q}`, { signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'Lumio' } }).then((r) => r.json());
-    const id = j && j.docs && j.docs[0] && j.docs[0].cover_i;
-    if (id) url = `https://covers.openlibrary.org/b/id/${id}-L.jpg`;
-  } catch {
-    return null; // pas gardé : réessai plus tard
+// ——— Métadonnées et couvertures, comme Audiobookshelf ———
+// 1. Étiquettes du fichier audio (ffprobe) : album → titre, artiste de l'album / artiste → auteur, compositeur → narrateur ;
+// 2. couverture intégrée au fichier (ffmpeg -map 0:v:0 -frames:v 1) enregistrée à côté du livre (cover.jpg) ;
+// 3. sinon couverture cherchée en ligne : Apple Books (livres audio, carré), Google Books, Open Library.
+const audioTagClean = (v) => {
+  // Étiquettes : pas de nettoyage des points (« J.R.R. Tolkien »), seulement disques et mentions de format
+  const t = String(v || '')
+    .replace(/\b(cd|dis[ck]|disque|partie|part)\s*\d+\b/gi, ' ')
+    .replace(/\[[^\]]*\]|\((?:mp3|m4b|livre audio|audiobooks?|int[eé]grale?|unabridged|abridged)\)/gi, ' ')
+    .replace(/^[\s>|:-]+|[\s|:,-]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return t && !/^(track|piste|chapitre|chapter|unknown|inconnu)\b/i.test(t) && !/^\d+$/.test(t) ? t : null;
+};
+async function audioProbe(file) {
+  const out = await run('ffprobe', ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', file], { timeout: 30_000 });
+  const j = JSON.parse(out);
+  const tags = {};
+  for (const [k, v] of Object.entries((j.format && j.format.tags) || {})) tags[k.toLowerCase()] = v;
+  const pic = (j.streams || []).some((st) => st.codec_type === 'video');
+  return { tags, pic };
+}
+const coverWords = (t) => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9]+/).filter((w) => w.length > 2);
+async function audioCoverSearch(title, author) {
+  const want = coverWords(title);
+  const fits = (name) => {
+    const got = coverWords(name || '');
+    return want.length && want.filter((w) => got.includes(w)).length >= Math.ceil(want.length * 0.6);
+  };
+  const tries = [
+    async () => {
+      const q = new URLSearchParams({ term: `${title} ${author || ''}`.trim(), media: 'audiobook', entity: 'audiobook', country: 'fr', limit: '10' });
+      const j = await (await fetch(`https://itunes.apple.com/search?${q}`, { signal: AbortSignal.timeout(10000) })).json();
+      const r = (j.results || []).find((x) => fits(x.collectionName)) || null;
+      return r && r.artworkUrl100 ? r.artworkUrl100.replace(/\/\d+x\d+bb\./, '/1000x1000bb.') : null;
+    },
+    async () => {
+      const q = encodeURIComponent(`intitle:${title}${author ? ` inauthor:${author}` : ''}`);
+      const j = await (await fetch(`https://www.googleapis.com/books/v1/volumes?q=${q}&maxResults=10`, { signal: AbortSignal.timeout(10000) })).json();
+      const v = (j.items || []).map((x) => x.volumeInfo || {}).find((x) => fits(x.title) && x.imageLinks);
+      const u = v && (v.imageLinks.thumbnail || v.imageLinks.smallThumbnail);
+      return u ? u.replace(/^http:/, 'https:').replace(/&edge=curl/, '').replace(/zoom=\d/, 'zoom=1') : null;
+    },
+    async () => {
+      const q = new URLSearchParams({ title, limit: '5', fields: 'cover_i,title' });
+      if (author) q.set('author', author);
+      const j = await (await fetch(`https://openlibrary.org/search.json?${q}`, { signal: AbortSignal.timeout(10000), headers: { 'User-Agent': 'Lumio' } })).json();
+      const d = (j.docs || []).find((x) => x.cover_i && fits(x.title));
+      return d ? `https://covers.openlibrary.org/b/id/${d.cover_i}-L.jpg` : null;
+    },
+  ];
+  for (const t of tries) {
+    const url = await t().catch(() => null);
+    if (!url) continue;
+    const r = await fetch(url, { signal: AbortSignal.timeout(15000) }).catch(() => null);
+    if (!r || !r.ok || !/^image\//.test(r.headers.get('content-type') || '')) continue;
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length > 3000) return buf;
   }
-  audioState.covers[k] = url;
-  saveAudio();
-  return url;
+  return null;
+}
+/** Complète les livres en arrière-plan (un à la fois) ; la bibliothèque est relue après chaque livre. */
+let audioEnriching = false;
+async function audioEnrich(books, dir) {
+  if (audioEnriching) return;
+  audioEnriching = true;
+  try {
+    const { full } = safePath(dir.root, dir.folder);
+    for (const b of books) {
+      const m = audioState.meta[b.id] || {};
+      const first = path.join(full, b.path.endsWith(b.files[0].name) ? b.path : path.join(b.path, b.files[0].name));
+      const coverFile = b.group ? path.join(full, path.dirname(b.path), `${path.basename(b.path).replace(/\.\w+$/, '')}.jpg`) : path.join(full, b.path, 'cover.jpg');
+      let changed = false;
+      if (!m.probed) {
+        try {
+          const { tags, pic } = await audioProbe(first);
+          m.title = audioTagClean(tags.album) || null;
+          m.author = audioTagClean(tags.album_artist) || audioTagClean(tags.artist) || null;
+          if (m.author && m.title && m.author.toLowerCase() === m.title.toLowerCase()) m.author = null;
+          m.narrator = audioTagClean(tags.composer) || null;
+          if (pic && !b.coverRel) {
+            await run('ffmpeg', ['-y', '-v', 'quiet', '-i', first, '-map', '0:v:0', '-frames:v', '1', coverFile], { timeout: 60_000 }).catch(() => {});
+            if (fs.existsSync(coverFile)) b.coverRel = 'embedded';
+          }
+        } catch {}
+        m.probed = Date.now();
+        changed = true;
+      }
+      if (!b.coverRel && !fs.existsSync(coverFile) && (!m.coverTried || Date.now() - m.coverTried > 7 * 86400e3)) {
+        const buf = await audioCoverSearch(m.title || b.title, m.author || b.author).catch(() => null);
+        if (buf) await fs.promises.writeFile(coverFile, buf).catch(() => {});
+        m.coverTried = Date.now();
+        changed = true;
+      }
+      if (changed) {
+        audioState.meta[b.id] = m;
+        saveAudio();
+        audioLibCache = null;
+      }
+    }
+  } finally {
+    audioEnriching = false;
+  }
 }
 
 let audioLibCache = null;
@@ -4418,7 +4518,11 @@ async function audioLibrary(force = false) {
     for (const files of groups) {
       const bookRel = files.length === 1 && groups.length > 1 ? `${rel}/${files[0]}` : rel;
       const meta = groups.length > 1 ? audioMeta(files[0].replace(/\.m4b$/i, '')) : audioMeta(rel || dir.folder);
-      const cover = images.find((n) => /^(cover|folder|front|couverture)\./i.test(n)) || images[0] || null;
+      const base = files[0].replace(/\.\w+$/, '');
+      const cover =
+        groups.length > 1
+          ? images.find((n) => n.replace(/\.\w+$/, '') === base) || null
+          : images.find((n) => /^(cover|folder|front|couverture)\./i.test(n)) || images[0] || null;
       let size = 0;
       let mtime = 0;
       const entries = [];
@@ -4439,20 +4543,29 @@ async function audioLibrary(force = false) {
         added: new Date(mtime).toISOString(),
         files: entries,
         coverRel: cover ? `${dir.folder}/${rel ? `${rel}/` : ''}${cover}` : null,
+        group: groups.length > 1,
       });
     }
     for (const s of subs) await walk(rel ? `${rel}/${s.name}` : s.name, depth + 1);
   };
   await walk('', 0);
+  // Étiquettes des fichiers (plus fiables que les noms de dossiers) quand elles existent
+  for (const b of books) {
+    const m = audioState.meta[b.id];
+    if (!m) continue;
+    if (m.title) b.title = m.title;
+    if (m.author) b.author = m.author;
+    if (m.narrator && !b.narrator) b.narrator = m.narrator;
+  }
   books.sort((a, b) => b.added.localeCompare(a.added));
   audioLibCache = { at: Date.now(), dir, books };
+  audioEnrich(books.map((b) => ({ ...b })), dir).catch(() => {});
   return audioLibCache;
 }
 /** Vue d'un livre pour l'appli : liens signés (lecture, couverture) et position d'écoute de la personne. */
 async function audioView(b, user, dir) {
   const prog = (audioState.progress[user.id] || {})[b.id] || null;
-  let cover = b.coverRel ? `/api/books/f/${bookSign(dir.root, b.coverRel)}/file` : null;
-  if (!cover) cover = await audioCoverUrl(b.title, b.author).catch(() => null);
+  const cover = b.coverRel ? `/api/books/f/${bookSign(dir.root, b.coverRel)}/file` : null;
   return {
     id: b.id,
     title: b.title,
