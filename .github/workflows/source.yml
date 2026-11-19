@@ -1,4 +1,4 @@
-# Met à jour la source FlareStore « Lumio » avec la dernière Lumio iOS (dépôt lumio-ios),
+# Met à jour la source FlareStore « Lumio » avec la dernière Lumio iOS (dépôt lumio-ios) et Wawa TV (dépôt wawa-tv),
 # sans reconstruire l'appli : toutes les 2 heures, ou à la main (Actions → Source Lumio iOS → Run).
 name: Source Lumio iOS
 
@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           sparse-checkout: scripts
-      - name: Ajoute Lumio iOS à la source de la dernière Release
+      - name: Ajoute Lumio iOS et Wawa TV à la source de la dernière Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
