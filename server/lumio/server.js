@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.119.0';
+const VERSION = '3.119.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4364,16 +4364,21 @@ function audioMeta(dirRel) {
   let author = null;
   const m = raw.match(/^(.+?)\s+-\s+(.+)$/);
   if (m) [author, title] = [m[1].trim(), m[2].trim()];
-  else if (parts.length >= 2) {
+  // « 03 Le Retour du Roi », « T02 - … » : le numéro du tome n'est pas dans le titre
+  const num = title.match(/^(?:t(?:ome)?\s*)?(\d{1,3})\s*[-–.]?\s+(?=\D)/i);
+  if (num) title = title.slice(num[0].length).trim();
+  if (!m && parts.length >= 2) {
     const parent = audioClean(parts[parts.length - 2]);
-    const pm = parent.match(/^(.+?)\s+-\s+(.+)$/);
+    const segs = parent.split(/\s+-\s+/).map((x) => x.trim()).filter(Boolean);
     const low = (x) => x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     // « Le Hobbit J R R Tolkien / Le Hobbit » : ce qui reste après le titre est l'auteur
     if (low(parent).startsWith(low(title)) && parent.length > title.length + 2) author = parent.slice(title.length).replace(/^[\s-]+/, '').trim();
-    else if (pm && low(pm[2]).includes(low(title))) author = pm[1].trim();
-    else if (pm && low(pm[1]).includes(low(title))) author = pm[2].trim();
+    // « J R R Tolkien - Le Seigneur des Anneaux - La trilogie / 03 Le Retour du Roi » : auteur = 1er morceau
+    else if (segs.length >= 2) author = low(segs[0]).includes(low(title)) ? segs[segs.length - 1] : segs[0];
     else if (low(parent) !== low(title)) author = parent;
   }
+  // « J R R Tolkien » → « J.R.R. Tolkien » (les points ont été retirés avec ceux du nom de dossier)
+  if (author) author = author.replace(/\b([A-Z])\s+(?=[A-Z]\b)/g, '$1.').replace(/\b([A-Z])\s+(?=[A-Z][a-zà-ÿ])/g, '$1. ');
   const narr = dirRel.match(/lu par ([^\]\)\/]+)/i);
   return { title: title || raw, author: author || null, narrator: narr ? narr[1].trim() : null };
 }
@@ -4402,6 +4407,9 @@ async function audioProbe(file) {
 }
 const coverWords = (t) => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9]+/).filter((w) => w.length > 2);
 async function audioCoverSearch(title, author) {
+  return (await audioCoverSearchOnce(title, author)) || (author ? await audioCoverSearchOnce(title, null) : null);
+}
+async function audioCoverSearchOnce(title, author) {
   const want = coverWords(title);
   const fits = (name) => {
     const got = coverWords(name || '');
@@ -4451,7 +4459,9 @@ async function audioEnrich(books, dir) {
       const first = path.join(full, b.path.endsWith(b.files[0].name) ? b.path : path.join(b.path, b.files[0].name));
       const coverFile = b.group ? path.join(full, path.dirname(b.path), `${path.basename(b.path).replace(/\.\w+$/, '')}.jpg`) : path.join(full, b.path, 'cover.jpg');
       let changed = false;
+      if (m.v !== 2) Object.assign(m, { v: 2, probed: 0, coverTried: 0 });
       if (!m.probed) {
+        let missing = false;
         try {
           const { tags, pic } = await audioProbe(first);
           m.title = audioTagClean(tags.album) || null;
@@ -4462,8 +4472,10 @@ async function audioEnrich(books, dir) {
             await run('ffmpeg', ['-y', '-v', 'quiet', '-i', first, '-map', '0:v:0', '-frames:v', '1', coverFile], { timeout: 60_000 }).catch(() => {});
             if (fs.existsSync(coverFile)) b.coverRel = 'embedded';
           }
-        } catch {}
-        m.probed = Date.now();
+        } catch (e) {
+          missing = e && e.code === 'ENOENT'; // ffmpeg pas encore dans l'image : on réessaiera après la mise à jour
+        }
+        if (!missing) m.probed = Date.now();
         changed = true;
       }
       if (!b.coverRel && !fs.existsSync(coverFile) && (!m.coverTried || Date.now() - m.coverTried > 7 * 86400e3)) {
