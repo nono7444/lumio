@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Plus de retour à l'écran de connexion après avoir fermé l'appli : la session est gardée à trois endroits (mémoire de l'appli, fichier, trousseau iOS) et réécrite dès que l'appli passe en arrière-plan.
+
 ## 1.0.190 — 19 novembre 2026
 
 - Nouvelles icônes : Lumio Audio (livre ouvert avec un casque, violet) et Lumio Auto (compteur, orange) ; celles de Lumio et Lumio TV ne changent pas.

@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { setHapticsEnabled } from './haptics';
+import * as FileSystem from 'expo-file-system/legacy';
 import { createContext, ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 
 import { loadFromJellyfin, loadFromKeychain, saveToJellyfin, saveToKeychain } from './backup';
 
@@ -178,6 +180,31 @@ const DEFAULTS: Settings = {
 };
 
 const KEY = 'lumio-native:settings:v2';
+// Copie dans un fichier de l'appli : une 2e mémoire si AsyncStorage revient vide au lancement
+const FILE = FileSystem.documentDirectory ? `${FileSystem.documentDirectory}lumio-settings.json` : null;
+
+type Stored = Partial<Settings> & { _savedAt?: number };
+const parse = (raw: string | null | undefined): Stored | null => {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw);
+    return v && typeof v === 'object' ? v : null;
+  } catch {
+    return null;
+  }
+};
+/** La copie la plus récente des trois (AsyncStorage, fichier, trousseau iOS). */
+async function loadStored(): Promise<Stored | null> {
+  const [a, f, k] = await Promise.all([
+    AsyncStorage.getItem(KEY).then(parse).catch(() => null),
+    FILE ? FileSystem.readAsStringAsync(FILE).then(parse).catch(() => null) : Promise.resolve(null),
+    loadFromKeychain().catch(() => null) as Promise<Stored | null>,
+  ]);
+  const all = [a, f, k].filter((x): x is Stored => !!x);
+  if (!all.length) return null;
+  // Copies datées : la plus récente gagne ; sinon (ancien format) celle qui a une session Jellyfin
+  return all.sort((x, y) => (y._savedAt ?? 0) - (x._savedAt ?? 0) || Number(!!y.jellyfin) - Number(!!x.jellyfin))[0];
+}
 
 function mergeSettings(saved: Partial<Settings>): Settings {
   return {
@@ -231,15 +258,25 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const keychainTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cloudTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const loaded = useRef(false);
+  const flush = useCallback((next: Settings) => {
+    // Rien n'est écrit avant d'avoir relu les réglages (sinon les valeurs par défaut écraseraient la session)
+    if (!loaded.current) return;
+    const json = JSON.stringify({ ...next, _savedAt: Date.now() });
+    AsyncStorage.setItem(KEY, json).catch(() => {});
+    if (FILE) FileSystem.writeAsStringAsync(FILE, json).catch(() => {});
+    return json;
+  }, []);
+
   useEffect(() => {
     (async () => {
+      // Appli réinstallée ou AsyncStorage vide : la copie fichier ou celle du trousseau iOS prend le relais
+      const stored = await loadStored();
       let saved: Partial<Settings> | null = null;
-      try {
-        const raw = await AsyncStorage.getItem(KEY);
-        if (raw) saved = JSON.parse(raw);
-      } catch {}
-      // Appli réinstallée : on récupère la copie du trousseau iOS
-      if (!saved) saved = await loadFromKeychain();
+      if (stored) {
+        const { _savedAt: _t, ...rest } = stored;
+        saved = rest;
+      }
       if (saved) {
         const merged = mergeSettings(saved);
         current.current = merged;
@@ -251,21 +288,34 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         current.current = next;
         setSettings(next);
       }
-      AsyncStorage.setItem(KEY, JSON.stringify(current.current)).catch(() => {});
+      loaded.current = true;
+      const json = flush(current.current);
+      if (json) saveToKeychain(json);
       setReady(true);
     })();
-  }, []);
+  }, [flush]);
+
+  // Appli mise en arrière-plan (avant d'être fermée) : tout est réécrit tout de suite, trousseau compris
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st !== 'active') {
+        const json = flush(current.current);
+        if (json) saveToKeychain(json);
+      }
+    });
+    return () => sub.remove();
+  }, [flush]);
 
   const persist = useCallback((next: Settings, cloud: boolean) => {
-    const json = JSON.stringify(next);
-    AsyncStorage.setItem(KEY, json).catch(() => {});
+    const json = flush(next);
+    if (!json) return;
     if (keychainTimer.current) clearTimeout(keychainTimer.current);
     keychainTimer.current = setTimeout(() => saveToKeychain(json), 800);
     if (cloud && next.jellyfin) {
       if (cloudTimer.current) clearTimeout(cloudTimer.current);
       cloudTimer.current = setTimeout(() => saveToJellyfin(next), 3000);
     }
-  }, []);
+  }, [flush]);
 
   const update = useCallback(
     async (patch: Partial<Settings>) => {
