@@ -10,7 +10,7 @@ import { BookCover, ReadBar } from '@/components/ebook-ui';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { ScreenTitle, SegChip, tap } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
-import { useEbooks, type Ebook } from '@/lib/ebooks';
+import { groupSeries, rememberSeries, useEbooks, type Ebook, type Series } from '@/lib/ebooks';
 import { useSettings } from '@/lib/settings';
 import { IS_BOOKS } from '@/lib/variant';
 
@@ -61,6 +61,24 @@ function Shelf() {
     if (sort === 'author') return by((b) => `${b.author ?? '~'} ${b.title}`);
     return l;
   }, [books, filter, kind, q, sort]);
+  // Collections : une seule carte par série, à la place de son premier tome dans la liste
+  const items = useMemo(() => {
+    const { series } = groupSeries(shown);
+    rememberSeries(groupSeries(books).series);
+    const of = new Map<string, Series>();
+    for (const sr of series) for (const b of sr.books) of.set(b.id, sr);
+    const out: ({ t: 'book'; b: Ebook } | { t: 'series'; s: Series })[] = [];
+    const seen = new Set<string>();
+    for (const b of shown) {
+      const sr = of.get(b.id);
+      if (!sr) out.push({ t: 'book', b });
+      else if (!seen.has(sr.key)) {
+        seen.add(sr.key);
+        out.push({ t: 'series', s: sr });
+      }
+    }
+    return out;
+  }, [shown, books]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={['top']}>
@@ -134,30 +152,13 @@ function Shelf() {
               </ScrollView>
             ) : null}
             <View style={[styles.grid, { gap: 14 }]}>
-              {shown.map((b) => {
-                const pr = b.progress?.pct ?? 0;
-                return (
-                  <Pressable key={b.id} onPress={() => open(b)} style={{ width: w, gap: 5 }}>
-                    <View>
-                      <BookCover book={b} width={w} />
-                      {b.progress?.done ? (
-                        <View style={styles.done}>
-                          <Ionicons name="checkmark" size={13} color="#000" />
-                        </View>
-                      ) : null}
-                    </View>
-                    {pr > 0 && !b.progress?.done ? <ReadBar value={pr} /> : null}
-                    <Text numberOfLines={2} style={styles.t}>
-                      {b.title}
-                    </Text>
-                    {b.author ? (
-                      <Text numberOfLines={1} style={styles.s}>
-                        {b.author}
-                      </Text>
-                    ) : null}
-                  </Pressable>
-                );
-              })}
+              {items.map((it) =>
+                it.t === 'series' ? (
+                  <SeriesCard key={`s-${it.s.key}`} s={it.s} w={w} />
+                ) : (
+                  <BookCard key={it.b.id} b={it.b} w={w} />
+                )
+              )}
             </View>
             {!shown.length ? <Empty icon="filter-outline" text="Aucun livre ne correspond." /> : null}
             {lib.downloading ? (
@@ -169,6 +170,60 @@ function Shelf() {
         )}
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function BookCard({ b, w }: { b: Ebook; w: number }) {
+  const pr = b.progress?.pct ?? 0;
+  return (
+    <Pressable onPress={() => open(b)} style={{ width: w, gap: 5 }}>
+      <View>
+        <BookCover book={b} width={w} />
+        {b.progress?.done ? (
+          <View style={styles.done}>
+            <Ionicons name="checkmark" size={13} color="#000" />
+          </View>
+        ) : null}
+      </View>
+      {pr > 0 && !b.progress?.done ? <ReadBar value={pr} /> : null}
+      <Text numberOfLines={2} style={styles.t}>
+        {b.title}
+      </Text>
+      {b.author ? (
+        <Text numberOfLines={1} style={styles.s}>
+          {b.author}
+        </Text>
+      ) : null}
+    </Pressable>
+  );
+}
+
+/** Collection : couverture du 1er tome, posée sur une pile, avec le nombre de tomes. */
+function SeriesCard({ s, w }: { s: Series; w: number }) {
+  const read = s.books.filter((b) => b.progress?.done).length;
+  const going = s.books.some((b) => b.progress && !b.progress.done);
+  const cw = w - 8;
+  return (
+    <Pressable onPress={() => (tap(), router.push({ pathname: '/series/[key]', params: { key: s.key } }))} style={{ width: w, gap: 5 }}>
+      <View style={{ width: w, height: Math.round(cw * 1.5) + 8 }}>
+        <View style={[styles.stack, { left: 8, top: 0, width: cw, height: Math.round(cw * 1.5) }]} />
+        <View style={[styles.stack, { left: 4, top: 4, width: cw, height: Math.round(cw * 1.5), opacity: 0.8 }]} />
+        <View style={{ position: 'absolute', left: 0, top: 8 }}>
+          <BookCover book={s.books[0]} width={cw} />
+        </View>
+        <View style={styles.count}>
+          <Ionicons name="albums" size={11} color="#000" />
+          <Text style={styles.countText}>{s.books.length}</Text>
+        </View>
+      </View>
+      {going || read ? <ReadBar value={read / s.books.length} /> : null}
+      <Text numberOfLines={2} style={styles.t}>
+        {s.name}
+      </Text>
+      <Text numberOfLines={1} style={styles.s}>
+        {read ? `${read}/${s.books.length} lus` : `${s.books.length} tomes`}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -188,6 +243,9 @@ const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16 },
   chips: { paddingHorizontal: 16, gap: 8, paddingBottom: 12 },
   done: { position: 'absolute', right: 6, top: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: C.success, alignItems: 'center', justifyContent: 'center' },
+  stack: { position: 'absolute', borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.14)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.2)' },
+  count: { position: 'absolute', right: 12, bottom: 6, flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, height: 22, borderRadius: 11, backgroundColor: '#fff' },
+  countText: { color: '#000', fontWeight: '800', fontSize: 12 },
   searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 10, paddingHorizontal: 12, height: 40, borderRadius: 12, backgroundColor: C.surfaceHigh },
   search: { flex: 1, color: C.text, fontSize: 15 },
 });

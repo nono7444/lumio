@@ -30,6 +30,10 @@ export const audioApi = {
   search: (s: Settings, q: string) => serverCall<{ results: AudioResult[]; sources: AudioSource[] }>(s, `/api/audio/search?q=${encodeURIComponent(q)}`),
   download: (s: Settings, id: string) => serverCall<{ ok: boolean; via: string; message: string }>(s, '/api/audio/download', { method: 'POST', body: JSON.stringify({ id }) }),
   jobs: (s: Settings) => serverCall<{ jobs: AudioJob[] }>(s, '/api/audio/jobs'),
+  covers: (s: Settings, id: string, q?: string) =>
+    serverCall<{ query: string; covers: string[] }>(s, `/api/audio/cover/${id}${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  setCover: (s: Settings, id: string, body: { url: string } | { data: string }) =>
+    serverCall<{ ok: boolean }>(s, `/api/audio/cover/${id}`, { method: 'POST', body: JSON.stringify(body) }),
   remove: (s: Settings, id: string) => serverCall<{ ok: boolean }>(s, `/api/audio/books/${id}`, { method: 'DELETE' }),
 };
 

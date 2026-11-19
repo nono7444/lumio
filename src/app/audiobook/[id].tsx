@@ -108,7 +108,8 @@ export default function AudiobookScreen() {
           ) : null}
 
           {lib?.admin ? (
-            <View style={{ paddingHorizontal: 20, marginTop: 28 }}>
+            <View style={{ paddingHorizontal: 20, marginTop: 28, gap: 10 }}>
+              <Button title="Changer la couverture" icon="image-outline" variant="glass" onPress={() => router.push({ pathname: '/audio-cover', params: { id: book.id } })} />
               <Button
                 title="Supprimer du serveur"
                 icon="trash-outline"

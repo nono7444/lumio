@@ -6,6 +6,11 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Lumio Livres : les tomes d'une même série sont rassemblés en collections (Kaamelott, Jujutsu Kaisen…), avec une page par collection et « Continuer le tome N ».
+- Lumio Audio, admin : « Changer la couverture » sur la fiche d'un livre : images trouvées en ligne ou photo du téléphone.
+- Lumio Audio et Lumio Livres : les résultats de l'onglet Trouver ont une vignette de couverture.
+- Lumio Audio et Lumio Livres, admin : dans Profil, « Dossier sur le serveur » pour voir le disque utilisé et déplacer les livres sur un autre disque.
+
 ## 1.0.192 — 19 novembre 2026
 
 - Nouvelle appli **Lumio Livres** (iPhone et Android) : les livres, BD et mangas de la maison. Bibliothèque avec couvertures, « Continuer la lecture », recherche, filtres et tri ; liseuse intégrée : EPUB chapitre par chapitre (thème sombre, clair ou sépia, taille du texte), BD et mangas page par page (sens manga, zoom), PDF. La page où tu t'es arrêté est gardée sur le serveur, on reprend sur n'importe quel appareil.

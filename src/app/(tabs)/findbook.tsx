@@ -6,6 +6,7 @@ import { ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, Text,
 import { FocusPressable as Pressable } from '@/components/tv';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ResultThumb } from '@/components/result-thumb';
 import { ScreenTitle, SegChip, tap } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
 import { ebookApi, loadEbooks, type EbookJob, type EbookKind, type EbookResult, type EbookSource } from '@/lib/ebooks';
@@ -174,6 +175,7 @@ function Find() {
           const st = sent[r.id];
           return (
             <View key={r.id} style={styles.result}>
+              <ResultThumb path="/api/books/cover-find" q={r.title} kind={kind} icon="book" />
               <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
                 <Text numberOfLines={3} style={styles.t}>
                   {r.title}

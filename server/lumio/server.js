@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.120.0';
+const VERSION = '3.121.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4067,7 +4067,16 @@ const saveBooksState = () => {
   clearTimeout(booksStateTimer);
   booksStateTimer = setTimeout(() => fs.promises.writeFile(BOOKS_STATE_FILE, JSON.stringify(booksState)).catch(() => {}), 1000);
 };
-const bookId = (rel) => crypto.createHash('sha1').update(rel).digest('hex').slice(0, 16);
+const sha16 = (x) => crypto.createHash('sha1').update(x).digest('hex').slice(0, 16);
+/** Identifiant d'un livre : son chemin dans le dossier « Livres » (il ne change pas si le dossier change de disque). */
+function bookId(file) {
+  try {
+    const d = booksDir();
+    const { full } = safePath(d.root, d.folder);
+    if (file.startsWith(full + path.sep)) return sha16(`b:${path.relative(full, file)}`);
+  } catch {}
+  return sha16(file);
+}
 /** Titre et auteur : ceux de l'EPUB, sinon « Auteur - Titre » du nom de fichier. */
 async function bookInfo(file, name, st) {
   const id = bookId(file);
@@ -4089,6 +4098,18 @@ async function bookInfo(file, name, st) {
   booksState.meta[id] = out;
   saveBooksState();
   return out;
+}
+
+/** Ancien identifiant (chemin complet) → nouveau : positions de lecture et infos reprises une fois. */
+function bookMigrate(file) {
+  const id = bookId(file);
+  const old = sha16(file);
+  if (old !== id) {
+    for (const mine of Object.values(booksState.progress)) if (mine[old] && !mine[id]) (mine[id] = mine[old]), delete mine[old];
+    if (booksState.meta[old] && !booksState.meta[id]) (booksState.meta[id] = booksState.meta[old]), delete booksState.meta[old];
+    saveBooksState();
+  }
+  return id;
 }
 
 async function bookLibrary() {
@@ -4121,7 +4142,7 @@ async function bookLibrary() {
         const rel = dir.folder ? `${dir.folder}/${f.rel}` : f.rel;
         const info = infos.get(f.rel);
         return {
-          id: bookId(path.join(full, f.rel)),
+          id: bookMigrate(path.join(full, f.rel)),
           name: f.name,
           title: info.title,
           author: info.author,
@@ -4286,9 +4307,97 @@ h1,h2,h3{line-height:1.25;font-family:-apple-system,system-ui,sans-serif}p{margi
   }
 }
 
+// ——— Dossier des livres / livres audio : changement de disque (déplacement des fichiers) ———
+const folderMoves = { audio: null, books: null };
+async function dirSize(dir) {
+  let total = 0;
+  const walk = async (d) => {
+    for (const e of await fs.promises.readdir(d, { withFileTypes: true }).catch(() => [])) {
+      const f = path.join(d, e.name);
+      if (e.isDirectory()) await walk(f);
+      else total += (await fs.promises.stat(f).catch(() => ({ size: 0 }))).size;
+    }
+  };
+  await walk(dir);
+  return total;
+}
+async function folderInfo(kind) {
+  const dir = kind === 'audio' ? audioDir() : booksDir();
+  let size = null;
+  if (dir) size = await dirSize(safePath(dir.root, dir.folder).full).catch(() => null);
+  return { dir, size, disks: await Promise.all(disks().map(diskInfo)), move: folderMoves[kind] };
+}
+/** Déplace « Livres audio » ou « Livres » vers un autre disque, puis le réglage suit. */
+async function folderMove(kind, root) {
+  const cur = kind === 'audio' ? audioDir() : booksDir();
+  if (!cur) throw new HttpError(400, 'Aucun disque configuré (LUMIO_DISKS)');
+  if (!disks().some((d) => d.name === root)) throw new HttpError(404, 'Disque inconnu');
+  if (root === cur.root) throw new HttpError(400, 'Le dossier est déjà sur ce disque');
+  if (folderMoves[kind] && folderMoves[kind].status === 'running') throw new HttpError(409, 'Un déplacement est déjà en cours');
+  const busy = kind === 'audio' ? audioJobs.some((j) => !['done', 'error'].includes(j.status)) : downloads.some((j) => j.book && ['queued', 'debrid', 'downloading'].includes(j.status));
+  if (busy) throw new HttpError(409, 'Des téléchargements sont en cours : attends qu’ils soient finis');
+  // Jamais tout un disque : seulement un dossier « Livres » / « Livres audio »
+  if (!cur.folder) throw new HttpError(400, 'Le dossier est la racine du disque : choisis d’abord un dossier dans les réglages');
+  const folder = cur.folder;
+  const from = safePath(cur.root, cur.folder).full;
+  const to = safePath(root, folder).full;
+  const size = await dirSize(from);
+  const free = (await diskInfo(disks().find((d) => d.name === root))).free;
+  if (free != null && free < size + 1e9) throw new HttpError(400, `Pas assez de place sur ${root} (${Math.round(size / 1e9)} Go à déplacer)`);
+  const job = (folderMoves[kind] = { status: 'running', from: cur.root, to: root, size, startedAt: new Date().toISOString(), error: null });
+  (async () => {
+    try {
+      await fs.promises.mkdir(to, { recursive: true });
+      if (fs.existsSync(from)) {
+        const same = (await fs.promises.stat(from)).dev === (await fs.promises.stat(to)).dev;
+        if (same) {
+          for (const e of await fs.promises.readdir(from)) await fs.promises.rename(path.join(from, e), path.join(to, e));
+        } else {
+          // Copie complète d'abord (cp -a garde dates et droits), puis effacement de l'ancien dossier
+          await run('cp', ['-a', `${from}/.`, to], { timeout: 24 * 3600e3 });
+        }
+        await fs.promises.rm(from, { recursive: true, force: true });
+      }
+      if (kind === 'audio') {
+        config.audio = { root, folder };
+        audioLibCache = null;
+      } else config.books = { ...(config.books || {}), root, folder };
+      saveConfig();
+      job.status = 'done';
+      notify({ title: `📦 ${kind === 'audio' ? 'Livres audio' : 'Livres'} déplacés sur ${root}`, message: `${Math.round(size / 1e8) / 10} Go`, tags: 'package' }).catch(() => {});
+    } catch (e) {
+      job.status = 'error';
+      job.error = e.message || String(e);
+    }
+    job.endedAt = new Date().toISOString();
+  })();
+  return job;
+}
+async function folderRoutes(req, res, p, user, kind) {
+  if (p !== `/api/${kind}/folder`) return false;
+  requireAdmin(user);
+  if (req.method === 'GET') {
+    send(res, 200, await folderInfo(kind));
+    return true;
+  }
+  if (req.method === 'POST') {
+    const b = await readBody(req);
+    await folderMove(kind, String(b.root || ''));
+    send(res, 200, await folderInfo(kind));
+    return true;
+  }
+  return false;
+}
+
 /** Routes Book (utilisateur connecté). Renvoie true si la requête est traitée. */
 async function bookRoutes(req, res, p, q, user) {
   if (!p.startsWith('/api/books')) return false;
+  if (await folderRoutes(req, res, p, user, 'books')) return true;
+  // Vignette d'un résultat de recherche (couverture trouvée en ligne d'après le nom)
+  if (req.method === 'GET' && p === '/api/books/cover-find') {
+    send(res, 200, { url: await coverFind(q.get('q'), q.get('kind') === 'livres' ? 'ebook' : 'comic') });
+    return true;
+  }
   if (req.method === 'GET' && p === '/api/books/settings') {
     const dir = booksDir();
     send(res, 200, {
@@ -4518,6 +4627,57 @@ async function audioProbe(file) {
   return { tags, pic };
 }
 const coverWords = (t) => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9]+/).filter((w) => w.length > 2);
+/** Couvertures possibles (adresses), dans l'ordre : Apple Books, Google Books, Open Library. */
+async function coverCandidates(title, author, media = 'audiobook', limit = 12) {
+  const out = [];
+  const add = (u) => u && !out.includes(u) && out.push(u);
+  const term = `${title} ${author || ''}`.trim();
+  await Promise.all([
+    (async () => {
+      const q = new URLSearchParams({ term, media: media === 'comic' ? 'ebook' : media, entity: media === 'comic' ? 'ebook' : media, country: 'fr', limit: '10' });
+      const j = await (await fetch(`https://itunes.apple.com/search?${q}`, { signal: AbortSignal.timeout(10000) })).json();
+      for (const r of j.results || []) if (r.artworkUrl100) add(r.artworkUrl100.replace(/\/\d+x\d+bb\./, '/1000x1000bb.'));
+    })().catch(() => {}),
+    (async () => {
+      const j = await (await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(term)}&maxResults=10`, { signal: AbortSignal.timeout(10000) })).json();
+      for (const it of j.items || []) {
+        const l = (it.volumeInfo || {}).imageLinks;
+        const u = l && (l.thumbnail || l.smallThumbnail);
+        if (u) add(u.replace(/^http:/, 'https:').replace(/&edge=curl/, '').replace(/zoom=\d/, 'zoom=1'));
+      }
+    })().catch(() => {}),
+    (async () => {
+      const j = await (await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(term)}&limit=8&fields=cover_i`, { signal: AbortSignal.timeout(10000), headers: { 'User-Agent': 'Lumio' } })).json();
+      for (const d of j.docs || []) if (d.cover_i) add(`https://covers.openlibrary.org/b/id/${d.cover_i}-L.jpg`);
+    })().catch(() => {}),
+  ]);
+  return out.slice(0, limit);
+}
+/** Nom de torrent / fiche → titre cherchable (« Les.Debutantes.T02.FR.MP3-NOTAG » → « Les Debutantes T02 »). */
+function releaseTitle(name) {
+  return String(name || '')
+    .replace(/^[>\s]+/, '')
+    .replace(/\[[^\]]*\]|\([^)]*\)/g, ' ')
+    .replace(/[._]+/g, ' ')
+    .split(/\b(?:19|20)\d{2}\b|\b(?:FRENCH|FR|VFF?|MULTI|MP3|M4B|FLAC|EPUB|PDF|CBZ|CBR|AZW3|MOBI|AUDIOBOOKS?|LIVRES? AUDIO|\d{2,3}\s?KBPS)\b/i)[0]
+    .replace(/\s*-\s*$/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
+}
+const coverFindCache = new Map();
+async function coverFind(name, media) {
+  const t = releaseTitle(name);
+  if (t.length < 2) return null;
+  const key = `${media}|${t.toLowerCase()}`;
+  const c = coverFindCache.get(key);
+  if (c && Date.now() - c.at < 86400e3) return c.url;
+  const url = (await coverCandidates(t, null, media, 1).catch(() => []))[0] || null;
+  coverFindCache.set(key, { url, at: Date.now() });
+  if (coverFindCache.size > 2000) coverFindCache.delete(coverFindCache.keys().next().value);
+  return url;
+}
+
 async function audioCoverSearch(title, author, media = 'audiobook') {
   return (await audioCoverSearchOnce(title, author, media)) || (author ? await audioCoverSearchOnce(title, null, media) : null);
 }
@@ -4643,10 +4803,14 @@ async function audioLibrary(force = false) {
       const bookRel = files.length === 1 && groups.length > 1 ? `${rel}/${files[0]}` : rel;
       const meta = groups.length > 1 ? audioMeta(files[0].replace(/\.m4b$/i, '')) : audioMeta(rel || dir.folder);
       const base = files[0].replace(/\.\w+$/, '');
+      // Couverture choisie dans Lumio Audio d'abord (« couverture-lumio.jpg »), puis celle du dossier
       const cover =
         groups.length > 1
-          ? images.find((n) => n.replace(/\.\w+$/, '') === base) || null
-          : images.find((n) => /^(cover|folder|front|couverture)\./i.test(n)) || images[0] || null;
+          ? images.find((n) => n === `${base}.couverture-lumio.jpg`) || images.find((n) => n.replace(/\.\w+$/, '') === base) || null
+          : images.find((n) => n === 'couverture-lumio.jpg') ||
+            images.find((n) => /^(cover|folder|front|couverture)\./i.test(n)) ||
+            images.find((n) => !/couverture-lumio/.test(n)) ||
+            null;
       let size = 0;
       let mtime = 0;
       const entries = [];
@@ -4689,7 +4853,14 @@ async function audioLibrary(force = false) {
 /** Vue d'un livre pour l'appli : liens signés (lecture, couverture) et position d'écoute de la personne. */
 async function audioView(b, user, dir) {
   const prog = (audioState.progress[user.id] || {})[b.id] || null;
-  const cover = b.coverRel ? `/api/books/f/${bookSign(dir.root, b.coverRel)}/file` : null;
+  let v = '';
+  if (b.coverRel) {
+    try {
+      v = `?v=${Math.round((await fs.promises.stat(safePath(dir.root, b.coverRel).full)).mtimeMs)}`;
+    } catch {}
+  }
+  // ?v= : une nouvelle couverture n'est pas cachée par l'ancienne image gardée par le téléphone
+  const cover = b.coverRel ? `/api/books/f/${bookSign(dir.root, b.coverRel)}/file${v}` : null;
   return {
     id: b.id,
     title: b.title,
@@ -4789,6 +4960,11 @@ setInterval(() => audioPendingTick().catch(() => {}), 60_000);
 
 async function audioRoutes(req, res, p, q, user) {
   if (!p.startsWith('/api/audio')) return false;
+  if (await folderRoutes(req, res, p, user, 'audio')) return true;
+  if (req.method === 'GET' && p === '/api/audio/cover-find') {
+    send(res, 200, { url: await coverFind(q.get('q'), 'audiobook') });
+    return true;
+  }
   if (req.method === 'GET' && p === '/api/audio/library') {
     const lib = await audioLibrary(q.get('refresh') === '1');
     const books = lib.dir ? await Promise.all(lib.books.map((b) => audioView(b, user, lib.dir))) : [];
@@ -4888,6 +5064,39 @@ async function audioRoutes(req, res, p, q, user) {
     }
     send(res, 200, { dir: audioDir() });
     return true;
+  }
+  // Couverture : propositions en ligne, puis enregistrement (adresse choisie ou photo du téléphone)
+  const cm = p.match(/^\/api\/audio\/cover\/([a-f0-9]{16})$/);
+  if (cm) {
+    requireAdmin(user);
+    const lib = await audioLibrary();
+    const b = lib.books.find((x) => x.id === cm[1]);
+    if (!b || !lib.dir) throw new HttpError(404, 'Livre introuvable');
+    if (req.method === 'GET') {
+      const query = String(q.get('q') || '').trim();
+      send(res, 200, { query: query || `${b.title} ${b.author || ''}`.trim(), covers: await coverCandidates(query || b.title, query ? null : b.author, 'audiobook', 18) });
+      return true;
+    }
+    if (req.method === 'POST') {
+      const body = await readBody(req, 12 * 1024 * 1024);
+      let buf = null;
+      if (typeof body.data === 'string') buf = Buffer.from(body.data, 'base64');
+      else if (typeof body.url === 'string' && /^https:\/\//.test(body.url)) {
+        const r = await fetch(body.url, { signal: AbortSignal.timeout(20000) });
+        if (!r.ok || !/^image\//.test(r.headers.get('content-type') || '')) throw new HttpError(400, 'Image introuvable à cette adresse');
+        buf = Buffer.from(await r.arrayBuffer());
+      }
+      if (!buf || buf.length < 1000) throw new HttpError(400, 'Image vide');
+      const { full } = safePath(lib.dir.root, lib.dir.folder);
+      const target = b.group
+        ? path.join(full, path.dirname(b.path), `${path.basename(b.path).replace(/\.\w+$/, '')}.couverture-lumio.jpg`)
+        : path.join(full, b.path, 'couverture-lumio.jpg');
+      if (!target.startsWith(full + path.sep)) throw new HttpError(400, 'Chemin refusé');
+      await fs.promises.writeFile(target, buf);
+      audioLibCache = null;
+      send(res, 200, { ok: true });
+      return true;
+    }
   }
   const dm = p.match(/^\/api\/audio\/books\/([a-f0-9]{16})$/);
   if (dm && req.method === 'DELETE') {

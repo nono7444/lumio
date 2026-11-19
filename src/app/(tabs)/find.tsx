@@ -7,6 +7,7 @@ import { FocusPressable as Pressable } from '@/components/tv';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { loadLibrary } from '@/components/audio-ui';
+import { ResultThumb } from '@/components/result-thumb';
 import { ScreenTitle, tap } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
 import { useAudio } from '@/lib/audio-player';
@@ -157,6 +158,7 @@ function Find() {
           const st = sent[r.id];
           return (
             <View key={r.id} style={styles.result}>
+              <ResultThumb path="/api/audio/cover-find" q={r.title} square icon="headset" />
               <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
                 <Text numberOfLines={3} style={styles.t}>
                   {r.title}
