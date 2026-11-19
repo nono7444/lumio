@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.118.0';
+const VERSION = '3.118.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3776,6 +3776,12 @@ const BOOK_TRACKERS = {
   tr4ker: { label: 'Tr4ker', url: 'https://tr4ker.net/torznab', key: () => process.env.BOOKS_TR4KER_KEY || (config.books && config.books.tr4kerKey) || '' },
 };
 const BOOK_EXT = { '.cbz': 'bd', '.cbr': 'bd', '.zip': 'bd', '.epub': 'epub', '.pdf': 'pdf', '.mp3': 'audio', '.m4b': 'audio', '.m4a': 'audio', '.aac': 'audio', '.ogg': 'audio', '.flac': 'audio' };
+// Sites des livres (C411, Tr4ker, Wawacity) : souvent bloqués par le DNS de la box / du FAI → même DNS de secours
+// (1.1.1.1, Quad9, Google) que Lumio Auto, avec une réponse qui ressemble à celle de fetch.
+async function siteFetch(url, { headers = {}, timeout = 20000 } = {}) {
+  const r = await autoHttp(url, { headers, timeout });
+  return { ok: r.status >= 200 && r.status < 300, status: r.status, text: async () => r.text(), json: async () => JSON.parse(r.text()), arrayBuffer: async () => r.buf };
+}
 const bookFound = new Map(); // id → { kind: 'torrent'|'wawa', link, title, source, at }
 const wawaBase = () => String(process.env.BOOKS_WAWACITY_URL || (config.books && config.books.wawacity) || process.env.SECOUR_WAWACITY_URL || 'https://www.wawacity.estate').replace(/\/+$/, '');
 
@@ -3820,7 +3826,7 @@ async function torznabSearch(id, q, kind) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 15000);
   try {
-    const r = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Lumio' } });
+    const r = await siteFetch(url, { headers: { 'User-Agent': 'Lumio' }, timeout: 15000 });
     const xml = await r.text();
     const err = xml.match(/<error[^>]*description="([^"]*)"/i);
     if (err) return { id, label: tr.label, state: 'error', message: decodeHtml(err[1]), items: [] };
@@ -3846,7 +3852,7 @@ async function torznabSearch(id, q, kind) {
 async function wawaSearch(q, kind) {
   if (!BOOK_KINDS[kind].wawa) return { id: 'wawacity', label: 'Wawacity', state: 'skip', items: [] };
   try {
-    const r = await fetch(`${wawaBase()}/?p=ebooks&search=${encodeURIComponent(q)}`, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(15000) });
+    const r = await siteFetch(`${wawaBase()}/?p=ebooks&search=${encodeURIComponent(q)}`, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 15000 });
     const html = (await r.text()).replace(/<!--[\s\S]*?-->/g, '');
     const items = [];
     const seen = new Set();
@@ -3867,7 +3873,7 @@ async function wawaSearch(q, kind) {
 
 /** Liens d'une fiche Wawacity : dl-protect → (redirecteur AllDebrid) → hébergeur → AllDebrid. */
 async function wawaLinks(id) {
-  const r = await fetch(`${wawaBase()}/?p=ebook&id=${encodeURIComponent(id)}`, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(20000) });
+  const r = await siteFetch(`${wawaBase()}/?p=ebook&id=${encodeURIComponent(id)}`, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 20000 });
   const html = (await r.text()).replace(/<!--[\s\S]*?-->/g, '');
   const out = [];
   for (const block of html.split(/<tr[^>]*class="link-row"[^>]*>/i).slice(1)) {
@@ -4256,7 +4262,7 @@ async function bookRoutes(req, res, p, q, user) {
     let link;
     let name = found.title;
     if (found.kind === 'torrent') {
-      const r = await fetch(found.link, { headers: { 'User-Agent': 'Lumio' }, signal: AbortSignal.timeout(30000) });
+      const r = await siteFetch(found.link, { headers: { 'User-Agent': 'Lumio' }, timeout: 30000 });
       if (!r.ok) throw new HttpError(502, `${found.source} n’a pas donné le .torrent (HTTP ${r.status})`);
       const buf = Buffer.from(await r.arrayBuffer());
       if (buf[0] !== 0x64) throw new HttpError(502, `${found.source} n’a pas donné un vrai .torrent`);
@@ -4588,7 +4594,7 @@ async function audioRoutes(req, res, p, q, user) {
     let link;
     let via = 'alldebrid';
     if (found.kind === 'torrent') {
-      const r = await fetch(found.link, { headers: { 'User-Agent': 'Lumio' }, signal: AbortSignal.timeout(30000) });
+      const r = await siteFetch(found.link, { headers: { 'User-Agent': 'Lumio' }, timeout: 30000 });
       if (!r.ok) throw new HttpError(502, `${found.source} n’a pas donné le .torrent (HTTP ${r.status})`);
       const buf = Buffer.from(await r.arrayBuffer());
       if (buf[0] !== 0x64) throw new HttpError(502, `${found.source} n’a pas donné un vrai .torrent`);
