@@ -446,9 +446,8 @@ export default function MediaScreen() {
               beforeRequest={
                 canWatchNow && !jfItem && details.kind === 'movie'
                   ? async () => {
-                      if (!(await streamReady(settings, { type: 'movie', tmdbId, title }))) return false;
-                      router.push({ pathname: '/watch', params: { type: 'movie', tmdbId: String(tmdbId), imdb: imdbId ?? '', title, stream: '1' } });
-                      return true;
+                      if (!(await streamReady(settings, { type: 'movie', tmdbId, title }))) return null;
+                      return () => router.push({ pathname: '/watch', params: { type: 'movie', tmdbId: String(tmdbId), imdb: imdbId ?? '', title, stream: '1' } });
                     }
                   : undefined
               }

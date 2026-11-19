@@ -43,7 +43,8 @@ export function RequestSection({
   /** Change quand la fiche a envoyé une demande (bouton « Demander » d'une saison) : on recharge */
   reloadKey?: number;
   /** Appelé à l'appui sur « Demander » (film) : true si un streaming a été lancé (la demande part alors avec lui) */
-  beforeRequest?: () => Promise<boolean>;
+  /** Film absent : renvoie de quoi lancer le streaming s'il est prêt (sinon null) */
+  beforeRequest?: () => Promise<(() => void) | null>;
 }) {
   const { settings } = useSettings();
   const [media, setMedia] = useState<MediaInfo | null>(null);
@@ -214,11 +215,19 @@ export function RequestSection({
           onPress={async () => {
             // Film : un streaming prêt (cache TorBox / AllDebrid, Wawacity) se lance tout de suite, et le titre est demandé
             // en même temps ; sinon, le choix de la demande comme avant
+            // Streaming prêt : on laisse le choix (regarder tout de suite, ou seulement faire la demande)
             if (beforeRequest && !isTv) {
               setTrying(true);
-              const launched = await beforeRequest().catch(() => false);
+              const watch = await beforeRequest().catch(() => null);
               setTrying(false);
-              if (launched) return;
+              if (watch) {
+                Alert.alert('Disponible en streaming', `${target.title} peut se regarder tout de suite (la demande part avec), ou être seulement demandé.`, [
+                  { text: 'Regarder maintenant', onPress: watch },
+                  { text: 'Seulement demander', onPress: () => setOpen(true) },
+                  { text: 'Annuler', style: 'cancel' },
+                ]);
+                return;
+              }
             }
             setOpen(true);
           }}

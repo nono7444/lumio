@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- « Demander » sur un film absent : si un streaming est prêt, tu choisis entre « Regarder maintenant » (la demande part avec) et « Seulement demander ». Plus besoin de lancer un stream pour faire une demande.
+
 ## 1.0.189 — 19 novembre 2026
 
 - Nouvelle appli **Lumio Audio** (iPhone et Android) : les livres audio de la maison. Bibliothèque avec couvertures, « Continuer l'écoute », recherche, tri et filtres ; lecteur avec −30 s / +30 s, chapitres, vitesse de 0,8× à 2×, minuterie de sommeil (ou fin du chapitre), lecture en arrière-plan et sur l'écran verrouillé. La position d'écoute est gardée sur le serveur, on reprend sur n'importe quel appareil.
