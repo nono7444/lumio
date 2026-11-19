@@ -74,5 +74,28 @@ if (!beta && existsSync(autoIpa)) {
   });
 }
 
+// Lumio Audio (livres audio de la maison) : dans la même source quand son IPA existe
+const audioIpa = 'lumio-audio-unsigned.ipa';
+if (!beta && existsSync(audioIpa)) {
+  const audioSize = statSync(audioIpa).size;
+  const audioURL = `https://github.com/${repo}/releases/download/${tag}/${audioIpa}`;
+  source.apps.push({
+    name: 'Lumio Audio',
+    bundleIdentifier: 'lol.wawanono.lumio.audio',
+    developerName: 'Norman',
+    subtitle: 'Les livres audio de la maison',
+    localizedDescription: 'Lumio Audio : bibliothèque de livres audio du serveur Lumio, lecture en arrière-plan, vitesse, minuterie, reprise sur tous les appareils.',
+    iconURL: `https://raw.githubusercontent.com/${repo}/main/assets/images/audio/icon.png`,
+    tintColor: '#9B6BFF',
+    category: 'entertainment',
+    version,
+    versionDate: date,
+    downloadURL: audioURL,
+    size: audioSize,
+    versions: [{ version, buildVersion: version.split('.').pop(), date, size: audioSize, downloadURL: audioURL, minOSVersion: '16.4', localizedDescription: notes || `Build ${tag}` }],
+    appPermissions: { entitlements: [], privacy: {} },
+  });
+}
+
 writeFileSync(out, JSON.stringify(source, null, 2));
 console.log(`${out} : Lumio ${version} → ${downloadURL} (${size} octets)`);

@@ -1,41 +1,64 @@
-// Deux applis à partir du même code :
+// Trois applis à partir du même code :
 // - Lumio (par défaut) : l'appli de la famille ;
-// - Lumio Auto (APP_VARIANT=auto) : l'appli de l'admin (Lumio Auto, torrents, serveur, mises à jour).
+// - Lumio Auto (APP_VARIANT=auto) : l'appli de l'admin (Lumio Auto, torrents, serveur, mises à jour) ;
+// - Lumio Audio (APP_VARIANT=audio) : les livres audio de la maison (bibliothèque du serveur Lumio, lecture en arrière-plan).
+const VARIANTS = {
+  auto: {
+    name: 'Lumio Auto',
+    scheme: 'lumioauto',
+    id: 'lol.wawanono.lumio.auto',
+    dir: 'auto',
+    bg: '#1A0F08',
+    local: 'Lumio Auto se connecte à ton serveur Lumio et à Jellyfin sur ton réseau local.',
+  },
+  audio: {
+    name: 'Lumio Audio',
+    scheme: 'lumioaudio',
+    id: 'lol.wawanono.lumio.audio',
+    dir: 'audio',
+    bg: '#120A1F',
+    local: 'Lumio Audio se connecte à ton serveur Lumio sur ton réseau local.',
+    // Lecture en arrière-plan et sur l'écran verrouillé ; pas de micro
+    plugins: [['expo-audio', { enableBackgroundPlayback: true, recordAudioAndroid: false }]],
+  },
+};
+
 module.exports = ({ config }) => {
-  if (process.env.APP_VARIANT !== 'auto') return { ...config, extra: { ...(config.extra || {}), variant: 'lumio' } };
-  const plugins = (config.plugins || [])
-    // Pas de widget dans Lumio Auto (il reste dans Lumio)
-    .filter((p) => p !== '@bacons/apple-targets')
-    .map((p) =>
-      Array.isArray(p) && p[0] === 'expo-splash-screen' ? ['expo-splash-screen', { ...p[1], image: './assets/images/auto/splash-icon.png' }] : p
-    );
+  const v = VARIANTS[process.env.APP_VARIANT];
+  if (!v) return { ...config, extra: { ...(config.extra || {}), variant: 'lumio' } };
+  const plugins = [
+    ...(config.plugins || [])
+      // Pas de widget dans Lumio Auto / Lumio Audio (il reste dans Lumio)
+      .filter((p) => p !== '@bacons/apple-targets')
+      .map((p) =>
+        Array.isArray(p) && p[0] === 'expo-splash-screen' ? ['expo-splash-screen', { ...p[1], image: `./assets/images/${v.dir}/splash-icon.png` }] : p
+      ),
+    ...(v.plugins || []),
+  ];
   return {
     ...config,
-    name: 'Lumio Auto',
+    name: v.name,
     slug: config.slug,
-    scheme: 'lumioauto',
-    icon: './assets/images/auto/icon.png',
+    scheme: v.scheme,
+    icon: `./assets/images/${v.dir}/icon.png`,
     ios: {
       ...config.ios,
-      icon: './assets/images/auto/icon.png',
-      bundleIdentifier: 'lol.wawanono.lumio.auto',
+      icon: `./assets/images/${v.dir}/icon.png`,
+      bundleIdentifier: v.id,
       entitlements: {},
-      infoPlist: {
-        ...config.ios.infoPlist,
-        NSLocalNetworkUsageDescription: 'Lumio Auto se connecte à ton serveur Lumio et à Jellyfin sur ton réseau local.',
-      },
+      infoPlist: { ...config.ios.infoPlist, NSLocalNetworkUsageDescription: v.local },
     },
     android: {
       ...config.android,
-      package: 'lol.wawanono.lumio.auto',
+      package: v.id,
       adaptiveIcon: {
         ...config.android.adaptiveIcon,
-        backgroundColor: '#1A0F08',
-        foregroundImage: './assets/images/auto/android-icon-foreground.png',
-        backgroundImage: './assets/images/auto/android-icon-background.png',
+        backgroundColor: v.bg,
+        foregroundImage: `./assets/images/${v.dir}/android-icon-foreground.png`,
+        backgroundImage: `./assets/images/${v.dir}/android-icon-background.png`,
       },
     },
     plugins,
-    extra: { ...(config.extra || {}), variant: 'auto' },
+    extra: { ...(config.extra || {}), variant: process.env.APP_VARIANT },
   };
 };

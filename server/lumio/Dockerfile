@@ -1,7 +1,7 @@
 # Serveur Lumio + Lumio Secour intégré (lancé par server.js)
 FROM node:22-bookworm-slim
 RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates curl \
+ && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates curl libarchive-tools \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 # Moteur Lumio Secour (fork de WAStream, licence MIT : secour/LICENSE)

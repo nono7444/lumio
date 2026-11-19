@@ -1,9 +1,9 @@
 import { HomeShortcuts } from '@/components/home-shortcuts';
 import { PlatformsRow } from '@/components/platforms-row';
 import { ProfileRank } from '@/components/rank-shield';
-import { router, useFocusEffect } from 'expo-router';
+import { Redirect, router, useFocusEffect } from 'expo-router';
 import { AutoPerfScreen } from '@/components/auto-admin';
-import { IS_AUTO } from '@/lib/variant';
+import { IS_AUDIO, IS_AUTO } from '@/lib/variant';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useCached } from '@/lib/cached';
 import { StatusBar } from 'expo-status-bar';
@@ -376,6 +376,8 @@ function JfDynamicRow({ kind, view, nonce }: { kind: 'continue' | 'nextup' | 'fa
 export default function HomeTab() {
   // Lumio Auto : onglet « Performance » (le serveur)
   if (IS_AUTO) return <AutoPerfScreen />;
+  // Lumio Audio : pas d'accueil, on va à la bibliothèque
+  if (IS_AUDIO) return <Redirect href="/listen" />;
   return <Home />;
 }
 

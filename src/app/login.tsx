@@ -11,7 +11,7 @@ import { C, R } from '@/constants/theme';
 import { login, serverInfo } from '@/lib/jellyfin';
 import { seerr } from '@/lib/seerr';
 import { useSettings } from '@/lib/settings';
-import { IS_AUTO } from '@/lib/variant';
+import { IS_AUDIO, IS_AUTO } from '@/lib/variant';
 
 /** Serveur Lumio de la maison : donne l'adresse de Jellyfin, la famille n'a que son identifiant à taper. */
 const HOME_LUMIO = 'https://lumio.wawanono.lol';
@@ -92,9 +92,9 @@ export default function Login() {
         }
       }
       // Compte admin : il peut avoir des profils pour la famille → « Qui regarde ? »
-      const household = session.isAdmin && !IS_AUTO ? { owner: session, askOnLaunch: true, count: 0 } : null;
+      const household = session.isAdmin && !IS_AUTO && !IS_AUDIO ? { owner: session, askOnLaunch: true, count: 0 } : null;
       await update({ jellyfin: session, household, skipJellyfin: false, seerr: seerrCfg });
-      router.replace(IS_AUTO ? '/' : session.isAdmin ? '/profiles' : '/');
+      router.replace(IS_AUDIO ? '/listen' : IS_AUTO ? '/' : session.isAdmin ? '/profiles' : '/');
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
@@ -115,9 +115,9 @@ export default function Login() {
         keyboardShouldPersistTaps="handled">
         <View style={styles.brandWrap}>
           <View style={styles.mark}>
-            <Ionicons name="play" size={30} color="#000" />
+            <Ionicons name={IS_AUDIO ? 'headset' : 'play'} size={30} color="#000" />
           </View>
-          <Text style={styles.brand}>Lumio</Text>
+          <Text style={styles.brand}>{IS_AUDIO ? 'Lumio Audio' : IS_AUTO ? 'Lumio Auto' : 'Lumio'}</Text>
           <Text style={styles.tagline}>Connecte-toi avec ton identifiant</Text>
         </View>
 
@@ -210,9 +210,12 @@ export default function Login() {
 
         <Button title="Se connecter" icon="log-in-outline" onPress={submit} loading={busy} style={{ marginTop: 22 }} />
 
-        <Pressable onPress={skip} style={styles.skip} hitSlop={8}>
-          <Text style={styles.skipText}>Continuer sans Jellyfin</Text>
-        </Pressable>
+        {/* Lumio Audio : le compte Jellyfin sert à reconnaître la personne (position d'écoute) */}
+        {IS_AUDIO ? null : (
+          <Pressable onPress={skip} style={styles.skip} hitSlop={8}>
+            <Text style={styles.skipText}>Continuer sans Jellyfin</Text>
+          </Pressable>
+        )}
         </>
         )}
       </ScrollView>

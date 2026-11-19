@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Nouvelle appli **Lumio Audio** (iPhone et Android) : les livres audio de la maison. Bibliothèque avec couvertures, « Continuer l'écoute », recherche, tri et filtres ; lecteur avec −30 s / +30 s, chapitres, vitesse de 0,8× à 2×, minuterie de sommeil (ou fin du chapitre), lecture en arrière-plan et sur l'écran verrouillé. La position d'écoute est gardée sur le serveur, on reprend sur n'importe quel appareil.
+- Lumio Audio, admin : onglet « Trouver » pour chercher un livre audio sur C411, Tr4ker et Wawacity et le télécharger sur le serveur (cache AllDebrid / TorBox d'abord, sinon qBittorrent qui le partage).
+
 ## 1.0.188 — 19 novembre 2026
 
 - Titre absent : retour du bouton « Demander » à la place de « Lire ». Pour un film, il cherche d'abord un streaming prêt (cache TorBox / AllDebrid, Wawacity, cherché dès l'ouverture de la fiche) : s'il y en a un, la lecture démarre et la demande part avec ; sinon, la demande s'ouvre comme avant.

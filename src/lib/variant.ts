@@ -4,6 +4,8 @@ import Constants from 'expo-constants';
 import { isManager, type Settings } from './settings';
 
 export const IS_AUTO = Constants.expoConfig?.extra?.variant === 'auto';
+/** Lumio Audio : l'appli des livres audio (bibliothèque du serveur Lumio, lecteur). */
+export const IS_AUDIO = Constants.expoConfig?.extra?.variant === 'audio';
 
 /** Outils d'admin (serveur, torrents, validation…) : seulement dans Lumio Auto. Lumio reste l'appli de la famille. */
 export const adminUI = (s: Settings) => IS_AUTO && s.jellyfin?.isAdmin === true;

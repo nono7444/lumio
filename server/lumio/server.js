@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.117.0';
+const VERSION = '3.118.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4299,6 +4299,354 @@ async function bookRoutes(req, res, p, q, user) {
     if (!file) throw new HttpError(403, 'Lien expiré');
     await fs.promises.rm(file, { force: true });
     zipCache.delete(file);
+    send(res, 200, { ok: true });
+    return true;
+  }
+  return false;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// Livres audio (appli Lumio Audio) : recherche C411 / Tr4ker (catégorie 3030) et Wawacity, téléchargement, bibliothèque
+// - Recherche et téléchargement : admin seulement ; écoute : tout le monde
+// - Torrent : cache AllDebrid / TorBox d'abord (rien ne compte sur le ratio), sinon qBittorrent (partage), puis lien dur
+//   des fichiers dans le dossier « Livres audio » ; Wawacity : lien AllDebrid, archives (.zip, .rar) décompressées
+// - Bibliothèque : un livre = un dossier qui contient des fichiers audio (ou un .m4b seul) ; « Auteur - Titre » ou
+//   « Auteur/Titre » reconnus ; couverture : image du dossier, sinon Open Library
+// - Lecture : liens signés de Book (/api/books/f/<jeton>/file, avec Range) ; position d'écoute gardée par personne
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+const AUDIO_EXT = /\.(mp3|m4b|m4a|aac|ogg|oga|opus|flac|wav)$/i;
+const AUDIO_ARCHIVE = /\.(zip|rar|7z)$/i;
+const AUDIO_FILE = path.join(DATA_DIR, 'audiobooks.json');
+const audioState = readJson(AUDIO_FILE, {});
+for (const k of ['progress', 'covers', 'pending']) if (!audioState[k] || typeof audioState[k] !== 'object') audioState[k] = {};
+const saveAudio = () => writeJson(AUDIO_FILE, audioState);
+
+function audioDir() {
+  const a = config.audio || {};
+  const d = disks();
+  if (!d.length) return null;
+  const root = a.root && d.some((x) => x.name === a.root) ? a.root : d[0].name;
+  return { root, folder: a.root ? a.folder || 'Livres audio' : 'Livres audio' };
+}
+const audioId = (rel) => crypto.createHash('sha1').update(rel).digest('hex').slice(0, 16);
+
+/** « Auteur - Titre », « Titre - Auteur [Livre audio] », dossier parent = auteur… → { title, author } */
+function audioMeta(dirRel) {
+  const parts = dirRel.split('/').filter(Boolean);
+  const raw = (parts[parts.length - 1] || 'Livre audio')
+    .replace(/[._]+/g, ' ')
+    .replace(/\[[^\]]*\]|\((?:mp3|m4b|flac|\d+\s*k(?:bps)?|livre audio|audiobook|lu par[^)]*)\)/gi, ' ')
+    .replace(/\b(mp3|m4b|flac|aac|\d{2,3}\s?kbps|livre audio|audiobook|french|fr|multi)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  let title = raw;
+  let author = null;
+  const m = raw.match(/^(.+?)\s+-\s+(.+)$/);
+  if (m) [author, title] = [m[1].trim(), m[2].trim()];
+  else if (parts.length >= 2) author = parts[parts.length - 2].replace(/[._]+/g, ' ').trim();
+  const narr = dirRel.match(/lu par ([^\]\)\/]+)/i);
+  return { title: title || raw, author, narrator: narr ? narr[1].trim() : null };
+}
+
+/** Couverture Open Library (gardée), pour les livres sans image dans leur dossier. */
+async function audioCoverUrl(title, author) {
+  const k = `${title}|${author || ''}`.toLowerCase();
+  if (k in audioState.covers) return audioState.covers[k];
+  let url = null;
+  try {
+    const q = new URLSearchParams({ title, limit: '1', fields: 'cover_i' });
+    if (author) q.set('author', author);
+    const j = await fetch(`https://openlibrary.org/search.json?${q}`, { signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'Lumio' } }).then((r) => r.json());
+    const id = j && j.docs && j.docs[0] && j.docs[0].cover_i;
+    if (id) url = `https://covers.openlibrary.org/b/id/${id}-L.jpg`;
+  } catch {
+    return null; // pas gardé : réessai plus tard
+  }
+  audioState.covers[k] = url;
+  saveAudio();
+  return url;
+}
+
+let audioLibCache = null;
+/** Livres audio du dossier (relu au plus toutes les 30 s). */
+async function audioLibrary(force = false) {
+  if (!force && audioLibCache && Date.now() - audioLibCache.at < 30e3) return audioLibCache;
+  const dir = audioDir();
+  if (!dir) return { at: Date.now(), dir: null, books: [] };
+  const { full } = safePath(dir.root, dir.folder);
+  await fs.promises.mkdir(full, { recursive: true }).catch(() => {});
+  const books = [];
+  const walk = async (rel, depth) => {
+    if (depth > 6 || books.length > 2000) return;
+    let list = [];
+    try {
+      list = await fs.promises.readdir(path.join(full, rel), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    let audio = list.filter((e) => e.isFile() && AUDIO_EXT.test(e.name) && !e.name.startsWith('.')).map((e) => e.name).sort(natural);
+    const images = list.filter((e) => e.isFile() && /\.(jpe?g|png|webp)$/i.test(e.name)).map((e) => e.name);
+    let subs = list.filter((e) => e.isDirectory() && !e.name.startsWith('.'));
+    // Livre en plusieurs disques (CD1, CD2, Disque 1, Partie 2…) : un seul livre, pistes à la suite
+    const discs = subs.filter((e) => /^(cd|dis[ck]|disque|partie|part|vol(ume)?)[\s._-]*\d+/i.test(e.name)).map((e) => e.name).sort(natural);
+    if (discs.length) {
+      for (const d of discs) {
+        const inner = await fs.promises.readdir(path.join(full, rel, d)).catch(() => []);
+        audio = audio.concat(inner.filter((n) => AUDIO_EXT.test(n) && !n.startsWith('.')).sort(natural).map((n) => `${d}/${n}`));
+      }
+      subs = subs.filter((e) => !discs.includes(e.name));
+    }
+    // Un .m4b par livre quand ils sont plusieurs à la racine d'un dossier sans sous-dossiers audio
+    const m4bs = audio.filter((n) => /\.m4b$/i.test(n));
+    const groups = m4bs.length > 1 && m4bs.length === audio.length ? m4bs.map((n) => [n]) : audio.length ? [audio] : [];
+    for (const files of groups) {
+      const bookRel = files.length === 1 && groups.length > 1 ? `${rel}/${files[0]}` : rel;
+      const meta = groups.length > 1 ? audioMeta(files[0].replace(/\.m4b$/i, '')) : audioMeta(rel || dir.folder);
+      const cover = images.find((n) => /^(cover|folder|front|couverture)\./i.test(n)) || images[0] || null;
+      let size = 0;
+      let mtime = 0;
+      const entries = [];
+      for (const n of files) {
+        try {
+          const st = await fs.promises.stat(path.join(full, rel, n));
+          size += st.size;
+          mtime = Math.max(mtime, st.mtimeMs);
+          entries.push({ name: n, size: st.size, rel: `${dir.folder}/${rel ? `${rel}/` : ''}${n}` });
+        } catch {}
+      }
+      if (!entries.length) continue;
+      books.push({
+        id: audioId(bookRel || files[0]),
+        ...meta,
+        path: bookRel,
+        size,
+        added: new Date(mtime).toISOString(),
+        files: entries,
+        coverRel: cover ? `${dir.folder}/${rel ? `${rel}/` : ''}${cover}` : null,
+      });
+    }
+    for (const s of subs) await walk(rel ? `${rel}/${s.name}` : s.name, depth + 1);
+  };
+  await walk('', 0);
+  books.sort((a, b) => b.added.localeCompare(a.added));
+  audioLibCache = { at: Date.now(), dir, books };
+  return audioLibCache;
+}
+/** Vue d'un livre pour l'appli : liens signés (lecture, couverture) et position d'écoute de la personne. */
+async function audioView(b, user, dir) {
+  const prog = (audioState.progress[user.id] || {})[b.id] || null;
+  let cover = b.coverRel ? `/api/books/f/${bookSign(dir.root, b.coverRel)}/file` : null;
+  if (!cover) cover = await audioCoverUrl(b.title, b.author).catch(() => null);
+  return {
+    id: b.id,
+    title: b.title,
+    author: b.author,
+    narrator: b.narrator,
+    size: b.size,
+    added: b.added,
+    cover,
+    files: b.files.map((f, i) => ({ index: i, name: f.name.replace(AUDIO_EXT, ''), size: f.size, url: `/api/books/f/${bookSign(dir.root, f.rel)}/file` })),
+    progress: prog,
+  };
+}
+
+// ——— Téléchargement ———
+const audioJobs = [];
+/** Wawacity : seulement les fiches qui ressemblent à des livres audio (la rubrique ebooks mélange tout). */
+async function wawaAudioSearch(q) {
+  const r = await wawaSearch(`${q}`, 'livres').catch(() => ({ items: [] }));
+  const items = (r.items || []).filter((it) => /livres? audio|audiobook|\bmp3\b|\bm4b\b|lu par/i.test(it.title));
+  return { id: 'wawacity', label: 'Wawacity', state: r.state || 'ok', message: r.message, items };
+}
+/** Après un téléchargement AllDebrid / Wawacity : archives décompressées (bsdtar), puis la bibliothèque est relue. */
+async function audioAfterDownload(job) {
+  if (job.status !== 'done') return;
+  const { full } = safePath(job.root, job.folder);
+  const archives = [];
+  const walk = async (d, depth) => {
+    if (depth > 4) return;
+    for (const e of await fs.promises.readdir(d, { withFileTypes: true }).catch(() => [])) {
+      const p2 = path.join(d, e.name);
+      if (e.isDirectory()) await walk(p2, depth + 1);
+      else if (AUDIO_ARCHIVE.test(e.name)) {
+        const part = e.name.match(/\.part(\d+)\.rar$/i);
+        if (!part || Number(part[1]) === 1) archives.push(p2); // archive en plusieurs morceaux : on ouvre la 1re
+      }
+    }
+  };
+  await walk(full, 0);
+  for (const a of archives) {
+    try {
+      await run('bsdtar', ['-xf', a, '-C', path.dirname(a)], { timeout: 30 * 60_000 });
+      await fs.promises.unlink(a).catch(() => {});
+      // morceaux .partN.rar restants
+      for (const n of await fs.promises.readdir(path.dirname(a)).catch(() => [])) if (/\.part\d+\.rar$/i.test(n)) await fs.promises.unlink(path.join(path.dirname(a), n)).catch(() => {});
+    } catch (e) {
+      job.error = `Décompression impossible (${path.basename(a)}) : ${e.message}`;
+    }
+  }
+  audioLibCache = null;
+  notify({ title: '🎧 Livre audio prêt', message: job.name, tags: ['headphones'] }).catch(() => {});
+}
+/** Torrent pas en cache : qBittorrent le télécharge et le partage ; une fois fini, ses fichiers sont reliés (liens durs)
+ *  dans le dossier du livre. */
+async function audioQbitAdd(found, buf, dest) {
+  const qc = autoCfg().qbit || {};
+  if (!qc.url) throw new HttpError(503, 'qBittorrent n’est pas réglé (Lumio Auto → qBit) et le livre n’est pas en cache');
+  const fd = new FormData();
+  fd.append('torrents', new Blob([buf], { type: 'application/x-bittorrent' }), `${cleanName(found.title)}.torrent`);
+  fd.append('category', qbitCategory());
+  fd.append('tags', 'lumio-audio');
+  fd.append('savepath', `${String(qc.remotePath || '/downloads').replace(/\/+$/, '')}/${dest.root}`);
+  const r = await qbitFetch('/api/v2/torrents/add', { method: 'POST', body: fd });
+  if (/fail/i.test(await r.text())) throw new HttpError(502, 'qBittorrent a refusé le torrent');
+  audioState.pending[found.hash] = { title: found.title, root: dest.root, folder: dest.folder, at: Date.now() };
+  saveAudio();
+}
+async function audioPendingTick() {
+  const hashes = Object.keys(audioState.pending);
+  if (!hashes.length) return;
+  const list = await (await qbitFetch(`/api/v2/torrents/info?hashes=${hashes.join('|')}`)).json().catch(() => null);
+  if (!Array.isArray(list)) return;
+  for (const h of hashes) {
+    const p2 = audioState.pending[h];
+    const t = list.find((x) => String(x.hash || '').toLowerCase() === h);
+    if (!t) {
+      if (Date.now() - p2.at > 3600e3) delete audioState.pending[h];
+      continue;
+    }
+    if ((Number(t.progress) || 0) < 1) continue;
+    const files = await (await qbitFetch(`/api/v2/torrents/files?hash=${h}`)).json().catch(() => []);
+    const base = safePath(p2.root, qbitLocalFolder()).full;
+    const { full: dest } = safePath(p2.root, p2.folder);
+    let n = 0;
+    for (const f of files) {
+      if (!AUDIO_EXT.test(f.name) && !/\.(jpe?g|png|webp)$/i.test(f.name) && !AUDIO_ARCHIVE.test(f.name)) continue;
+      const src = path.join(base, f.name);
+      if (!fs.existsSync(src)) continue;
+      await linkFile(src, path.join(dest, f.name.split('/').slice(1).join('/') || f.name));
+      n++;
+    }
+    delete audioState.pending[h];
+    saveAudio();
+    if (n) await audioAfterDownload({ status: 'done', root: p2.root, folder: p2.folder, name: p2.title });
+  }
+}
+setInterval(() => audioPendingTick().catch(() => {}), 60_000);
+
+async function audioRoutes(req, res, p, q, user) {
+  if (!p.startsWith('/api/audio')) return false;
+  if (req.method === 'GET' && p === '/api/audio/library') {
+    const lib = await audioLibrary(q.get('refresh') === '1');
+    const books = lib.dir ? await Promise.all(lib.books.map((b) => audioView(b, user, lib.dir))) : [];
+    send(res, 200, { books, dir: lib.dir, admin: Boolean(user.admin), downloading: audioJobs.filter((j) => !['done', 'error', 'cancelled'].includes(j.status)).length + Object.keys(audioState.pending).length });
+    return true;
+  }
+  const pm = p.match(/^\/api\/audio\/progress\/([a-f0-9]{16})$/);
+  if (pm && req.method === 'POST') {
+    const b = await readBody(req);
+    const mine = (audioState.progress[user.id] = audioState.progress[user.id] || {});
+    mine[pm[1]] = { file: Math.max(0, Math.floor(Number(b.file) || 0)), pos: Math.max(0, Number(b.pos) || 0), dur: Number(b.dur) || 0, total: Number(b.total) || 0, done: Boolean(b.done), at: Date.now() };
+    saveAudio();
+    send(res, 200, { ok: true });
+    return true;
+  }
+  // — Admin —
+  requireAdmin(user);
+  if (req.method === 'GET' && p === '/api/audio/search') {
+    const query = String(q.get('q') || '').trim();
+    if (query.length < 2) return send(res, 200, { results: [], sources: [] }), true;
+    const all = await Promise.all([torznabSearch('c411', query, 'audio'), torznabSearch('tr4ker', query, 'audio'), wawaAudioSearch(query)]);
+    const now = Date.now();
+    const seen = new Set();
+    const results = [];
+    const words = query.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').split(/\s+/).filter((w) => w.length > 1);
+    for (const s of all) {
+      for (const it of s.items) {
+        if (notFrench(it.title)) continue;
+        const dedupe = it.hash || `${it.source}:${it.title}`;
+        if (seen.has(dedupe)) continue;
+        seen.add(dedupe);
+        const id = crypto.randomBytes(6).toString('hex');
+        bookFound.set(id, { kind: it.wawa ? 'wawa' : 'torrent', link: it.link, title: it.title, source: it.source, at: now, hash: it.hash });
+        const norm = it.title.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[._]+/g, ' ');
+        results.push({ id, title: it.title, source: it.source, size: it.size || 0, seeders: it.seeders, format: bookFormat(it.title), close: words.every((w) => norm.includes(w)) });
+      }
+    }
+    results.sort((a, b) => Number(b.close) - Number(a.close) || (b.seeders ?? 0) - (a.seeders ?? 0));
+    send(res, 200, { results, sources: all.map((s) => ({ id: s.id, label: s.label, state: s.state, count: s.items.length, message: s.message })) });
+    return true;
+  }
+  if (req.method === 'POST' && p === '/api/audio/download') {
+    const b = await readBody(req);
+    const found = bookFound.get(String(b.id || ''));
+    if (!found) throw new HttpError(404, 'Résultat expiré : relance la recherche');
+    const dir = audioDir();
+    if (!dir) throw new HttpError(503, 'Aucun disque n’est relié au serveur Lumio');
+    const dest = { root: dir.root, folder: `${dir.folder}/${cleanName(audioMeta(found.title).title === found.title ? found.title : found.title.replace(/[._]+/g, ' '))}` };
+    let link;
+    let via = 'alldebrid';
+    if (found.kind === 'torrent') {
+      const r = await fetch(found.link, { headers: { 'User-Agent': 'Lumio' }, signal: AbortSignal.timeout(30000) });
+      if (!r.ok) throw new HttpError(502, `${found.source} n’a pas donné le .torrent (HTTP ${r.status})`);
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (buf[0] !== 0x64) throw new HttpError(502, `${found.source} n’a pas donné un vrai .torrent`);
+      const hash = found.hash || null;
+      // Cache d'abord (rien ne compte sur le ratio), sinon qBittorrent qui partage
+      const hit = hash ? await cacheByHash(hash).catch(() => null) : null;
+      if (hit) {
+        link = hit.link;
+        via = hit.via;
+      } else if (hash) {
+        await audioQbitAdd({ ...found, hash }, buf, dest);
+        send(res, 201, { ok: true, via: 'qbit', message: 'Pas en cache : qBittorrent le télécharge et le partage, il arrive dans la bibliothèque une fois fini' });
+        return true;
+      } else {
+        const up = await uploadTorrentFile(`${cleanName(found.title)}.torrent`, buf);
+        link = `adid:${up.id}`;
+      }
+    } else link = await wawaResolve(found.link);
+    const job = { id: crypto.randomBytes(5).toString('hex'), link, root: dest.root, folder: dest.folder, status: 'queued', book: true, audio: true, quiet: true,
+      name: found.title, size: 0, done: 0, speed: 0, token: null, createdAt: new Date().toISOString(), by: user.name, via };
+    downloads.push(job);
+    audioJobs.push(job);
+    if (audioJobs.length > 50) audioJobs.shift();
+    runDownload(job).then(() => audioAfterDownload(job)).catch(() => {});
+    send(res, 201, { ok: true, via, message: via === 'torbox' ? 'En cache TorBox : téléchargement lancé' : 'Téléchargement lancé' });
+    return true;
+  }
+  if (req.method === 'GET' && p === '/api/audio/jobs') {
+    const jobs = audioJobs.map(publicJob).reverse();
+    const pend = Object.entries(audioState.pending).map(([h, v]) => ({ id: h, name: v.title, status: 'qbit', size: 0, done: 0, speed: 0, createdAt: new Date(v.at).toISOString() }));
+    send(res, 200, { jobs: [...pend, ...jobs] });
+    return true;
+  }
+  if (req.method === 'GET' && p === '/api/audio/settings') {
+    send(res, 200, { dir: audioDir(), disks: disks().map((d) => d.name), c411: Boolean(BOOK_TRACKERS.c411.key()), tr4ker: Boolean(BOOK_TRACKERS.tr4ker.key()) });
+    return true;
+  }
+  if (req.method === 'PUT' && p === '/api/audio/settings') {
+    const b = await readBody(req);
+    if (typeof b.root === 'string') {
+      safePath(b.root, b.folder || 'Livres audio');
+      config.audio = { root: b.root, folder: String(b.folder || 'Livres audio') };
+      saveConfig();
+      audioLibCache = null;
+    }
+    send(res, 200, { dir: audioDir() });
+    return true;
+  }
+  const dm = p.match(/^\/api\/audio\/books\/([a-f0-9]{16})$/);
+  if (dm && req.method === 'DELETE') {
+    const lib = await audioLibrary(true);
+    const b = lib.books.find((x) => x.id === dm[1]);
+    if (!b || !lib.dir) throw new HttpError(404, 'Livre introuvable');
+    const { full } = safePath(lib.dir.root, lib.dir.folder);
+    const target = path.join(full, b.path);
+    if (!target.startsWith(full + path.sep)) throw new HttpError(400, 'Chemin refusé');
+    await fs.promises.rm(target, { recursive: true, force: true });
+    audioLibCache = null;
     send(res, 200, { ok: true });
     return true;
   }
@@ -8996,6 +9344,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
     const q = url.searchParams;
     // Book (livres, BD, mangas, audio)
     if (await bookRoutes(req, res, p, q, user)) return;
+    if (await audioRoutes(req, res, p, q, user)) return;
     if (await profileRoutes(req, res, p, q, user)) return;
     if (await autoRoutes(req, res, p, q, user)) return;
 

@@ -18,7 +18,7 @@ import { orderTabs } from '@/lib/home-layout';
 import { useSeason } from '@/lib/seasons';
 import { useAppUpdate } from '@/lib/app-update';
 import { useSettings } from '@/lib/settings';
-import { IS_AUTO } from '@/lib/variant';
+import { IS_AUDIO, IS_AUTO } from '@/lib/variant';
 
 type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>>[0];
 
@@ -38,6 +38,10 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   playing: 'play-circle',
   // Lumio Auto : l'onglet « Réglages »
   settings: 'settings',
+  // Lumio Audio
+  listen: 'headset',
+  find: 'search',
+  me: 'person-circle',
 };
 
 // Libellés courts, affichés sous chaque icône (comme la barre d'onglets d'iOS)
@@ -56,6 +60,9 @@ const SHORT: Record<string, string> = {
   server: 'Serveur',
   playing: 'Lecture',
   settings: IS_AUTO ? 'Réglages' : 'Profil',
+  listen: 'Livres',
+  find: 'Trouver',
+  me: 'Profil',
 };
 
 const glass = Platform.OS === 'ios' && isLiquidGlassAvailable();
@@ -101,7 +108,7 @@ function PhoneTabBar({ state, descriptors, navigation }: TabBarProps) {
   const order = orderTabs(
     visible.map((r) => r.name),
     // Lumio Auto : onglets fixes, dans l'ordre du code
-    IS_AUTO ? [] : settings.tabsLayout
+    IS_AUTO || IS_AUDIO ? [] : settings.tabsLayout
   );
   // TV : expérience épurée, seulement Accueil, Bibliothèque, Recherche, Demandes (et le profil)
   const TV_TABS = ['index', 'library', 'search', 'activity', 'settings'];
@@ -219,7 +226,7 @@ function PhoneTabBar({ state, descriptors, navigation }: TabBarProps) {
           const { options } = descriptors[route.key];
           const label = typeof options.title === 'string' ? options.title : route.name;
           const short = SHORT[route.name] ?? label;
-          const isProfile = route.name === 'settings' && !IS_AUTO;
+          const isProfile = (route.name === 'settings' && !IS_AUTO) || route.name === 'me';
           const color = focused ? activeColor : C.textDim;
           const dot = (route.name === 'chat' && unread > 0) || (route.name === 'settings' && update);
           const count = route.name === 'activity' ? pending : 0;
