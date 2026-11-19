@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Nouveaux logos pour Lumio Auto (éclair, orange), Lumio Audio (casque, violet) et Lumio Livres (livre, vert) : le même « L » en verre et la même bille que Lumio, chacun dans sa couleur.
+- Lumio Auto, Seed : le texte d'aide dit maintenant qu'aucun torrent n'est retiré automatiquement.
+
 - Lumio Livres : les tomes d'une même série sont rassemblés en collections (Kaamelott, Jujutsu Kaisen…), avec une page par collection et « Continuer le tome N ».
 - Lumio Audio, admin : « Changer la couverture » sur la fiche d'un livre : images trouvées en ligne ou photo du téléphone.
 - Lumio Audio et Lumio Livres : les résultats de l'onglet Trouver ont une vignette de couverture.

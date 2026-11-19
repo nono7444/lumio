@@ -2245,7 +2245,7 @@ function QbitPrefsSection() {
             </>
           ) : null}
           <Text style={styles.help}>
-            Règle C411 toujours respectée : un torrent n’est jamais retiré avant 72 h de partage ou un ratio de 1 sur ce torrent (sinon c’est un Hit & Run). Partage intelligent : un torrent encore demandé (3 personnes ou plus) reste en partage même objectif atteint ; un torrent que plus personne ne demande depuis 14 jours est retiré une fois la durée minimum passée. Le résumé du soir arrive en notification : envoyé, reçu et partages.
+            Aucun torrent n’est retiré automatiquement : tout reste en partage. L’objectif (ratio, durée) sert seulement d’indication : « objectif atteint, gardé en partage ». Pour en retirer un, fais-le à la main. Règle C411 : jamais avant 72 h de partage ou un ratio de 1 (sinon c’est un Hit & Run). Le résumé du soir arrive en notification : envoyé, reçu et partages.
           </Text>
           <Button
             title="Partager un maximum"
