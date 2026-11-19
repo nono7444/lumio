@@ -1,6 +1,6 @@
 // Bloc « demande » de la fiche, comme sur Seerr : statut du média, demandes en cours, boutons.
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, View, Platform } from 'react-native';
 
 import { TvPill } from '@/components/tv-actions';
@@ -30,7 +30,7 @@ export function RequestSection({
   onAvailable,
   onMedia,
   reloadKey,
-  beside,
+  beforeRequest,
 }: {
   target: RequestTarget;
   onChange?: () => void;
@@ -42,12 +42,13 @@ export function RequestSection({
   onMedia?: (m: MediaInfo) => void;
   /** Change quand la fiche a envoyé une demande (bouton « Demander » d'une saison) : on recharge */
   reloadKey?: number;
-  /** Bouton posé à côté de « Demander » (titre absent : « Streaming ») ; seul sous la progression sinon */
-  beside?: ReactNode;
+  /** Appelé à l'appui sur « Demander » (film) : true si un streaming a été lancé (la demande part alors avec lui) */
+  beforeRequest?: () => Promise<boolean>;
 }) {
   const { settings } = useSettings();
   const [media, setMedia] = useState<MediaInfo | null>(null);
   const [open, setOpen] = useState(false);
+  const [trying, setTrying] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const admin = managerUI(settings);
@@ -204,22 +205,24 @@ export function RequestSection({
           label={isTv && status !== MediaStatus.UNKNOWN ? 'Autres saisons' : 'Demander'}
           onPress={() => setOpen(true)}
         />
-      ) : canRequest && !active && beside ? (
-        // Titre absent : « Lire » (streaming + demande en même temps) remplace « Demander »
-        beside
       ) : canRequest && !active ? (
-        <View style={{ flexDirection: 'row', gap: 10 }}>
-          <Button
-            title={isTv && status !== MediaStatus.UNKNOWN ? (beside ? 'Autres saisons' : 'Demander d’autres saisons') : 'Demander'}
-            icon="paper-plane-outline"
-            variant={status === MediaStatus.UNKNOWN ? 'primary' : 'glass'}
-            onPress={() => setOpen(true)}
-            style={{ flex: 1 }}
-          />
-          {beside ?? null}
-        </View>
-      ) : beside && !Platform.isTV ? (
-        beside
+        <Button
+          title={trying ? 'Recherche d’un streaming…' : isTv && status !== MediaStatus.UNKNOWN ? 'Demander d’autres saisons' : 'Demander'}
+          icon="paper-plane-outline"
+          variant={status === MediaStatus.UNKNOWN ? 'primary' : 'glass'}
+          disabled={trying}
+          onPress={async () => {
+            // Film : un streaming prêt (cache TorBox / AllDebrid, Wawacity) se lance tout de suite, et le titre est demandé
+            // en même temps ; sinon, le choix de la demande comme avant
+            if (beforeRequest && !isTv) {
+              setTrying(true);
+              const launched = await beforeRequest().catch(() => false);
+              setTrying(false);
+              if (launched) return;
+            }
+            setOpen(true);
+          }}
+        />
       ) : null}
 
       <RequestModal

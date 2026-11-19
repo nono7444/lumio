@@ -35,7 +35,7 @@ type ProbeArgs = { type: 'movie' | 'tv'; tmdbId: number; season?: number; episod
 /** Sources par qualité, cherchées dès l'ouverture de la fiche (le serveur prépare aussi les liens LooStream) : le menu
  *  et la lecture sont alors immédiats. Gardé 10 min. */
 const probeMemo = new Map<string, { at: number; p: Promise<Record<string, Sources>> }>();
-function probeOnce(settings: Settings, a: ProbeArgs) {
+export function probeOnce(settings: Settings, a: ProbeArgs) {
   const k = `${a.type}:${a.tmdbId}:${a.season ?? ''}:${a.episode ?? ''}`;
   const hit = probeMemo.get(k);
   if (hit && Date.now() - hit.at < 10 * 60e3) return hit.p;
@@ -260,3 +260,9 @@ const qm = StyleSheet.create({
   cancel: { alignItems: 'center', paddingVertical: 12 },
   cancelTxt: { color: 'rgba(255,255,255,0.7)', fontSize: 16, fontWeight: '600' },
 });
+
+/** « Demander » d'un film : un streaming est-il prêt (cache TorBox / AllDebrid ou Wawacity) ? Réponse en 8 s au plus. */
+export async function streamReady(settings: Settings, a: ProbeArgs) {
+  const res = await Promise.race([probeOnce(settings, a), new Promise<Record<string, Sources>>((r) => setTimeout(() => r({}), 8000))]);
+  return Object.values(res).some((x) => x && (x.torbox || x.alldebrid || x.wawacity));
+}

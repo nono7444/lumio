@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Titre absent : retour du bouton « Demander » à la place de « Lire ». Pour un film, il cherche d'abord un streaming prêt (cache TorBox / AllDebrid, Wawacity, cherché dès l'ouverture de la fiche) : s'il y en a un, la lecture démarre et la demande part avec ; sinon, la demande s'ouvre comme avant.
+
 - Lecture : quand un film a deux versions sur le serveur (4K et 1080p), « Lire » prend la 4K au lieu de la 1080p.
 
 ## 1.0.186 — 18 novembre 2026

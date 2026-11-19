@@ -20,7 +20,7 @@ import { jf, type JfItem } from '@/lib/jellyfin';
 import { askFolder } from '@/components/folder-picker';
 import { TvBackdropLayer } from '@/components/tv-backdrop';
 import { JfEpisodes } from '@/components/jf-episodes';
-import { DlButton, StreamingButton } from '@/components/quality-menu';
+import { DlButton, probeOnce, streamReady } from '@/components/quality-menu';
 import { ReportProblemButton } from '@/components/report-problem';
 import { RequestSection } from '@/components/request-section';
 import { TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
@@ -103,6 +103,11 @@ export default function MediaScreen() {
   const [jfItem, setJfItem] = useState<JfItem | null>(null);
   // La recherche dans Jellyfin est faite avant d'afficher la fiche : pas de « Streaming » qui devient « Lire »
   const [jfChecked, setJfChecked] = useState(false);
+  // Film absent : le streaming est cherché dès l'ouverture, pour que « Demander » le lance sans attendre
+  useEffect(() => {
+    if (jfChecked && !jfItem && canWatchNow && type === 'movie' && Number(id)) probeOnce(settings, { type: 'movie', tmdbId: Number(id) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jfChecked, jfItem, canWatchNow, id]);
   const [showRate, setShowRate] = useState(false);
   // Statut de chaque saison (serveur Lumio) et demande d'une saison en cours d'envoi
   // Une saison demandée depuis la liste : le bloc de demande se recharge (et inversement)
@@ -438,10 +443,14 @@ export default function MediaScreen() {
           {serverReq && !Platform.isTV && jfChecked ? (
             <RequestSection
               inJellyfin={Boolean(jfItem)}
-              beside={
-                canWatchNow && !jfItem ? (
-                  <StreamingButton type={details.kind} tmdbId={tmdbId} title={title} imdb={imdbId ?? undefined} label text="Lire" primary direct style={{ alignSelf: 'stretch' }} ok={streamOk} />
-                ) : undefined
+              beforeRequest={
+                canWatchNow && !jfItem && details.kind === 'movie'
+                  ? async () => {
+                      if (!(await streamReady(settings, { type: 'movie', tmdbId, title }))) return false;
+                      router.push({ pathname: '/watch', params: { type: 'movie', tmdbId: String(tmdbId), imdb: imdbId ?? '', title, stream: '1' } });
+                      return true;
+                    }
+                  : undefined
               }
               onAvailable={refreshJf}
               onChange={() => setMediaKey((k) => k + 1)}
