@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Nouvelles icônes : Lumio Audio (livre ouvert avec un casque, violet) et Lumio Auto (compteur, orange) ; celles de Lumio et Lumio TV ne changent pas.
+
 - « Demander » sur un film absent : si un streaming est prêt, tu choisis entre « Regarder maintenant » (la demande part avec) et « Seulement demander ». Plus besoin de lancer un stream pour faire une demande.
 
 ## 1.0.189 — 19 novembre 2026
