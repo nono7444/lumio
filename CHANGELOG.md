@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.194 — 19 novembre 2026
+
 - Nouveaux logos pour Lumio Auto (éclair, orange), Lumio Audio (casque, violet) et Lumio Livres (livre, vert) : le même « L » en verre et la même bille que Lumio, chacun dans sa couleur.
 - Lumio Auto, Seed : le texte d'aide dit maintenant qu'aucun torrent n'est retiré automatiquement.
 
