@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.122.1';
+const VERSION = '3.122.2';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -7942,7 +7942,8 @@ function autoSeedView() {
     }));
   return {
     guard: { enabled: g0.enabled, ratio: g0.ratio, sites },
-    seeding: { count: seeding.length, upSpeed: seeding.reduce((n, g) => n + (g.upSpeed || 0), 0) + boostActive().reduce((n, b) => n + (b.upSpeed || 0), 0), uploaded: seeding.reduce((n, g) => n + (g.uploaded || 0), 0) },
+    // Compte aussi les torrents « partage seul » (booster) : même total que la liste « En partage »
+    seeding: { count: seeding.length + boostActive().filter((b) => b.state === 'seeding').length, upSpeed: seeding.reduce((n, g) => n + (g.upSpeed || 0), 0) + boostActive().reduce((n, b) => n + (b.upSpeed || 0), 0), uploaded: seeding.reduce((n, g) => n + (g.uploaded || 0), 0) },
     routes,
     boost: autoBoostView(),
     cleaned: auto.cleanLog.slice(0, 25),
