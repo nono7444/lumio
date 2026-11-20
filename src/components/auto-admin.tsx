@@ -664,7 +664,7 @@ function AddTorrentCard() {
   };
   return (
     <Fold id="qb-add" title="Ajouter un torrent" defaultOpen={false}>
-      <Text style={styles.help}>Pour le partage seulement : le torrent va dans le dossier du booster (pas dans Jellyfin) et il est retiré tout seul après 72 h s’il reste à 1 de ratio ou moins.</Text>
+      <Text style={styles.help}>Pour le partage seulement : le torrent va dans le dossier du booster (pas dans Jellyfin) et apparaît dans Seed → En partage. Il n’est jamais retiré tout seul (sauf si le disque est presque plein).</Text>
       <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
         <View style={[styles.searchBox, { flex: 1 }]}>
           <Ionicons name="search" size={18} color={C.textDim} />
@@ -2745,7 +2745,10 @@ export function AutoSeedScreen() {
   const insets = useSafeAreaInsets();
   const { st, load } = useAutoState();
   const seeding = st?.grabs.filter((g) => g.seeding) ?? [];
-  const up = seeding.reduce((n, g) => n + (g.upSpeed || 0), 0);
+  // Torrents ajoutés « pour le partage seul » (Torrents qui peuvent rapporter, Ajouter un torrent) : dans la même liste
+  const boost = st?.boostTorrents ?? [];
+  const up = seeding.reduce((n, g) => n + (g.upSpeed || 0), 0) + boost.reduce((n, b) => n + (b.upSpeed || 0), 0);
+  const total = seeding.length + boost.length;
   const goal = st?.seed ?? { ratio: 1, days: 7 };
   return (
     <SectionCollapse.Provider value={COLLAPSE}>
@@ -2753,11 +2756,34 @@ export function AutoSeedScreen() {
         style={{ flex: 1, backgroundColor: C.bg }}
         contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: TAB_SPACE + 20, gap: 14 }}
         refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={C.text} />}>
-        <AutoHeader title="Seed" sub={st ? `${seeding.length} en partage · ↑ ${fmtSpeed2(up)}` : null} color={seeding.length ? C.success : C.textFaint} />
+        <AutoHeader title="Seed" sub={st ? `${total} en partage · ↑ ${fmtSpeed2(up)}` : null} color={total ? C.success : C.textFaint} />
         <SeedAutoCards />
         {st ? (
-          <Fold id="seed-list" title="En partage" count={seeding.length} color={seeding.length ? C.success : undefined} defaultOpen={false}>
-            {!seeding.length ? <Text style={styles.help}>Rien en partage pour le moment.</Text> : null}
+          <Fold id="seed-list" title="En partage" count={total} color={total ? C.success : undefined} defaultOpen={false}>
+            {!total ? <Text style={styles.help}>Rien en partage pour le moment.</Text> : null}
+            {boost.map((b) => (
+              <View key={`b-${b.id}`} style={styles.card}>
+                <View style={{ flex: 1, gap: 4 }}>
+                  <View style={styles.rowBetween}>
+                    <Text style={[styles.title, { flex: 1 }]} numberOfLines={1}>
+                      {b.title}
+                    </Text>
+                    <Text style={[styles.title, { color: b.state === 'downloading' ? C.info : b.ratio >= 1 ? C.success : C.warning }]}>
+                      {b.state === 'downloading' ? `${b.progress} %` : b.ratio.toFixed(2).replace('.', ',')}
+                    </Text>
+                  </View>
+                  <Text style={styles.small}>
+                    <Text style={{ color: C.warning, fontWeight: '800' }}>Partage seul</Text>
+                    {b.free ? ' · freeleech' : ''} · {b.state === 'downloading' ? `téléchargement · ${gb(b.size)}` : `↑ ${gb(b.uploaded)} envoyés`}
+                    {b.upSpeed ? ` · ${fmtSpeed2(b.upSpeed)}` : ''}
+                    {b.leechers != null ? ` · ${b.leechers} demandent` : ''}
+                  </Text>
+                  <View style={styles.bar}>
+                    <View style={[styles.barFill, { width: `${Math.max(2, b.state === 'downloading' ? b.progress : Math.min(100, b.ratio * 100))}%`, backgroundColor: b.state === 'downloading' ? C.info : C.success }]} />
+                  </View>
+                </View>
+              </View>
+            ))}
             {seeding.map((g) => {
               const pct = Math.min(100, Math.max(goal.ratio ? ((g.ratio ?? 0) / goal.ratio) * 100 : 0, goal.days ? ((g.seedTime ?? 0) / (goal.days * 86400)) * 100 : 0));
               return (

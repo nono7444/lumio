@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.122.0';
+const VERSION = '3.122.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -7637,8 +7637,7 @@ async function autoBoostTick() {
       b.state = Number(t.progress) >= 1 ? 'seeding' : 'downloading';
       // Jamais fini au bout de 3 jours (plus de source) : place rendue, rien n'a été compté (freeleech)
       if (b.state === 'downloading' && Date.now() - Date.parse(b.addedAt) > 3 * 86400e3 && b.progress < 100) await boostRemove(b, 'téléchargement bloqué').catch(() => {});
-      // 72 h de partage passées et toujours à 1 de ratio ou moins : il ne rapporte pas, la place est rendue
-      else if (b.state === 'seeding' && b.seedTime >= HR_SEED_S && b.ratio <= 1) await boostRemove(b, '72 h de partage, ratio 1 ou moins').catch(() => {});
+      // Plus de retrait après 72 h à ratio 1 ou moins (« on laisse tout ») : seule la place disque reste une raison
     }
     // Disque presque plein : les vrais téléchargements passent avant le booster. On rend de la place
     // (torrents pas finis d'abord, puis ceux qui ont leurs 72 h ou ratio 1), un par passage.
@@ -8513,6 +8512,8 @@ async function autoRoutes(req, res, p, q, user) {
       disks: disks().map((d) => d.name),
       items: auto.items.map(publicItem),
       grabs: auto.grabs.slice(0, 60),
+      // Torrents « partage seul » (booster, « Torrents qui peuvent rapporter ») : affichés aussi dans « En partage »
+      boostTorrents: autoBoostView().torrents,
       adoptable: autoAdoptable().length,
       log: auto.log.slice(0, 80),
     });

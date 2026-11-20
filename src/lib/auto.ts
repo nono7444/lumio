@@ -159,6 +159,7 @@ export type AutoGrab = {
 };
 export type AutoFolder = { path: string; root: string; folder: string; name: string };
 export type AutoState = {
+  boostTorrents?: AutoBoostTorrent[];
   enabled: boolean;
   debridOnly?: boolean;
   client: 'rdt' | 'alldebrid' | 'qbit';

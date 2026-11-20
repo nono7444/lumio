@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Lumio Auto, Seed : les torrents ajoutés depuis « Torrents qui peuvent rapporter » (ou « Ajouter un torrent ») apparaissent maintenant dans « En partage », marqués « Partage seul », avec l'avancement pendant le téléchargement puis le ratio. Ils ne sont plus retirés au bout de 72 h.
+
 ## 1.0.196 — 20 novembre 2026
 
 - Livres : le numéro du tome est bien reconnu même quand le nom du fichier contient une année (« Black Clover 2016 … T33 ») : les tomes sont dans l'ordre et « Continuer le tome 33 » est juste.
