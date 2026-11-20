@@ -1,4 +1,4 @@
-name: Build Lumio, Lumio Auto, Lumio Audio et Lumio Livres (iOS, Android)
+name: Build Lumio et Lumio Auto (iOS, Android)
 
 # Lance le build à chaque push sur main, à chaque tag v*, ou à la main depuis l'onglet Actions.
 on:
@@ -25,7 +25,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
 
-  # Quatre applis du même code : Lumio (famille), Lumio Auto (admin, APP_VARIANT=auto), Lumio Audio (APP_VARIANT=audio) et Lumio Livres (APP_VARIANT=books)
+  # Deux applis du même code : Lumio (famille : films et séries, livres audio, livres) et Lumio Auto (admin, APP_VARIANT=auto)
   ios:
     needs: check
     runs-on: macos-latest
@@ -39,12 +39,6 @@ jobs:
           - variant: auto
             proj: LumioAuto
             ipa: lumio-auto-unsigned.ipa
-          - variant: audio
-            proj: LumioAudio
-            ipa: lumio-audio-unsigned.ipa
-          - variant: books
-            proj: LumioLivres
-            ipa: lumio-livres-unsigned.ipa
     env:
       APP_VARIANT: ${{ matrix.variant }}
     steps:
@@ -107,10 +101,6 @@ jobs:
             apk: lumio-android.apk
           - variant: auto
             apk: lumio-auto-android.apk
-          - variant: audio
-            apk: lumio-audio-android.apk
-          - variant: books
-            apk: lumio-livres-android.apk
     env:
       APP_VARIANT: ${{ matrix.variant }}
     steps:
@@ -163,12 +153,6 @@ jobs:
           - variant: auto
             apk: lumio-auto-android.apk
             pkg: lol.wawanono.lumio.auto
-          - variant: audio
-            apk: lumio-audio-android.apk
-            pkg: lol.wawanono.lumio.audio
-          - variant: books
-            apk: lumio-livres-android.apk
-            pkg: lol.wawanono.lumio.livres
     steps:
       - name: Accélération matérielle de l'émulateur
         run: |
@@ -210,7 +194,7 @@ jobs:
           merge-multiple: true
       - name: APK Android non publié s'il plante au démarrage
         if: ${{ needs.android-smoke.result != 'success' }}
-        run: rm -f lumio-android.apk lumio-auto-android.apk lumio-audio-android.apk lumio-livres-android.apk
+        run: rm -f lumio-android.apk lumio-auto-android.apk
       - name: Notes de version (section « À venir » du CHANGELOG, sinon message du commit)
         env:
           COMMIT_MSG: ${{ github.event.head_commit.message }}
@@ -235,8 +219,6 @@ jobs:
             echo "iPhone : mets à jour depuis FlareStore (source : https://github.com/${{ github.repository }}/releases/latest/download/altstore.json), ou installe lumio-unsigned.ipa avec Sideloadly / SideStore."
             echo "Android (téléphone) : https://github.com/${{ github.repository }}/releases/latest/download/lumio-android.apk"
             echo "Lumio Auto (admin) : dans la même source FlareStore ; Android : https://github.com/${{ github.repository }}/releases/latest/download/lumio-auto-android.apk"
-            echo "Lumio Audio (livres audio) : dans la même source FlareStore ; Android : https://github.com/${{ github.repository }}/releases/latest/download/lumio-audio-android.apk"
-            echo "Lumio Livres (livres, BD, mangas) : dans la même source FlareStore ; Android : https://github.com/${{ github.repository }}/releases/latest/download/lumio-livres-android.apk"
             echo "Android TV : Lumio TV (https://github.com/nono7444/lumio-tv/releases/latest), ou lumio.wawanono.lol/tv dans Downloader"
             echo "Toutes les notes : https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md"
           } > body.md
@@ -253,10 +235,6 @@ jobs:
             lumio-android.apk
             lumio-auto-unsigned.ipa
             lumio-auto-android.apk
-            lumio-audio-unsigned.ipa
-            lumio-audio-android.apk
-            lumio-livres-unsigned.ipa
-            lumio-livres-android.apk
             altstore.json
       - name: Range les notes sous le numéro de version dans CHANGELOG.md
         if: github.ref == 'refs/heads/main'

@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AnnouncementPopup } from '@/components/announcement';
 import { TvHomeHeader } from '@/components/tv-backdrop';
+import { UniverseSwitch } from '@/components/universe-switch';
 import { tvInfoFromJf, type TvFocusInfo } from '@/lib/tv-focus';
 import { Hero, heroFromTmdb, HeroTopBar, type HeroItem } from '@/components/hero';
 import { HomeBackdrop, homeBackdropSource } from '@/components/home-backdrop';
@@ -460,7 +461,7 @@ function Home() {
       <StatusBar style="light" />
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingTop: withHero ? 0 : insets.top + 60, paddingBottom: TAB_SPACE }}
+        contentContainerStyle={{ paddingTop: withHero ? 0 : insets.top + (IS_AUTO || Platform.isTV ? 60 : 100), paddingBottom: TAB_SPACE }}
         scrollEventThrottle={32}
         onScroll={(e) => setScrolled(e.nativeEvent.contentOffset.y > 40)}
         refreshControl={Platform.isTV ? undefined :
@@ -528,6 +529,8 @@ function Home() {
           lead={settings.chatUrl && settings.jellyfin ? <ProfileRank nonce={nonce} /> : undefined}
           right={<HomeShortcuts onCustomize={() => router.push('/customize')} />}
         />
+        {/* Univers : Films & séries (ici), Livres audio, Livres */}
+        <UniverseSwitch style={{ marginLeft: 16, marginTop: 6 }} />
       </View>
       {/* Message épinglé par l'admin, tant qu'il n'a pas été lu */}
       <AnnouncementPopup />

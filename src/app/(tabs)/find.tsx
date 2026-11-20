@@ -13,7 +13,6 @@ import { C, TAB_SPACE } from '@/constants/theme';
 import { useAudio } from '@/lib/audio-player';
 import { audioApi, type AudioJob, type AudioResult, type AudioSource } from '@/lib/audiobooks';
 import { useSettings } from '@/lib/settings';
-import { IS_AUDIO } from '@/lib/variant';
 
 const gb = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} Go` : n > 0 ? `${Math.round(n / 1e6)} Mo` : '');
 const JOB_LABEL: Record<string, string> = {
@@ -26,7 +25,7 @@ const JOB_LABEL: Record<string, string> = {
 };
 
 export default function FindRoute() {
-  return IS_AUDIO ? <Find /> : null;
+  return <Find />;
 }
 
 function Find() {

@@ -7,6 +7,7 @@ import { FocusPressable as Pressable } from '@/components/tv';
 import { Picker, Toggle } from '@/components/arr-section';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { FolderCard } from '@/components/folder-card';
 import { Button, Field, ScreenTitle, Section, SectionCollapse, SectionGroup } from '@/components/ui';
 import { ADDONS_ENABLED } from '@/constants/features';
 import { C, R, TAB_SPACE } from '@/constants/theme';
@@ -217,6 +218,15 @@ function SettingsScreen() {
                 )
               }
             />
+          </Section>
+        ) : null}
+        {/* Admin : disque des livres audio et des livres (univers Livres audio et Livres) */}
+        {settings.jellyfin?.isAdmin && !Platform.isTV && !IS_AUTO ? (
+          <Section title="Livres et livres audio" id="admin-livres">
+            <View style={{ gap: 18 }}>
+              <FolderCard kind="audio" title="Livres audio sur le serveur" flat />
+              <FolderCard kind="books" title="Livres sur le serveur" flat />
+            </View>
           </Section>
         ) : null}
         {/* TV : profil épuré (serveur, demandes, idées, clés et options téléphone masqués) */}

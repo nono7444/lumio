@@ -74,48 +74,5 @@ if (!beta && existsSync(autoIpa)) {
   });
 }
 
-// Lumio Audio et Lumio Livres : dans la même source quand leur IPA existe
-const EXTRA = [
-  {
-    ipa: 'lumio-audio-unsigned.ipa',
-    name: 'Lumio Audio',
-    id: 'lol.wawanono.lumio.audio',
-    dir: 'audio',
-    tint: '#9B6BFF',
-    subtitle: 'Les livres audio de la maison',
-    about: 'Lumio Audio : bibliothèque de livres audio du serveur Lumio, lecture en arrière-plan, vitesse, minuterie, reprise sur tous les appareils.',
-  },
-  {
-    ipa: 'lumio-livres-unsigned.ipa',
-    name: 'Lumio Livres',
-    id: 'lol.wawanono.lumio.livres',
-    dir: 'books',
-    tint: '#2FD3A8',
-    subtitle: 'Livres, BD et mangas de la maison',
-    about: 'Lumio Livres : bibliothèque de livres, BD et mangas du serveur Lumio, liseuse intégrée (EPUB, BD, PDF), reprise à la bonne page sur tous les appareils.',
-  },
-];
-for (const x of EXTRA) {
-  if (beta || !existsSync(x.ipa)) continue;
-  const size = statSync(x.ipa).size;
-  const url = `https://github.com/${repo}/releases/download/${tag}/${x.ipa}`;
-  source.apps.push({
-    name: x.name,
-    bundleIdentifier: x.id,
-    developerName: 'Norman',
-    subtitle: x.subtitle,
-    localizedDescription: x.about,
-    iconURL: `https://raw.githubusercontent.com/${repo}/main/assets/images/${x.dir}/icon.png`,
-    tintColor: x.tint,
-    category: 'entertainment',
-    version,
-    versionDate: date,
-    downloadURL: url,
-    size,
-    versions: [{ version, buildVersion: version.split('.').pop(), date, size, downloadURL: url, minOSVersion: '16.4', localizedDescription: notes || `Build ${tag}` }],
-    appPermissions: { entitlements: [], privacy: {} },
-  });
-}
-
 writeFileSync(out, JSON.stringify(source, null, 2));
 console.log(`${out} : Lumio ${version} → ${downloadURL} (${size} octets)`);

@@ -6,6 +6,10 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Lumio réunit maintenant trois univers : **Films & séries** (Jellyfin, toujours en premier), **Livres audio** et **Livres** (livres, BD, mangas). Un bouton en haut de l'accueil permet de passer de l'un à l'autre, et les onglets du bas s'adaptent : Livres audio (bibliothèque, Trouver pour l'admin, Profil), Livres (bibliothèque, Trouver pour l'admin, Profil). Le mini-lecteur des livres audio reste visible partout, et la lecture continue en arrière-plan.
+- Les applis séparées Lumio Audio et Lumio Livres ne sont plus mises à jour : tout est dans Lumio. Lumio Auto reste à part pour l'admin.
+- Profil (admin) : « Livres et livres audio » pour voir le disque utilisé et déplacer les dossiers.
+
 ## 1.0.194 — 19 novembre 2026
 
 - Nouveaux logos pour Lumio Auto (éclair, orange), Lumio Audio (casque, violet) et Lumio Livres (livre, vert) : le même « L » en verre et la même bille que Lumio, chacun dans sa couleur.

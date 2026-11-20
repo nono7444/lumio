@@ -19,8 +19,6 @@ const VARIANTS = {
     dir: 'audio',
     bg: '#120A1F',
     local: 'Lumio Audio se connecte à ton serveur Lumio sur ton réseau local.',
-    // Lecture en arrière-plan et sur l'écran verrouillé ; pas de micro
-    plugins: [['expo-audio', { enableBackgroundPlayback: true, recordAudioAndroid: false }]],
   },
   books: {
     name: 'Lumio Livres',

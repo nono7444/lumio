@@ -9,12 +9,14 @@ import { useSettings } from '@/lib/settings';
 import { IS_AUDIO, IS_AUTO, IS_BOOKS } from '@/lib/variant';
 import { AutoAdminOnly } from '@/components/auto-server';
 import { MiniPlayer } from '@/components/audio-ui';
+import { UNIVERSE_TABS, useUniverse } from '@/lib/universe';
 
 // « Qui regarde ? » proposé une fois par ouverture de l'appli (si des profils existent)
 let askedThisLaunch = false;
 
 export default function TabsLayout() {
   const { settings, update } = useSettings();
+  const universe = useUniverse();
 
   useEffect(() => {
     const h = settings.household;
@@ -148,22 +150,30 @@ export default function TabsLayout() {
     );
   }
 
+  // Univers choisi (Films & séries, Livres audio, Livres) : seuls ses onglets sont affichés ; TV : Films & séries
+  const shown = UNIVERSE_TABS[Platform.isTV ? 'media' : universe];
+  const tab = (name: string, href: null | undefined) => (shown.includes(name) ? href : null);
   return (
     <Tabs
-      tabBar={(props) => <FloatingTabBar {...props} />}
+      tabBar={(props) => (
+        <>
+          {Platform.isTV ? null : <MiniPlayer />}
+          <FloatingTabBar {...props} />
+        </>
+      )}
       // TV : menu latéral à gauche (façon Nuvio)
       screenOptions={{
         headerShown: false,
         sceneStyle: { backgroundColor: C.bg },
         tabBarPosition: Platform.isTV ? 'left' : 'bottom',
       }}>
-      <Tabs.Screen name="index" options={{ title: 'Accueil' }} />
-      <Tabs.Screen name="search" options={{ title: 'Recherche' }} />
-      <Tabs.Screen name="library" options={{ title: 'Bibliothèque', href: settings.jellyfin ? undefined : null }} />
-      <Tabs.Screen name="live" options={{ title: 'Live TV' }} />
-      <Tabs.Screen name="calendar" options={{ title: 'Calendrier' }} />
-      <Tabs.Screen name="chat" options={{ title: 'Chat', href: settings.jellyfin ? undefined : null }} />
-      <Tabs.Screen name="activity" options={{ title: 'Demandes' }} />
+      <Tabs.Screen name="index" options={{ title: 'Accueil', href: tab('index', undefined) }} />
+      <Tabs.Screen name="search" options={{ title: 'Recherche', href: tab('search', undefined) }} />
+      <Tabs.Screen name="library" options={{ title: 'Bibliothèque', href: tab('library', settings.jellyfin ? undefined : null) }} />
+      <Tabs.Screen name="live" options={{ title: 'Live TV', href: tab('live', undefined) }} />
+      <Tabs.Screen name="calendar" options={{ title: 'Calendrier', href: tab('calendar', undefined) }} />
+      <Tabs.Screen name="chat" options={{ title: 'Chat', href: tab('chat', settings.jellyfin ? undefined : null) }} />
+      <Tabs.Screen name="activity" options={{ title: 'Demandes', href: tab('activity', undefined) }} />
       {/* Lumio Auto : admin seulement, jamais sur la TV */}
       {/* Lumio Auto est une appli à part (outils d'admin) */}
       <Tabs.Screen name="auto" options={{ title: 'Auto', href: null }} />
@@ -171,12 +181,12 @@ export default function TabsLayout() {
       <Tabs.Screen name="disks" options={{ href: null }} />
       <Tabs.Screen name="server" options={{ href: null }} />
       <Tabs.Screen name="playing" options={{ href: null }} />
-      <Tabs.Screen name="watchlist" options={{ title: 'À voir', href: Platform.isTV ? null : undefined }} />
-      <Tabs.Screen name="settings" options={{ title: 'Profil' }} />
-      <Tabs.Screen name="listen" options={{ href: null }} />
-      <Tabs.Screen name="shelf" options={{ href: null }} />
-      <Tabs.Screen name="findbook" options={{ href: null }} />
-      <Tabs.Screen name="find" options={{ href: null }} />
+      <Tabs.Screen name="watchlist" options={{ title: 'À voir', href: tab('watchlist', Platform.isTV ? null : undefined) }} />
+      <Tabs.Screen name="settings" options={{ title: 'Profil', href: tab('settings', undefined) }} />
+      <Tabs.Screen name="listen" options={{ title: 'Livres audio', href: tab('listen', undefined) }} />
+      <Tabs.Screen name="shelf" options={{ title: 'Livres', href: tab('shelf', undefined) }} />
+      <Tabs.Screen name="findbook" options={{ title: 'Trouver', href: tab('findbook', settings.jellyfin?.isAdmin ? undefined : null) }} />
+      <Tabs.Screen name="find" options={{ title: 'Trouver', href: tab('find', settings.jellyfin?.isAdmin ? undefined : null) }} />
       <Tabs.Screen name="me" options={{ href: null }} />
     </Tabs>
   );

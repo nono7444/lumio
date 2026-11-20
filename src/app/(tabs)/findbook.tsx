@@ -11,7 +11,6 @@ import { ScreenTitle, SegChip, tap } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
 import { ebookApi, loadEbooks, type EbookJob, type EbookKind, type EbookResult, type EbookSource } from '@/lib/ebooks';
 import { useSettings } from '@/lib/settings';
-import { IS_BOOKS } from '@/lib/variant';
 
 const gb = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} Go` : n > 0 ? `${Math.round(n / 1e6)} Mo` : '');
 const JOB_LABEL: Record<string, string> = {
@@ -30,7 +29,7 @@ const KINDS: { id: EbookKind; label: string }[] = [
 ];
 
 export default function FindBookRoute() {
-  return IS_BOOKS ? <Find /> : null;
+  return <Find />;
 }
 
 function Find() {

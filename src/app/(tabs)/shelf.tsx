@@ -8,11 +8,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BookCover, ReadBar } from '@/components/ebook-ui';
 import { FocusPressable as Pressable } from '@/components/tv';
+import { UniverseSwitch } from '@/components/universe-switch';
 import { ScreenTitle, SegChip, tap } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
 import { groupSeries, rememberSeries, useEbooks, type Ebook, type Series } from '@/lib/ebooks';
 import { useSettings } from '@/lib/settings';
-import { IS_BOOKS } from '@/lib/variant';
 
 type Sort = 'recent' | 'title' | 'author';
 type Filter = 'all' | 'progress' | 'new' | 'done';
@@ -22,7 +22,7 @@ const open = (b: Ebook) => (tap(), router.push({ pathname: '/ebook/[id]', params
 const read = (b: Ebook) => (tap(), router.push({ pathname: '/reader', params: { id: b.id } }));
 
 export default function ShelfRoute() {
-  return IS_BOOKS ? <Shelf /> : null;
+  return <Shelf />;
 }
 
 function Shelf() {
@@ -85,7 +85,8 @@ function Shelf() {
       <ScrollView
         contentContainerStyle={{ paddingBottom: TAB_SPACE }}
         refreshControl={<RefreshControl refreshing={loading && !!lib} onRefresh={reload} tintColor={C.text} />}>
-        <ScreenTitle title="Bibliothèque" />
+        <UniverseSwitch style={{ marginLeft: 16, marginTop: 8 }} />
+        <ScreenTitle title="Livres" />
         {!settings.chatUrl ? (
           <Empty icon="cloud-offline-outline" text="Serveur Lumio non configuré (Profil)." />
         ) : !lib && libErr ? (

@@ -7,12 +7,12 @@ import { FocusPressable as Pressable } from '@/components/tv';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { bookProgress, Cover, ProgressLine, useAudioLibrary } from '@/components/audio-ui';
+import { UniverseSwitch } from '@/components/universe-switch';
 import { ScreenTitle, SegChip, tap } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
 import { playBook, useAudio } from '@/lib/audio-player';
 import { type AudioBook } from '@/lib/audiobooks';
 import { useSettings } from '@/lib/settings';
-import { IS_AUDIO } from '@/lib/variant';
 
 type Sort = 'recent' | 'title' | 'author';
 type Filter = 'all' | 'progress' | 'new' | 'done';
@@ -20,7 +20,7 @@ type Filter = 'all' | 'progress' | 'new' | 'done';
 const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
 export default function ListenRoute() {
-  return IS_AUDIO ? <Listen /> : null;
+  return <Listen />;
 }
 
 function Listen() {
@@ -64,7 +64,8 @@ function Listen() {
       <ScrollView
         contentContainerStyle={{ paddingBottom: TAB_SPACE + (a.book ? 70 : 0) }}
         refreshControl={<RefreshControl refreshing={loading && !!lib} onRefresh={() => reload(true)} tintColor={C.text} />}>
-        <ScreenTitle title="Bibliothèque" />
+        <UniverseSwitch style={{ marginLeft: 16, marginTop: 8 }} />
+        <ScreenTitle title="Livres audio" />
         {!settings.chatUrl ? (
           <Empty icon="cloud-offline-outline" text="Serveur Lumio non configuré (Profil)." />
         ) : !lib && libErr ? (

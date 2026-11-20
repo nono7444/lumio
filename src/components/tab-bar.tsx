@@ -19,6 +19,7 @@ import { useSeason } from '@/lib/seasons';
 import { useAppUpdate } from '@/lib/app-update';
 import { useSettings } from '@/lib/settings';
 import { IS_AUDIO, IS_AUTO, IS_BOOKS } from '@/lib/variant';
+import { useUniverse } from '@/lib/universe';
 
 type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>>[0];
 
@@ -63,7 +64,7 @@ const SHORT: Record<string, string> = {
   server: 'Serveur',
   playing: 'Lecture',
   settings: IS_AUTO ? 'Réglages' : 'Profil',
-  listen: 'Livres',
+  listen: IS_AUDIO ? 'Livres' : 'Audio',
   find: 'Trouver',
   shelf: 'Livres',
   findbook: 'Trouver',
@@ -103,6 +104,7 @@ function PhoneTabBar({ state, descriptors, navigation }: TabBarProps) {
   const pending = usePendingRequests();
   const update = useAppUpdate();
   const initial = (settings.jellyfin?.userName ?? 'L').slice(0, 1).toUpperCase();
+  const universe = useUniverse();
 
   // Onglets cachés (href: null) : expo-router les transforme en tabBarItemStyle { display: 'none' }
   const visible = state.routes.filter((r) => {
@@ -113,7 +115,7 @@ function PhoneTabBar({ state, descriptors, navigation }: TabBarProps) {
   const order = orderTabs(
     visible.map((r) => r.name),
     // Lumio Auto : onglets fixes, dans l'ordre du code
-    IS_AUTO || IS_AUDIO || IS_BOOKS ? [] : settings.tabsLayout
+    IS_AUTO || IS_AUDIO || IS_BOOKS || universe !== 'media' ? [] : settings.tabsLayout
   );
   // TV : expérience épurée, seulement Accueil, Bibliothèque, Recherche, Demandes (et le profil)
   const TV_TABS = ['index', 'library', 'search', 'activity', 'settings'];
