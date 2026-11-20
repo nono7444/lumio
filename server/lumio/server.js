@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.122.2';
+const VERSION = '3.123.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3695,6 +3695,7 @@ async function runDownload(job) {
       const rel = String(u.rel || 'fichier').replace(/\.\.+/g, '_');
       job.current = path.basename(rel);
       await downloadTo(u.url, path.join(full, rel), job);
+      (job.written = job.written || []).push(path.join(full, rel));
     }
     if (job.cancelled) {
       job.status = 'cancelled';
@@ -4134,6 +4135,122 @@ function bookMigrate(file) {
   return id;
 }
 
+// ——— Rangement du dossier « Livres » : tout ce que la liseuse ne sait pas ouvrir devient un CBZ / un fichier lisible ———
+// • .rar / .7z / .zip qui contiennent des livres (pack « Tomes 01-04 ») : décompressés dans un dossier à leur nom ;
+// • .cbr (BD en RAR) : converties en .cbz ;
+// • dossier rempli d'images (un tome en pages) : regroupé en un .cbz.
+let bookTidyRunning = false;
+let bookTidyAt = 0;
+const BOOK_ARCHIVE = /\.(rar|7z|zip|cbr)$/i;
+async function listFiles(dir, depth = 0, out = []) {
+  if (depth > 6) return out;
+  for (const e of await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    if (e.name.startsWith('.')) continue;
+    const f = path.join(dir, e.name);
+    if (e.isDirectory()) await listFiles(f, depth + 1, out);
+    else out.push(f);
+  }
+  return out;
+}
+/** Un .zip est une BD (images) ou un paquet de livres ? */
+async function zipHoldsBooks(file) {
+  try {
+    const names = (await zipEntries(file)).map((e) => e.name);
+    return names.some((n) => /\.(cbz|cbr|epub|pdf|rar|zip)$/i.test(n)) || !names.some(isImage);
+  } catch {
+    return true; // illisible comme ZIP : on laisse bsdtar essayer
+  }
+}
+async function packCbz(srcDir, out) {
+  // Noms sans « ./ » devant (sinon les pages passent pour des fichiers cachés)
+  const names = (await listFiles(srcDir)).map((f) => path.relative(srcDir, f)).filter((n) => isImage(n)).sort(natural);
+  if (!names.length) throw new Error('aucune image');
+  await run('bsdtar', ['--format', 'zip', '--options', 'zip:compression=store', '-cf', `${out}.tmp`, '-C', srcDir, ...names], { timeout: 30 * 60_000 });
+  await fs.promises.rename(`${out}.tmp`, out);
+}
+async function bookTidy(force) {
+  if (bookTidyRunning || (!force && Date.now() - bookTidyAt < 10 * 60e3)) return;
+  const d = booksDir();
+  if (!d) return;
+  bookTidyRunning = true;
+  bookTidyAt = Date.now();
+  try {
+    const { full } = safePath(d.root, d.folder);
+    // 1. Archives de livres → dossier
+    for (let pass = 0; pass < 3; pass++) {
+      let changed = false;
+      for (const f of await listFiles(full)) {
+        const name = path.basename(f);
+        if (!/\.(rar|7z|zip)$/i.test(name) || name.endsWith('.part')) continue;
+        const part = name.match(/\.part(\d+)\.rar$/i);
+        if (part && Number(part[1]) !== 1) continue;
+        if (/\.zip$/i.test(name) && !(await zipHoldsBooks(f))) continue; // BD en .zip : lisible telle quelle
+        const out = path.join(path.dirname(f), name.replace(/(\.part\d+)?\.(rar|7z|zip)$/i, ''));
+        try {
+          await fs.promises.mkdir(out, { recursive: true });
+          await run('bsdtar', ['-xf', f, '-C', out], { timeout: 60 * 60_000 });
+          await fs.promises.unlink(f).catch(() => {});
+          if (part) for (const n of await fs.promises.readdir(path.dirname(f)).catch(() => [])) if (/\.part\d+\.rar$/i.test(n) && n.startsWith(name.replace(/\.part\d+\.rar$/i, ''))) await fs.promises.unlink(path.join(path.dirname(f), n)).catch(() => {});
+          changed = true;
+          console.log(`Livres : ${name} décompressé`);
+        } catch (e) {
+          console.log(`Livres : ${name} pas décompressé (${e.message})`);
+        }
+      }
+      if (!changed) break;
+    }
+    // 2. .cbr → .cbz
+    for (const f of await listFiles(full)) {
+      if (!/\.cbr$/i.test(f)) continue;
+      const tmp = `${f}.lumio-tmp`;
+      try {
+        // Certains .cbr sont en fait des ZIP : il suffit de les renommer
+        let isZip = false;
+        try {
+          isZip = (await zipEntries(f)).some((e) => isImage(e.name));
+        } catch {}
+        const out = f.replace(/\.cbr$/i, '.cbz');
+        if (isZip) await fs.promises.rename(f, out);
+        else {
+          await fs.promises.mkdir(tmp, { recursive: true });
+          await run('bsdtar', ['-xf', f, '-C', tmp], { timeout: 30 * 60_000 });
+          await packCbz(tmp, out);
+          await fs.promises.unlink(f).catch(() => {});
+        }
+        console.log(`Livres : ${path.basename(f)} converti en CBZ`);
+      } catch (e) {
+        console.log(`Livres : ${path.basename(f)} pas converti (${e.message})`);
+      } finally {
+        await fs.promises.rm(tmp, { recursive: true, force: true }).catch(() => {});
+      }
+    }
+    // 3. Dossier de pages (au moins 8 images, aucun autre livre dedans) → un .cbz du même nom
+    const dirs = new Map();
+    for (const f of await listFiles(full)) {
+      const dir = path.dirname(f);
+      if (dir === full) continue;
+      const e = dirs.get(dir) || { img: 0, other: 0 };
+      if (isImage(path.basename(f))) e.img++;
+      else if (BOOK_EXT[path.extname(f).toLowerCase()]) e.other++;
+      dirs.set(dir, e);
+    }
+    for (const [dir, e] of dirs) {
+      if (e.img < 8 || e.other) continue;
+      const kids = await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => []);
+      if (kids.some((k) => k.isDirectory())) continue;
+      try {
+        await packCbz(dir, `${dir}.cbz`);
+        await fs.promises.rm(dir, { recursive: true, force: true });
+        console.log(`Livres : ${path.basename(dir)} regroupé en CBZ`);
+      } catch (err) {
+        console.log(`Livres : ${path.basename(dir)} pas regroupé (${err.message})`);
+      }
+    }
+  } finally {
+    bookTidyRunning = false;
+  }
+}
+
 async function bookLibrary() {
   const dir = booksDir();
   if (!dir) return { dir: null, books: [] };
@@ -4566,7 +4683,10 @@ async function bookRoutes(req, res, p, q, user) {
     const job = { id: crypto.randomBytes(5).toString('hex'), link, root: dir.root, folder: dir.folder, status: 'queued', book: true, quiet: true,
       name, size: 0, done: 0, speed: 0, token: null, createdAt: new Date().toISOString(), by: user.name };
     downloads.push(job);
-    runDownload(job);
+    // Packs (.rar, .zip de plusieurs tomes), BD en .cbr ou en dossiers d'images : rangés en CBZ lisibles
+    runDownload(job)
+      .then(() => bookTidy(true))
+      .catch(() => {});
     send(res, 201, { job: publicJob(job) });
     return true;
   }
@@ -4587,6 +4707,7 @@ async function bookRoutes(req, res, p, q, user) {
     return true;
   }
   if (req.method === 'GET' && p === '/api/books/library') {
+    bookTidy(false).catch(() => {});
     const lib = await bookLibrary();
     const mine = booksState.progress[user.name] || {};
     for (const b of lib.books) b.progress = mine[b.id] || null;
