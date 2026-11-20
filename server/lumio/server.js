@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.123.0';
+const VERSION = '3.124.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4141,13 +4141,14 @@ function bookMigrate(file) {
 // • dossier rempli d'images (un tome en pages) : regroupé en un .cbz.
 let bookTidyRunning = false;
 let bookTidyAt = 0;
+const bookTidyFailed = new Set();
 const BOOK_ARCHIVE = /\.(rar|7z|zip|cbr)$/i;
-async function listFiles(dir, depth = 0, out = []) {
+async function walkFiles(dir, depth = 0, out = []) {
   if (depth > 6) return out;
   for (const e of await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => [])) {
     if (e.name.startsWith('.')) continue;
     const f = path.join(dir, e.name);
-    if (e.isDirectory()) await listFiles(f, depth + 1, out);
+    if (e.isDirectory()) await walkFiles(f, depth + 1, out);
     else out.push(f);
   }
   return out;
@@ -4163,7 +4164,7 @@ async function zipHoldsBooks(file) {
 }
 async function packCbz(srcDir, out) {
   // Noms sans « ./ » devant (sinon les pages passent pour des fichiers cachés)
-  const names = (await listFiles(srcDir)).map((f) => path.relative(srcDir, f)).filter((n) => isImage(n)).sort(natural);
+  const names = (await walkFiles(srcDir)).map((f) => path.relative(srcDir, f)).filter((n) => isImage(n)).sort(natural);
   if (!names.length) throw new Error('aucune image');
   await run('bsdtar', ['--format', 'zip', '--options', 'zip:compression=store', '-cf', `${out}.tmp`, '-C', srcDir, ...names], { timeout: 30 * 60_000 });
   await fs.promises.rename(`${out}.tmp`, out);
@@ -4176,12 +4177,27 @@ async function bookTidy(force) {
   bookTidyAt = Date.now();
   try {
     const { full } = safePath(d.root, d.folder);
+    // 0. Fichier sans la bonne extension (nom tronqué par l'hébergeur) : RAR / ZIP / 7z reconnus à leurs premiers octets
+    for (const f of await walkFiles(full)) {
+      const ext = path.extname(f).toLowerCase();
+      if (BOOK_EXT[ext] || /\.(rar|7z|zip|jpe?g|png|webp|gif|txt|nfo|url|part|lumio-part|tmp)$/i.test(f)) continue;
+      try {
+        const fh = await fs.promises.open(f, 'r');
+        const { buffer } = await fh.read(Buffer.alloc(8), 0, 8, 0);
+        await fh.close();
+        const kind = buffer.slice(0, 4).toString('latin1') === 'Rar!' ? '.rar' : buffer[0] === 0x50 && buffer[1] === 0x4b ? '.zip' : buffer[0] === 0x37 && buffer[1] === 0x7a && buffer[2] === 0xbc ? '.7z' : buffer.slice(0, 4).toString('latin1') === '%PDF' ? '.pdf' : null;
+        if (kind) {
+          await fs.promises.rename(f, `${f}${kind}`);
+          console.log(`Livres : ${path.basename(f)} reconnu comme ${kind}`);
+        }
+      } catch {}
+    }
     // 1. Archives de livres → dossier
     for (let pass = 0; pass < 3; pass++) {
       let changed = false;
-      for (const f of await listFiles(full)) {
+      for (const f of await walkFiles(full)) {
         const name = path.basename(f);
-        if (!/\.(rar|7z|zip)$/i.test(name) || name.endsWith('.part')) continue;
+        if (!/\.(rar|7z|zip)$/i.test(name) || name.endsWith('.part') || bookTidyFailed.has(f)) continue;
         const part = name.match(/\.part(\d+)\.rar$/i);
         if (part && Number(part[1]) !== 1) continue;
         if (/\.zip$/i.test(name) && !(await zipHoldsBooks(f))) continue; // BD en .zip : lisible telle quelle
@@ -4194,13 +4210,16 @@ async function bookTidy(force) {
           changed = true;
           console.log(`Livres : ${name} décompressé`);
         } catch (e) {
+          // Archive abîmée ou protégée par mot de passe : pas de dossier vide, et on ne réessaie pas à chaque fois
+          await fs.promises.rmdir(out).catch(() => {});
+          bookTidyFailed.add(f);
           console.log(`Livres : ${name} pas décompressé (${e.message})`);
         }
       }
       if (!changed) break;
     }
     // 2. .cbr → .cbz
-    for (const f of await listFiles(full)) {
+    for (const f of await walkFiles(full)) {
       if (!/\.cbr$/i.test(f)) continue;
       const tmp = `${f}.lumio-tmp`;
       try {
@@ -4226,7 +4245,7 @@ async function bookTidy(force) {
     }
     // 3. Dossier de pages (au moins 8 images, aucun autre livre dedans) → un .cbz du même nom
     const dirs = new Map();
-    for (const f of await listFiles(full)) {
+    for (const f of await walkFiles(full)) {
       const dir = path.dirname(f);
       if (dir === full) continue;
       const e = dirs.get(dir) || { img: 0, other: 0 };
@@ -4517,9 +4536,11 @@ async function dirSize(dir) {
 }
 async function folderInfo(kind) {
   const dir = kind === 'audio' ? audioDir() : booksDir();
+  const mv = folderMoves[kind];
   let size = null;
-  if (dir) size = await dirSize(safePath(dir.root, dir.folder).full).catch(() => null);
-  return { dir, size, disks: await Promise.all(disks().map(diskInfo)), move: folderMoves[kind] };
+  // Pendant un déplacement (suivi toutes les 2 s) on ne recompte pas tout le dossier
+  if (dir && !(mv && mv.status === 'running')) size = await dirSize(safePath(dir.root, dir.folder).full).catch(() => null);
+  return { dir, size, disks: await Promise.all(disks().map(diskInfo)), move: mv ? { ...mv, pct: mv.size ? Math.min(100, Math.round((mv.done / mv.size) * 100)) : 100 } : null };
 }
 /** Déplace « Livres audio » ou « Livres » vers un autre disque, puis le réglage suit. */
 async function folderMove(kind, root) {
@@ -4531,27 +4552,48 @@ async function folderMove(kind, root) {
   const busy = kind === 'audio' ? audioJobs.some((j) => !['done', 'error'].includes(j.status)) : downloads.some((j) => j.book && ['queued', 'debrid', 'downloading'].includes(j.status));
   if (busy) throw new HttpError(409, 'Des téléchargements sont en cours : attends qu’ils soient finis');
   // Jamais tout un disque : seulement un dossier « Livres » / « Livres audio »
-  if (!cur.folder) throw new HttpError(400, 'Le dossier est la racine du disque : choisis d’abord un dossier dans les réglages');
+  if (!cur.folder) throw new HttpError(400, `Les ${kind === 'audio' ? 'livres audio' : 'livres'} sont à la racine du disque ${cur.root} : déplacement refusé pour ne pas tout emporter`);
   const folder = cur.folder;
   const from = safePath(cur.root, cur.folder).full;
   const to = safePath(root, folder).full;
   const size = await dirSize(from);
   const free = (await diskInfo(disks().find((d) => d.name === root))).free;
   if (free != null && free < size + 1e9) throw new HttpError(400, `Pas assez de place sur ${root} (${Math.round(size / 1e9)} Go à déplacer)`);
-  const job = (folderMoves[kind] = { status: 'running', from: cur.root, to: root, size, startedAt: new Date().toISOString(), error: null });
+  const job = (folderMoves[kind] = { status: 'running', from: cur.root, to: root, size, done: 0, current: null, startedAt: new Date().toISOString(), error: null });
   (async () => {
     try {
       await fs.promises.mkdir(to, { recursive: true });
       if (fs.existsSync(from)) {
-        const same = (await fs.promises.stat(from)).dev === (await fs.promises.stat(to)).dev;
-        if (same) {
-          for (const e of await fs.promises.readdir(from)) await fs.promises.rename(path.join(from, e), path.join(to, e));
-        } else {
-          // Copie complète d'abord (cp -a garde dates et droits), puis effacement de l'ancien dossier
-          await run('cp', ['-a', `${from}/.`, to], { timeout: 24 * 3600e3 });
+        // Fichier par fichier, avec le nombre d'octets copiés (pourcentage dans l'appli). Même disque : simple
+        // renommage ; disques différents (ou montages Docker différents, erreur EXDEV) : copie puis effacement.
+        for (const f of await walkFiles(from, 0)) {
+          const rel = path.relative(from, f);
+          const dst = path.join(to, rel);
+          job.current = rel;
+          await fs.promises.mkdir(path.dirname(dst), { recursive: true });
+          const st = await fs.promises.stat(f);
+          try {
+            await fs.promises.rename(f, dst);
+            job.done += st.size;
+          } catch (e) {
+            if (e.code !== 'EXDEV') throw e;
+            await new Promise((resolve, reject) => {
+              const rs = fs.createReadStream(f);
+              const ws = fs.createWriteStream(`${dst}.lumio-part`);
+              rs.on('data', (c) => (job.done += c.length));
+              rs.on('error', reject);
+              ws.on('error', reject);
+              ws.on('finish', resolve);
+              rs.pipe(ws);
+            });
+            await fs.promises.rename(`${dst}.lumio-part`, dst);
+            await fs.promises.utimes(dst, st.atime, st.mtime).catch(() => {});
+            await fs.promises.unlink(f);
+          }
         }
         await fs.promises.rm(from, { recursive: true, force: true });
       }
+      job.current = null;
       if (kind === 'audio') {
         config.audio = { root, folder };
         audioLibCache = null;
@@ -4713,6 +4755,19 @@ async function bookRoutes(req, res, p, q, user) {
     for (const b of lib.books) b.progress = mine[b.id] || null;
     lib.admin = Boolean(user.admin);
     lib.downloading = downloads.filter((j) => j.book && ['queued', 'debrid', 'downloading'].includes(j.status)).length;
+    lib.tidying = bookTidyRunning;
+    // Admin : fichiers du dossier que la liseuse ne sait pas ouvrir (pour comprendre un livre qui n'apparaît pas)
+    if (user.admin && lib.dir) {
+      const { full } = safePath(lib.dir.root, lib.dir.folder);
+      const odd = [];
+      for (const f of await walkFiles(full).catch(() => [])) {
+        if (BOOK_EXT[path.extname(f).toLowerCase()] || isImage(path.basename(f))) continue;
+        const st = await fs.promises.stat(f).catch(() => null);
+        if (st && st.size > 200e3) odd.push({ name: path.relative(full, f), size: st.size });
+        if (odd.length >= 30) break;
+      }
+      lib.unread = odd;
+    }
     send(res, 200, lib);
     return true;
   }

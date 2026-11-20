@@ -8,7 +8,7 @@ import { C } from '@/constants/theme';
 import { folderApi, type FolderInfo } from '@/lib/ebooks';
 import { useSettings } from '@/lib/settings';
 
-const go = (n: number | null) => (n == null ? '?' : n >= 1e12 ? `${(n / 1e12).toFixed(1)} To` : `${Math.round(n / 1e9)} Go`);
+const go = (n: number | null) => (n == null ? '?' : n >= 1e12 ? `${(n / 1e12).toFixed(1)} To` : n >= 1e9 ? `${(n / 1e9).toFixed(1)} Go` : `${Math.round(n / 1e6)} Mo`);
 /** Admin : sur quel disque du serveur sont rangés les livres, et déplacement vers un autre disque. */
 export function FolderCard({ kind, onMoved, title, flat }: { kind: 'audio' | 'books'; onMoved?: () => void; title?: string; flat?: boolean }) {
   const { settings } = useSettings();
@@ -35,7 +35,7 @@ export function FolderCard({ kind, onMoved, title, flat }: { kind: 'audio' | 'bo
   // Déplacement en cours : on suit toutes les 5 s
   useEffect(() => {
     if (info?.move?.status !== 'running') return;
-    const t = setInterval(load, 5000);
+    const t = setInterval(load, 2000);
     return () => clearInterval(t);
   }, [info?.move?.status, load]);
 
@@ -68,11 +68,21 @@ export function FolderCard({ kind, onMoved, title, flat }: { kind: 'audio' | 'bo
         </Text>
       ) : null}
       {m?.status === 'running' ? (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <ActivityIndicator color={C.text} />
-          <Text style={styles.s}>
-            Déplacement vers {m.to} en cours ({go(m.size)})… Les {label} reviennent dès que c'est fini.
-          </Text>
+        <View style={{ gap: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <ActivityIndicator color={C.text} />
+            <Text style={[styles.s, { flex: 1 }]}>
+              Déplacement vers {m.to} : {m.pct ?? 0} % · {go(m.done ?? 0)} / {go(m.size)}
+            </Text>
+          </View>
+          <View style={styles.bar}>
+            <View style={[styles.barFill, { width: `${Math.max(2, m.pct ?? 0)}%` }]} />
+          </View>
+          {m.current ? (
+            <Text numberOfLines={1} style={styles.s}>
+              {m.current}
+            </Text>
+          ) : null}
         </View>
       ) : m?.status === 'error' ? (
         <Text style={[styles.s, { color: C.danger }]}>Déplacement vers {m.to} échoué : {m.error}</Text>
@@ -102,5 +112,7 @@ const styles = StyleSheet.create({
   card: { marginHorizontal: 16, marginBottom: 14, padding: 16, borderRadius: 18, backgroundColor: C.surface, gap: 12 },
   h: { color: C.text, fontSize: 16, fontWeight: '800' },
   s: { color: C.textDim, fontSize: 13, lineHeight: 18 },
+  bar: { height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.15)', overflow: 'hidden' },
+  barFill: { height: '100%', backgroundColor: C.success },
   disk: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 12, backgroundColor: C.surfaceHigh },
 });

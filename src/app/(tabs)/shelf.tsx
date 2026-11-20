@@ -11,7 +11,7 @@ import { FocusPressable as Pressable } from '@/components/tv';
 import { UniverseSwitch } from '@/components/universe-switch';
 import { ScreenTitle, SegChip, tap } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
-import { groupSeries, rememberSeries, useEbooks, type Ebook, type Series } from '@/lib/ebooks';
+import { groupSeries, mo, rememberSeries, useEbooks, type Ebook, type Series } from '@/lib/ebooks';
 import { useSettings } from '@/lib/settings';
 
 type Sort = 'recent' | 'title' | 'author';
@@ -162,6 +162,20 @@ function Shelf() {
               )}
             </View>
             {!shown.length ? <Empty icon="filter-outline" text="Aucun livre ne correspond." /> : null}
+            {lib.tidying ? (
+              <Text style={[styles.s, { textAlign: 'center', marginTop: 18 }]}>Rangement des derniers téléchargements (packs, BD)… tire vers le bas dans un moment.</Text>
+            ) : null}
+            {lib.admin && lib.unread?.length ? (
+              <View style={styles.unread}>
+                <Text style={styles.t}>Fichiers que la liseuse ne sait pas ouvrir</Text>
+                <Text style={styles.s}>Ils sont dans le dossier « {lib.dir?.folder} » mais ne sont ni EPUB, ni PDF, ni CBZ (archive protégée par mot de passe, format inconnu…).</Text>
+                {lib.unread.map((u) => (
+                  <Text key={u.name} numberOfLines={2} style={styles.s}>
+                    • {u.name} · {mo(u.size)}
+                  </Text>
+                ))}
+              </View>
+            ) : null}
             {lib.downloading ? (
               <Text style={[styles.s, { textAlign: 'center', marginTop: 18 }]}>
                 {lib.downloading} livre{lib.downloading > 1 ? 's' : ''} en cours de téléchargement…
@@ -244,6 +258,7 @@ const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16 },
   chips: { paddingHorizontal: 16, gap: 8, paddingBottom: 12 },
   done: { position: 'absolute', right: 6, top: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: C.success, alignItems: 'center', justifyContent: 'center' },
+  unread: { margin: 16, marginTop: 20, padding: 14, borderRadius: 14, backgroundColor: C.surface, gap: 6 },
   stack: { position: 'absolute', borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.14)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.2)' },
   count: { position: 'absolute', right: 12, bottom: 6, flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, height: 22, borderRadius: 11, backgroundColor: '#fff' },
   countText: { color: '#000', fontWeight: '800', fontSize: 12 },

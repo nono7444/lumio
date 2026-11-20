@@ -20,7 +20,16 @@ export type Ebook = {
   token: string;
   progress: BookProgress | null;
 };
-export type EbookLibrary = { books: Ebook[]; dir: { root: string; folder: string } | null; admin: boolean; downloading: number };
+export type EbookLibrary = {
+  books: Ebook[];
+  dir: { root: string; folder: string } | null;
+  admin: boolean;
+  downloading: number;
+  /** Rangement en cours (packs décompressés, CBR convertis) */
+  tidying?: boolean;
+  /** Admin : fichiers du dossier que la liseuse ne sait pas ouvrir */
+  unread?: { name: string; size: number }[];
+};
 export type EbookKind = 'livres' | 'bd' | 'mangas' | 'comics';
 export type EbookResult = {
   id: string;
@@ -193,7 +202,7 @@ export type FolderInfo = {
   dir: { root: string; folder: string } | null;
   size: number | null;
   disks: FolderDisk[];
-  move: { status: 'running' | 'done' | 'error'; from: string; to: string; size: number; error: string | null } | null;
+  move: { status: 'running' | 'done' | 'error'; from: string; to: string; size: number; done?: number; pct?: number; current?: string | null; error: string | null } | null;
 };
 export const folderApi = {
   get: (s: Settings, kind: 'audio' | 'books') => serverCall<FolderInfo>(s, `/api/${kind}/folder`),
