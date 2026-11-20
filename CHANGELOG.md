@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.197 — 20 novembre 2026
+
 - Lumio Auto, Seed : les torrents ajoutés depuis « Torrents qui peuvent rapporter » (ou « Ajouter un torrent ») apparaissent maintenant dans « En partage », marqués « Partage seul », avec l'avancement pendant le téléchargement puis le ratio. Ils ne sont plus retirés au bout de 72 h.
 
 ## 1.0.196 — 20 novembre 2026
