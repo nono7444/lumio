@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.124.1';
+const VERSION = '3.125.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3662,7 +3662,8 @@ async function runDownload(job) {
       job.via = 'torbox';
       files = await torboxFiles(job.link.slice(5), job);
     } else {
-      files = [{ rel: null, link: job.link }];
+      // Plusieurs liens (pack Wawacity, archive en plusieurs parties) : tous téléchargés dans le même dossier
+      files = (job.links && job.links.length ? job.links : [job.link]).map((link) => ({ rel: null, link }));
     }
     // Fichier pris dans le cache pour un torrent du site : mêmes chemins que dans le torrent (qBittorrent le retrouvera)
     if (job.layout) {
@@ -3902,6 +3903,42 @@ async function wawaLinks(id) {
     out.push({ host: cells[1], url });
   }
   return out;
+}
+
+/** Tous les liens d'un hébergeur (une fiche « pack » ou une archive en plusieurs parties a plusieurs lignes, et un
+ *  lien protégé peut cacher plusieurs fichiers) : on garde le 1er hébergeur dont tous les liens s'ouvrent. */
+async function wawaResolveAll(id) {
+  const links = await wawaLinks(id);
+  if (!links.length) throw new HttpError(422, 'Cette fiche Wawacity ne donne aucun lien');
+  const byHost = new Map();
+  for (const l of links) byHost.set(l.host, [...(byHost.get(l.host) || []), l]);
+  for (const [, rows] of byHost) {
+    const got = [];
+    let ok = true;
+    for (const l of rows) {
+      let done = false;
+      for (let i = 0; i < 3 && !done; i++) {
+        try {
+          const d = await ad('/v4/link/redirector', { link: l.url });
+          const hosts = (d.links || []).filter((x) => /^https?:\/\//.test(x));
+          if (hosts.length) {
+            for (const h of hosts) if (!got.includes(h)) got.push(h);
+            done = true;
+          } else break;
+        } catch (e) {
+          if (!/REDIRECTOR_ERROR|TEMPORARY|UNAVAILABLE/i.test(String(e.message))) break;
+          await sleep(3000);
+        }
+      }
+      if (!done) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok && got.length) return got;
+  }
+  // Aucun hébergeur complet : au moins un lien (ancien comportement)
+  return [await wawaResolve(id)];
 }
 
 async function wawaResolve(id) {
@@ -4234,7 +4271,15 @@ async function bookTidy(force) {
         const out = path.join(path.dirname(f), name.replace(/(\.part\d+)?\.(rar|7z|zip)$/i, ''));
         try {
           await fs.promises.mkdir(out, { recursive: true });
-          await run('bsdtar', ['-xf', f, '-C', out], { timeout: 60 * 60_000 });
+          // RAR (surtout en plusieurs parties) : unrar d'abord, il suit les .part2, .part3… ; sinon bsdtar
+          let okRar = false;
+          if (/\.rar$/i.test(name)) {
+            try {
+              await run('unrar', ['x', '-o+', '-y', '-p-', f, `${out}${path.sep}`], { timeout: 60 * 60_000 });
+              okRar = true;
+            } catch {}
+          }
+          if (!okRar) await run('bsdtar', ['-xf', f, '-C', out], { timeout: 60 * 60_000 });
           await fs.promises.unlink(f).catch(() => {});
           if (part) for (const n of await fs.promises.readdir(path.dirname(f)).catch(() => [])) if (/\.part\d+\.rar$/i.test(n) && n.startsWith(name.replace(/\.part\d+\.rar$/i, ''))) await fs.promises.unlink(path.join(path.dirname(f), n)).catch(() => {});
           changed = true;
@@ -4740,6 +4785,7 @@ async function bookRoutes(req, res, p, q, user) {
     const dir = booksDir();
     if (!dir) throw new HttpError(503, 'Aucun disque n’est relié au serveur Lumio');
     let link;
+    let links = null;
     let name = found.title;
     if (found.kind === 'torrent') {
       const r = await siteFetch(found.link, { headers: { 'User-Agent': 'Lumio' }, timeout: 30000 });
@@ -4750,9 +4796,10 @@ async function bookRoutes(req, res, p, q, user) {
       link = `adid:${up.id}`;
       name = up.name || name;
     } else {
-      link = await wawaResolve(found.link);
+      links = await wawaResolveAll(found.link);
+      link = links[0];
     }
-    const job = { id: crypto.randomBytes(5).toString('hex'), link, root: dir.root, folder: dir.folder, status: 'queued', book: true, quiet: true,
+    const job = { id: crypto.randomBytes(5).toString('hex'), link, links, root: dir.root, folder: dir.folder, status: 'queued', book: true, quiet: true,
       name, size: 0, done: 0, speed: 0, token: null, createdAt: new Date().toISOString(), by: user.name };
     downloads.push(job);
     // Packs (.rar, .zip de plusieurs tomes), BD en .cbr ou en dossiers d'images : rangés en CBZ lisibles
@@ -5184,7 +5231,14 @@ async function audioAfterDownload(job) {
   await walk(full, 0);
   for (const a of archives) {
     try {
-      await run('bsdtar', ['-xf', a, '-C', path.dirname(a)], { timeout: 30 * 60_000 });
+      let okRar = false;
+      if (/\.rar$/i.test(a)) {
+        try {
+          await run('unrar', ['x', '-o+', '-y', '-p-', a, `${path.dirname(a)}${path.sep}`], { timeout: 60 * 60_000 });
+          okRar = true;
+        } catch {}
+      }
+      if (!okRar) await run('bsdtar', ['-xf', a, '-C', path.dirname(a)], { timeout: 30 * 60_000 });
       await fs.promises.unlink(a).catch(() => {});
       // morceaux .partN.rar restants
       for (const n of await fs.promises.readdir(path.dirname(a)).catch(() => [])) if (/\.part\d+\.rar$/i.test(n)) await fs.promises.unlink(path.join(path.dirname(a), n)).catch(() => {});
@@ -5297,6 +5351,7 @@ async function audioRoutes(req, res, p, q, user) {
     if (!dir) throw new HttpError(503, 'Aucun disque n’est relié au serveur Lumio');
     const dest = { root: dir.root, folder: `${dir.folder}/${cleanName(audioMeta(found.title).title === found.title ? found.title : found.title.replace(/[._]+/g, ' '))}` };
     let link;
+    let wlinks = null;
     let via = 'alldebrid';
     if (found.kind === 'torrent') {
       const r = await siteFetch(found.link, { headers: { 'User-Agent': 'Lumio' }, timeout: 30000 });
@@ -5317,8 +5372,11 @@ async function audioRoutes(req, res, p, q, user) {
         const up = await uploadTorrentFile(`${cleanName(found.title)}.torrent`, buf);
         link = `adid:${up.id}`;
       }
-    } else link = await wawaResolve(found.link);
-    const job = { id: crypto.randomBytes(5).toString('hex'), link, root: dest.root, folder: dest.folder, status: 'queued', book: true, audio: true, quiet: true,
+    } else {
+      wlinks = await wawaResolveAll(found.link);
+      link = wlinks[0];
+    }
+    const job = { id: crypto.randomBytes(5).toString('hex'), link, links: wlinks, root: dest.root, folder: dest.folder, status: 'queued', book: true, audio: true, quiet: true,
       name: found.title, size: 0, done: 0, speed: 0, token: null, createdAt: new Date().toISOString(), by: user.name, via };
     downloads.push(job);
     audioJobs.push(job);

@@ -1,7 +1,10 @@
 # Serveur Lumio + Lumio Secour intégré (lancé par server.js)
 FROM node:22-bookworm-slim
-RUN apt-get update \
+# unrar (dépôt non-free) : archives RAR en plusieurs parties des packs de livres
+RUN (sed -i 's/^Components: main$/Components: main non-free/' /etc/apt/sources.list.d/debian.sources || true) \
+ && apt-get update \
  && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates curl libarchive-tools ffmpeg \
+ && (apt-get install -y --no-install-recommends unrar || echo "unrar indisponible : bsdtar seul") \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 # Moteur Lumio Secour (fork de WAStream, licence MIT : secour/LICENSE)
