@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.198 — 20 novembre 2026
+
 - Livres : les packs (.rar, .7z, .zip de plusieurs tomes), les BD en .cbr et les tomes livrés en dossiers de pages sont rangés tout seuls en CBZ lisibles. Pour l'admin, la bibliothèque liste les fichiers que la liseuse ne sait pas ouvrir.
 - Profil (admin) : le déplacement des livres et livres audio vers un autre disque affiche le pourcentage, les Go copiés et le fichier en cours.
 
