@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.124.0';
+const VERSION = '3.124.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4103,13 +4103,14 @@ function bookId(file) {
 /** Titre et auteur : ceux de l'EPUB, sinon « Auteur - Titre » du nom de fichier. */
 async function bookInfo(file, name, st) {
   const id = bookId(file);
-  const sig = `${st.size}-${Math.round(st.mtimeMs)}-v2`; // v2 : titres avec le numéro du tome
+  const sig = `${st.size}-${Math.round(st.mtimeMs)}-v3`; // v3 : titres avec le numéro du tome, BD sans « auteur - »
   const c = booksState.meta[id];
   if (c && c.sig === sig) return c;
   let title = bookTitle(name);
   let author = null;
   const m = title.match(/^(.+?)\s+-\s+(.+)$/);
-  if (m && !/\b(t(ome)?\s*\d|vol)/i.test(m[1])) [author, title] = [m[1].trim(), m[2].trim()];
+  // « Auteur - Titre » seulement pour les livres : pour une BD, « Naruto - Édition Hokage T04 » est un titre entier
+  if (m && !/\.(cbz|cbr|zip)$/i.test(name) && !/\b(t(ome)?\s*\d|vol)/i.test(m[1])) [author, title] = [m[1].trim(), m[2].trim()];
   if (/\.epub$/i.test(name)) {
     try {
       const b = await epubBook(file);
@@ -4139,6 +4140,32 @@ function bookMigrate(file) {
 // • .rar / .7z / .zip qui contiennent des livres (pack « Tomes 01-04 ») : décompressés dans un dossier à leur nom ;
 // • .cbr (BD en RAR) : converties en .cbz ;
 // • dossier rempli d'images (un tome en pages) : regroupé en un .cbz.
+// Page de code des vieux ZIP Windows (CP850) pour les lettres françaises ; le reste en Latin-1
+const CP850 = { 0x80: 'Ç', 0x81: 'ü', 0x82: 'é', 0x83: 'â', 0x84: 'ä', 0x85: 'à', 0x87: 'ç', 0x88: 'ê', 0x89: 'ë', 0x8a: 'è', 0x8b: 'ï', 0x8c: 'î', 0x8e: 'Ä', 0x90: 'É', 0x93: 'ô', 0x94: 'ö', 0x96: 'û', 0x97: 'ù', 0x99: 'Ö', 0x9a: 'Ü', 0xb7: 'À', 0xd2: 'Ê', 0xd4: 'È', 0xe2: 'Ô' };
+function decodeName(buf) {
+  const utf = buf.toString('utf8');
+  if (!utf.includes('\uFFFD')) return null; // déjà bon
+  const cp = [...buf].some((b) => b >= 0x80 && b < 0xa0); // octets 0x80-0x9F : CP850 (en Latin-1 ce sont des codes de contrôle)
+  return [...buf].map((b) => (b < 0x80 ? String.fromCharCode(b) : cp ? CP850[b] || '_' : String.fromCharCode(b))).join('');
+}
+async function fixNames(dir, depth = 0) {
+  if (depth > 6) return;
+  const dirBuf = Buffer.isBuffer(dir) ? dir : Buffer.from(dir);
+  for (const e of await fs.promises.readdir(dirBuf, { withFileTypes: true, encoding: 'buffer' }).catch(() => [])) {
+    let nameBuf = e.name;
+    const better = decodeName(nameBuf);
+    if (better) {
+      const to = Buffer.concat([dirBuf, Buffer.from(path.sep), Buffer.from(better.replace(/[/\\]/g, '_'))]);
+      try {
+        await fs.promises.rename(Buffer.concat([dirBuf, Buffer.from(path.sep), nameBuf]), to);
+        nameBuf = Buffer.from(better);
+        console.log(`Livres : nom corrigé → ${better}`);
+      } catch {}
+    }
+    if (e.isDirectory()) await fixNames(Buffer.concat([dirBuf, Buffer.from(path.sep), nameBuf]), depth + 1);
+  }
+}
+
 let bookTidyRunning = false;
 let bookTidyAt = 0;
 const bookTidyFailed = new Set();
@@ -4177,6 +4204,9 @@ async function bookTidy(force) {
   bookTidyAt = Date.now();
   try {
     const { full } = safePath(d.root, d.folder);
+    // 00. Noms de fichiers mal encodés (archives faites sous Windows : « �dition ») : renommés en vrai UTF-8,
+    //     sinon ils sont illisibles (ENOENT) pour tout le reste
+    await fixNames(full).catch(() => {});
     // 0. Fichier sans la bonne extension (nom tronqué par l'hébergeur) : RAR / ZIP / 7z reconnus à leurs premiers octets
     for (const f of await walkFiles(full)) {
       const ext = path.extname(f).toLowerCase();
