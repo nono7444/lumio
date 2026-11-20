@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.196 — 20 novembre 2026
+
 - Livres : le numéro du tome est bien reconnu même quand le nom du fichier contient une année (« Black Clover 2016 … T33 ») : les tomes sont dans l'ordre et « Continuer le tome 33 » est juste.
 - Livres : les mangas prennent la vraie couverture de chaque tome (MangaDex, édition française d'abord) ; une 1re page en noir et blanc n'est plus prise pour la couverture.
 
