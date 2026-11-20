@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Livres : le numéro du tome est bien reconnu même quand le nom du fichier contient une année (« Black Clover 2016 … T33 ») : les tomes sont dans l'ordre et « Continuer le tome 33 » est juste.
+- Livres : les mangas prennent la vraie couverture de chaque tome (MangaDex, édition française d'abord) ; une 1re page en noir et blanc n'est plus prise pour la couverture.
+
 ## 1.0.195 — 20 novembre 2026
 
 - Lumio réunit maintenant trois univers : **Films & séries** (Jellyfin, toujours en premier), **Livres audio** et **Livres** (livres, BD, mangas). Un bouton en haut de l'accueil permet de passer de l'un à l'autre, et les onglets du bas s'adaptent : Livres audio (bibliothèque, Trouver pour l'admin, Profil), Livres (bibliothèque, Trouver pour l'admin, Profil). Le mini-lecteur des livres audio reste visible partout, et la lecture continue en arrière-plan.

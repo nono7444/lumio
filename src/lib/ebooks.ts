@@ -126,7 +126,8 @@ export function seriesOf(b: Ebook): { name: string; index: number } | null {
   ];
   for (const re of pats) {
     const m = t.match(re);
-    if (m && m[1].trim().length >= 2) return { name: m[1].replace(/[\s,:-]+$/, '').trim(), index: Number(m[2]) };
+    // Une année (« Black Clover 2016 ») n'est pas un numéro de tome
+    if (m && m[1].trim().length >= 2 && !/^(19|20)\d{2}$/.test(m[2])) return { name: m[1].replace(/[\s,:-]+$/, '').trim(), index: Number(m[2]) };
   }
   return null;
 }

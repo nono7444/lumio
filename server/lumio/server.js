@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.121.1';
+const VERSION = '3.122.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4046,13 +4046,35 @@ async function epubBook(file) {
 }
 
 function bookTitle(name) {
-  return String(name)
-    .replace(/\.[a-z0-9]{2,4}$/i, '')
-    .replace(/[._]+/g, ' ')
+  const base = String(name).replace(/\.[a-z0-9]{2,4}$/i, '').replace(/[._]+/g, ' ');
+  // Numéro du tome où qu'il soit dans le nom (« Black Clover 2016 FRENCH T33 … »)
+  const tm = base.match(/\b(?:t(?:ome)?|vol(?:ume)?)\s*-?\s*(\d{1,4})\b/i);
+  let t = base
     .replace(/\[[^\]]*\]/g, '')
     .replace(/\b(FRENCH|FR|VF|MULTi|CBZ|CBR|EPUB|PDF|Digital|NoTag)\b.*$/i, '')
     .replace(/\s{2,}/g, ' ')
-    .trim() || name;
+    .trim();
+  if (tm) {
+    // L'année de l'édition n'est pas le numéro du tome
+    t = t.replace(/\s*\(?\b(19|20)\d{2}\b\)?/g, '').trim();
+    if (!new RegExp(`\\b(?:t(?:ome)?|vol(?:ume)?)\\s*-?\\s*0*${Number(tm[1])}\\b`, 'i').test(t)) t = `${t} T${tm[1].padStart(2, '0')}`;
+  }
+  return t || name;
+}
+/** Série et numéro d'après le titre (« Kaamelott, 07 … », « Jujutsu Kaisen T30 », « One Piece - Tome 12 »). */
+function bookSeries(title, bd) {
+  const t = String(title).replace(/\s+/g, ' ').trim();
+  const pats = [
+    /^(.+?)[\s,:-]+(?:t(?:ome)?|vol(?:ume)?\.?|#|n°)\s*(\d{1,4})(?:\D|$)/i,
+    /^(.+?),\s*(\d{1,4})(?:\D|$)/,
+    /^(.+?)\s+-\s+(\d{1,4})(?:\D|$)/,
+    ...(bd ? [/^(.+?)\s+(\d{1,4})(?:\s|$)/] : []),
+  ];
+  for (const re of pats) {
+    const m = t.match(re);
+    if (m && m[1].trim().length >= 2 && !/^(19|20)\d{2}$/.test(m[2])) return { name: m[1].replace(/[\s,:-]+$/, '').trim(), index: Number(m[2]) };
+  }
+  return null;
 }
 
 // Lumio Livres : position de lecture par personne, titre / auteur des EPUB (lus dans le fichier) en cache
@@ -4080,7 +4102,7 @@ function bookId(file) {
 /** Titre et auteur : ceux de l'EPUB, sinon « Auteur - Titre » du nom de fichier. */
 async function bookInfo(file, name, st) {
   const id = bookId(file);
-  const sig = `${st.size}-${Math.round(st.mtimeMs)}`;
+  const sig = `${st.size}-${Math.round(st.mtimeMs)}-v2`; // v2 : titres avec le numéro du tome
   const c = booksState.meta[id];
   if (c && c.sig === sig) return c;
   let title = bookTitle(name);
@@ -4158,37 +4180,92 @@ async function bookLibrary() {
 }
 
 /** Couverture d'un livre : celle de l'EPUB, 1re planche d'un CBZ, sinon cherchée en ligne (gardée sur le serveur). */
+const sniffType = (buf) => (buf[0] === 0x89 && buf[1] === 0x50 ? 'image/png' : buf[0] === 0x52 && buf[1] === 0x49 ? 'image/webp' : 'image/jpeg');
+/** Saturation moyenne d'une image (0 = noir et blanc) : une 1re page en noir et blanc n'est pas une couverture. */
+async function imageSaturation(buf) {
+  const tmp = path.join(require('os').tmpdir(), `lumio-cov-${crypto.randomBytes(6).toString('hex')}`);
+  try {
+    await fs.promises.writeFile(tmp, buf);
+    const out = await run('ffmpeg', ['-v', 'error', '-i', tmp, '-vf', 'scale=96:-1,signalstats,metadata=print:key=lavfi.signalstats.SATAVG:file=-', '-frames:v', '1', '-f', 'null', '-'], { timeout: 20_000 });
+    const m = String(out).match(/SATAVG=([\d.]+)/);
+    return m ? Number(m[1]) : null;
+  } catch {
+    return null;
+  } finally {
+    fs.promises.rm(tmp, { force: true }).catch(() => {});
+  }
+}
+/** Couverture d'un tome de manga sur MangaDex (édition française d'abord, sinon japonaise). */
+async function mangadexCover(series, tome) {
+  const ua = { 'User-Agent': 'Lumio/1.0 (serveur familial)' };
+  const j = await (await fetch(`https://api.mangadex.org/manga?title=${encodeURIComponent(series)}&limit=5&order[relevance]=desc`, { headers: ua, signal: AbortSignal.timeout(10000) })).json();
+  const want = coverWords(series);
+  const manga = (j.data || []).find((m) => {
+    const titles = [...Object.values(m.attributes?.title || {}), ...(m.attributes?.altTitles || []).flatMap((x) => Object.values(x))];
+    return titles.some((t) => {
+      const got = coverWords(String(t));
+      return want.length && want.every((w) => got.includes(w));
+    });
+  });
+  if (!manga) return null;
+  const c = await (await fetch(`https://api.mangadex.org/cover?manga[]=${manga.id}&limit=100`, { headers: ua, signal: AbortSignal.timeout(10000) })).json();
+  const vols = (c.data || []).filter((x) => Number(x.attributes?.volume) === tome);
+  const pick = ['fr', 'ja', 'en'].map((l) => vols.find((x) => x.attributes?.locale === l)).find(Boolean) || vols[0];
+  if (!pick) return null;
+  const r = await fetch(`https://uploads.mangadex.org/covers/${manga.id}/${pick.attributes.fileName}.512.jpg`, { headers: ua, signal: AbortSignal.timeout(15000) });
+  if (!r.ok) return null;
+  const buf = Buffer.from(await r.arrayBuffer());
+  return buf.length > 3000 ? buf : null;
+}
+/** Couverture d'un livre, gardée sur le serveur : celle de l'EPUB ; pour une BD / un manga, la couverture du tome
+ *  sur MangaDex, sinon la 1re page si elle est en couleur, sinon une couverture trouvée en ligne. */
 async function bookCover(file) {
   const ext = path.extname(file).toLowerCase();
-  try {
-    if (ext === '.epub') {
-      const b = await epubBook(file);
-      const e = b.cover && b.entries.find((x) => x.name === b.cover);
-      if (e) return { buf: await zipRead(file, e), type: imgType(e.name) };
-    } else if (ext === '.cbz' || ext === '.zip') {
-      const e = (await zipEntries(file)).filter((x) => isImage(x.name)).sort((a, b) => natural(a.name, b.name))[0];
-      if (e) return { buf: await zipRead(file, e), type: imgType(e.name) };
-    }
-  } catch {}
-  // En ligne (Apple Books, Google Books, Open Library), une fois par semaine au plus si rien n'est trouvé
   const id = bookId(file);
-  const cached = path.join(BOOK_COVERS_DIR, `${id}.jpg`);
+  const cached = path.join(BOOK_COVERS_DIR, `${id}.img`);
   try {
-    return { buf: await fs.promises.readFile(cached), type: 'image/jpeg' };
+    const buf = await fs.promises.readFile(cached);
+    return { buf, type: sniffType(buf) };
   } catch {}
   const miss = path.join(BOOK_COVERS_DIR, `${id}.none`);
   try {
     if (Date.now() - (await fs.promises.stat(miss)).mtimeMs < 7 * 86400e3) return null;
   } catch {}
   await fs.promises.mkdir(BOOK_COVERS_DIR, { recursive: true }).catch(() => {});
+  const keep = async (buf) => {
+    await fs.promises.writeFile(cached, buf).catch(() => {});
+    return { buf, type: sniffType(buf) };
+  };
   const info = booksState.meta[id] || { title: bookTitle(path.basename(file)), author: null };
+  try {
+    if (ext === '.epub') {
+      const b = await epubBook(file);
+      const e = b.cover && b.entries.find((x) => x.name === b.cover);
+      if (e) return keep(await zipRead(file, e));
+    } else if (ext === '.cbz' || ext === '.zip') {
+      const ser = bookSeries(info.title, true);
+      if (ser) {
+        const md = await mangadexCover(ser.name, ser.index).catch(() => null);
+        if (md) return keep(md);
+      }
+      const e = (await zipEntries(file)).filter((x) => isImage(x.name)).sort((a, b) => natural(a.name, b.name))[0];
+      const first = e ? await zipRead(file, e) : null;
+      const sat = first ? await imageSaturation(first) : null;
+      if (first && (sat == null || sat > 8)) return keep(first);
+      // 1re page en noir et blanc : couverture en ligne (« Série tome N »), sinon cette page quand même
+      const q = ser ? `${ser.name} tome ${ser.index}` : info.title;
+      const online = await audioCoverSearch(q, info.author, 'ebook').catch(() => null);
+      if (online) return keep(online);
+      if (first) return keep(first);
+    }
+  } catch {}
+  // En ligne (Apple Books, Google Books, Open Library), une fois par semaine au plus si rien n'est trouvé
   const buf = await audioCoverSearch(info.title, info.author, 'ebook').catch(() => null);
   if (!buf) {
     await fs.promises.writeFile(miss, '').catch(() => {});
     return null;
   }
-  await fs.promises.writeFile(cached, buf).catch(() => {});
-  return { buf, type: 'image/jpeg' };
+  return keep(buf);
 }
 
 /** Routes de lecture par lien signé (sans jeton Jellyfin). Renvoie true si la requête est traitée. */
