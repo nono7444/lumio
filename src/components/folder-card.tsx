@@ -10,7 +10,7 @@ import { useSettings } from '@/lib/settings';
 
 const go = (n: number | null) => (n == null ? '?' : n >= 1e12 ? `${(n / 1e12).toFixed(1)} To` : n >= 1e9 ? `${(n / 1e9).toFixed(1)} Go` : `${Math.round(n / 1e6)} Mo`);
 /** Admin : sur quel disque du serveur sont rangés les livres, et déplacement vers un autre disque. */
-export function FolderCard({ kind, onMoved, title, flat }: { kind: 'audio' | 'books'; onMoved?: () => void; title?: string; flat?: boolean }) {
+export function FolderCard({ kind, onMoved, title, flat }: { kind: 'audio' | 'books' | 'twitch'; onMoved?: () => void; title?: string; flat?: boolean }) {
   const { settings } = useSettings();
   const [info, setInfo] = useState<FolderInfo | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -39,7 +39,7 @@ export function FolderCard({ kind, onMoved, title, flat }: { kind: 'audio' | 'bo
     return () => clearInterval(t);
   }, [info?.move?.status, load]);
 
-  const label = kind === 'audio' ? 'livres audio' : 'livres';
+  const label = kind === 'audio' ? 'livres audio' : kind === 'twitch' ? 'rediffusions' : 'livres';
   const move = (root: string) =>
     Alert.alert(
       `Déplacer les ${label} sur ${root} ?`,

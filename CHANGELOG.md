@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Twitch : choix de la qualité comme sur Twitch (Auto, Source, 1080p60, 720p60, 480p… Audio seul), gardée pour les prochaines lectures ; appui long sur une rediffusion pour la regarder dans une autre qualité.
+- Twitch : « Télécharger sur le serveur » (appui long) enregistre une rediffusion sur un disque, dans la qualité choisie, avec le pourcentage en direct ; le dossier « Twitch » peut être déplacé sur un autre disque. Notification quand c'est fini.
+
 ## 1.0.201 — 21 novembre 2026
 
 - Twitch : « Se connecter » avec ton compte Twitch abonné (page de connexion officielle de Twitch dans l'appli, ou jeton collé) pour lire les rediffusions réservées aux abonnés. Le jeton reste seulement sur ton serveur.

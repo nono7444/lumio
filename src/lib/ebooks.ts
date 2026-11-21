@@ -205,6 +205,6 @@ export type FolderInfo = {
   move: { status: 'running' | 'done' | 'error'; from: string; to: string; size: number; done?: number; pct?: number; current?: string | null; error: string | null } | null;
 };
 export const folderApi = {
-  get: (s: Settings, kind: 'audio' | 'books') => serverCall<FolderInfo>(s, `/api/${kind}/folder`),
-  move: (s: Settings, kind: 'audio' | 'books', root: string) => serverCall<FolderInfo>(s, `/api/${kind}/folder`, { method: 'POST', body: JSON.stringify({ root }) }),
+  get: (s: Settings, kind: 'audio' | 'books' | 'twitch') => serverCall<FolderInfo>(s, `/api/${kind}/folder`),
+  move: (s: Settings, kind: 'audio' | 'books' | 'twitch', root: string) => serverCall<FolderInfo>(s, `/api/${kind}/folder`, { method: 'POST', body: JSON.stringify({ root }) }),
 };

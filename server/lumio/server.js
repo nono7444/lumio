@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.127.0';
+const VERSION = '3.128.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4596,7 +4596,17 @@ h1,h2,h3{line-height:1.25;font-family:-apple-system,system-ui,sans-serif}p{margi
 }
 
 // ——— Dossier des livres / livres audio : changement de disque (déplacement des fichiers) ———
-const folderMoves = { audio: null, books: null };
+const folderMoves = { audio: null, books: null, twitch: null };
+/** Dossier d'un univers sur les disques du serveur. */
+function kindDir(kind) {
+  if (kind === 'audio') return audioDir();
+  if (kind === 'books') return booksDir();
+  const t = config.twitch || {};
+  const d = disks();
+  if (!d.length) return null;
+  const root = t.root && d.some((x) => x.name === t.root) ? t.root : d[0].name;
+  return { root, folder: t.folder || 'Twitch' };
+}
 async function dirSize(dir) {
   let total = 0;
   const walk = async (d) => {
@@ -4610,7 +4620,7 @@ async function dirSize(dir) {
   return total;
 }
 async function folderInfo(kind) {
-  const dir = kind === 'audio' ? audioDir() : booksDir();
+  const dir = kindDir(kind);
   const mv = folderMoves[kind];
   let size = null;
   // Pendant un déplacement (suivi toutes les 2 s) on ne recompte pas tout le dossier
@@ -4619,12 +4629,17 @@ async function folderInfo(kind) {
 }
 /** Déplace « Livres audio » ou « Livres » vers un autre disque, puis le réglage suit. */
 async function folderMove(kind, root) {
-  const cur = kind === 'audio' ? audioDir() : booksDir();
+  const cur = kindDir(kind);
   if (!cur) throw new HttpError(400, 'Aucun disque configuré (LUMIO_DISKS)');
   if (!disks().some((d) => d.name === root)) throw new HttpError(404, 'Disque inconnu');
   if (root === cur.root) throw new HttpError(400, 'Le dossier est déjà sur ce disque');
   if (folderMoves[kind] && folderMoves[kind].status === 'running') throw new HttpError(409, 'Un déplacement est déjà en cours');
-  const busy = kind === 'audio' ? audioJobs.some((j) => !['done', 'error'].includes(j.status)) : downloads.some((j) => j.book && ['queued', 'debrid', 'downloading'].includes(j.status));
+  const busy =
+    kind === 'audio'
+      ? audioJobs.some((j) => !['done', 'error'].includes(j.status))
+      : kind === 'twitch'
+        ? twitchJobs.some((j) => ['queued', 'running'].includes(j.status))
+        : downloads.some((j) => j.book && ['queued', 'debrid', 'downloading'].includes(j.status));
   if (busy) throw new HttpError(409, 'Des téléchargements sont en cours : attends qu’ils soient finis');
   // Jamais tout un disque : seulement un dossier « Livres » / « Livres audio »
   if (!cur.folder) throw new HttpError(400, `Les ${kind === 'audio' ? 'livres audio' : 'livres'} sont à la racine du disque ${cur.root} : déplacement refusé pour ne pas tout emporter`);
@@ -4672,10 +4687,11 @@ async function folderMove(kind, root) {
       if (kind === 'audio') {
         config.audio = { root, folder };
         audioLibCache = null;
-      } else config.books = { ...(config.books || {}), root, folder };
+      } else if (kind === 'twitch') config.twitch = { ...(config.twitch || {}), root, folder };
+      else config.books = { ...(config.books || {}), root, folder };
       saveConfig();
       job.status = 'done';
-      notify({ title: `📦 ${kind === 'audio' ? 'Livres audio' : 'Livres'} déplacés sur ${root}`, message: `${Math.round(size / 1e8) / 10} Go`, tags: 'package' }).catch(() => {});
+      notify({ title: `📦 ${kind === 'audio' ? 'Livres audio' : kind === 'twitch' ? 'Rediffusions Twitch' : 'Livres'} déplacés sur ${root}`, message: `${Math.round(size / 1e8) / 10} Go`, tags: 'package' }).catch(() => {});
     } catch (e) {
       job.status = 'error';
       job.error = e.message || String(e);
@@ -5537,9 +5553,107 @@ async function twitchVodUrl(id) {
   if (!r.ok) throw new HttpError(502, `Twitch refuse la lecture (${r.status})`);
   return u;
 }
+/** Qualités proposées par Twitch (playlist maîtresse) : Source 1080p60, 720p60… Audio seul. */
+async function twitchQualities(master) {
+  const txt = await (await fetch(master, { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': 'Mozilla/5.0' } })).text();
+  const lines = txt.split(/\r?\n/);
+  const names = new Map();
+  for (const l of lines) {
+    const m = l.match(/^#EXT-X-MEDIA:.*GROUP-ID="([^"]+)".*NAME="([^"]+)"/);
+    if (m) names.set(m[1], m[2]);
+  }
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].startsWith('#EXT-X-STREAM-INF')) continue;
+    const info = lines[i];
+    const url = (lines[i + 1] || '').trim();
+    if (!/^https?:/.test(url)) continue;
+    const group = (info.match(/VIDEO="([^"]+)"/) || [])[1] || '';
+    const res = (info.match(/RESOLUTION=(\d+)x(\d+)/) || []).slice(1).map(Number);
+    const fps = Number((info.match(/FRAME-RATE=([\d.]+)/) || [])[1] || 0);
+    const bw = Number((info.match(/BANDWIDTH=(\d+)/) || [])[1] || 0);
+    let name = names.get(group) || group || (res[1] ? `${res[1]}p` : 'Qualité');
+    if (group === 'chunked') name = `${name.replace(/\s*\(source\)/i, '')} (source)`;
+    if (group === 'audio_only') name = 'Audio seul';
+    out.push({ id: group || name, name, height: res[1] || 0, fps: Math.round(fps), bandwidth: bw, url });
+  }
+  // Source d'abord, puis du plus haut au plus bas, audio seul à la fin
+  return out.sort((a, b) => (a.id === 'audio_only') - (b.id === 'audio_only') || (b.id === 'chunked') - (a.id === 'chunked') || b.height - a.height || b.fps - a.fps);
+}
+
+// Téléchargement d'une rediffusion sur un disque (ffmpeg recopie le flux sans le réencoder : rapide, même qualité)
+const twitchJobs = [];
+const safeName = (x) => String(x || '').replace(/[\/\\:*?"<>|\x00-\x1f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Rediffusion';
+async function twitchDownloadRun() {
+  if (twitchJobs.some((j) => j.status === 'running')) return;
+  const job = twitchJobs.find((j) => j.status === 'queued');
+  if (!job) return;
+  job.status = 'running';
+  try {
+    const dir = kindDir('twitch');
+    if (!dir) throw new Error('Aucun disque configuré (LUMIO_DISKS)');
+    const { full } = safePath(dir.root, dir.folder);
+    const folder = path.join(full, safeName(job.channel));
+    await fs.promises.mkdir(folder, { recursive: true });
+    const day = (job.createdAt || '').slice(0, 10);
+    const target = path.join(folder, `${day} - ${safeName(job.title)} [${job.vodId}].mp4`);
+    const master = await twitchVodUrl(job.vodId);
+    const qs = await twitchQualities(master);
+    const pick = qs.find((x) => x.id === job.quality) || qs.find((x) => x.id === 'chunked') || qs[0];
+    if (!pick) throw new Error('Aucune qualité disponible');
+    job.qualityName = pick.name;
+    await new Promise((resolve, reject) => {
+      const { spawn } = require('child_process');
+      const c = spawn('ffmpeg', ['-y', '-nostats', '-loglevel', 'error', '-progress', 'pipe:1', '-i', pick.url, '-c', 'copy', '-bsf:a', 'aac_adtstoasc', '-movflags', '+faststart', `${target}.part.mp4`], { stdio: ['ignore', 'pipe', 'pipe'] });
+      job.kill = () => c.kill('SIGTERM');
+      let errTxt = '';
+      c.stdout.on('data', (d) => {
+        const m = String(d).match(/out_time_us=(\d+)/g);
+        if (m) job.done = Math.round(Number(m[m.length - 1].split('=')[1]) / 1e6);
+        const sz = String(d).match(/total_size=(\d+)/g);
+        if (sz) job.bytes = Number(sz[sz.length - 1].split('=')[1]);
+      });
+      c.stderr.on('data', (d) => (errTxt = (errTxt + d).slice(-400)));
+      c.on('error', reject);
+      c.on('close', (code) => (code === 0 ? resolve() : reject(new Error(job.cancelled ? 'Annulé' : errTxt.trim().split('\n').pop() || `ffmpeg ${code}`))));
+    });
+    await fs.promises.rename(`${target}.part.mp4`, target);
+    job.status = 'done';
+    job.done = job.length;
+    job.file = path.relative(full, target);
+    (twitchState.saved = twitchState.saved || {})[job.vodId] = { file: job.file, root: dir.root, folder: dir.folder, at: Date.now() };
+    twitchSave();
+    notify({ title: '📼 Rediffusion téléchargée', message: `${job.channel} · ${job.title}`, tags: 'vhs' }).catch(() => {});
+  } catch (e) {
+    job.status = job.cancelled ? 'cancelled' : 'error';
+    job.error = e.message || String(e);
+  } finally {
+    job.kill = null;
+    job.endedAt = Date.now();
+    setTimeout(twitchDownloadRun, 500);
+  }
+}
+const twitchJobView = (j) => ({ id: j.id, vodId: j.vodId, channel: j.channel, title: j.title, status: j.status, quality: j.qualityName || j.quality, done: j.done || 0, length: j.length, bytes: j.bytes || 0, error: j.error || null, file: j.file || null });
+
 async function twitchRoutes(req, res, p, q, user) {
   if (!p.startsWith('/api/twitch')) return false;
   requireAdmin(user);
+  if (await folderRoutes(req, res, p, user, 'twitch')) return true;
+  if (req.method === 'GET' && p === '/api/twitch/jobs') {
+    send(res, 200, { jobs: twitchJobs.slice(-30).reverse().map(twitchJobView), saved: Object.keys(twitchState.saved || {}) });
+    return true;
+  }
+  const jm = p.match(/^\/api\/twitch\/jobs\/(\w+)$/);
+  if (jm && req.method === 'DELETE') {
+    const j = twitchJobs.find((x) => x.id === jm[1]);
+    if (j) {
+      j.cancelled = true;
+      if (j.status === 'queued') j.status = 'cancelled';
+      j.kill?.();
+    }
+    send(res, 200, { ok: true });
+    return true;
+  }
   const mine = (twitchState.progress[user.name] = twitchState.progress[user.name] || {});
   if (req.method === 'GET' && p === '/api/twitch/channels') {
     const fresh = q.get('refresh') === '1';
@@ -5594,7 +5708,19 @@ async function twitchRoutes(req, res, p, q, user) {
   }
   const pm = p.match(/^\/api\/twitch\/vod\/(\d+)\/(play|progress)$/);
   if (pm && req.method === 'GET' && pm[2] === 'play') {
-    send(res, 200, { url: await twitchVodUrl(pm[1]) });
+    const url = await twitchVodUrl(pm[1]);
+    send(res, 200, { url, qualities: await twitchQualities(url).catch(() => []) });
+    return true;
+  }
+  const dm = p.match(/^\/api\/twitch\/vod\/(\d+)\/download$/);
+  if (dm && req.method === 'POST') {
+    const b = await readBody(req);
+    if (twitchJobs.some((j) => j.vodId === dm[1] && ['queued', 'running'].includes(j.status))) throw new HttpError(409, 'Déjà en cours de téléchargement');
+    const job = { id: crypto.randomBytes(4).toString('hex'), vodId: dm[1], channel: String(b.channel || 'Twitch'), title: String(b.title || dm[1]), createdAt: String(b.createdAt || ''), length: Number(b.length) || 0, quality: String(b.quality || 'chunked'), status: 'queued', startedAt: Date.now() };
+    twitchJobs.push(job);
+    if (twitchJobs.length > 100) twitchJobs.splice(0, twitchJobs.length - 100);
+    twitchDownloadRun();
+    send(res, 201, { job: twitchJobView(job) });
     return true;
   }
   if (pm && req.method === 'PUT' && pm[2] === 'progress') {

@@ -1,10 +1,11 @@
 // Lumio → univers « Twitch » (admin) : rediffusions des chaînes suivies (Altair par défaut), rangées par jeu.
 // Choisir un jeu montre les rediffusions où il a été joué, et la lecture démarre au début de ce jeu.
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FocusPressable as Pressable } from '@/components/tv';
@@ -12,9 +13,32 @@ import { ScreenTitle, SegChip, tap } from '@/components/ui';
 import { UniverseSwitch } from '@/components/universe-switch';
 import { C, TAB_SPACE } from '@/constants/theme';
 import { useSettings } from '@/lib/settings';
-import { fmtDay, fmtLen, loadTwitch, twitchApi, useTwitch, type TwitchChannel, type TwitchVod } from '@/lib/twitch';
+import { FolderCard } from '@/components/folder-card';
+import { fmtDay, fmtLen, loadTwitch, twitchApi, useTwitch, type TwitchChannel, type TwitchJob, type TwitchQuality, type TwitchVod } from '@/lib/twitch';
 
 const TWITCH = '#9146FF';
+const QKEY = 'lumio:twitch-qualite';
+// Qualités connues avant d'ouvrir une rediffusion (le choix exact vient de Twitch au moment de la lecture)
+const QUALITY_PREFS = [
+  { id: 'auto', name: 'Auto' },
+  { id: 'chunked', name: 'Source' },
+  { id: '1080p60', name: '1080p60' },
+  { id: '720p60', name: '720p60' },
+  { id: '720p30', name: '720p' },
+  { id: '480p30', name: '480p' },
+  { id: '360p30', name: '360p' },
+  { id: '160p30', name: '160p' },
+  { id: 'audio_only', name: 'Audio seul' },
+];
+/** Qualité voulue → la plus proche que la rediffusion propose (même hauteur ou en dessous). */
+function pickQuality(list: TwitchQuality[], want: string): TwitchQuality | null {
+  if (want === 'auto' || !list.length) return null;
+  const exact = list.find((q) => q.id === want);
+  if (exact) return exact;
+  if (want === 'chunked') return list.find((q) => q.id === 'chunked') ?? list[0];
+  const h = Number(want.match(/^(\d+)/)?.[1] ?? 0);
+  return list.filter((q) => q.id !== 'audio_only' && q.height <= h).sort((a, b) => b.height - a.height || b.fps - a.fps)[0] ?? list[list.length - 1];
+}
 
 export default function TwitchScreen() {
   const { settings } = useSettings();
@@ -26,6 +50,47 @@ export default function TwitchScreen() {
   const [newCh, setNewCh] = useState('');
   const [opening, setOpening] = useState<string | null>(null);
   const [account, setAccount] = useState<{ login: string; name: string } | null | undefined>(undefined);
+  const [quality, setQuality] = useState('auto');
+  const [qSheet, setQSheet] = useState(false);
+  const [menu, setMenu] = useState<{ v: TwitchVod; qualities: TwitchQuality[] | null } | null>(null);
+  const [jobs, setJobs] = useState<TwitchJob[]>([]);
+  const [saved, setSaved] = useState<string[]>([]);
+  useEffect(() => {
+    AsyncStorage.getItem(QKEY)
+      .then((v) => v && setQuality(v))
+      .catch(() => {});
+  }, []);
+  const chooseQuality = (id: string) => {
+    setQuality(id);
+    AsyncStorage.setItem(QKEY, id).catch(() => {});
+  };
+  // Téléchargements sur le serveur : suivis toutes les 3 s tant qu'il y en a un en cours
+  const loadJobs = () =>
+    twitchApi
+      .jobs(settings)
+      .then((r) => {
+        setJobs(r.jobs);
+        setSaved(r.saved);
+      })
+      .catch(() => {});
+  const running = jobs.some((j) => j.status === 'queued' || j.status === 'running');
+  useEffect(() => {
+    loadJobs();
+    if (!running) return;
+    const t = setInterval(loadJobs, 3000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running]);
+  const jobOf = (id: string) => jobs.find((j) => j.vodId === id && j.status !== 'cancelled');
+  const download = async (v: TwitchVod, q: string) => {
+    tap();
+    try {
+      await twitchApi.download(settings, v, ch?.name ?? 'Twitch', q === 'auto' ? 'chunked' : q);
+      loadJobs();
+    } catch (e) {
+      Alert.alert('Téléchargement impossible', e instanceof Error ? e.message : String(e));
+    }
+  };
   useEffect(() => {
     twitchApi
       .account(settings)
@@ -55,17 +120,20 @@ export default function TwitchScreen() {
   const going = useMemo(() => (ch?.vods ?? []).filter((v) => v.progress && !v.progress.done && v.progress.pos > 60).slice(0, 8), [ch]);
   const cw = Math.min(width - 32, 640);
 
-  const play = async (v: TwitchVod, from?: number) => {
+  const play = async (v: TwitchVod, from?: number, want?: string) => {
     tap();
     setOpening(v.id);
     try {
-      const { url } = await twitchApi.play(settings, v.id);
+      const r = await twitchApi.play(settings, v.id);
+      // Qualité choisie (comme sur Twitch) ; Auto = le lecteur s'adapte au débit
+      const q = pickQuality(r.qualities ?? [], want ?? quality);
+      const url = q?.url ?? r.url;
       // Reprise là où on s'était arrêté ; sinon début du jeu choisi
       const chap = game ? v.chapters.find((c) => c.game === game) : null;
       const start = from ?? (v.progress && !v.progress.done ? v.progress.pos : chap ? chap.start : 0);
       router.push({
         pathname: '/player',
-        params: { kind: 'url', uri: url, hls: '1', title: v.title, subtitle: `${ch?.name ?? ''} · ${fmtDay(v.createdAt)}`, start: String(Math.floor(start)), twitch: v.id, twitchLen: String(v.length) },
+        params: { kind: 'url', uri: url, hls: '1', title: v.title, subtitle: `${ch?.name ?? ''} · ${fmtDay(v.createdAt)}${q ? ` · ${q.name}` : ''}`, start: String(Math.floor(start)), twitch: v.id, twitchLen: String(v.length) },
       });
     } catch (e) {
       Alert.alert('Lecture impossible', e instanceof Error ? e.message : String(e));
@@ -210,6 +278,44 @@ export default function TwitchScreen() {
           </View>
         ) : null}
 
+        <View style={styles.tools}>
+          <Pressable onPress={() => (tap(), setQSheet(true))} style={styles.tool}>
+            <Ionicons name="options-outline" size={16} color={C.text} />
+            <Text style={styles.toolText}>Qualité : {QUALITY_PREFS.find((x) => x.id === quality)?.name ?? quality}</Text>
+            <Ionicons name="chevron-down" size={14} color={C.textDim} />
+          </Pressable>
+          <Text style={[styles.s, { flex: 1 }]} numberOfLines={2}>
+            Appui long sur une rediffusion : autre qualité ou téléchargement.
+          </Text>
+        </View>
+        {jobs.filter((j) => j.status === 'queued' || j.status === 'running' || j.status === 'error').slice(0, 5).map((j) => (
+          <View key={j.id} style={styles.job}>
+            <Ionicons name={j.status === 'error' ? 'alert-circle' : 'cloud-download-outline'} size={18} color={j.status === 'error' ? C.danger : TWITCH} />
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text numberOfLines={1} style={styles.small}>
+                {j.title}
+              </Text>
+              <Text style={styles.s}>
+                {j.status === 'error'
+                  ? j.error
+                  : j.status === 'queued'
+                    ? 'En attente'
+                    : `${j.quality} · ${j.length ? Math.round((j.done / j.length) * 100) : 0} % · ${fmtLen(j.done)} / ${fmtLen(j.length)}${j.bytes ? ` · ${(j.bytes / 1e9).toFixed(1)} Go` : ''}`}
+              </Text>
+              {j.status === 'running' && j.length ? (
+                <View style={styles.jobBar}>
+                  <View style={{ width: `${Math.min(100, (j.done / j.length) * 100)}%`, height: '100%', backgroundColor: TWITCH }} />
+                </View>
+              ) : null}
+            </View>
+            {j.status !== 'error' ? (
+              <Pressable onPress={() => twitchApi.cancel(settings, j.id).then(loadJobs)} hitSlop={8} accessibilityLabel="Annuler">
+                <Ionicons name="close" size={18} color={C.textDim} />
+              </Pressable>
+            ) : null}
+          </View>
+        ))}
+
         {/* Tri par jeu */}
         {games.length > 1 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 14 }}>
@@ -224,8 +330,19 @@ export default function TwitchScreen() {
           {vods.map((v) => {
             const chap = game ? v.chapters.find((c) => c.game === game) : null;
             return (
-              <Pressable key={v.id} onPress={() => play(v)} style={{ gap: 8 }}>
-                <Thumb v={v} w={cw} busy={opening === v.id} />
+              <Pressable
+                key={v.id}
+                onPress={() => play(v)}
+                onLongPress={() => {
+                  tap();
+                  setMenu({ v, qualities: null });
+                  twitchApi
+                    .play(settings, v.id)
+                    .then((r) => setMenu((m) => (m && m.v.id === v.id ? { v, qualities: r.qualities ?? [] } : m)))
+                    .catch((e) => (setMenu(null), Alert.alert('Rediffusion indisponible', e instanceof Error ? e.message : String(e))));
+                }}
+                style={{ gap: 8 }}>
+                <Thumb v={v} w={cw} busy={opening === v.id} saved={saved.includes(v.id)} job={jobOf(v.id)} />
                 <Text numberOfLines={2} style={styles.t}>
                   {v.title}
                 </Text>
@@ -250,12 +367,61 @@ export default function TwitchScreen() {
           })}
           {ch && !ch.error && !vods.length ? <Text style={styles.s}>Aucune rediffusion publique pour l'instant.</Text> : null}
         </View>
+        <View style={{ marginTop: 24 }}>
+          <FolderCard kind="twitch" title="Rediffusions téléchargées sur le serveur" />
+        </View>
       </ScrollView>
+
+      {/* Qualité par défaut */}
+      <Modal visible={qSheet} transparent animationType="slide" onRequestClose={() => setQSheet(false)}>
+        <Pressable style={styles.backdrop} onPress={() => setQSheet(false)} />
+        <View style={styles.sheet}>
+          <Text style={styles.sheetTitle}>Qualité de lecture</Text>
+          {QUALITY_PREFS.map((x) => (
+            <Pressable key={x.id} onPress={() => (tap(), chooseQuality(x.id), setQSheet(false))} style={styles.opt}>
+              <Text style={[styles.optText, quality === x.id && { fontWeight: '800' }]}>{x.name}</Text>
+              {quality === x.id ? <Ionicons name="checkmark" size={20} color={TWITCH} /> : null}
+            </Pressable>
+          ))}
+          <Text style={[styles.s, { marginTop: 10 }]}>Si une rediffusion n'a pas cette qualité, la plus proche en dessous est prise.</Text>
+        </View>
+      </Modal>
+
+      {/* Une rediffusion : regarder dans une autre qualité, ou télécharger sur le serveur */}
+      <Modal visible={!!menu} transparent animationType="slide" onRequestClose={() => setMenu(null)}>
+        <Pressable style={styles.backdrop} onPress={() => setMenu(null)} />
+        <View style={styles.sheet}>
+          <Text numberOfLines={2} style={styles.sheetTitle}>
+            {menu?.v.title}
+          </Text>
+          {!menu?.qualities ? (
+            <ActivityIndicator color={C.text} style={{ margin: 20 }} />
+          ) : (
+            <ScrollView style={{ maxHeight: 420 }}>
+              <Text style={styles.sheetSub}>Regarder en</Text>
+              {menu.qualities.map((x) => (
+                <Pressable key={`p-${x.id}`} onPress={() => (setMenu(null), play(menu.v, undefined, x.id))} style={styles.opt}>
+                  <Text style={styles.optText}>{x.name}</Text>
+                  <Ionicons name="play" size={16} color={C.textDim} />
+                </Pressable>
+              ))}
+              <Text style={[styles.sheetSub, { marginTop: 14 }]}>Télécharger sur le serveur en</Text>
+              {saved.includes(menu.v.id) ? <Text style={styles.s}>Déjà téléchargée (retélécharger la remplace).</Text> : null}
+              {menu.qualities.map((x) => (
+                <Pressable key={`d-${x.id}`} onPress={() => (setMenu(null), download(menu.v, x.id))} style={styles.opt}>
+                  <Text style={styles.optText}>{x.name}</Text>
+                  <Ionicons name="download-outline" size={18} color={C.textDim} />
+                </Pressable>
+              ))}
+            </ScrollView>
+          )}
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
-function Thumb({ v, w, busy }: { v: TwitchVod; w: number; busy: boolean }) {
+function Thumb({ v, w, busy, saved, job }: { v: TwitchVod; w: number; busy: boolean; saved?: boolean; job?: TwitchJob }) {
   const h = Math.round((w * 9) / 16);
   const p = v.progress;
   const pct = p && p.length ? Math.min(1, p.pos / p.length) : 0;
@@ -265,6 +431,12 @@ function Thumb({ v, w, busy }: { v: TwitchVod; w: number; busy: boolean }) {
       <View style={styles.len}>
         <Text style={styles.lenText}>{fmtLen(v.length)}</Text>
       </View>
+      {saved || job?.status === 'running' || job?.status === 'queued' ? (
+        <View style={styles.dl}>
+          <Ionicons name={saved && job?.status !== 'running' ? 'server' : 'cloud-download'} size={12} color="#fff" />
+          {job?.status === 'running' && job.length ? <Text style={styles.dlText}>{Math.round((job.done / job.length) * 100)} %</Text> : null}
+        </View>
+      ) : null}
       {p?.done ? (
         <View style={styles.seen}>
           <Ionicons name="checkmark" size={12} color="#000" />
@@ -295,6 +467,19 @@ const styles = StyleSheet.create({
   chName: { color: C.textDim, fontSize: 12, fontWeight: '600' },
   addBox: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginBottom: 14, paddingHorizontal: 12, height: 44, borderRadius: 12, backgroundColor: C.surfaceHigh },
   addInput: { flex: 1, color: C.text, fontSize: 15 },
+  tools: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, marginBottom: 12 },
+  tool: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, height: 34, borderRadius: 17, backgroundColor: C.surfaceHigh },
+  toolText: { color: C.text, fontSize: 13, fontWeight: '700' },
+  job: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginBottom: 10, padding: 12, borderRadius: 12, backgroundColor: C.surface },
+  jobBar: { height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.15)', overflow: 'hidden' },
+  dl: { position: 'absolute', right: 8, top: 8, flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 6, height: 22, borderRadius: 11, backgroundColor: TWITCH },
+  dlText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' },
+  sheet: { backgroundColor: C.surfaceHigh, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingTop: 18, paddingBottom: 34, paddingHorizontal: 18 },
+  sheetTitle: { color: C.text, fontSize: 17, fontWeight: '800', marginBottom: 10 },
+  sheetSub: { color: C.textDim, fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 },
+  opt: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 13, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
+  optText: { color: C.text, fontSize: 16 },
   account: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginBottom: 14, padding: 12, borderRadius: 12, backgroundColor: C.surface },
   link: { color: C.text, fontSize: 13, fontWeight: '800' },
   live: { marginHorizontal: 16, marginBottom: 16, padding: 14, borderRadius: 14, backgroundColor: 'rgba(145,70,255,0.18)', borderWidth: StyleSheet.hairlineWidth, borderColor: TWITCH, gap: 6 },

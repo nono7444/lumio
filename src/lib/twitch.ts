@@ -16,6 +16,8 @@ export type TwitchVod = {
   chapters: TwitchChapter[];
   progress: { pos: number; length: number; done: boolean; at: number } | null;
 };
+export type TwitchQuality = { id: string; name: string; height: number; fps: number; bandwidth: number; url: string };
+export type TwitchJob = { id: string; vodId: string; channel: string; title: string; status: 'queued' | 'running' | 'done' | 'error' | 'cancelled'; quality: string; done: number; length: number; bytes: number; error: string | null; file: string | null };
 export type TwitchChannel = {
   login: string;
   name: string;
@@ -29,7 +31,14 @@ export const twitchApi = {
   channels: (s: Settings, refresh = false) => serverCall<{ channels: TwitchChannel[] }>(s, `/api/twitch/channels${refresh ? '?refresh=1' : ''}`),
   setChannels: (s: Settings, channels: string[]) =>
     serverCall<{ channels: string[] }>(s, '/api/twitch/channels', { method: 'PUT', body: JSON.stringify({ channels }) }),
-  play: (s: Settings, id: string) => serverCall<{ url: string }>(s, `/api/twitch/vod/${id}/play`),
+  play: (s: Settings, id: string) => serverCall<{ url: string; qualities: TwitchQuality[] }>(s, `/api/twitch/vod/${id}/play`),
+  download: (s: Settings, v: { id: string; title: string; createdAt: string; length: number }, channel: string, quality: string) =>
+    serverCall<{ job: TwitchJob }>(s, `/api/twitch/vod/${v.id}/download`, {
+      method: 'POST',
+      body: JSON.stringify({ channel, title: v.title, createdAt: v.createdAt, length: v.length, quality }),
+    }),
+  jobs: (s: Settings) => serverCall<{ jobs: TwitchJob[]; saved: string[] }>(s, '/api/twitch/jobs'),
+  cancel: (s: Settings, id: string) => serverCall<{ ok: boolean }>(s, `/api/twitch/jobs/${id}`, { method: 'DELETE' }),
   account: (s: Settings) => serverCall<{ account: { login: string; name: string } | null }>(s, '/api/twitch/account'),
   connect: (s: Settings, token: string) =>
     serverCall<{ account: { login: string; name: string } }>(s, '/api/twitch/account', { method: 'PUT', body: JSON.stringify({ token }) }),
