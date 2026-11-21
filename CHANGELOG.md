@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.199 — 21 novembre 2026
+
 - Lumio Auto, Seed : un torrent « partage seul » en file d'attente dans qBittorrent démarre tout de suite (démarrage forcé) au lieu de rester à 0 %, et la liste dit pourquoi un torrent n'avance pas (en attente, aucune source, vitesse et sources).
 
 ## 1.0.198 — 20 novembre 2026
