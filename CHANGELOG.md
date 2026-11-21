@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.201 — 21 novembre 2026
+
 - Twitch : « Se connecter » avec ton compte Twitch abonné (page de connexion officielle de Twitch dans l'appli, ou jeton collé) pour lire les rediffusions réservées aux abonnés. Le jeton reste seulement sur ton serveur.
 
 - Lumio (admin) : nouvel univers **Twitch** dans le menu en haut de l'accueil. Les rediffusions des chaînes suivies (Altair par défaut, + pour en ajouter, appui long pour retirer), le direct en cours, « Reprendre », et un tri par jeu : choisir un jeu montre les rediffusions où il a été joué et la lecture démarre au début de ce jeu. Les chapitres de chaque rediffusion permettent de sauter d'un jeu à l'autre. La position est gardée sur le serveur.
