@@ -2774,7 +2774,16 @@ export function AutoSeedScreen() {
                   </View>
                   <Text style={styles.small}>
                     <Text style={{ color: C.warning, fontWeight: '800' }}>Partage seul</Text>
-                    {b.free ? ' · freeleech' : ''} · {b.state === 'downloading' ? `téléchargement · ${gb(b.size)}` : `↑ ${gb(b.uploaded)} envoyés`}
+                    {b.free ? ' · freeleech' : ''} ·{' '}
+                    {b.state !== 'downloading'
+                      ? `↑ ${gb(b.uploaded)} envoyés`
+                      : /^queued/i.test(b.qstate ?? '')
+                        ? `en attente dans qBittorrent (démarrage forcé) · ${gb(b.size)}`
+                        : b.qstate === 'stalledDL' && !b.seeders
+                          ? `aucune source pour l'instant · ${gb(b.size)}`
+                          : b.qstate === 'metaDL'
+                            ? 'récupération des infos du torrent'
+                            : `téléchargement · ${gb(b.size)}${b.dlSpeed ? ` · ↓ ${fmtSpeed2(b.dlSpeed)}` : ''}${b.seeders != null ? ` · ${b.seeders} sources` : ''}`}
                     {b.upSpeed ? ` · ${fmtSpeed2(b.upSpeed)}` : ''}
                     {b.leechers != null ? ` · ${b.leechers} demandent` : ''}
                   </Text>

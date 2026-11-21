@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.125.0';
+const VERSION = '3.125.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -7865,7 +7865,7 @@ function autoBoostView() {
     paidAllowed: autoIndexers().some((x) => x.enabled !== false && boostPaidOk({ indexerId: x.id })),
     lastNote: auto.boostNote || null,
     paidWeek: boostPaidWeek(),
-    torrents: boostActive().map((b) => ({ id: b.id, title: b.title, size: b.size, indexer: b.indexer, addedAt: b.addedAt, state: b.state, free: b.free !== false, progress: b.progress || 0, ratio: b.ratio || 0, uploaded: b.uploaded || 0, upSpeed: b.upSpeed || 0, leechers: b.leechers ?? null, seeders: b.seeders ?? null, hoursLeft: b.state === 'seeding' ? hrLeft(b.seedTime) : null })),
+    torrents: boostActive().map((b) => ({ id: b.id, title: b.title, size: b.size, indexer: b.indexer, addedAt: b.addedAt, state: b.state, free: b.free !== false, progress: b.progress || 0, ratio: b.ratio || 0, uploaded: b.uploaded || 0, upSpeed: b.upSpeed || 0, leechers: b.leechers ?? null, seeders: b.seeders ?? null, qstate: b.qstate || null, dlSpeed: b.dlSpeed || 0, hoursLeft: b.state === 'seeding' ? hrLeft(b.seedTime) : null })),
   };
 }
 async function boostRemove(b, why) {
@@ -7899,6 +7899,13 @@ async function autoBoostTick() {
       b.leechers = Number(t.num_incomplete) || 0;
       b.seeders = Number(t.num_complete) || 0;
       b.state = Number(t.progress) >= 1 ? 'seeding' : 'downloading';
+      b.qstate = String(t.state || '');
+      b.dlSpeed = Number(t.dlspeed) || 0;
+      // En file d'attente dans qBittorrent (limite de téléchargements actifs) : démarrage forcé, sinon il reste à 0 %
+      if (/^queued/i.test(b.qstate) || b.qstate === 'pausedDL' || b.qstate === 'stoppedDL') {
+        await qbitFetch('/api/v2/torrents/setForceStart', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ hashes: b.hash, value: 'true' }) }).catch(() => {});
+        if (/^(paused|stopped)DL$/.test(b.qstate)) await qbitFetch('/api/v2/torrents/start', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ hashes: b.hash }) }).catch(() => qbitFetch('/api/v2/torrents/resume', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ hashes: b.hash }) }).catch(() => {}));
+      }
       // Jamais fini au bout de 3 jours (plus de source) : place rendue, rien n'a été compté (freeleech)
       if (b.state === 'downloading' && Date.now() - Date.parse(b.addedAt) > 3 * 86400e3 && b.progress < 100) await boostRemove(b, 'téléchargement bloqué').catch(() => {});
       // Plus de retrait après 72 h à ratio 1 ou moins (« on laisse tout ») : seule la place disque reste une raison
@@ -7989,6 +7996,9 @@ async function boostAdd(r) {
   fd.append('seedingTimeLimit', '-1');
   const resp = await qbitFetch('/api/v2/torrents/add', { method: 'POST', body: fd });
   if (/fail/i.test(await resp.text())) throw new Error('refusé par qBittorrent');
+  // Démarrage forcé : il ne doit pas attendre derrière les autres téléchargements de qBittorrent
+  setTimeout(() => qbitFetch('/api/v2/torrents/setForceStart', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ hashes: hash, value: 'true' }) }).catch(() => {}), 3000);
+  setTimeout(() => autoBoostTick().catch(() => {}), 20_000);
   const b = { id: autoId(), hash, guid: r.guid, title: r.title, size: r.size, indexer: r.indexer, indexerId: r.indexerId, addedAt: new Date().toISOString(), state: 'downloading', leechers: r.leechers, seeders: r.seeders, free: Boolean(r.freeleech) };
   auto.boost.push(b);
   // Torrent payant : compté dans le volume du jour du site, comme un téléchargement normal

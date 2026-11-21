@@ -291,7 +291,7 @@ export type AutoRatioSite = {
   /** Mode ratio sur ce site (serveur 3.92+) */
   guard?: { on: boolean; ratio: number | null; since: string | null } | null;
 };
-export type AutoBoostTorrent = { id: string; title: string; size: number; indexer: string; addedAt: string; state: 'downloading' | 'seeding'; free?: boolean; progress: number; ratio: number; uploaded: number; upSpeed: number; leechers: number | null; seeders: number | null; hoursLeft: number | null };
+export type AutoBoostTorrent = { id: string; title: string; size: number; indexer: string; addedAt: string; state: 'downloading' | 'seeding'; free?: boolean; progress: number; ratio: number; uploaded: number; upSpeed: number; leechers: number | null; seeders: number | null; qstate?: string | null; dlSpeed?: number; hoursLeft: number | null };
 /** Booster de seed : torrents freeleech pris seulement pour partager */
 /** Torrent proposé au booster, classé d'après les chiffres du site (gain estimé = envoi espéré − coût du téléchargement) */
 export type AutoBoostCandidate = { guid: string; title: string; size: number; seeders: number | null; leechers: number | null; grabs: number | null; free: boolean; demand: number; expected: number; gain: number; indexer: string; pub: string | null; worth: boolean };

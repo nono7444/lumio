@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Lumio Auto, Seed : un torrent « partage seul » en file d'attente dans qBittorrent démarre tout de suite (démarrage forcé) au lieu de rester à 0 %, et la liste dit pourquoi un torrent n'avance pas (en attente, aucune source, vitesse et sources).
+
 ## 1.0.198 — 20 novembre 2026
 
 - Livres : les packs (.rar, .7z, .zip de plusieurs tomes), les BD en .cbr et les tomes livrés en dossiers de pages sont rangés tout seuls en CBZ lisibles. Pour l'admin, la bibliothèque liste les fichiers que la liseuse ne sait pas ouvrir.
