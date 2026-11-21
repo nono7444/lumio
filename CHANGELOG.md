@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Lumio (admin) : nouvel univers **Twitch** dans le menu en haut de l'accueil. Les rediffusions des chaînes suivies (Altair par défaut, + pour en ajouter, appui long pour retirer), le direct en cours, « Reprendre », et un tri par jeu : choisir un jeu montre les rediffusions où il a été joué et la lecture démarre au début de ce jeu. Les chapitres de chaque rediffusion permettent de sauter d'un jeu à l'autre. La position est gardée sur le serveur.
+
 ## 1.0.199 — 21 novembre 2026
 
 - Lumio Auto, Seed : un torrent « partage seul » en file d'attente dans qBittorrent démarre tout de suite (démarrage forcé) au lieu de rester à 0 %, et la liste dit pourquoi un torrent n'avance pas (en attente, aucune source, vitesse et sources).

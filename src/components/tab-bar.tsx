@@ -44,6 +44,7 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   find: 'search',
   // Lumio Livres
   shelf: 'library',
+  twitch: 'logo-twitch',
   findbook: 'search',
   me: 'person-circle',
 };
@@ -67,6 +68,7 @@ const SHORT: Record<string, string> = {
   listen: IS_AUDIO ? 'Livres' : 'Audio',
   find: 'Trouver',
   shelf: 'Livres',
+  twitch: 'Twitch',
   findbook: 'Trouver',
   me: 'Profil',
 };
@@ -262,7 +264,7 @@ function PhoneTabBar({ state, descriptors, navigation }: TabBarProps) {
                   </View>
                 ) : (
                   <Ionicons
-                    name={(focused ? ICONS[route.name] : `${ICONS[route.name]}-outline`) as keyof typeof Ionicons.glyphMap}
+                    name={(focused || ICONS[route.name]?.startsWith('logo-') ? ICONS[route.name] : `${ICONS[route.name]}-outline`) as keyof typeof Ionicons.glyphMap}
                     size={dense ? 21 : 23}
                     color={color}
                   />

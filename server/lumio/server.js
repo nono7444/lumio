@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.125.1';
+const VERSION = '3.126.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -5456,6 +5456,129 @@ async function audioRoutes(req, res, p, q, user) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ——— Twitch (univers « Twitch » de Lumio, admin) : rediffusions publiques des chaînes suivies, triées par jeu ———
+// Passe par l'API GraphQL publique de twitch.tv (identifiant public du site web, pas une clé secrète).
+// Les rediffusions réservées aux abonnés ne sont pas contournées : Twitch refuse leur lecture, on l'affiche.
+const TWITCH_GQL_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
+const TWITCH_FILE = path.join(DATA_DIR, 'twitch.json');
+let twitchState = { channels: ['altair'], progress: {} };
+try {
+  twitchState = { ...twitchState, ...JSON.parse(fs.readFileSync(TWITCH_FILE, 'utf8')) };
+} catch {}
+let twitchSaveT = null;
+const twitchSave = () => {
+  clearTimeout(twitchSaveT);
+  twitchSaveT = setTimeout(() => fs.promises.writeFile(TWITCH_FILE, JSON.stringify(twitchState)).catch(() => {}), 1000);
+};
+async function twitchGql(query) {
+  const r = await fetch('https://gql.twitch.tv/gql', {
+    method: 'POST',
+    headers: { 'Client-ID': TWITCH_GQL_ID, 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' },
+    body: JSON.stringify({ query }),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!r.ok) throw new HttpError(502, `Twitch ne répond pas (${r.status})`);
+  const j = await r.json();
+  if (j.errors && !j.data) throw new HttpError(502, `Twitch : ${j.errors[0]?.message || 'erreur'}`);
+  return j.data || {};
+}
+const twitchLogin = (x) => String(x || '').trim().toLowerCase().replace(/^https?:\/\/(www\.)?twitch\.tv\//, '').replace(/[^a-z0-9_]/g, '');
+const twitchCache = new Map();
+/** Une chaîne : infos, direct en cours, rediffusions (100 dernières) avec leurs jeux (chapitres). */
+async function twitchChannel(login, fresh) {
+  const c = twitchCache.get(login);
+  if (!fresh && c && Date.now() - c.at < 10 * 60e3) return c.data;
+  const q = `query {
+    user(login: ${JSON.stringify(login)}) {
+      id login displayName profileImageURL(width: 150)
+      stream { id title viewersCount game { name } }
+      videos(first: 100, type: ARCHIVE, sort: TIME) {
+        edges { node {
+          id title lengthSeconds createdAt viewCount
+          previewThumbnailURL(width: 640, height: 360)
+          game { id name boxArtURL(width: 144, height: 192) }
+          moments(momentRequestType: VIDEO_CHAPTER_MARKERS, first: 30) {
+            edges { node {
+              positionMilliseconds durationMilliseconds description
+              details { ... on GameChangeMomentDetails { game { id name boxArtURL(width: 144, height: 192) } } }
+            } }
+          }
+        } }
+      }
+    }
+  }`;
+  // Si Twitch refuse les chapitres (champ changé), on redemande sans : le jeu principal de chaque rediffusion suffit
+  const d = await twitchGql(q).catch(() => twitchGql(q.replace(/moments\([\s\S]*?\n {10}\}\n/, '')));
+  const u = d.user;
+  if (!u) throw new HttpError(404, `Chaîne « ${login} » introuvable sur Twitch`);
+  const vods = (u.videos?.edges || []).map(({ node: v }) => {
+    const chapters = (v.moments?.edges || [])
+      .map(({ node: m }) => ({ game: m.details?.game?.name || m.description || 'Autre', box: m.details?.game?.boxArtURL || null, start: Math.round((m.positionMilliseconds || 0) / 1000), length: Math.round((m.durationMilliseconds || 0) / 1000) }))
+      .filter((x) => x.game);
+    // Pas de chapitres : un seul jeu (celui de la rediffusion)
+    if (!chapters.length && v.game) chapters.push({ game: v.game.name, box: v.game.boxArtURL || null, start: 0, length: v.lengthSeconds });
+    return { id: v.id, title: v.title, length: v.lengthSeconds, createdAt: v.createdAt, views: v.viewCount, thumb: v.previewThumbnailURL || null, chapters };
+  });
+  const data = { login: u.login, name: u.displayName, avatar: u.profileImageURL, live: u.stream ? { title: u.stream.title, viewers: u.stream.viewersCount, game: u.stream.game?.name || null } : null, vods };
+  twitchCache.set(login, { at: Date.now(), data });
+  return data;
+}
+/** Adresse de lecture (HLS) d'une rediffusion, ou une erreur claire (abonnés seulement, supprimée…). */
+async function twitchVodUrl(id) {
+  const d = await twitchGql(`query { videoPlaybackAccessToken(id: ${JSON.stringify(String(id))}, params: { platform: "web", playerBackend: "mediaplayer", playerType: "site" }) { value signature } }`);
+  const t = d.videoPlaybackAccessToken;
+  if (!t?.value) throw new HttpError(404, 'Rediffusion introuvable');
+  const u = `https://usher.ttvnw.net/vod/${encodeURIComponent(id)}.m3u8?${new URLSearchParams({ sig: t.signature, token: t.value, allow_source: 'true', allow_audio_only: 'true', player: 'twitchweb', playlist_include_framerate: 'true', p: String(Math.floor(Math.random() * 1e6)) })}`;
+  const r = await fetch(u, { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': 'Mozilla/5.0' } });
+  if (r.status === 403) throw new HttpError(403, 'Rediffusion réservée aux abonnés de la chaîne');
+  if (!r.ok) throw new HttpError(502, `Twitch refuse la lecture (${r.status})`);
+  return u;
+}
+async function twitchRoutes(req, res, p, q, user) {
+  if (!p.startsWith('/api/twitch')) return false;
+  requireAdmin(user);
+  const mine = (twitchState.progress[user.name] = twitchState.progress[user.name] || {});
+  if (req.method === 'GET' && p === '/api/twitch/channels') {
+    const fresh = q.get('refresh') === '1';
+    const out = [];
+    for (const login of twitchState.channels) {
+      try {
+        const c = await twitchChannel(login, fresh);
+        out.push({ ...c, vods: c.vods.map((v) => ({ ...v, progress: mine[v.id] || null })) });
+      } catch (e) {
+        out.push({ login, name: login, error: e.message || String(e), vods: [] });
+      }
+    }
+    send(res, 200, { channels: out });
+    return true;
+  }
+  if (req.method === 'PUT' && p === '/api/twitch/channels') {
+    const b = await readBody(req);
+    const list = [...new Set((Array.isArray(b.channels) ? b.channels : []).map(twitchLogin).filter(Boolean))].slice(0, 20);
+    // Chaîne ajoutée : vérifiée tout de suite (faute de frappe = erreur claire)
+    for (const l of list) if (!twitchState.channels.includes(l)) await twitchChannel(l, true);
+    twitchState.channels = list;
+    twitchSave();
+    send(res, 200, { channels: list });
+    return true;
+  }
+  const pm = p.match(/^\/api\/twitch\/vod\/(\d+)\/(play|progress)$/);
+  if (pm && req.method === 'GET' && pm[2] === 'play') {
+    send(res, 200, { url: await twitchVodUrl(pm[1]) });
+    return true;
+  }
+  if (pm && req.method === 'PUT' && pm[2] === 'progress') {
+    const b = await readBody(req);
+    const pos = Math.max(0, Number(b.pos) || 0);
+    const len = Math.max(0, Number(b.length) || 0);
+    mine[pm[1]] = { pos, length: len, done: len > 0 && pos > len - 120, at: Date.now() };
+    twitchSave();
+    send(res, 200, { ok: true });
+    return true;
+  }
+  return false;
+}
+
 // Lumio Auto (bêta) : remplace Radarr / Sonarr pour l'essentiel, écrit pour Lumio (aucun code repris d'eux).
 // - Indexeurs à soi (Torznab : C411, Tr4ker, Jackett…) et/ou Prowlarr, avec limite de requêtes par site
 // - Veille RSS des nouveautés + recherche automatique de ce qui manque (films sortis, épisodes diffusés)
@@ -10155,6 +10278,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
     // Book (livres, BD, mangas, audio)
     if (await bookRoutes(req, res, p, q, user)) return;
     if (await audioRoutes(req, res, p, q, user)) return;
+    if (await twitchRoutes(req, res, p, q, user)) return;
     if (await profileRoutes(req, res, p, q, user)) return;
     if (await autoRoutes(req, res, p, q, user)) return;
 

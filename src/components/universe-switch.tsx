@@ -10,6 +10,7 @@ import { FocusPressable as Pressable } from '@/components/tv';
 import { tap } from '@/components/ui';
 import { C } from '@/constants/theme';
 import { setUniverse, UNIVERSES, useUniverse, type Universe } from '@/lib/universe';
+import { useSettings } from '@/lib/settings';
 import { IS_AUDIO, IS_AUTO, IS_BOOKS } from '@/lib/variant';
 
 export function goUniverse(u: Universe) {
@@ -21,6 +22,8 @@ export function goUniverse(u: Universe) {
 
 export function UniverseSwitch({ style }: { style?: object }) {
   const u = useUniverse();
+  const { settings } = useSettings();
+  const list = UNIVERSES.filter((x) => !x.admin || settings.jellyfin?.isAdmin);
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
   // Pas d'univers dans Lumio Auto, les anciennes applis séparées et sur la TV
@@ -36,7 +39,7 @@ export function UniverseSwitch({ style }: { style?: object }) {
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
         <View style={[styles.menu, { top: insets.top + 54 }]}>
-          {UNIVERSES.map((x) => {
+          {list.map((x) => {
             const on = x.id === u;
             return (
               <Pressable

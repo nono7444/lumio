@@ -16,7 +16,9 @@ let askedThisLaunch = false;
 
 export default function TabsLayout() {
   const { settings, update } = useSettings();
-  const universe = useUniverse();
+  const rawUniverse = useUniverse();
+  // Twitch est réservé à l'admin : un membre retombe sur Films & séries
+  const universe = rawUniverse === 'twitch' && !settings.jellyfin?.isAdmin ? 'media' : rawUniverse;
 
   useEffect(() => {
     const h = settings.household;
@@ -79,6 +81,7 @@ export default function TabsLayout() {
         <Tabs.Screen name="settings" options={{ href: null }} />
         <Tabs.Screen name="listen" options={{ href: null }} />
         <Tabs.Screen name="find" options={{ href: null }} />
+        <Tabs.Screen name="twitch" options={{ href: null }} />
       </Tabs>
     );
   }
@@ -114,6 +117,7 @@ export default function TabsLayout() {
         <Tabs.Screen name="settings" options={{ href: null }} />
         <Tabs.Screen name="shelf" options={{ href: null }} />
         <Tabs.Screen name="findbook" options={{ href: null }} />
+        <Tabs.Screen name="twitch" options={{ href: null }} />
       </Tabs>
     );
   }
@@ -144,6 +148,7 @@ export default function TabsLayout() {
         <Tabs.Screen name="listen" options={{ href: null }} />
         <Tabs.Screen name="shelf" options={{ href: null }} />
         <Tabs.Screen name="findbook" options={{ href: null }} />
+        <Tabs.Screen name="twitch" options={{ href: null }} />
         <Tabs.Screen name="find" options={{ href: null }} />
         <Tabs.Screen name="me" options={{ href: null }} />
       </Tabs>
@@ -186,6 +191,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="listen" options={{ title: 'Livres audio', href: tab('listen', undefined) }} />
       <Tabs.Screen name="shelf" options={{ title: 'Livres', href: tab('shelf', undefined) }} />
       <Tabs.Screen name="findbook" options={{ title: 'Trouver', href: tab('findbook', settings.jellyfin?.isAdmin ? undefined : null) }} />
+      <Tabs.Screen name="twitch" options={{ title: 'Twitch', href: tab('twitch', settings.jellyfin?.isAdmin ? undefined : null) }} />
       <Tabs.Screen name="find" options={{ title: 'Trouver', href: tab('find', settings.jellyfin?.isAdmin ? undefined : null) }} />
       <Tabs.Screen name="me" options={{ href: null }} />
     </Tabs>

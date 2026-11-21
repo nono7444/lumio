@@ -12,6 +12,7 @@ import { CastIcon, CastingScreen, guessContentType, useCasting } from '@/compone
 import { MpvPlayer } from '@/components/players/mpv-player';
 import { NativePlayer } from '@/components/players/native-player';
 import { Toasts } from '@/components/toast';
+import { noteTwitchProgress, twitchApi } from '@/lib/twitch';
 import { Button } from '@/components/ui';
 import { C } from '@/constants/theme';
 import { getPlayback, jf, jfImage, playback, QUALITIES, type PlaybackTarget } from '@/lib/jellyfin';
@@ -38,6 +39,9 @@ type Params = {
   stream?: string;
   /** « 1 » : flux HLS dont l'adresse ne finit pas par .m3u8 (LooStream) */
   hls?: string;
+  /** Rediffusion Twitch : son id et sa durée (position gardée sur le serveur Lumio) */
+  twitch?: string;
+  twitchLen?: string;
   // Contexte d'une série en streaming (pour l'épisode suivant)
   tmdbId?: string;
   imdb?: string;
@@ -181,13 +185,25 @@ export default function Player() {
     return () => {
       if (target.current) playback.stop(settings, { target: target.current, positionSeconds: position.current });
       reportStream(position.current);
+      reportTwitch(position.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const reportTwitch = (pos: number) => {
+    if (!p.twitch || pos < 5) return;
+    const len = Number(p.twitchLen) || 0;
+    noteTwitchProgress(p.twitch, pos, len);
+    twitchApi.progress(settings, p.twitch, pos, len).catch(() => {});
+  };
   const onTime = (pos: number, paused: boolean) => {
     position.current = pos;
     const now = Date.now();
+    if (p.twitch && now - lastReport.current >= 20_000) {
+      lastReport.current = now;
+      reportTwitch(pos);
+      return;
+    }
     if (p.stream === '1' && now - lastReport.current >= 20_000) {
       lastReport.current = now;
       reportStream(pos);
