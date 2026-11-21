@@ -30,6 +30,10 @@ export const twitchApi = {
   setChannels: (s: Settings, channels: string[]) =>
     serverCall<{ channels: string[] }>(s, '/api/twitch/channels', { method: 'PUT', body: JSON.stringify({ channels }) }),
   play: (s: Settings, id: string) => serverCall<{ url: string }>(s, `/api/twitch/vod/${id}/play`),
+  account: (s: Settings) => serverCall<{ account: { login: string; name: string } | null }>(s, '/api/twitch/account'),
+  connect: (s: Settings, token: string) =>
+    serverCall<{ account: { login: string; name: string } }>(s, '/api/twitch/account', { method: 'PUT', body: JSON.stringify({ token }) }),
+  disconnect: (s: Settings) => serverCall<{ account: null }>(s, '/api/twitch/account', { method: 'DELETE' }),
   progress: (s: Settings, id: string, pos: number, length: number) =>
     serverCall<{ ok: boolean }>(s, `/api/twitch/vod/${id}/progress`, { method: 'PUT', body: JSON.stringify({ pos, length }) }),
 };

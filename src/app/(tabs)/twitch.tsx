@@ -3,7 +3,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -25,6 +25,15 @@ export default function TwitchScreen() {
   const [adding, setAdding] = useState(false);
   const [newCh, setNewCh] = useState('');
   const [opening, setOpening] = useState<string | null>(null);
+  const [account, setAccount] = useState<{ login: string; name: string } | null | undefined>(undefined);
+  useEffect(() => {
+    twitchApi
+      .account(settings)
+      .then((r) => setAccount(r.account))
+      .catch(() => setAccount(null));
+    // Relu au retour de l'écran de connexion (la liste des chaînes est rechargée à ce moment-là)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
 
   const ch: TwitchChannel | null = data?.find((c) => c.login === sel) ?? data?.[0] ?? null;
   // Jeux de la chaîne : du plus joué au moins joué (en temps total)
@@ -145,6 +154,30 @@ export default function TwitchScreen() {
           </View>
         ) : null}
 
+        {/* Compte Twitch abonné : rediffusions réservées aux abonnés */}
+        <View style={styles.account}>
+          <Ionicons name="logo-twitch" size={20} color={TWITCH} />
+          <Text style={[styles.s, { flex: 1 }]}>
+            {account === undefined ? '…' : account ? `Compte : ${account.name} (rediffusions d'abonnés lisibles)` : 'Rediffusions pour abonnés : connecte ton compte Twitch'}
+          </Text>
+          {account ? (
+            <Pressable
+              onPress={() =>
+                Alert.alert('Déconnecter le compte Twitch ?', 'Les rediffusions réservées aux abonnés ne seront plus lisibles.', [
+                  { text: 'Annuler', style: 'cancel' },
+                  { text: 'Déconnecter', style: 'destructive', onPress: () => twitchApi.disconnect(settings).then(() => setAccount(null)).catch(() => {}) },
+                ])
+              }
+              hitSlop={8}>
+              <Text style={styles.link}>Déconnecter</Text>
+            </Pressable>
+          ) : account === null ? (
+            <Pressable onPress={() => (tap(), router.push('/twitch-login'))} hitSlop={8}>
+              <Text style={[styles.link, { color: TWITCH }]}>Se connecter</Text>
+            </Pressable>
+          ) : null}
+        </View>
+
         {!data && err ? <Text style={[styles.s, { padding: 24, color: C.danger }]}>{err}</Text> : null}
         {!data && !err ? <ActivityIndicator color={C.text} style={{ marginTop: 40 }} /> : null}
         {ch?.error ? <Text style={[styles.s, { paddingHorizontal: 16, color: C.danger }]}>{ch.error} (appui long sur la chaîne pour la retirer)</Text> : null}
@@ -262,6 +295,8 @@ const styles = StyleSheet.create({
   chName: { color: C.textDim, fontSize: 12, fontWeight: '600' },
   addBox: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginBottom: 14, paddingHorizontal: 12, height: 44, borderRadius: 12, backgroundColor: C.surfaceHigh },
   addInput: { flex: 1, color: C.text, fontSize: 15 },
+  account: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginBottom: 14, padding: 12, borderRadius: 12, backgroundColor: C.surface },
+  link: { color: C.text, fontSize: 13, fontWeight: '800' },
   live: { marginHorizontal: 16, marginBottom: 16, padding: 14, borderRadius: 14, backgroundColor: 'rgba(145,70,255,0.18)', borderWidth: StyleSheet.hairlineWidth, borderColor: TWITCH, gap: 6 },
   liveBadge: { alignSelf: 'flex-start', backgroundColor: '#E91916', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 5 },
   liveBadgeText: { color: '#fff', fontSize: 11, fontWeight: '900' },

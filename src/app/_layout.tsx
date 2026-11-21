@@ -67,6 +67,7 @@ function Root() {
       <Stack.Screen name="watch" options={{ animation: 'fade', presentation: 'fullScreenModal' }} />
       <Stack.Screen name="profiles" options={{ animation: 'fade', presentation: 'fullScreenModal' }} />
       <Stack.Screen name="profile-edit" options={{ presentation: 'modal' }} />
+      <Stack.Screen name="twitch-login" options={{ presentation: 'modal' }} />
       <Stack.Screen name="series/[key]" options={{ animation: 'fade_from_bottom' }} />
       <Stack.Screen name="audio-cover" options={{ presentation: 'modal' }} />
       <Stack.Screen name="ebook/[id]" options={{ animation: 'fade_from_bottom' }} />

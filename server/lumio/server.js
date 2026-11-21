@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.126.0';
+const VERSION = '3.127.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -5470,10 +5470,13 @@ const twitchSave = () => {
   clearTimeout(twitchSaveT);
   twitchSaveT = setTimeout(() => fs.promises.writeFile(TWITCH_FILE, JSON.stringify(twitchState)).catch(() => {}), 1000);
 };
-async function twitchGql(query) {
+// Compte Twitch de l'admin (jeton de connexion du site, gardé seulement sur le serveur) : donne accès aux
+// rediffusions réservées aux abonnés des chaînes auxquelles CE compte est abonné.
+const twitchAuthHeader = (token) => (token ? { Authorization: `OAuth ${token}` } : {});
+async function twitchGql(query, token = twitchState.auth?.token) {
   const r = await fetch('https://gql.twitch.tv/gql', {
     method: 'POST',
-    headers: { 'Client-ID': TWITCH_GQL_ID, 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' },
+    headers: { 'Client-ID': TWITCH_GQL_ID, 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0', ...twitchAuthHeader(token) },
     body: JSON.stringify({ query }),
     signal: AbortSignal.timeout(15000),
   });
@@ -5530,7 +5533,7 @@ async function twitchVodUrl(id) {
   if (!t?.value) throw new HttpError(404, 'Rediffusion introuvable');
   const u = `https://usher.ttvnw.net/vod/${encodeURIComponent(id)}.m3u8?${new URLSearchParams({ sig: t.signature, token: t.value, allow_source: 'true', allow_audio_only: 'true', player: 'twitchweb', playlist_include_framerate: 'true', p: String(Math.floor(Math.random() * 1e6)) })}`;
   const r = await fetch(u, { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': 'Mozilla/5.0' } });
-  if (r.status === 403) throw new HttpError(403, 'Rediffusion réservée aux abonnés de la chaîne');
+  if (r.status === 403) throw new HttpError(403, twitchState.auth?.token ? 'Rediffusion réservée aux abonnés : ton compte Twitch n’est pas abonné à cette chaîne (ou la connexion a expiré)' : 'Rediffusion réservée aux abonnés : connecte ton compte Twitch abonné dans l’univers Twitch');
   if (!r.ok) throw new HttpError(502, `Twitch refuse la lecture (${r.status})`);
   return u;
 }
@@ -5561,6 +5564,33 @@ async function twitchRoutes(req, res, p, q, user) {
     twitchSave();
     send(res, 200, { channels: list });
     return true;
+  }
+  // Compte Twitch : connexion (jeton du site, vérifié), état, déconnexion
+  if (p === '/api/twitch/account') {
+    if (req.method === 'GET') {
+      const a = twitchState.auth;
+      send(res, 200, { account: a ? { login: a.login, name: a.name } : null });
+      return true;
+    }
+    if (req.method === 'PUT') {
+      const b = await readBody(req);
+      const token = String(b.token || '').trim().replace(/^OAuth\s+/i, '');
+      if (!/^[a-z0-9]{20,40}$/i.test(token)) throw new HttpError(400, 'Jeton Twitch invalide');
+      const d = await twitchGql('query { currentUser { login displayName } }', token);
+      if (!d.currentUser) throw new HttpError(401, 'Twitch refuse ce jeton (connexion expirée ?)');
+      twitchState.auth = { token, login: d.currentUser.login, name: d.currentUser.displayName, at: Date.now() };
+      twitchSave();
+      twitchCache.clear();
+      send(res, 200, { account: { login: twitchState.auth.login, name: twitchState.auth.name } });
+      return true;
+    }
+    if (req.method === 'DELETE') {
+      delete twitchState.auth;
+      twitchSave();
+      twitchCache.clear();
+      send(res, 200, { account: null });
+      return true;
+    }
   }
   const pm = p.match(/^\/api\/twitch\/vod\/(\d+)\/(play|progress)$/);
   if (pm && req.method === 'GET' && pm[2] === 'play') {
