@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.133.0';
+const VERSION = '3.134.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -114,6 +114,23 @@ if (!config.quotaPresetRatio) {
   } catch {}
 }
 const tvBySeries = () => config.tvQuotaUnit === 'series';
+// Plus de quota pour les membres (demandé par l'admin) : tout passe à illimité, une seule fois.
+// Les quotas restent réglables ensuite dans Utilisateurs si besoin.
+if (!config.quotaOff) {
+  config.quotaOff = true;
+  config.defaultMovieQuotaLimit = 0;
+  config.defaultTvQuotaLimit = 0;
+  for (const p of Object.values(userPrefs)) {
+    if (p && typeof p === 'object') {
+      delete p.movieQuotaLimit;
+      delete p.tvQuotaLimit;
+    }
+  }
+  try {
+    writeJson(CONFIG_FILE, config);
+    writeJson(USERS_FILE, userPrefs);
+  } catch {}
+}
 
 function settings() {
   return {
