@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.205 — 22 novembre 2026
+
 - « Qui utilise le processeur ? » affiche maintenant un résultat tout de suite (total, part de Lumio) et dit clairement ce qui manque.
 - Serveur 3.131.0 : relevé immédiat du processeur.
 
