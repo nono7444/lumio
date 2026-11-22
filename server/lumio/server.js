@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.129.0';
+const VERSION = '3.130.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4520,7 +4520,10 @@ async function bookFileRoutes(req, res, p, q) {
         ...(range ? { 'Content-Range': `bytes ${start}-${end}/${st.size}` } : {}),
         'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(path.basename(file))}`,
       });
-      fs.createReadStream(file, { start, end }).pipe(res);
+      // Gros morceaux (1 Mo) : beaucoup moins de travail pour le processeur sur les vidéos ; arrêt net si le lecteur coupe
+      const rs = fs.createReadStream(file, { start, end, highWaterMark: 1024 * 1024 });
+      res.on('close', () => rs.destroy());
+      rs.pipe(res);
       return true;
     }
     if (what === 'pages' || what.startsWith('page/')) {
@@ -11154,6 +11157,34 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       fs.writeFileSync(path.join(dir, 'update-containers'), JSON.stringify({ by: user.name, at: new Date().toISOString() }));
       console.log(`Mise à jour des conteneurs demandée par ${user.name}`);
       return send(res, 200, { ok: true, message: 'Mise à jour des conteneurs lancée : les services mis à jour redémarrent un par un (quelques minutes).' });
+    }
+    // Qui utilise le processeur ? La machine fait le relevé (docker stats + top) via le service des conteneurs
+    if (p === '/api/admin/host/diag') {
+      requireAdmin(user);
+      const dir = path.join(DATA_DIR, 'host-actions');
+      if (req.method === 'POST') {
+        if (!fs.existsSync(path.join(dir, '.helper-containers'))) throw new HttpError(409, 'Le service de la machine doit d’abord être installé (install-host-actions.sh).');
+        if (fs.existsSync(path.join(dir, 'update-containers'))) throw new HttpError(409, 'La machine est déjà occupée, réessaie dans un instant.');
+        fs.writeFileSync(path.join(dir, 'update-containers'), JSON.stringify({ mode: 'diag', by: user.name, at: new Date().toISOString() }));
+        return send(res, 200, { ok: true });
+      }
+      let txt = '';
+      let at = null;
+      try {
+        txt = fs.readFileSync(path.join(dir, 'diag.log'), 'utf8');
+        at = fs.statSync(path.join(dir, 'diag.log')).mtime.toISOString();
+      } catch {}
+      const part = (name) => ((txt.split(`== ${name}\n`)[1] || '').split('\n== ')[0].split('\nLUMIO_EXIT')[0]).split('\n').filter((l) => l.includes('|'));
+      const pct = (v) => Number(String(v).replace('%', '').replace(',', '.')) || 0;
+      const containers = part('CONTENEURS').map((l) => {
+        const [name, cpu, mem] = l.split('|');
+        return { name, cpu: pct(cpu), mem: (mem || '').split('/')[0].trim() };
+      }).sort((x, y) => y.cpu - x.cpu);
+      const procs = part('PROCESSUS').map((l) => {
+        const [cpu, name, owner] = l.split('|');
+        return { name, cpu: pct(cpu), owner };
+      }).filter((x) => x.name);
+      return send(res, 200, { at, pending: fs.existsSync(path.join(dir, 'update-containers')), cores: require('os').cpus().length, cpu: (sysHistory[sysHistory.length - 1] || {}).cpu ?? null, containers, procs });
     }
     if (req.method === 'GET' && p === '/api/admin/host/status') {
       requireAdmin(user);

@@ -4,7 +4,22 @@
 #   $DIR/containers-progress : « 42 Téléchargement de jellyfin (3/7) »
 #   $DIR/containers-last.log : journal, terminé par LUMIO_EXIT=<code>
 DIR="$1"; COMPOSE_DIR="$2"
+REQ=$(cat "$DIR/update-containers" 2>/dev/null)
 rm -f "$DIR/update-containers"
+# Demande « diag » (Profil → Serveur → Qui utilise le processeur ?) : relevé du processeur, sans rien mettre à jour
+case "$REQ" in *'"diag"'*)
+  {
+    echo "DATE=$(date '+%d/%m/%Y %H:%M:%S')"
+    echo "== CONTENEURS"
+    docker stats --no-stream --format '{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}' 2>&1
+    echo "== PROCESSUS"
+    # Deux relevés à 3 s d'écart : le second donne la consommation réelle du moment
+    top -b -n 2 -d 3 -w 200 -o %CPU 2>/dev/null | awk '/^top -/{n++} n==2 && $1 ~ /^[0-9]+$/ {print $9"|"$12"|"$2}' | head -12
+    echo "LUMIO_EXIT=0"
+  } > "$DIR/diag.log.part" 2>&1
+  mv "$DIR/diag.log.part" "$DIR/diag.log"
+  exit 0
+;; esac
 LOG="$DIR/containers-last.log"
 PROG="$DIR/containers-progress"
 step() { echo "$1 $2" > "$PROG"; }

@@ -47,6 +47,15 @@ type HostStatus = {
   version?: string;
 };
 
+type Diag = {
+  at: string | null;
+  pending: boolean;
+  cores: number;
+  cpu: number | null;
+  containers: { name: string; cpu: number; mem: string }[];
+  procs: { name: string; cpu: number; owner: string }[];
+};
+
 type RefreshStatus = { active: boolean; progress: number; libraries: { name: string; active: boolean; progress: number }[] };
 
 export function ServerActionsSection() {
@@ -70,6 +79,8 @@ export function ServerActionsSection() {
     return () => clearTimeout(t);
   }, [allowed, containersRunning, host, loadHost]);
   const [watch, setWatch] = useState(0);
+  const [diag, setDiag] = useState<Diag | null>(null);
+  const [diagBusy, setDiagBusy] = useState(false);
   const sawActive = useRef(false);
   const poll = useCallback(async () => {
     try {
@@ -104,6 +115,28 @@ export function ServerActionsSection() {
     };
   }, [allowed, poll, watch]);
   if (!allowed) return null;
+
+  // Qui utilise le processeur ? Relevé fait par la machine (environ 5 s)
+  const runDiag = async () => {
+    setDiagBusy(true);
+    try {
+      const before = diag?.at ?? null;
+      await serverCall(settings, '/api/admin/host/diag', { method: 'POST', body: '{}' });
+      for (let i = 0; i < 15; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const d = await serverCall<Diag>(settings, '/api/admin/host/diag');
+        if (d.at && d.at !== before && !d.pending) {
+          setDiag(d);
+          return;
+        }
+      }
+      toast('La machine n’a pas répondu (service de la machine installé ?)', 'error');
+    } catch (e: any) {
+      toast(e?.message ?? String(e), 'error');
+    } finally {
+      setDiagBusy(false);
+    }
+  };
 
   const run = async (a: Action) => {
     setBusy(a);
@@ -210,6 +243,29 @@ export function ServerActionsSection() {
             {host.containers.ok ? (host.containers.updated.length ? ` · mis à jour : ${host.containers.updated.join(', ')}` : ' · rien de nouveau') : ` · erreur : ${host.containers.tail.split('\n').slice(-2).join(' ')}`}
           </Text>
         ) : null}
+        <Button title="Qui utilise le processeur ?" icon="speedometer-outline" variant="secondary" loading={diagBusy} onPress={runDiag} />
+        {diag ? (
+          <View style={styles.progressBox}>
+            <View style={styles.progressHead}>
+              <Text style={styles.progressTitle}>Processeur{diag.at ? ` · ${new Date(diag.at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}</Text>
+              {diag.cpu != null ? <Text style={styles.progressPct}>{diag.cpu} %</Text> : null}
+            </View>
+            <Text style={[styles.help, { marginBottom: 0 }]}>Conteneurs (100 % = 1 cœur sur {diag.cores})</Text>
+            {diag.containers.slice(0, 8).map((c) => (
+              <View key={c.name} style={styles.progressHead}>
+                <Text style={styles.diagName} numberOfLines={1}>{c.name}</Text>
+                <Text style={styles.diagVal}>{c.cpu.toFixed(1)} % · {c.mem}</Text>
+              </View>
+            ))}
+            <Text style={[styles.help, { marginBottom: 0, marginTop: 6 }]}>Programmes les plus gourmands</Text>
+            {diag.procs.slice(0, 8).map((x, i) => (
+              <View key={`${x.name}-${i}`} style={styles.progressHead}>
+                <Text style={styles.diagName} numberOfLines={1}>{x.name}</Text>
+                <Text style={styles.diagVal}>{x.cpu.toFixed(1)} %</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
         <Button title="Redémarrer le PC serveur" icon="power" variant="danger" loading={busy === 'reboot'} onPress={() => confirm('reboot')} />
       </View>
     </Section>
@@ -223,5 +279,7 @@ const styles = StyleSheet.create({
   progressTitle: { color: C.text, fontSize: 14, fontWeight: '700', flex: 1 },
   progressPct: { color: C.accent, fontSize: 18, fontWeight: '900', fontVariant: ['tabular-nums'] },
   track: { height: 8, borderRadius: 4, backgroundColor: C.surfaceHigh, overflow: 'hidden' },
+  diagName: { color: C.text, fontSize: 14, flex: 1 },
+  diagVal: { color: C.textDim, fontSize: 13, fontVariant: ['tabular-nums'] },
   fill: { height: 8, borderRadius: 4, backgroundColor: C.accent },
 });

@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Profil → Serveur : bouton « Qui utilise le processeur ? » qui montre les conteneurs et programmes les plus gourmands, sans SSH.
+- Serveur 3.130.0 : lecture des rediffusions et vidéos du serveur plus légère pour le processeur.
+
 ## 1.0.203 — 22 novembre 2026
 
 - Twitch : nouvel onglet « Mes rediffusions » avec les rediffusions téléchargées sur le serveur (lecture, reprise, suppression par appui long).
