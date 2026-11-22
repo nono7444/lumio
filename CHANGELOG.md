@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Twitch : les téléchargements ne restent plus bloqués à 100 % (le fichier n'est plus réécrit en entier à la fin) ; « finalisation » ou « rien de neuf depuis X min » s'affiche si besoin.
+- Serveur 3.133.0 : un téléchargement Twitch qui ne bouge plus pendant 15 min s'arrête avec un message clair.
+
 ## 1.0.206 — 22 novembre 2026
 
 - Twitch : à la maison, « Mes rediffusions » se lisent directement sur le serveur, sans passer par le tunnel Cloudflare (beaucoup moins de processeur).

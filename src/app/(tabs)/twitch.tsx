@@ -352,7 +352,9 @@ export default function TwitchScreen() {
                   ? j.error
                   : j.status === 'queued'
                     ? 'En attente'
-                    : `${j.quality} · ${j.length ? Math.round((j.done / j.length) * 100) : 0} % · ${fmtLen(j.done)} / ${fmtLen(j.length)}${j.bytes ? ` · ${(j.bytes / 1e9).toFixed(1)} Go` : ''}`}
+                    : j.finishing
+                      ? `${j.quality} · finalisation du fichier…${j.bytes ? ` · ${(j.bytes / 1e9).toFixed(1)} Go` : ''}`
+                      : `${j.quality} · ${j.length ? Math.round((j.done / j.length) * 100) : 0} % · ${fmtLen(j.done)} / ${fmtLen(j.length)}${j.bytes ? ` · ${(j.bytes / 1e9).toFixed(1)} Go` : ''}${(j.idle ?? 0) > 120 ? ` · rien de neuf depuis ${Math.round((j.idle ?? 0) / 60)} min` : ''}`}
               </Text>
               {j.status === 'running' && j.length ? (
                 <View style={styles.jobBar}>

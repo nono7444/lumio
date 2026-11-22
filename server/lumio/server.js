@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.132.0';
+const VERSION = '3.133.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -5607,18 +5607,32 @@ async function twitchDownloadRun() {
     job.qualityName = pick.name;
     await new Promise((resolve, reject) => {
       const { spawn } = require('child_process');
-      const c = spawn('ffmpeg', ['-y', '-nostats', '-loglevel', 'error', '-progress', 'pipe:1', '-i', pick.url, '-c', 'copy', '-bsf:a', 'aac_adtstoasc', '-movflags', '+faststart', `${target}.part.mp4`], { stdio: ['ignore', 'pipe', 'pipe'] });
+      const c = spawn('ffmpeg', ['-y', '-nostats', '-loglevel', 'error', '-progress', 'pipe:1', '-i', pick.url, '-c', 'copy', '-bsf:a', 'aac_adtstoasc', `${target}.part.mp4`], { stdio: ['ignore', 'pipe', 'pipe'] });
       job.kill = () => c.kill('SIGTERM');
       let errTxt = '';
+      job.movedAt = Date.now();
+      // Surveillance : plus rien ne bouge depuis 15 min (et ce n'est pas la finalisation) → arrêt avec erreur
+      const watch = setInterval(() => {
+        if (!job.finishing && Date.now() - job.movedAt > 15 * 60_000) {
+          job.stalled = true;
+          c.kill('SIGTERM');
+        }
+      }, 60_000);
+      c.on('close', () => clearInterval(watch));
       c.stdout.on('data', (d) => {
+        if (/progress=end/.test(String(d))) job.finishing = true;
         const m = String(d).match(/out_time_us=(\d+)/g);
-        if (m) job.done = Math.round(Number(m[m.length - 1].split('=')[1]) / 1e6);
+        if (m) {
+          const done = Math.round(Number(m[m.length - 1].split('=')[1]) / 1e6);
+          if (done !== job.done) job.movedAt = Date.now();
+          job.done = done;
+        }
         const sz = String(d).match(/total_size=(\d+)/g);
         if (sz) job.bytes = Number(sz[sz.length - 1].split('=')[1]);
       });
       c.stderr.on('data', (d) => (errTxt = (errTxt + d).slice(-400)));
       c.on('error', reject);
-      c.on('close', (code) => (code === 0 ? resolve() : reject(new Error(job.cancelled ? 'Annulé' : errTxt.trim().split('\n').pop() || `ffmpeg ${code}`))));
+      c.on('close', (code) => (code === 0 ? resolve() : reject(new Error(job.cancelled ? 'Annulé' : job.stalled ? 'Bloqué : plus rien ne venait de Twitch depuis 15 min, relance le téléchargement' : errTxt.trim().split('\n').pop() || `ffmpeg ${code}`))));
     });
     await fs.promises.rename(`${target}.part.mp4`, target);
     job.status = 'done';
@@ -5637,7 +5651,7 @@ async function twitchDownloadRun() {
     setTimeout(twitchDownloadRun, 500);
   }
 }
-const twitchJobView = (j) => ({ id: j.id, vodId: j.vodId, channel: j.channel, title: j.title, status: j.status, quality: j.qualityName || j.quality, done: j.done || 0, length: j.length, bytes: j.bytes || 0, error: j.error || null, file: j.file || null });
+const twitchJobView = (j) => ({ id: j.id, vodId: j.vodId, channel: j.channel, title: j.title, status: j.status, quality: j.qualityName || j.quality, done: j.done || 0, length: j.length, bytes: j.bytes || 0, error: j.error || null, file: j.file || null, finishing: Boolean(j.finishing), idle: j.status === 'running' && j.movedAt ? Math.round((Date.now() - j.movedAt) / 1000) : 0 });
 
 async function twitchRoutes(req, res, p, q, user) {
   if (!p.startsWith('/api/twitch')) return false;

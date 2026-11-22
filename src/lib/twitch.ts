@@ -17,7 +17,7 @@ export type TwitchVod = {
   progress: { pos: number; length: number; done: boolean; at: number } | null;
 };
 export type TwitchQuality = { id: string; name: string; height: number; fps: number; bandwidth: number; url: string };
-export type TwitchJob = { id: string; vodId: string; channel: string; title: string; status: 'queued' | 'running' | 'done' | 'error' | 'cancelled'; quality: string; done: number; length: number; bytes: number; error: string | null; file: string | null };
+export type TwitchJob = { id: string; vodId: string; channel: string; title: string; status: 'queued' | 'running' | 'done' | 'error' | 'cancelled'; quality: string; done: number; length: number; bytes: number; error: string | null; file: string | null; finishing?: boolean; idle?: number };
 export type TwitchSaved = {
   vodId: string;
   title: string;
