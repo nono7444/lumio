@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.207 — 22 novembre 2026
+
 - Twitch : les téléchargements ne restent plus bloqués à 100 % (le fichier n'est plus réécrit en entier à la fin) ; « finalisation » ou « rien de neuf depuis X min » s'affiche si besoin.
 - Serveur 3.133.0 : un téléchargement Twitch qui ne bouge plus pendant 15 min s'arrête avec un message clair.
 
