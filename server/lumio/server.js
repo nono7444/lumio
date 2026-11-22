@@ -10394,9 +10394,9 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
     return streamRelay(st0.url, req, res, url.pathname);
   }
 
-  // Lumio TV (fork de NuvioTV, dépôt nono7444/lumio-tv) : /tvnuvio = 32 bits (toutes les box), /tvnuvio64 = 64 bits
-  if (url.pathname === '/tvnuvio' || url.pathname === '/tvnuvio.apk' || url.pathname === '/tvnuvio64') {
-    const file = url.pathname === '/tvnuvio64' ? 'lumio-tv-arm64-v8a.apk' : 'lumio-tv-armeabi-v7a.apk';
+  // Lumio TV (fork de NuvioTV, dépôt nono7444/lumio-tv) : /tvnuvio ou /nuviotv = 32 bits (toutes les box), …64 = 64 bits
+  if (['/tvnuvio', '/tvnuvio.apk', '/tvnuvio64', '/nuviotv', '/nuviotv.apk', '/nuviotv64'].includes(url.pathname)) {
+    const file = url.pathname.endsWith('64') ? 'lumio-tv-arm64-v8a.apk' : 'lumio-tv-armeabi-v7a.apk';
     res.writeHead(302, { Location: `https://github.com/nono7444/lumio-tv/releases/latest/download/${file}` });
     return res.end();
   }
