@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.204 — 22 novembre 2026
+
 - Profil → Serveur : bouton « Qui utilise le processeur ? » qui montre les conteneurs et programmes les plus gourmands, sans SSH.
 - Serveur 3.130.0 : lecture des rediffusions et vidéos du serveur plus légère pour le processeur.
 
