@@ -14,7 +14,9 @@ import { UniverseSwitch } from '@/components/universe-switch';
 import { C, TAB_SPACE } from '@/constants/theme';
 import { useSettings } from '@/lib/settings';
 import { FolderCard } from '@/components/folder-card';
-import { fmtDay, fmtLen, loadTwitch, twitchApi, useTwitch, type TwitchChannel, type TwitchJob, type TwitchQuality, type TwitchVod } from '@/lib/twitch';
+import { serverBase } from '@/lib/chat';
+import { folderApi } from '@/lib/ebooks';
+import { fmtDay, fmtLen, loadTwitch, twitchApi, useTwitch, type TwitchChannel, type TwitchJob, type TwitchQuality, type TwitchSaved, type TwitchVod } from '@/lib/twitch';
 
 const TWITCH = '#9146FF';
 const QKEY = 'lumio:twitch-qualite';
@@ -54,6 +56,25 @@ export default function TwitchScreen() {
   const [qSheet, setQSheet] = useState(false);
   const [menu, setMenu] = useState<{ v: TwitchVod; qualities: TwitchQuality[] | null } | null>(null);
   const [jobs, setJobs] = useState<TwitchJob[]>([]);
+  const [tab, setTab] = useState<'vods' | 'mine'>('vods');
+  const [mine, setMine] = useState<TwitchSaved[] | null>(null);
+  const [diskSheet, setDiskSheet] = useState(false);
+  const [disk, setDisk] = useState<string | null>(null);
+  const loadMine = () =>
+    twitchApi
+      .saved(settings)
+      .then((r) => setMine(r.saved))
+      .catch(() => setMine([]));
+  const loadDisk = () =>
+    folderApi
+      .get(settings, 'twitch')
+      .then((r) => setDisk(r.dir?.root ?? null))
+      .catch(() => {});
+  useEffect(() => {
+    loadMine();
+    loadDisk();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [saved, setSaved] = useState<string[]>([]);
   useEffect(() => {
     AsyncStorage.getItem(QKEY)
@@ -69,7 +90,10 @@ export default function TwitchScreen() {
     twitchApi
       .jobs(settings)
       .then((r) => {
-        setJobs(r.jobs);
+        setJobs((old) => {
+          if (r.jobs.some((j) => j.status === 'done' && old.find((o) => o.id === j.id && o.status !== 'done'))) loadMine();
+          return r.jobs;
+        });
         setSaved(r.saved);
       })
       .catch(() => {});
@@ -86,6 +110,7 @@ export default function TwitchScreen() {
     tap();
     try {
       await twitchApi.download(settings, v, ch?.name ?? 'Twitch', q === 'auto' ? 'chunked' : q);
+      setTab('vods');
       loadJobs();
     } catch (e) {
       Alert.alert('Téléchargement impossible', e instanceof Error ? e.message : String(e));
@@ -140,6 +165,23 @@ export default function TwitchScreen() {
     } finally {
       setOpening(null);
     }
+  };
+  const playSaved = (m: TwitchSaved) => {
+    tap();
+    if (!settings.chatUrl) return;
+    const start = m.progress && !m.progress.done ? m.progress.pos : 0;
+    router.push({
+      pathname: '/player',
+      params: {
+        kind: 'url',
+        uri: `${serverBase(settings.chatUrl)}${m.url}`,
+        title: m.title,
+        subtitle: `${m.channel} · sur le serveur`,
+        start: String(Math.floor(start)),
+        twitch: m.vodId,
+        twitchLen: String(m.length),
+      },
+    });
   };
   const saveChannels = async (list: string[]) => {
     try {
@@ -278,16 +320,24 @@ export default function TwitchScreen() {
           </View>
         ) : null}
 
+        <View style={styles.tabs}>
+          <SegChip label={`Rediffusions${ch ? ` · ${ch.vods.length}` : ''}`} icon="logo-twitch" on={tab === 'vods'} onPress={() => setTab('vods')} />
+          <SegChip label={`Mes rediffusions${mine ? ` · ${mine.length}` : ''}`} icon="server-outline" on={tab === 'mine'} onPress={() => (setTab('mine'), loadMine())} />
+        </View>
+
         <View style={styles.tools}>
+          <Pressable onPress={() => (tap(), setDiskSheet(true))} style={styles.tool}>
+            <Ionicons name="server-outline" size={16} color={C.text} />
+            <Text style={styles.toolText}>Disque : {disk ?? '…'}</Text>
+            <Ionicons name="chevron-down" size={14} color={C.textDim} />
+          </Pressable>
           <Pressable onPress={() => (tap(), setQSheet(true))} style={styles.tool}>
             <Ionicons name="options-outline" size={16} color={C.text} />
             <Text style={styles.toolText}>Qualité : {QUALITY_PREFS.find((x) => x.id === quality)?.name ?? quality}</Text>
             <Ionicons name="chevron-down" size={14} color={C.textDim} />
           </Pressable>
-          <Text style={[styles.s, { flex: 1 }]} numberOfLines={2}>
-            Appui long sur une rediffusion : autre qualité ou téléchargement.
-          </Text>
         </View>
+        {tab === 'vods' ? <Text style={[styles.s, { paddingHorizontal: 16, marginBottom: 12 }]}>Appui long sur une rediffusion : autre qualité ou téléchargement sur le serveur.</Text> : null}
         {jobs.filter((j) => j.status === 'queued' || j.status === 'running' || j.status === 'error').slice(0, 5).map((j) => (
           <View key={j.id} style={styles.job}>
             <Ionicons name={j.status === 'error' ? 'alert-circle' : 'cloud-download-outline'} size={18} color={j.status === 'error' ? C.danger : TWITCH} />
@@ -316,8 +366,47 @@ export default function TwitchScreen() {
           </View>
         ))}
 
+        {tab === 'mine' ? (
+          <View style={{ paddingHorizontal: 16, gap: 18 }}>
+            {mine === null ? <ActivityIndicator color={C.text} /> : null}
+            {mine && !mine.length ? (
+              <Text style={styles.s}>Aucune rediffusion téléchargée. Appui long sur une rediffusion → « Télécharger sur le serveur ».</Text>
+            ) : null}
+            {mine?.map((m) => (
+              <Pressable
+                key={m.vodId}
+                onPress={() => playSaved(m)}
+                onLongPress={() =>
+                  Alert.alert(m.title, `${m.channel} · ${m.quality} · ${(m.size / 1e9).toFixed(1)} Go`, [
+                    { text: 'Annuler', style: 'cancel' },
+                    { text: 'Regarder', onPress: () => playSaved(m) },
+                    {
+                      text: 'Supprimer du disque',
+                      style: 'destructive',
+                      onPress: () => twitchApi.removeSaved(settings, m.vodId).then(() => (loadMine(), loadJobs())),
+                    },
+                  ])
+                }
+                style={{ gap: 8 }}>
+                <Thumb
+                  v={{ id: m.vodId, title: m.title, length: m.length, createdAt: m.createdAt, views: 0, thumb: m.thumb, chapters: [], progress: m.progress }}
+                  w={cw}
+                  busy={false}
+                  saved
+                />
+                <Text numberOfLines={2} style={styles.t}>
+                  {m.title}
+                </Text>
+                <Text style={styles.s}>
+                  {[m.channel, m.createdAt ? fmtDay(m.createdAt) : null, fmtLen(m.length), m.quality, `${(m.size / 1e9).toFixed(1)} Go`].filter(Boolean).join(' · ')}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+
         {/* Tri par jeu */}
-        {games.length > 1 ? (
+        {tab === 'vods' && games.length > 1 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 14 }}>
             <SegChip label={`Tous · ${ch?.vods.length ?? 0}`} on={!game} onPress={() => setGame(null)} />
             {games.map((g) => (
@@ -326,7 +415,7 @@ export default function TwitchScreen() {
           </ScrollView>
         ) : null}
 
-        <View style={{ paddingHorizontal: 16, gap: 18 }}>
+        <View style={{ paddingHorizontal: 16, gap: 18, display: tab === 'vods' ? 'flex' : 'none' }}>
           {vods.map((v) => {
             const chap = game ? v.chapters.find((c) => c.game === game) : null;
             return (
@@ -367,10 +456,18 @@ export default function TwitchScreen() {
           })}
           {ch && !ch.error && !vods.length ? <Text style={styles.s}>Aucune rediffusion publique pour l'instant.</Text> : null}
         </View>
-        <View style={{ marginTop: 24 }}>
-          <FolderCard kind="twitch" title="Rediffusions téléchargées sur le serveur" />
-        </View>
       </ScrollView>
+
+      {/* Disque des rediffusions téléchargées */}
+      <Modal visible={diskSheet} transparent animationType="slide" onRequestClose={() => (setDiskSheet(false), loadDisk())}>
+        <Pressable style={styles.backdrop} onPress={() => (setDiskSheet(false), loadDisk(), loadMine())} />
+        <View style={styles.sheet}>
+          <FolderCard kind="twitch" title="Disque des rediffusions" flat onMoved={() => (loadDisk(), loadMine())} />
+          <Text style={[styles.s, { marginTop: 12 }]}>
+            Les prochains téléchargements vont sur ce disque, dans le dossier « Twitch ». Choisir un autre disque y déplace aussi celles déjà téléchargées.
+          </Text>
+        </View>
+      </Modal>
 
       {/* Qualité par défaut */}
       <Modal visible={qSheet} transparent animationType="slide" onRequestClose={() => setQSheet(false)}>
@@ -467,7 +564,8 @@ const styles = StyleSheet.create({
   chName: { color: C.textDim, fontSize: 12, fontWeight: '600' },
   addBox: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginBottom: 14, paddingHorizontal: 12, height: 44, borderRadius: 12, backgroundColor: C.surfaceHigh },
   addInput: { flex: 1, color: C.text, fontSize: 15 },
-  tools: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, marginBottom: 12 },
+  tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 12 },
+  tools: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, marginBottom: 12, flexWrap: 'wrap' },
   tool: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, height: 34, borderRadius: 17, backgroundColor: C.surfaceHigh },
   toolText: { color: C.text, fontSize: 13, fontWeight: '700' },
   job: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginBottom: 10, padding: 12, borderRadius: 12, backgroundColor: C.surface },

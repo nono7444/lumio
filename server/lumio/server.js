@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.128.0';
+const VERSION = '3.129.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4504,7 +4504,7 @@ async function bookFileRoutes(req, res, p, q) {
     if (what === 'file') {
       const st = await fs.promises.stat(file);
       const ext = path.extname(file).toLowerCase();
-      const type = { '.pdf': 'application/pdf', '.epub': 'application/epub+zip', '.mp3': 'audio/mpeg', '.m4b': 'audio/mp4', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.flac': 'audio/flac' }[ext] || 'application/octet-stream';
+      const type = { '.pdf': 'application/pdf', '.epub': 'application/epub+zip', '.mp3': 'audio/mpeg', '.m4b': 'audio/mp4', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.flac': 'audio/flac', '.mp4': 'video/mp4', '.mkv': 'video/x-matroska' }[ext] || 'application/octet-stream';
       const range = String(req.headers.range || '').match(/bytes=(\d*)-(\d*)/);
       let start = 0;
       let end = st.size - 1;
@@ -5621,7 +5621,8 @@ async function twitchDownloadRun() {
     job.status = 'done';
     job.done = job.length;
     job.file = path.relative(full, target);
-    (twitchState.saved = twitchState.saved || {})[job.vodId] = { file: job.file, root: dir.root, folder: dir.folder, at: Date.now() };
+    const st = await fs.promises.stat(target).catch(() => ({ size: 0 }));
+    (twitchState.saved = twitchState.saved || {})[job.vodId] = { file: job.file, root: dir.root, folder: dir.folder, at: Date.now(), title: job.title, channel: job.channel, createdAt: job.createdAt, length: job.length, quality: job.qualityName || job.quality, size: st.size, thumb: job.thumb || null };
     twitchSave();
     notify({ title: '📼 Rediffusion téléchargée', message: `${job.channel} · ${job.title}`, tags: 'vhs' }).catch(() => {});
   } catch (e) {
@@ -5639,6 +5640,45 @@ async function twitchRoutes(req, res, p, q, user) {
   if (!p.startsWith('/api/twitch')) return false;
   requireAdmin(user);
   if (await folderRoutes(req, res, p, user, 'twitch')) return true;
+  // Mes rediffusions : celles téléchargées sur le serveur (fichier encore présent), lisibles par lien signé
+  if (req.method === 'GET' && p === '/api/twitch/saved') {
+    const mine = twitchState.progress[user.name] || {};
+    const out = [];
+    for (const [vodId, x] of Object.entries(twitchState.saved || {})) {
+      // Le dossier a pu changer de disque depuis : on cherche d'abord à l'endroit actuel
+      const cur = kindDir('twitch');
+      const places = [cur && { root: cur.root, rel: `${cur.folder}/${x.file}` }, { root: x.root, rel: `${x.folder}/${x.file}` }].filter(Boolean);
+      let found = null;
+      for (const pl of places) {
+        try {
+          const st = await fs.promises.stat(safePath(pl.root, pl.rel).full);
+          found = { ...pl, size: st.size };
+          break;
+        } catch {}
+      }
+      if (!found) continue;
+      out.push({ vodId, title: x.title || x.file, channel: x.channel || '', createdAt: x.createdAt || '', length: x.length || 0, quality: x.quality || '', thumb: x.thumb || null, size: found.size, at: x.at, url: `/api/books/f/${bookSign(found.root, found.rel)}/file`, progress: mine[vodId] || null });
+    }
+    out.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    send(res, 200, { saved: out });
+    return true;
+  }
+  const sm = p.match(/^\/api\/twitch\/saved\/(\d+)$/);
+  if (sm && req.method === 'DELETE') {
+    const x = (twitchState.saved || {})[sm[1]];
+    if (x) {
+      const cur = kindDir('twitch');
+      for (const pl of [cur && { root: cur.root, rel: `${cur.folder}/${x.file}` }, { root: x.root, rel: `${x.folder}/${x.file}` }].filter(Boolean)) {
+        try {
+          await fs.promises.unlink(safePath(pl.root, pl.rel).full);
+        } catch {}
+      }
+      delete twitchState.saved[sm[1]];
+      twitchSave();
+    }
+    send(res, 200, { ok: true });
+    return true;
+  }
   if (req.method === 'GET' && p === '/api/twitch/jobs') {
     send(res, 200, { jobs: twitchJobs.slice(-30).reverse().map(twitchJobView), saved: Object.keys(twitchState.saved || {}) });
     return true;
@@ -5716,7 +5756,7 @@ async function twitchRoutes(req, res, p, q, user) {
   if (dm && req.method === 'POST') {
     const b = await readBody(req);
     if (twitchJobs.some((j) => j.vodId === dm[1] && ['queued', 'running'].includes(j.status))) throw new HttpError(409, 'Déjà en cours de téléchargement');
-    const job = { id: crypto.randomBytes(4).toString('hex'), vodId: dm[1], channel: String(b.channel || 'Twitch'), title: String(b.title || dm[1]), createdAt: String(b.createdAt || ''), length: Number(b.length) || 0, quality: String(b.quality || 'chunked'), status: 'queued', startedAt: Date.now() };
+    const job = { id: crypto.randomBytes(4).toString('hex'), vodId: dm[1], channel: String(b.channel || 'Twitch'), title: String(b.title || dm[1]), createdAt: String(b.createdAt || ''), length: Number(b.length) || 0, quality: String(b.quality || 'chunked'), thumb: /^https:\/\//.test(String(b.thumb || '')) ? String(b.thumb) : null, status: 'queued', startedAt: Date.now() };
     twitchJobs.push(job);
     if (twitchJobs.length > 100) twitchJobs.splice(0, twitchJobs.length - 100);
     twitchDownloadRun();

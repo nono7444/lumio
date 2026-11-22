@@ -18,6 +18,19 @@ export type TwitchVod = {
 };
 export type TwitchQuality = { id: string; name: string; height: number; fps: number; bandwidth: number; url: string };
 export type TwitchJob = { id: string; vodId: string; channel: string; title: string; status: 'queued' | 'running' | 'done' | 'error' | 'cancelled'; quality: string; done: number; length: number; bytes: number; error: string | null; file: string | null };
+export type TwitchSaved = {
+  vodId: string;
+  title: string;
+  channel: string;
+  createdAt: string;
+  length: number;
+  quality: string;
+  thumb: string | null;
+  size: number;
+  at: number;
+  url: string;
+  progress: { pos: number; length: number; done: boolean; at: number } | null;
+};
 export type TwitchChannel = {
   login: string;
   name: string;
@@ -32,10 +45,12 @@ export const twitchApi = {
   setChannels: (s: Settings, channels: string[]) =>
     serverCall<{ channels: string[] }>(s, '/api/twitch/channels', { method: 'PUT', body: JSON.stringify({ channels }) }),
   play: (s: Settings, id: string) => serverCall<{ url: string; qualities: TwitchQuality[] }>(s, `/api/twitch/vod/${id}/play`),
-  download: (s: Settings, v: { id: string; title: string; createdAt: string; length: number }, channel: string, quality: string) =>
+  saved: (s: Settings) => serverCall<{ saved: TwitchSaved[] }>(s, '/api/twitch/saved'),
+  removeSaved: (s: Settings, vodId: string) => serverCall<{ ok: boolean }>(s, `/api/twitch/saved/${vodId}`, { method: 'DELETE' }),
+  download: (s: Settings, v: { id: string; title: string; createdAt: string; length: number; thumb?: string | null }, channel: string, quality: string) =>
     serverCall<{ job: TwitchJob }>(s, `/api/twitch/vod/${v.id}/download`, {
       method: 'POST',
-      body: JSON.stringify({ channel, title: v.title, createdAt: v.createdAt, length: v.length, quality }),
+      body: JSON.stringify({ channel, title: v.title, createdAt: v.createdAt, length: v.length, thumb: v.thumb ?? null, quality }),
     }),
   jobs: (s: Settings) => serverCall<{ jobs: TwitchJob[]; saved: string[] }>(s, '/api/twitch/jobs'),
   cancel: (s: Settings, id: string) => serverCall<{ ok: boolean }>(s, `/api/twitch/jobs/${id}`, { method: 'DELETE' }),

@@ -6,6 +6,10 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Twitch : nouvel onglet « Mes rediffusions » avec les rediffusions téléchargées sur le serveur (lecture, reprise, suppression par appui long).
+- Twitch : bouton « Disque » pour choisir le disque où sont rangées les rediffusions (déplace aussi celles déjà téléchargées).
+- Serveur 3.129.0 : liste et suppression des rediffusions téléchargées, miniatures conservées.
+
 ## 1.0.202 — 21 novembre 2026
 
 - Twitch : choix de la qualité comme sur Twitch (Auto, Source, 1080p60, 720p60, 480p… Audio seul), gardée pour les prochaines lectures ; appui long sur une rediffusion pour la regarder dans une autre qualité.
