@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.203 — 22 novembre 2026
+
 - Twitch : nouvel onglet « Mes rediffusions » avec les rediffusions téléchargées sur le serveur (lecture, reprise, suppression par appui long).
 - Twitch : bouton « Disque » pour choisir le disque où sont rangées les rediffusions (déplace aussi celles déjà téléchargées).
 - Serveur 3.129.0 : liste et suppression des rediffusions téléchargées, miniatures conservées.
