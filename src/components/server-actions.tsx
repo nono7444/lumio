@@ -49,11 +49,17 @@ type HostStatus = {
 
 type Diag = {
   at: string | null;
-  pending: boolean;
+  pending?: boolean;
   cores: number;
   cpu: number | null;
-  containers: { name: string; cpu: number; mem: string }[];
+  /** Part du serveur Lumio (100 % = 1 cœur) */
+  lumio?: number;
+  /** Programmes de la machine visibles (sinon seulement Lumio) */
+  host?: boolean;
+  containers?: { name: string; cpu: number; mem: string }[];
   procs: { name: string; cpu: number; owner: string }[];
+  /** Message d'état affiché sous le relevé */
+  note?: string;
 };
 
 type RefreshStatus = { active: boolean; progress: number; libraries: { name: string; active: boolean; progress: number }[] };
@@ -119,24 +125,39 @@ export function ServerActionsSection() {
   // Qui utilise le processeur ? Relevé fait par la machine (environ 5 s)
   const runDiag = async () => {
     setDiagBusy(true);
+    setDiag(null);
     try {
-      const before = diag?.at ?? null;
-      await serverCall(settings, '/api/admin/host/diag', { method: 'POST', body: '{}' });
+      // 1) Relevé immédiat fait par Lumio (total, part de Lumio, programmes si visibles)
+      let live: Diag | null = null;
+      try {
+        live = await serverCall<Diag>(settings, '/api/admin/host/live');
+        setDiag({ ...live, note: 'Relevé des conteneurs en cours…' });
+      } catch {
+        setDiag({ at: null, cores: 0, cpu: null, procs: [], note: 'Le serveur ne connaît pas encore ce relevé : mets à jour le serveur Lumio (3.131.0), puis réessaie.' });
+        return;
+      }
+      // 2) Détail par conteneur, fait par la machine (si son service est installé)
+      const before = (await serverCall<Diag>(settings, '/api/admin/host/diag').catch(() => null))?.at ?? null;
+      try {
+        await serverCall(settings, '/api/admin/host/diag', { method: 'POST', body: '{}' });
+      } catch (e: any) {
+        setDiag({ ...live, note: e?.message ?? String(e) });
+        return;
+      }
       for (let i = 0; i < 15; i++) {
         await new Promise((r) => setTimeout(r, 2000));
-        const d = await serverCall<Diag>(settings, '/api/admin/host/diag');
-        if (d.at && d.at !== before && !d.pending) {
-          setDiag(d);
+        const d = await serverCall<Diag>(settings, '/api/admin/host/diag').catch(() => null);
+        if (d?.at && d.at !== before && !d.pending) {
+          setDiag({ ...live, containers: d.containers, procs: d.procs.length ? d.procs : live.procs, note: undefined });
           return;
         }
       }
-      toast('La machine n’a pas répondu (service de la machine installé ?)', 'error');
-    } catch (e: any) {
-      toast(e?.message ?? String(e), 'error');
+      setDiag({ ...live, note: 'La machine n’a pas donné le détail par conteneur (son service ne répond pas).' });
     } finally {
       setDiagBusy(false);
     }
   };
+
 
   const run = async (a: Action) => {
     setBusy(a);
@@ -250,20 +271,27 @@ export function ServerActionsSection() {
               <Text style={styles.progressTitle}>Processeur{diag.at ? ` · ${new Date(diag.at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}</Text>
               {diag.cpu != null ? <Text style={styles.progressPct}>{diag.cpu} %</Text> : null}
             </View>
-            <Text style={[styles.help, { marginBottom: 0 }]}>Conteneurs (100 % = 1 cœur sur {diag.cores})</Text>
-            {diag.containers.slice(0, 8).map((c) => (
+            {diag.lumio != null ? (
+              <View style={styles.progressHead}>
+                <Text style={styles.diagName}>Serveur Lumio</Text>
+                <Text style={styles.diagVal}>{diag.lumio.toFixed(1)} %</Text>
+              </View>
+            ) : null}
+            {diag.containers?.length ? <Text style={[styles.help, { marginBottom: 0 }]}>Conteneurs (100 % = 1 cœur sur {diag.cores})</Text> : null}
+            {(diag.containers ?? []).slice(0, 8).map((c) => (
               <View key={c.name} style={styles.progressHead}>
                 <Text style={styles.diagName} numberOfLines={1}>{c.name}</Text>
                 <Text style={styles.diagVal}>{c.cpu.toFixed(1)} % · {c.mem}</Text>
               </View>
             ))}
-            <Text style={[styles.help, { marginBottom: 0, marginTop: 6 }]}>Programmes les plus gourmands</Text>
+            {diag.procs.length ? <Text style={[styles.help, { marginBottom: 0, marginTop: 6 }]}>Programmes les plus gourmands</Text> : null}
             {diag.procs.slice(0, 8).map((x, i) => (
               <View key={`${x.name}-${i}`} style={styles.progressHead}>
                 <Text style={styles.diagName} numberOfLines={1}>{x.name}</Text>
                 <Text style={styles.diagVal}>{x.cpu.toFixed(1)} %</Text>
               </View>
             ))}
+            {diag.note ? <Text style={[styles.help, { marginBottom: 0 }]}>{diag.note}</Text> : null}
           </View>
         ) : null}
         <Button title="Redémarrer le PC serveur" icon="power" variant="danger" loading={busy === 'reboot'} onPress={() => confirm('reboot')} />

@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.130.0';
+const VERSION = '3.131.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -11157,6 +11157,55 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       fs.writeFileSync(path.join(dir, 'update-containers'), JSON.stringify({ by: user.name, at: new Date().toISOString() }));
       console.log(`Mise à jour des conteneurs demandée par ${user.name}`);
       return send(res, 200, { ok: true, message: 'Mise à jour des conteneurs lancée : les services mis à jour redémarrent un par un (quelques minutes).' });
+    }
+    // Relevé immédiat, fait par Lumio lui-même (2 s) : total de la machine, part de Lumio,
+    // et programmes de la machine si /proc de l'hôte est monté (« /proc:/host/proc:ro »)
+    if (req.method === 'GET' && p === '/api/admin/host/live') {
+      requireAdmin(user);
+      const cores = require('os').cpus().length;
+      const total = () => {
+        const l = fs.readFileSync('/proc/stat', 'utf8').split('\n')[0].trim().split(/\s+/).slice(1).map(Number);
+        return { idle: l[3] + (l[4] || 0), all: l.reduce((x, y) => x + y, 0) };
+      };
+      const hostProc = fs.existsSync('/host/proc/1/stat') ? '/host/proc' : null;
+      const snap = () => {
+        const m = new Map();
+        if (!hostProc) return m;
+        for (const d of fs.readdirSync(hostProc)) {
+          if (!/^\d+$/.test(d)) continue;
+          try {
+            const raw = fs.readFileSync(`${hostProc}/${d}/stat`, 'utf8');
+            const name = raw.slice(raw.indexOf('(') + 1, raw.lastIndexOf(')'));
+            const f = raw.slice(raw.lastIndexOf(')') + 2).split(' ');
+            m.set(d, { name, t: Number(f[11]) + Number(f[12]) });
+          } catch {}
+        }
+        return m;
+      };
+      const t0 = total();
+      const u0 = process.cpuUsage();
+      const s0 = snap();
+      const w0 = Date.now();
+      await new Promise((r) => setTimeout(r, 2000));
+      const t1 = total();
+      const u1 = process.cpuUsage(u0);
+      const s1 = snap();
+      const sec = (Date.now() - w0) / 1000;
+      const byName = new Map();
+      for (const [pid, x] of s1) {
+        const b = s0.get(pid);
+        if (!b || b.name !== x.name) continue;
+        const pct = ((x.t - b.t) / 100 / sec) * 100;
+        if (pct > 0) byName.set(x.name, (byName.get(x.name) || 0) + pct);
+      }
+      return send(res, 200, {
+        at: new Date().toISOString(),
+        cores,
+        cpu: Math.round((1 - (t1.idle - t0.idle) / (t1.all - t0.all || 1)) * 100),
+        lumio: Math.round(((u1.user + u1.system) / 1e6 / sec) * 1000) / 10,
+        host: Boolean(hostProc),
+        procs: [...byName].map(([name, cpu]) => ({ name, cpu: Math.round(cpu * 10) / 10, owner: '' })).sort((x, y) => y.cpu - x.cpu).slice(0, 10),
+      });
     }
     // Qui utilise le processeur ? La machine fait le relevé (docker stats + top) via le service des conteneurs
     if (p === '/api/admin/host/diag') {
