@@ -24,6 +24,51 @@ export const serverBase = (u: string) => {
   return url;
 };
 
+// ——— Lecture en local (même réseau que le serveur) ———
+// Par le tunnel Cloudflare, une vidéo lourde fait travailler cloudflared à fond (un cœur entier).
+// À la maison, on lit directement sur l'adresse locale du serveur Lumio si elle répond et que c'est bien le même.
+const LUMIO_LAN = ['http://192.168.1.71:3456'];
+let lumioLan: { key: string; at: number; base: string | null } | null = null;
+
+async function health(base: string, ms: number): Promise<{ version?: string } | null> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const r = await fetch(`${base}/health`, { signal: ctrl.signal });
+    return r.ok ? await r.json() : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/** Adresse à utiliser pour lire un fichier du serveur Lumio : locale si on est à la maison, sinon l'adresse publique. */
+export async function lumioPlayBase(s: Settings): Promise<string> {
+  const remote = serverBase(s.chatUrl ?? '');
+  if (/^http:\/\/(192\.168|10\.|172\.(1[6-9]|2\d|3[01])\.|localhost|127\.)/.test(remote)) return remote;
+  if (lumioLan && lumioLan.key === remote && Date.now() - lumioLan.at < 5 * 60_000) return lumioLan.base ?? remote;
+  let candidates = [...LUMIO_LAN];
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 2500);
+    const r = await fetch(`${remote}/tv/setup`, { signal: ctrl.signal }).finally(() => clearTimeout(t));
+    const cfg = r.ok ? ((await r.json()) as { localLumioUrl?: string | null }) : null;
+    if (cfg?.localLumioUrl) candidates = [serverBase(cfg.localLumioUrl), ...candidates];
+  } catch {}
+  const ref = await health(remote, 4000);
+  let found: string | null = null;
+  for (const c of candidates) {
+    const h = await health(c, 1500);
+    if (h && (!ref?.version || h.version === ref.version)) {
+      found = c;
+      break;
+    }
+  }
+  lumioLan = { key: remote, at: Date.now(), base: found };
+  return found ?? remote;
+}
+
 /** Appel authentifié (jeton Jellyfin) au serveur Lumio : chat, téléchargements, état. */
 export async function serverCall<T>(s: Settings, path: string, init?: RequestInit): Promise<T> {
   if (!s.chatUrl) throw new Error('Serveur Lumio non configuré (Profil → Serveur Lumio)');

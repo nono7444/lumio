@@ -14,7 +14,7 @@ import { UniverseSwitch } from '@/components/universe-switch';
 import { C, TAB_SPACE } from '@/constants/theme';
 import { useSettings } from '@/lib/settings';
 import { FolderCard } from '@/components/folder-card';
-import { serverBase } from '@/lib/chat';
+import { lumioPlayBase } from '@/lib/chat';
 import { folderApi } from '@/lib/ebooks';
 import { fmtDay, fmtLen, loadTwitch, twitchApi, useTwitch, type TwitchChannel, type TwitchJob, type TwitchQuality, type TwitchSaved, type TwitchVod } from '@/lib/twitch';
 
@@ -166,17 +166,19 @@ export default function TwitchScreen() {
       setOpening(null);
     }
   };
-  const playSaved = (m: TwitchSaved) => {
+  const playSaved = async (m: TwitchSaved) => {
     tap();
     if (!settings.chatUrl) return;
+    // À la maison : lecture directe sur le serveur, sans passer par le tunnel Cloudflare
+    const base = await lumioPlayBase(settings);
     const start = m.progress && !m.progress.done ? m.progress.pos : 0;
     router.push({
       pathname: '/player',
       params: {
         kind: 'url',
-        uri: `${serverBase(settings.chatUrl)}${m.url}`,
+        uri: `${base}${m.url}`,
         title: m.title,
-        subtitle: `${m.channel} · sur le serveur`,
+        subtitle: `${m.channel} · ${base.startsWith('http://') ? 'en local' : 'sur le serveur'}`,
         start: String(Math.floor(start)),
         twitch: m.vodId,
         twitchLen: String(m.length),

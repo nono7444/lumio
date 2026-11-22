@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.131.0';
+const VERSION = '3.132.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -10440,6 +10440,8 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
       jellyfinUrl: process.env.PUBLIC_JELLYFIN_URL || config.publicJellyfinUrl || null,
       // Adresse locale (réseau de la maison) : la TV lit les vidéos en direct, sans passer par le tunnel
       localJellyfinUrl: process.env.LOCAL_JELLYFIN_URL || null,
+      // Adresse locale du serveur Lumio : à la maison, les rediffusions et fichiers se lisent sans le tunnel
+      localLumioUrl: process.env.LOCAL_LUMIO_URL || null,
     });
   }
 

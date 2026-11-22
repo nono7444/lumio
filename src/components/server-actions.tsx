@@ -127,32 +127,15 @@ export function ServerActionsSection() {
     setDiagBusy(true);
     setDiag(null);
     try {
-      // 1) Relevé immédiat fait par Lumio (total, part de Lumio, programmes si visibles)
+      // Relevé fait par Lumio en 2 s (total, part de Lumio, programmes de la machine)
       let live: Diag | null = null;
       try {
         live = await serverCall<Diag>(settings, '/api/admin/host/live');
-        setDiag({ ...live, note: 'Relevé des conteneurs en cours…' });
       } catch {
         setDiag({ at: null, cores: 0, cpu: null, procs: [], note: 'Le serveur ne connaît pas encore ce relevé : mets à jour le serveur Lumio (3.131.0), puis réessaie.' });
         return;
       }
-      // 2) Détail par conteneur, fait par la machine (si son service est installé)
-      const before = (await serverCall<Diag>(settings, '/api/admin/host/diag').catch(() => null))?.at ?? null;
-      try {
-        await serverCall(settings, '/api/admin/host/diag', { method: 'POST', body: '{}' });
-      } catch (e: any) {
-        setDiag({ ...live, note: e?.message ?? String(e) });
-        return;
-      }
-      for (let i = 0; i < 15; i++) {
-        await new Promise((r) => setTimeout(r, 2000));
-        const d = await serverCall<Diag>(settings, '/api/admin/host/diag').catch(() => null);
-        if (d?.at && d.at !== before && !d.pending) {
-          setDiag({ ...live, containers: d.containers, procs: d.procs.length ? d.procs : live.procs, note: undefined });
-          return;
-        }
-      }
-      setDiag({ ...live, note: 'La machine n’a pas donné le détail par conteneur (son service ne répond pas).' });
+      setDiag(live);
     } finally {
       setDiagBusy(false);
     }
