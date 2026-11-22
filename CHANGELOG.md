@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.206 — 22 novembre 2026
+
 - Twitch : à la maison, « Mes rediffusions » se lisent directement sur le serveur, sans passer par le tunnel Cloudflare (beaucoup moins de processeur).
 - « Qui utilise le processeur ? » : relevé plus rapide, sans solliciter la machine.
 - Serveur 3.132.0 : adresse locale du serveur communiquée à l'appli (LOCAL_LUMIO_URL, facultatif).
