@@ -1,6 +1,7 @@
 // Ajoute (ou met à jour) dans la source Lumio les applis publiées par d'autres dépôts :
 // - Lumio iOS (dépôt nono7444/lumio-ios) ;
-// - Wawa TV, le client Twitch sans pubs (dépôt nono7444/wawa-tv).
+// - Wawa TV, le client Twitch sans pubs (dépôt nono7444/wawa-tv) ;
+// - Calisthénie, mon programme de calisthénie (dépôt nono7444/mon-programme-calisthenie).
 // Usage : node scripts/add-ios-app.mjs altstore.json
 // Lit la source publiée par chaque dépôt et recopie son appli : une seule source FlareStore pour tout.
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -18,6 +19,12 @@ const EXTERNAL = [
     source: 'https://github.com/nono7444/wawa-tv/releases/latest/download/altstore.json',
     bundle: 'lol.wawanono.wawatv',
     subtitle: 'Twitch sans pubs',
+  },
+  {
+    name: 'Calisthénie',
+    source: 'https://github.com/nono7444/mon-programme-calisthenie/releases/latest/download/altstore.json',
+    bundle: 'lol.wawanono.calisthenie',
+    subtitle: 'Mon programme de calisthénie',
   },
 ];
 

@@ -1,4 +1,4 @@
-# Met à jour la source FlareStore « Lumio » avec la dernière Lumio iOS (dépôt lumio-ios) et Wawa TV (dépôt wawa-tv),
+# Met à jour la source FlareStore « Lumio » avec la dernière Lumio iOS (dépôt lumio-ios), Wawa TV (dépôt wawa-tv) et Calisthénie (dépôt mon-programme-calisthenie),
 # sans reconstruire l'appli : toutes les 2 heures, ou à la main (Actions → Source Lumio iOS → Run).
 name: Source Lumio iOS
 
