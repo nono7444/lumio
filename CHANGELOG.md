@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Disques : les dossiers et fichiers de films et séries affichent leur jaquette, dans la liste comme dans la recherche (serveur 3.136.0).
+
 ## 1.0.208 — 24 novembre 2026
 
 - Fiche d'un film ou d'une série : « Lire » s'il est sur le serveur, « Télécharger » s'il est déjà sorti, sinon « Demander » avec sa date de sortie (cinéma ou numérique, d'après le calendrier puis TMDB).

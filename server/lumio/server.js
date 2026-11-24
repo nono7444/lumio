@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.135.0';
+const VERSION = '3.136.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2331,6 +2331,75 @@ function disks() {
 }
 
 /** Chemin absolu sûr à l'intérieur d'un disque (refuse « .. » et les liens qui sortent du disque). */
+// ——— Jaquettes des dossiers de films et séries (Disques → recherche et dossiers) ———
+// Ordre : image dans le dossier (poster.jpg…), identifiant TMDB (nom du dossier ou .nfo), sinon recherche TMDB « Titre (Année) ».
+const POSTER_VIDEO = /\.(mkv|mp4|avi|mov|m4v|ts|webm)$/i;
+const filePosterCache = new Map(); // "disque:chemin" → { url, at }
+function parseMediaName(name) {
+  let n = name.replace(POSTER_VIDEO, '');
+  const id = n.match(/[{[]\s*tmdb(?:id)?[-= ]\s*(\d+)\s*[}\]]/i);
+  n = n.replace(/[{[][^}\]]*[}\]]/g, ' ');
+  const y = n.match(/(?:^|[\s.(_-])((?:19|20)\d{2})(?=$|[\s.)_-])/);
+  let title = y ? n.slice(0, y.index) : n;
+  title = title.replace(/[._]+/g, ' ').replace(/\s*[(-]\s*$/, '').replace(/\s+/g, ' ').trim();
+  // Sans année : on coupe aux mots techniques (1080p, MULTI, x265…)
+  if (!y) title = title.split(/\s(?:2160p|1080p|720p|4k|multi|vff|vfq|french|truefrench|x26[45]|h26[45]|hevc|web|bluray|hdlight|s\d{2})\b/i)[0].trim();
+  return { title, year: y ? Number(y[1]) : null, tmdbId: id ? Number(id[1]) : null };
+}
+async function filePoster(rootName, rel, isDir) {
+  const k = `${rootName}:${rel}`;
+  const hit = filePosterCache.get(k);
+  if (hit && Date.now() - hit.at < 7 * 86400e3) return hit.url;
+  const { full } = safePath(rootName, rel);
+  const name = path.basename(full);
+  if (!isDir && (!POSTER_VIDEO.test(name) || /S\d{1,2}E\d{1,3}/i.test(name))) return null; // épisodes : pas de jaquette
+  let url = null;
+  let kind = 'movie';
+  let tmdbId = null;
+  if (isDir) {
+    let entries = [];
+    try {
+      entries = await fs.promises.readdir(full, { withFileTypes: true });
+    } catch {}
+    // 1. Image rangée dans le dossier (Jellyfin, Radarr, Sonarr…)
+    const img = entries.find((e) => e.isFile() && /^(poster|folder|cover)\.(jpe?g|png|webp)$/i.test(e.name));
+    if (img) url = `/api/books/f/${bookSign(rootName, path.join(rel, img.name))}/file`;
+    // Série : sous-dossiers « Saison » / « Season » ou épisodes SxxExx
+    if (entries.some((e) => (e.isDirectory() && /^(season|saison|specials)\b/i.test(e.name)) || /S\d{1,2}E\d{1,3}/i.test(e.name))) kind = 'tv';
+    // 2. Identifiant TMDB dans un .nfo
+    const nfo = entries.find((e) => e.isFile() && /\.nfo$/i.test(e.name));
+    if (!url && nfo) {
+      try {
+        const txt = (await fs.promises.readFile(path.join(full, nfo.name), 'utf8')).slice(0, 20000);
+        const m = txt.match(/<tmdbid>(\d+)<\/tmdbid>/i) || txt.match(/<uniqueid[^>]*type="tmdb"[^>]*>(\d+)</i);
+        if (m) tmdbId = Number(m[1]);
+        if (/<tvshow\b/i.test(txt)) kind = 'tv';
+      } catch {}
+    }
+  }
+  if (!url) {
+    const pm = parseMediaName(name);
+    tmdbId = tmdbId || pm.tmdbId;
+    try {
+      let posterPath = null;
+      if (tmdbId) posterPath = (await tmdbGet(`/${kind}/${tmdbId}`))?.poster_path || null;
+      if (!posterPath && pm.title.length >= 2) {
+        const tries = kind === 'tv' ? ['tv', 'movie'] : ['movie', 'tv'];
+        for (const t of tries) {
+          const params = { query: pm.title };
+          if (pm.year) params[t === 'tv' ? 'first_air_date_year' : 'year'] = String(pm.year);
+          const r = await tmdbGet(`/search/${t}`, params);
+          posterPath = (r?.results || []).find((x) => x.poster_path)?.poster_path || null;
+          if (posterPath) break;
+        }
+      }
+      if (posterPath) url = `https://image.tmdb.org/t/p/w185${posterPath}`;
+    } catch {}
+  }
+  filePosterCache.set(k, { url, at: Date.now() });
+  return url;
+}
+
 function safePath(rootName, rel) {
   const d = disks().find((x) => x.name === rootName);
   if (!d) throw new HttpError(404, 'disque inconnu');
@@ -11581,6 +11650,26 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
           }
         }
         return send(res, 200, { results });
+      }
+      // Jaquettes des dossiers de films / séries affichés (liste ou recherche) : jusqu'à 80 à la fois, 4 en parallèle
+      if (req.method === 'POST' && p === '/api/files/posters') {
+        const b = await readBody(req);
+        const items = (Array.isArray(b.items) ? b.items : []).slice(0, 80);
+        const posters = {};
+        let i = 0;
+        await Promise.all(
+          Array.from({ length: 4 }, async () => {
+            while (i < items.length) {
+              const it = items[i++];
+              try {
+                posters[`${it.root}:${it.path}`] = await filePoster(String(it.root), String(it.path || ''), Boolean(it.dir));
+              } catch {
+                posters[`${it.root}:${it.path}`] = null;
+              }
+            }
+          })
+        );
+        return send(res, 200, { posters });
       }
       // « Voir dans le disque » : chemin d'un fichier Jellyfin → disque + dossier (mêmes montages que Jellyfin)
       if (req.method === 'GET' && p === '/api/files/locate') {

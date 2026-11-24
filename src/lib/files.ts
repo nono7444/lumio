@@ -49,6 +49,9 @@ export const filesApi = {
   /** Fichier .torrent (contenu en base64) → AllDebrid → disque choisi */
   startTorrent: (s: Settings, name: string, data: string, root: string, folder: string) => post(s, '/api/downloads/torrent', { name, data, root, folder }),
   cancelDownload: (s: Settings, id: string) => serverCall(s, `/api/downloads/${id}`, { method: 'DELETE' }),
+  /** Jaquettes des dossiers de films / séries (clé « disque:chemin » → adresse de l'image, ou null) */
+  posters: (s: Settings, items: { root: string; path: string; dir: boolean }[]) =>
+    post(s, '/api/files/posters', { items }).then((r) => ((r as { posters?: Record<string, string | null> }).posters ?? {})),
 };
 
 export const joinPath = (a: string, b: string) => [a, b].filter(Boolean).join('/');

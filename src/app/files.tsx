@@ -1,6 +1,7 @@
 // Admin : disques du serveur — parcourir, rechercher, créer un dossier, renommer, déplacer (même vers un autre disque,
 // un ou plusieurs éléments à la fois), supprimer. Peut s'ouvrir directement sur un dossier (« Voir dans le disque »).
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, TextInput, View, Platform } from 'react-native';
@@ -14,6 +15,7 @@ import { C, R } from '@/constants/theme';
 import { filesApi, formatSize, joinPath, parentPath, type Disk, type FileEntry, type MoveJob } from '@/lib/files';
 import { SecourSearch } from '@/components/secour-search';
 import { useSettings } from '@/lib/settings';
+import { serverBase } from '@/lib/chat';
 import { adminUI } from '@/lib/variant';
 
 type Item = { root: string; path: string; name: string };
@@ -39,6 +41,39 @@ export default function Files() {
   const [error, setError] = useState<string | null>(null);
   const [moving, setMoving] = useState<Item[] | null>(null);
   const [jobs, setJobs] = useState<MoveJob[]>([]);
+  // Jaquettes des dossiers de films / séries : « disque:chemin » → image (null = aucune trouvée)
+  const [posters, setPosters] = useState<Record<string, string | null>>({});
+  const askPosters = useCallback(
+    (items: { root: string; path: string; dir: boolean; name: string }[]) => {
+      const want = items
+        .filter((it) => (it.dir || VIDEO.test(it.name)) && !/S\d{1,2}E\d{1,3}/i.test(it.name) && !(`${it.root}:${it.path}` in postersRef.current))
+        .slice(0, 80);
+      if (!want.length) return;
+      // Marquées « en cours » pour ne pas les redemander
+      want.forEach((it) => (postersRef.current[`${it.root}:${it.path}`] = null));
+      filesApi
+        .posters(settings, want.map(({ root: r, path: p, dir }) => ({ root: r, path: p, dir })))
+        .then((map) => {
+          Object.assign(postersRef.current, map);
+          setPosters({ ...postersRef.current });
+        })
+        .catch(() => {});
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [settings.chatUrl]
+  );
+  const postersRef = useRef<Record<string, string | null>>({});
+  useEffect(() => {
+    if (hits) askPosters(hits.map((h) => ({ root: h.root, path: h.path, dir: h.dir, name: h.name })));
+  }, [hits, askPosters]);
+  useEffect(() => {
+    if (root && entries) askPosters(entries.map((e) => ({ root, path: joinPath(path, e.name), dir: e.dir, name: e.name })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries, askPosters]);
+  const posterOf = (r: string, p: string) => {
+    const u = posters[`${r}:${p}`];
+    return u ? (u.startsWith('/') ? `${serverBase(settings.chatUrl)}${u}` : u) : null;
+  };
   const loadRef = useRef<() => void>(() => {});
 
   // Déplacements vers un autre disque : progression en direct
@@ -311,7 +346,7 @@ export default function Files() {
                 }
               }}
               style={styles.row}>
-              <Ionicons name={h.dir ? 'folder' : 'film-outline'} size={22} color={h.dir ? '#FFC93C' : C.textDim} />
+              <Thumb uri={posterOf(h.root, h.path)} icon={h.dir ? 'folder' : 'film-outline'} color={h.dir ? '#FFC93C' : C.textDim} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.file} numberOfLines={2}>
                   {h.name}
@@ -379,7 +414,11 @@ export default function Files() {
               {selecting ? (
                 <Ionicons name={picked.has(e.name) ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={picked.has(e.name) ? C.accent : C.textDim} />
               ) : null}
-              <Ionicons name={e.dir ? 'folder' : /\.(mkv|mp4|avi|mov|m4v|ts)$/i.test(e.name) ? 'film-outline' : 'document-outline'} size={22} color={e.dir ? '#FFC93C' : C.textDim} />
+              <Thumb
+                uri={posterOf(root, joinPath(path, e.name))}
+                icon={e.dir ? 'folder' : VIDEO.test(e.name) ? 'film-outline' : 'document-outline'}
+                color={e.dir ? '#FFC93C' : C.textDim}
+              />
               <View style={{ flex: 1 }}>
                 <Text style={styles.file} numberOfLines={2}>
                   {e.name}
@@ -437,7 +476,16 @@ export default function Files() {
   );
 }
 
+const VIDEO = /\.(mkv|mp4|avi|mov|m4v|ts|webm)$/i;
+
+/** Jaquette du film / de la série (sinon l'icône du dossier ou du fichier) */
+function Thumb({ uri, icon, color }: { uri: string | null; icon: keyof typeof Ionicons.glyphMap; color: string }) {
+  if (!uri) return <Ionicons name={icon} size={22} color={color} style={{ width: 34, textAlign: 'center' }} />;
+  return <Image source={{ uri }} style={styles.thumb} contentFit="cover" transition={200} cachePolicy="memory-disk" />;
+}
+
 const styles = StyleSheet.create({
+  thumb: { width: 34, height: 50, borderRadius: 5, backgroundColor: C.surfaceHigh },
   header: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingBottom: 6 },
   title: { flex: 1, color: C.text, fontSize: 24, fontWeight: '800' },
   round: { width: 38, height: 38, borderRadius: 19, backgroundColor: C.surfaceHigh, alignItems: 'center', justifyContent: 'center' },
