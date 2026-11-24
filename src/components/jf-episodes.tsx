@@ -11,10 +11,31 @@ import { FocusPressable as Pressable } from '@/components/tv';
 import { Button, SegChip, tap } from '@/components/ui';
 import { C, R } from '@/constants/theme';
 import { formatRuntime, jf, jfEpisodeThumb, type JfItem } from '@/lib/jellyfin';
+import { tmdb, tmdbImg } from '@/lib/tmdb';
 import { useSettings } from '@/lib/settings';
 import { serverCall } from '@/lib/chat';
 import { usePrompt } from '@/components/prompt-modal';
 import { adminUI } from '@/lib/variant';
+
+/** Épisode annoncé (TMDB) mais pas encore sur le serveur : affiché grisé avec sa date de sortie. */
+export type UpcomingEpisode = { n: number; name: string; overview?: string; still?: string | null; airDate: string | null };
+
+const MONTHS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+const DAYS = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
+const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+/** « Sortie le mar. 2 déc. », « Sort aujourd'hui », « Sorti le … · arrive bientôt » */
+export function airLabel(airDate: string | null): string {
+  if (!airDate) return 'Date de sortie à venir';
+  const [y, m, d] = airDate.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const txt = `${DAYS[date.getDay()]} ${d} ${MONTHS[m - 1]}${y !== new Date().getFullYear() ? ` ${y}` : ''}`;
+  const t = today();
+  if (airDate === t) return 'Sort aujourd’hui';
+  return airDate > t ? `Sortie le ${txt}` : `Sorti le ${txt} · arrive bientôt`;
+}
 
 /** Saisons et épisodes d'une série Jellyfin (partagé par la fiche Jellyfin et la fiche TMDB). */
 export function useSeriesEpisodes(seriesId: string | undefined) {
@@ -24,6 +45,8 @@ export function useSeriesEpisodes(seriesId: string | undefined) {
   const [episodes, setEpisodes] = useState<JfItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [nonce, setNonce] = useState(0);
+  const [tmdbId, setTmdbId] = useState<number | null>(null);
+  const [upcoming, setUpcoming] = useState<UpcomingEpisode[]>([]);
 
   useEffect(() => {
     if (!seriesId) return;
@@ -35,6 +58,20 @@ export function useSeriesEpisodes(seriesId: string | undefined) {
         // Première saison pas terminée, sinon la première
         const first = list.find((s) => !s.UserData?.Played) ?? list[0];
         if (first) setSeason((cur) => cur ?? first.Id);
+        // Série en cours de diffusion : la saison qui démarre (pas encore d'épisode sur le serveur) est ajoutée
+        jf.item(settings, seriesId)
+          .then(async (it) => {
+            const id = Number(it.ProviderIds?.Tmdb);
+            if (!id) return;
+            setTmdbId(id);
+            const show: any = await tmdb.tv(settings, id);
+            const next = show?.next_episode_to_air?.season_number as number | undefined;
+            if (!next || list.some((x) => x.IndexNumber === next)) return;
+            const virtual = { Id: `tmdb:${next}`, Name: `Saison ${next}`, IndexNumber: next } as JfItem;
+            setSeasons([...list, virtual]);
+            if (!list.length) setSeason((cur) => cur ?? virtual.Id);
+          })
+          .catch(() => {});
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -43,6 +80,12 @@ export function useSeriesEpisodes(seriesId: string | undefined) {
   useEffect(() => {
     if (!season || !seriesId) return;
     let alive = true;
+    // Saison pas encore commencée sur le serveur : seulement les épisodes annoncés
+    if (season.startsWith('tmdb:')) {
+      setEpisodes([]);
+      setLoading(false);
+      return;
+    }
     const cached = jf.cachedEpisodes(settings, season);
     setEpisodes(cached ?? []);
     setLoading(!cached);
@@ -63,11 +106,39 @@ export function useSeriesEpisodes(seriesId: string | undefined) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [season, seriesId, seasons.length, settings.jellyfin?.token]);
 
+  // Épisodes annoncés après le dernier épisode présent (séries hebdomadaires) : TMDB, avec leur date de sortie
+  useEffect(() => {
+    setUpcoming([]);
+    const cur = seasons.find((x) => x.Id === season);
+    if (!tmdbId || cur?.IndexNumber == null) return;
+    if (!season?.startsWith('tmdb:') && loading) return;
+    let alive = true;
+    const have = new Set(episodes.map((e) => e.IndexNumber));
+    const last = Math.max(0, ...episodes.map((e) => e.IndexNumber ?? 0));
+    // Un épisode sorti il y a plus de 2 semaines et absent n'est pas « à venir » (vieille saison incomplète)
+    const old = new Date(Date.now() - 14 * 864e5).toISOString().slice(0, 10);
+    tmdb
+      .season(settings, tmdbId, cur.IndexNumber)
+      .then((r) => {
+        if (!alive) return;
+        setUpcoming(
+          (r.episodes ?? [])
+            .filter((e) => e.episode_number > last && !have.has(e.episode_number) && (!e.air_date || e.air_date >= old))
+            .map((e) => ({ n: e.episode_number, name: e.name, overview: e.overview, still: e.still_path, airDate: e.air_date ?? null }))
+        );
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tmdbId, season, episodes, loading, seasons.length]);
+
   const reload = () => {
     setSeason(null);
     setNonce((n) => n + 1);
   };
-  return { seriesId, seasons, season, setSeason, episodes, loading, reload };
+  return { seriesId, seasons, season, setSeason, episodes, upcoming, loading, reload };
 }
 
 /** Puces des saisons + liste des épisodes. */
@@ -77,6 +148,7 @@ export function EpisodePicker({
   season,
   setSeason,
   episodes,
+  upcoming,
   loading,
   reload,
   title,
@@ -136,7 +208,7 @@ export function EpisodePicker({
         </Pressable>
       ) : null}
       {promptEl}
-      {loading && !episodes.length ? (
+      {loading && !episodes.length && !upcoming.length ? (
         <ActivityIndicator color={C.text} style={{ marginVertical: 20 }} />
       ) : (
         <View style={{ gap: 14 }}>
@@ -182,6 +254,32 @@ export function EpisodePicker({
               </Pressable>
             );
           })}
+          {episodes.length <= limit
+            ? upcoming.map((u) => (
+                <View key={`up-${u.n}`} style={[styles.episode, { opacity: 0.55 }]}>
+                  <View style={styles.thumb}>
+                    {u.still ? (
+                      <Image source={tmdbImg(u.still, 'w342')} cachePolicy="memory-disk" style={StyleSheet.absoluteFill} contentFit="cover" />
+                    ) : (
+                      <View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }]}>
+                        <Ionicons name="calendar-outline" size={22} color={C.textDim} />
+                      </View>
+                    )}
+                  </View>
+                  <View style={{ flex: 1, gap: 3 }}>
+                    <Text style={styles.title} numberOfLines={2}>
+                      {u.n}. {u.name}
+                    </Text>
+                    <Text style={styles.soon}>{airLabel(u.airDate)}</Text>
+                    {u.overview ? (
+                      <Text style={styles.overview} numberOfLines={2}>
+                        {u.overview}
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
+              ))
+            : null}
           {episodes.length > limit ? (
             <Button
               title={`Afficher plus (${episodes.length - limit} épisodes)`}
@@ -223,5 +321,6 @@ const styles = StyleSheet.create({
   barFill: { height: 3, backgroundColor: C.text },
   title: { color: C.text, fontSize: 14, fontWeight: '700' },
   dim: { color: C.textDim, fontSize: 13 },
+  soon: { color: C.text, fontSize: 13, fontWeight: '700' },
   overview: { color: C.textDim, fontSize: 12, lineHeight: 17 },
 });

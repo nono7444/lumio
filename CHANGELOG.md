@@ -7,6 +7,7 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 ## À venir
 
 - Disques : les dossiers et fichiers de films et séries affichent leur jaquette, dans la liste comme dans la recherche (serveur 3.136.0).
+- Séries en cours de diffusion : les prochains épisodes s'affichent grisés avec leur date de sortie (« Sortie le mar. 2 déc. »), y compris la saison qui démarre.
 
 ## 1.0.208 — 24 novembre 2026
 
