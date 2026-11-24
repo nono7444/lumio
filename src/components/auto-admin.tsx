@@ -15,6 +15,7 @@ import { C, TAB_SPACE } from '@/constants/theme';
 import { autoApi, gb, type AutoSeed, type QbitPrefs, type QbitTorrent, type AutoEvent, type AutoGrab, type AutoIndexer, type AutoItem, type AutoMissingSeason, type AutoRatio, type AutoRatioSite, type AutoBoost, type AutoBoostCandidate, type AutoSeedView, type AutoMissingSeries, type AutoRelease, type AutoState, type AutoWant, palliApi, type PalliView, demandesApi } from '@/lib/auto';
 import { useSettings } from '@/lib/settings';
 import { IS_AUTO } from '@/lib/variant';
+import { UniverseSwitch } from '@/components/universe-switch';
 import { PendingCard } from '@/components/server-requests';
 import { RequestStatus, requestsApi, type Req } from '@/lib/requests';
 import { ServerActionsSection } from '@/components/server-actions';
@@ -2432,6 +2433,9 @@ const fmtSpeed2 = (b: number) => (b >= 1e6 ? `${(b / 1e6).toFixed(1)} Mo/s` : `$
 /** Grand titre + une phrase d'état + la roue des réglages. */
 function AutoHeader({ title, sub, color }: { title: string; sub?: string | null; color?: string }) {
   return (
+    <>
+    {/* Univers Lumio Auto dans Lumio : le sélecteur pour revenir aux films, livres… */}
+    {IS_AUTO ? null : <UniverseSwitch style={{ marginBottom: 2 }} />}
     <View style={styles.ahead}>
       <View style={{ flex: 1, gap: 4 }}>
         <Text style={styles.aheadTitle}>{title}</Text>
@@ -2444,10 +2448,11 @@ function AutoHeader({ title, sub, color }: { title: string; sub?: string | null;
           </View>
         ) : null}
       </View>
-      <Pressable onPress={() => router.push('/settings')} hitSlop={10} style={styles.gear} accessibilityLabel="Réglages">
+      <Pressable onPress={() => router.navigate(IS_AUTO ? '/settings' : ('/server' as never))} hitSlop={10} style={styles.gear} accessibilityLabel="Réglages">
         <Ionicons name="settings-outline" size={20} color={C.text} />
       </Pressable>
     </View>
+    </>
   );
 }
 
@@ -2515,11 +2520,11 @@ export function AutoPerfScreen() {
         />
         <View style={styles.ratioRow}>
           <PerfTile icon="play-circle" value={String(watching.length)} label={watching.length ? names.join(', ') : 'Personne ne regarde'} color={watching.length ? C.success : C.textDim} to="/playing" />
-          <PerfTile icon="swap-vertical" value={svc.v} label={svc.l} color={svc.c} to="/auto" />
+          <PerfTile icon="swap-vertical" value={svc.v} label={svc.l} color={svc.c} to={IS_AUTO ? "/auto" : "/seed"} />
           <PerfTile icon="server" value={fmtDisk(free)} label={tight ? 'Un disque est presque plein' : 'libres sur les disques'} color={tight ? C.warning : C.text} to="/disks" />
         </View>
         {boost?.enabled ? (
-          <Pressable onPress={() => router.navigate('/auto' as never)} style={styles.stateLine}>
+          <Pressable onPress={() => router.navigate((IS_AUTO ? '/auto' : '/seed') as never)} style={styles.stateLine}>
             <Ionicons name="rocket" size={14} color={C.success} />
             <Text style={[styles.small, { flex: 1 }]} numberOfLines={1}>
               Booster de seed : {boost.torrents.length} torrent{boost.torrents.length > 1 ? 's' : ''} · {gb(boost.used)} / {boost.gb} Go

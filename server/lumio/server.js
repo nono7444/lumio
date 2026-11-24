@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.134.0';
+const VERSION = '3.135.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3101,6 +3101,71 @@ async function radarTmdbId(meta) {
   radarTmdb.set(imdb[0], id);
   return id;
 }
+// ——— Sortie d'un titre : déjà sorti (« Télécharger ») ou pas encore (« Demander », avec la date) ———
+// Le calendrier (radar amtVOD) passe d'abord, puis les dates TMDB (sortie numérique en France, sinon aux États-Unis, sinon cinéma).
+const releaseCache = new Map(); // "movie:603" → { v, at }
+const releaseDay = (s) => {
+  const d = s ? new Date(String(s).slice(0, 10) + 'T12:00:00Z') : null;
+  return d && !isNaN(d) ? d : null;
+};
+const releaseFr = (d) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Paris' });
+async function releaseTmdb(type, tmdbId) {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  if (type === 'tv') {
+    const d = await tmdbGet(`/tv/${tmdbId}`);
+    const first = releaseDay(d && d.first_air_date);
+    if (!first) return { state: 'upcoming', label: 'Date de diffusion pas encore annoncée', date: null };
+    if (first >= today) return { state: 'upcoming', label: `Première diffusion le ${releaseFr(first)}`, date: first.toISOString().slice(0, 10) };
+    return { state: 'released', label: null, date: first.toISOString().slice(0, 10) };
+  }
+  const d = await tmdbGet(`/movie/${tmdbId}`, { append_to_response: 'release_dates' });
+  const results = (d && d.release_dates && d.release_dates.results) || [];
+  const pick = (country, types) =>
+    (results.find((r) => r.iso_3166_1 === country)?.release_dates || [])
+      .filter((x) => types.includes(x.type))
+      .map((x) => releaseDay(x.release_date))
+      .filter(Boolean)
+      .sort((a, b) => a - b)[0] || null;
+  const digitalFr = pick('FR', [4]);
+  const digital = digitalFr || pick('US', [4]);
+  if (digital && digital >= today)
+    return { state: 'upcoming', label: `Sortie numérique le ${releaseFr(digital)}${digitalFr ? '' : ' (date US)'}`, date: digital.toISOString().slice(0, 10) };
+  if (digital) return { state: 'released', label: null, date: digital.toISOString().slice(0, 10) };
+  // Déjà sorti en numérique ou en physique quelque part
+  if (results.some((r) => r.release_dates.some((x) => (x.type === 4 || x.type === 5) && (releaseDay(x.release_date) || today) < today))) return { state: 'released', label: null, date: null };
+  const cinema = pick('FR', [2, 3]) || releaseDay(d && d.release_date);
+  if (!cinema) return { state: 'upcoming', label: 'Date de sortie pas encore annoncée', date: null };
+  if (cinema >= today) return { state: 'upcoming', label: `Au cinéma le ${releaseFr(cinema)}`, date: cinema.toISOString().slice(0, 10) };
+  // Sorti au cinéma il y a moins de 4 mois, sans date numérique : encore en salle
+  if (today - cinema < 120 * 86400e3) return { state: 'upcoming', label: 'Au cinéma · sortie numérique pas encore annoncée', date: cinema.toISOString().slice(0, 10) };
+  return { state: 'released', label: null, date: cinema.toISOString().slice(0, 10) };
+}
+async function releaseInfo(type, tmdbId) {
+  const k = `${type}:${tmdbId}`;
+  const hit = releaseCache.get(k);
+  if (hit && Date.now() - hit.at < 6 * 3600e3) return hit.v;
+  // Calendrier : on n'attend pas son chargement (il se prépare pour la prochaine fois)
+  if (!radarCache) radarLoad().catch(() => {});
+  let fromRadar = null;
+  const rank = { available: 3, confirmed: 2, cinema: 1 };
+  for (const sec of (radarCache && radarCache.sections) || []) {
+    const it = (sec.items || []).find((i) => i.tmdbId === tmdbId && i.type === type);
+    if (it && rank[sec.status] && (!fromRadar || rank[sec.status] > rank[fromRadar.status])) fromRadar = { status: sec.status, info: it.releaseInfo };
+  }
+  const tm = await releaseTmdb(type, tmdbId).catch(() => null);
+  let v;
+  if (fromRadar && fromRadar.status === 'available') v = { state: 'released', label: null, date: tm && tm.date, source: 'calendrier' };
+  else if (fromRadar && fromRadar.status === 'confirmed')
+    v = { state: 'upcoming', label: tm && tm.state === 'upcoming' && /numérique/.test(tm.label || '') ? tm.label : `Sortie numérique${fromRadar.info ? ` : ${fromRadar.info}` : ' confirmée'}`, date: tm && tm.date, source: 'calendrier' };
+  else if (fromRadar && fromRadar.status === 'cinema')
+    v = { state: 'upcoming', label: tm && tm.state === 'upcoming' ? tm.label : 'Au cinéma · sortie numérique pas encore annoncée', date: tm && tm.date, source: 'calendrier' };
+  else if (tm) v = { ...tm, source: 'tmdb' };
+  else v = { state: 'released', label: null, date: null, source: 'inconnu' };
+  releaseCache.set(k, { v, at: Date.now() });
+  return v;
+}
+
 async function radarLoad(force = false) {
   if (!force && radarCache && Date.now() - radarCache.at < 3600e3) return radarCache;
   if (radarBusy) return radarBusy;
@@ -11617,6 +11682,13 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
 
     // ——— « Lire » un titre absent (admin) : lien de streaming TorBox + téléchargement en arrière-plan + reprise ———
     // Calendrier : radar amtVOD (sorties VOD)
+    // Sortie d'un titre (fiche : « Télécharger » si sorti, sinon « Demander » avec la date)
+    if (req.method === 'GET' && p === '/api/release') {
+      const type = q.get('type') === 'tv' ? 'tv' : 'movie';
+      const tmdbId = Number(q.get('tmdbId'));
+      if (!tmdbId) throw new HttpError(400, 'tmdbId manquant');
+      return send(res, 200, await releaseInfo(type, tmdbId));
+    }
     if (req.method === 'GET' && p === '/api/radar') {
       const r = await radarLoad(q.get('refresh') === '1');
       return send(res, 200, { ...r, at: new Date(r.at).toISOString() });

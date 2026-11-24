@@ -309,6 +309,9 @@ function SettingsScreen() {
         <Section title="Personnalisation">
           <Button title="Accueil et onglets" icon="options-outline" variant="secondary" onPress={() => router.push('/customize')} />
           {Platform.isTV ? null : (
+            <Button title="Apparence (couleurs, formes, reflet)" icon="color-palette-outline" variant="secondary" onPress={() => router.push('/appearance')} style={{ marginTop: 10 }} />
+          )}
+          {Platform.isTV ? null : (
             <View style={{ marginTop: 12, gap: 10 }}>
               <Picker
                 label="Fond de l'accueil"

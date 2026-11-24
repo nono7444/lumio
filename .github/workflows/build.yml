@@ -25,7 +25,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
 
-  # Deux applis du même code : Lumio (famille : films et séries, livres audio, livres) et Lumio Auto (admin, APP_VARIANT=auto)
+  # Une seule appli : Lumio (films et séries, livres audio, livres, Twitch et Lumio Auto pour l'admin)
   ios:
     needs: check
     runs-on: macos-latest
@@ -36,9 +36,6 @@ jobs:
           - variant: lumio
             proj: Lumio
             ipa: lumio-unsigned.ipa
-          - variant: auto
-            proj: LumioAuto
-            ipa: lumio-auto-unsigned.ipa
     env:
       APP_VARIANT: ${{ matrix.variant }}
     steps:
@@ -99,8 +96,6 @@ jobs:
         include:
           - variant: lumio
             apk: lumio-android.apk
-          - variant: auto
-            apk: lumio-auto-android.apk
     env:
       APP_VARIANT: ${{ matrix.variant }}
     steps:
@@ -150,9 +145,6 @@ jobs:
           - variant: lumio
             apk: lumio-android.apk
             pkg: lol.wawanono.lumio
-          - variant: auto
-            apk: lumio-auto-android.apk
-            pkg: lol.wawanono.lumio.auto
     steps:
       - name: Accélération matérielle de l'émulateur
         run: |
@@ -218,7 +210,6 @@ jobs:
             echo "---"
             echo "iPhone : mets à jour depuis FlareStore (source : https://github.com/${{ github.repository }}/releases/latest/download/altstore.json), ou installe lumio-unsigned.ipa avec Sideloadly / SideStore."
             echo "Android (téléphone) : https://github.com/${{ github.repository }}/releases/latest/download/lumio-android.apk"
-            echo "Lumio Auto (admin) : dans la même source FlareStore ; Android : https://github.com/${{ github.repository }}/releases/latest/download/lumio-auto-android.apk"
             echo "Android TV : Lumio TV (https://github.com/nono7444/lumio-tv/releases/latest), ou lumio.wawanono.lol/tv dans Downloader"
             echo "Toutes les notes : https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md"
           } > body.md
@@ -233,8 +224,6 @@ jobs:
           files: |
             lumio-unsigned.ipa
             lumio-android.apk
-            lumio-auto-unsigned.ipa
-            lumio-auto-android.apk
             altstore.json
       - name: Range les notes sous le numéro de version dans CHANGELOG.md
         if: github.ref == 'refs/heads/main'

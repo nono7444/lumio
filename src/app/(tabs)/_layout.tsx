@@ -17,8 +17,8 @@ let askedThisLaunch = false;
 export default function TabsLayout() {
   const { settings, update } = useSettings();
   const rawUniverse = useUniverse();
-  // Twitch est réservé à l'admin : un membre retombe sur Films & séries
-  const universe = rawUniverse === 'twitch' && !settings.jellyfin?.isAdmin ? 'media' : rawUniverse;
+  // Twitch et Lumio Auto sont réservés à l'admin : un membre retombe sur Films & séries
+  const universe = (rawUniverse === 'twitch' || rawUniverse === 'auto') && !settings.jellyfin?.isAdmin ? 'media' : rawUniverse;
 
   useEffect(() => {
     const h = settings.household;
@@ -82,6 +82,9 @@ export default function TabsLayout() {
         <Tabs.Screen name="listen" options={{ href: null }} />
         <Tabs.Screen name="find" options={{ href: null }} />
         <Tabs.Screen name="twitch" options={{ href: null }} />
+        <Tabs.Screen name="perf" options={{ href: null }} />
+        <Tabs.Screen name="seed" options={{ href: null }} />
+        <Tabs.Screen name="demandes" options={{ href: null }} />
       </Tabs>
     );
   }
@@ -118,6 +121,9 @@ export default function TabsLayout() {
         <Tabs.Screen name="shelf" options={{ href: null }} />
         <Tabs.Screen name="findbook" options={{ href: null }} />
         <Tabs.Screen name="twitch" options={{ href: null }} />
+        <Tabs.Screen name="perf" options={{ href: null }} />
+        <Tabs.Screen name="seed" options={{ href: null }} />
+        <Tabs.Screen name="demandes" options={{ href: null }} />
       </Tabs>
     );
   }
@@ -149,14 +155,18 @@ export default function TabsLayout() {
         <Tabs.Screen name="shelf" options={{ href: null }} />
         <Tabs.Screen name="findbook" options={{ href: null }} />
         <Tabs.Screen name="twitch" options={{ href: null }} />
+        <Tabs.Screen name="perf" options={{ href: null }} />
+        <Tabs.Screen name="seed" options={{ href: null }} />
+        <Tabs.Screen name="demandes" options={{ href: null }} />
         <Tabs.Screen name="find" options={{ href: null }} />
         <Tabs.Screen name="me" options={{ href: null }} />
       </Tabs>
     );
   }
 
-  // Univers choisi (Films & séries, Livres audio, Livres) : seuls ses onglets sont affichés ; TV : Films & séries
+  // Univers choisi (Films & séries, Livres audio, Livres, Twitch, Lumio Auto) : seuls ses onglets sont affichés ; TV : Films & séries
   const shown = UNIVERSE_TABS[Platform.isTV ? 'media' : universe];
+  const isAdmin = settings.jellyfin?.isAdmin === true;
   const tab = (name: string, href: null | undefined) => (shown.includes(name) ? href : null);
   return (
     <Tabs
@@ -177,15 +187,18 @@ export default function TabsLayout() {
       <Tabs.Screen name="library" options={{ title: 'Bibliothèque', href: tab('library', settings.jellyfin ? undefined : null) }} />
       <Tabs.Screen name="live" options={{ title: 'Live TV', href: tab('live', undefined) }} />
       <Tabs.Screen name="calendar" options={{ title: 'Calendrier', href: tab('calendar', undefined) }} />
-      <Tabs.Screen name="chat" options={{ title: 'Chat', href: tab('chat', settings.jellyfin ? undefined : null) }} />
-      <Tabs.Screen name="activity" options={{ title: 'Demandes', href: tab('activity', undefined) }} />
-      {/* Lumio Auto : admin seulement, jamais sur la TV */}
-      {/* Lumio Auto est une appli à part (outils d'admin) */}
+      {/* Plus de Chat ni de Demandes dans Lumio : les demandes se gèrent dans l'univers Lumio Auto */}
+      <Tabs.Screen name="chat" options={{ title: 'Chat', href: null }} />
+      <Tabs.Screen name="activity" options={{ title: 'Demandes', href: null }} />
       <Tabs.Screen name="auto" options={{ title: 'Auto', href: null }} />
-      <Tabs.Screen name="qbit" options={{ href: null }} />
-      <Tabs.Screen name="disks" options={{ href: null }} />
-      <Tabs.Screen name="server" options={{ href: null }} />
-      <Tabs.Screen name="playing" options={{ href: null }} />
+      {/* Univers Lumio Auto (admin seulement, jamais sur la TV) */}
+      <Tabs.Screen name="perf" options={{ title: 'Perf', href: tab('perf', isAdmin ? undefined : null) }} />
+      <Tabs.Screen name="seed" options={{ title: 'Seed', href: tab('seed', isAdmin ? undefined : null) }} />
+      <Tabs.Screen name="demandes" options={{ title: 'Demandes', href: tab('demandes', isAdmin ? undefined : null) }} />
+      <Tabs.Screen name="qbit" options={{ title: 'qBittorrent', href: tab('qbit', isAdmin ? undefined : null) }} />
+      <Tabs.Screen name="disks" options={{ title: 'Disques', href: tab('disks', isAdmin ? undefined : null) }} />
+      <Tabs.Screen name="server" options={{ title: 'Serveur', href: tab('server', isAdmin ? undefined : null) }} />
+      <Tabs.Screen name="playing" options={{ title: 'Lecture', href: tab('playing', isAdmin ? undefined : null) }} />
       <Tabs.Screen name="watchlist" options={{ title: 'À voir', href: tab('watchlist', Platform.isTV ? null : undefined) }} />
       <Tabs.Screen name="settings" options={{ title: 'Profil', href: tab('settings', undefined) }} />
       <Tabs.Screen name="listen" options={{ title: 'Livres audio', href: tab('listen', undefined) }} />

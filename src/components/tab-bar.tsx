@@ -33,6 +33,10 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   activity: 'file-tray-full',
   watchlist: 'bookmark',
   auto: IS_AUTO ? 'arrow-up-circle' : 'flash',
+  // Lumio Auto (univers admin)
+  perf: 'pulse',
+  seed: 'arrow-up-circle',
+  demandes: 'file-tray-full',
   qbit: 'magnet',
   disks: 'server',
   server: 'power',
@@ -60,6 +64,9 @@ const SHORT: Record<string, string> = {
   activity: 'Demandes',
   watchlist: 'À voir',
   auto: IS_AUTO ? 'Seed' : 'Auto',
+  perf: 'Perf',
+  seed: 'Seed',
+  demandes: 'Demandes',
   qbit: 'qBit',
   disks: 'Disques',
   server: 'Serveur',
@@ -238,7 +245,7 @@ function PhoneTabBar({ state, descriptors, navigation }: TabBarProps) {
           const isProfile = (route.name === 'settings' && !IS_AUTO) || route.name === 'me';
           const color = focused ? activeColor : C.textDim;
           const dot = (route.name === 'chat' && unread > 0) || (route.name === 'settings' && update);
-          const count = route.name === 'activity' ? pending : 0;
+          const count = route.name === 'activity' || route.name === 'demandes' ? pending : 0;
           return (
             <Pressable
               key={route.key}

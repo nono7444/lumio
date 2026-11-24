@@ -4,10 +4,13 @@ import { ProfileRank } from '@/components/rank-shield';
 import { Redirect, router, useFocusEffect } from 'expo-router';
 import { AutoPerfScreen } from '@/components/auto-admin';
 import { IS_AUDIO, IS_AUTO, IS_BOOKS } from '@/lib/variant';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useCached } from '@/lib/cached';
 import { StatusBar } from 'expo-status-bar';
-import { Platform, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Animated, Platform, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
+import { AmbientReflection } from '@/components/ambient-reflection';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AnnouncementPopup } from '@/components/announcement';
@@ -388,7 +391,8 @@ function Home() {
   const insets = useSafeAreaInsets();
   const [nonce, setNonce] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
-  const [scrolled, setScrolled] = useState(false);
+  // Défilement : la barre du haut (fixe) prend un fond flouté dès qu'on descend
+  const scrollY = useRef(new Animated.Value(0)).current;
   const { rows } = useAvailableRows(nonce);
   const ordered = orderRows(rows, settings.homeLayout).filter((r) => !r.hidden);
   const withHero = ordered[0]?.kind === 'hero';
@@ -459,14 +463,16 @@ function Home() {
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <StatusBar style="light" />
-      <ScrollView
+      <Animated.ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingTop: withHero ? 0 : insets.top + (IS_AUTO || Platform.isTV ? 60 : 100), paddingBottom: TAB_SPACE }}
-        scrollEventThrottle={32}
-        onScroll={(e) => setScrolled(e.nativeEvent.contentOffset.y > 40)}
+        scrollEventThrottle={16}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
         refreshControl={Platform.isTV ? undefined :
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.text} progressViewOffset={insets.top} />
         }>
+        {/* Reflet de l'image du haut : ses couleurs coulent sous les rangées au lieu d'un noir brutal */}
+        {withHero ? <AmbientReflection /> : null}
         {ordered.map((r, idx) => {
           const spacer = idx === 1 && withHero ? <View key="sp" style={{ height: 20 }} /> : null;
           // Plateformes (Netflix, Disney+…) : juste après le carrousel du haut
@@ -518,10 +524,17 @@ function Home() {
             </Text>
           </View>
         )}
-      </ScrollView>
+      </Animated.ScrollView>
 
-      {/* Barre du haut : toujours transparente (plus de bandeau noir en défilant) */}
+      {/* Barre du haut fixe : transparente sur l'image, puis fond flouté dès qu'on fait défiler */}
       <View style={[styles.top, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
+        <Animated.View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, { opacity: scrollY.interpolate({ inputRange: [40, 160], outputRange: [0, 1], extrapolate: 'clamp' }) }]}>
+          <BlurView intensity={45} tint="dark" style={StyleSheet.absoluteFill} />
+          <LinearGradient colors={['rgba(0,0,0,0.55)', 'rgba(0,0,0,0.35)']} style={StyleSheet.absoluteFill} />
+          <View style={styles.topLine} />
+        </Animated.View>
         <HeroTopBar
           title="Lumio"
           season={season}
@@ -540,4 +553,5 @@ function Home() {
 
 const styles = StyleSheet.create({
   top: { position: 'absolute', top: 0, left: 0, right: 0, paddingBottom: 10 },
+  topLine: { position: 'absolute', left: 0, right: 0, bottom: 0, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.12)' },
 });

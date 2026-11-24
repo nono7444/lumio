@@ -35,7 +35,10 @@ export function RequestModal({
   media,
   onClose,
   onDone,
+  verb = 'Demander',
 }: {
+  /** « Télécharger » (titre déjà sorti) ou « Demander » (pas encore sorti) */
+  verb?: string;
   visible: boolean;
   target: RequestTarget;
   media: MediaInfo | null;
@@ -355,7 +358,7 @@ export function RequestModal({
           ) : (
             <>
               <Ionicons name="paper-plane" size={16} color="#fff" />
-              <Text style={styles.sendTxt}>{isTv ? (selected.size ? `Demander ${selected.size} saison${selected.size > 1 ? 's' : ''}` : 'Choisis une saison') : 'Demander'}</Text>
+              <Text style={styles.sendTxt}>{isTv ? (selected.size ? `${verb} ${selected.size} saison${selected.size > 1 ? 's' : ''}` : 'Choisis une saison') : verb}</Text>
             </>
           )}
         </Pressable>

@@ -78,12 +78,6 @@ export function HomeShortcuts({ onCustomize }: { onCustomize: () => void }) {
           </View>
         </Btn>
       ) : null}
-      {!chatInBar && settings.jellyfin && settings.chatUrl ? (
-        <Btn label="Chat de la famille" onPress={() => router.navigate('/chat')}>
-          <Ionicons name="chatbubbles-outline" size={19} color={C.text} />
-          <Count dot={unread > 0} />
-        </Btn>
-      ) : null}
       <Btn label="Personnaliser l'accueil" onPress={onCustomize}>
         <Ionicons name="options-outline" size={20} color={C.text} />
       </Btn>

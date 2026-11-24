@@ -20,16 +20,15 @@ import { jf, type JfItem } from '@/lib/jellyfin';
 import { askFolder } from '@/components/folder-picker';
 import { TvBackdropLayer } from '@/components/tv-backdrop';
 import { JfEpisodes } from '@/components/jf-episodes';
-import { DlButton, probeOnce, streamReady } from '@/components/quality-menu';
+import { DlButton } from '@/components/quality-menu';
 import { ReportProblemButton } from '@/components/report-problem';
 import { RequestSection } from '@/components/request-section';
 import { TvPill, TvRound, TV_GOLD } from '@/components/tv-actions';
 import { grab, mediaFlavor } from '@/lib/grab';
 import { MediaStatus, requestsApi, useServerRequests } from '@/lib/requests';
-import { watchNowApi } from '@/lib/watch-now';
+import { releaseApi, type Release } from '@/lib/release';
 import { SeasonRequests } from '@/components/season-requests';
 import { WatchlistButton } from '@/components/watchlist-button';
-import { chat } from '@/lib/chat';
 import { MoveFolder } from '@/components/move-folder';
 import { arrReady, hasTmdb, isManager, useSettings } from '@/lib/settings';
 import { pickLogo, tmdb, tmdbImg, upcomingRelease, type TmdbMovie, type TmdbTv } from '@/lib/tmdb';
@@ -54,8 +53,6 @@ function seasonInfo(series: SonarrSeries | null, n: number): SeasonInfo | null {
   return { label: '', color: C.textFaint, monitored: false, have, total };
 }
 
-/** État du streaming déjà connu (gardé pendant que l'appli est ouverte). */
-let streamMemo: { can: boolean; ok: boolean | null } | null = null;
 /** Attend la recherche Jellyfin 2,5 s au plus ; si elle est plus lente, la fiche s'affiche et le résultat arrive ensuite. */
 function jfFirst<T>(p: Promise<T | null>, late: (v: T | null) => void): Promise<T | null> {
   const safe = p.catch(() => null);
@@ -79,35 +76,31 @@ export default function MediaScreen() {
   const [fullOverview, setFullOverview] = useState(false);
   // Statut sur le serveur Lumio (disponible, partiel…) : le bouton « DL » ne s'affiche que si le titre manque
   const [mediaStatus, setMediaStatus] = useState<number | null>(null);
-  // « Regarder » : le serveur sait lire tout de suite un titre absent quand son torrent est dans le cache TorBox
-  // État du streaming gardé entre les fiches : la bonne barre de boutons s'affiche d'emblée
-  const [canWatchNow, setCanWatchNow] = useState(streamMemo?.can ?? false);
-  const [streamOk, setStreamOk] = useState<boolean | null>(streamMemo?.ok ?? null);
-  const [streamKnown, setStreamKnown] = useState(Boolean(streamMemo) || !settings.chatUrl);
+  // Sortie du titre (calendrier puis TMDB, côté serveur) : « Télécharger » s'il est sorti, sinon « Demander » avec la date
+  // undefined = en cours de chargement, null = inconnue (pas de serveur Lumio)
+  const [release, setRelease] = useState<Release | null | undefined>(settings.chatUrl ? undefined : null);
   useEffect(() => {
-    if (!settings.chatUrl) return setStreamKnown(true);
-    watchNowApi
-      .status(settings)
-      .then((st) => {
-        streamMemo = { can: Boolean(st.streaming), ok: st.health ? st.health.ok : null };
-        setCanWatchNow(streamMemo.can);
-        setStreamOk(streamMemo.ok);
-      })
-      .catch(() => setCanWatchNow(false))
-      .finally(() => setStreamKnown(true));
+    if (!settings.chatUrl) return setRelease(null);
+    let done = false;
+    // Serveur lent : on n'attend pas plus de 4 s, la date de TMDB prend le relais
+    const t = setTimeout(() => !done && setRelease(null), 4000);
+    releaseApi
+      .get(settings, type === 'tv' ? 'tv' : 'movie', Number(id))
+      .then((r) => setRelease(r))
+      .catch(() => setRelease(null))
+      .finally(() => {
+        done = true;
+        clearTimeout(t);
+      });
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.chatUrl]);
+  }, [settings.chatUrl, id, type]);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [jfItem, setJfItem] = useState<JfItem | null>(null);
   // La recherche dans Jellyfin est faite avant d'afficher la fiche : pas de « Streaming » qui devient « Lire »
   const [jfChecked, setJfChecked] = useState(false);
-  // Film absent : le streaming est cherché dès l'ouverture, pour que « Demander » le lance sans attendre
-  useEffect(() => {
-    if (jfChecked && !jfItem && canWatchNow && type === 'movie' && Number(id)) probeOnce(settings, { type: 'movie', tmdbId: Number(id) });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jfChecked, jfItem, canWatchNow, id]);
   const [showRate, setShowRate] = useState(false);
   // Statut de chaque saison (serveur Lumio) et demande d'une saison en cours d'envoi
   // Une saison demandée depuis la liste : le bloc de demande se recharge (et inversement)
@@ -212,23 +205,18 @@ export default function MediaScreen() {
     );
 
   const d = details.data;
+  const imdbId = details.kind === 'movie' ? details.data.imdb_id : details.data.external_ids?.imdb_id;
   const title = details.kind === 'movie' ? details.data.title : details.data.name;
   const date = details.kind === 'movie' ? details.data.release_date : details.data.first_air_date;
   // « Disponible le … » si le titre n'est pas encore sorti (et pas déjà sur le serveur)
-  const upcoming = jfItem ? null : upcomingRelease(details.kind, details.data);
+  // Déjà sur le serveur (Jellyfin l'a, ou le serveur Lumio le dit disponible pendant que la recherche Jellyfin se termine)
+  const onServer = Boolean(jfItem) || (details.kind === 'movie' && mediaStatus === MediaStatus.AVAILABLE);
+  const tmdbUpcoming = upcomingRelease(details.kind, details.data);
+  const notOut = release ? release.state === 'upcoming' : Boolean(tmdbUpcoming);
+  const upcoming = onServer ? null : release ? release.label : tmdbUpcoming;
+  const play = () => router.push({ pathname: '/watch', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title } });
   const seasonsList = details.kind === 'tv' ? details.data.seasons.filter((s) => s.season_number > 0) : [];
 
-
-  // Proposer le titre dans le chat famille (petit mot facultatif)
-  const propose = () => {
-    const share = (msg: string) =>
-      chat
-        .send(settings, msg, { type: details.kind, tmdbId, title, year: date?.slice(0, 4), poster: tmdbImg(d.poster_path, 'w342') })
-        .then(() => Alert.alert('Proposé ✅', 'Ta proposition est dans le chat.'))
-        .catch((e) => Alert.alert('Envoi impossible', e?.message ?? String(e)));
-    if (Alert.prompt) Alert.prompt('Proposer', 'Un petit mot pour la famille (facultatif) ?', (msg) => share(msg ?? ''));
-    else share('');
-  };
 
   async function run(action: () => Promise<unknown>, success: string) {
     setBusy(true);
@@ -287,7 +275,6 @@ export default function MediaScreen() {
     poster: tmdbImg(d.poster_path, 'w342'),
     backdrop: tmdbImg(d.backdrop_path, 'w780'),
   };
-  const imdbId = details.kind === 'movie' ? details.data.imdb_id : details.data.external_ids?.imdb_id;
   const logo = pickLogo(settings, d.images);
   // Sur TV (paysage), le hero ne dépasse pas l'écran
   // Téléphone : l'affiche entière (son titre fait partie de l'image, on n'en rajoute pas par-dessus)
@@ -407,49 +394,31 @@ export default function MediaScreen() {
         </View>
 
         <View style={[{ paddingHorizontal: 16, gap: 20, marginTop: 4 }, Platform.isTV && { width: '100%', maxWidth: 1100, alignSelf: 'flex-start', paddingLeft: 48 }]}>
-          {/* ——— Barre d'actions : Lire (ou « Regarder » en streaming, ou « À voir »), puis Proposer ——— */}
-          {!Platform.isTV && !(jfChecked && streamKnown) ? <View style={[styles.actionBar, { height: 46 }]} /> : null}
-          {!Platform.isTV && jfChecked && streamKnown ? (
+          {/* ——— Barre d'actions : « Lire » si le titre est sur le serveur ; sinon « Télécharger » ou « Demander » (en dessous) ——— */}
+          {!Platform.isTV && !(jfChecked && release !== undefined) ? <View style={[styles.actionBar, { height: 46 }]} /> : null}
+          {!Platform.isTV && jfChecked && release !== undefined && onServer ? (
             <View style={styles.actionBar}>
-              {jfItem ? (
-                <Button
-                  title="Lire"
-                  icon="play"
-                  small
-                  onPress={() => router.push({ pathname: '/watch', params: { type: details.kind, tmdbId: String(tmdbId), imdb: imdbId ?? '', title } })}
-                  style={{ flex: 1 }}
-                />
-              ) : (
-                <WatchlistButton item={wlItem} variant="pill" />
-              )}
-              {/* Titre absent : « Demander » et « Streaming » côte à côte, juste en dessous */}
-              {jfItem ? <WatchlistButton item={wlItem} variant="icon" /> : <View style={{ flex: 1 }} />}
+              <Button title="Lire" icon="play" small onPress={play} style={{ flex: 1 }} />
+              <WatchlistButton item={wlItem} variant="icon" />
               {/* Admin : « DL » → qualité (4K / 1080p), puis fichiers Wawacity téléchargés par le serveur (AllDebrid) */}
               {settings.chatUrl && settings.jellyfin?.isAdmin === true ? <DlButton type={details.kind} tmdbId={tmdbId} title={title} imdb={imdbId ?? undefined} /> : null}
-              {/* Proposer dans le chat famille : seulement pour un titre pas encore sur le serveur */}
-              {settings.chatUrl && settings.jellyfin && !jfItem ? (
-                <Button title="" icon="chatbubbles-outline" variant="glass" small onPress={propose} style={{ width: 46, paddingHorizontal: 0 }} />
-              ) : null}
               {/* Déplacer (admin) : titre rangé dans le mauvais dossier → Radarr / Sonarr le déplacent */}
-              {settings.chatUrl && adminUI(settings) && jfItem?.Path ? (
-                <MoveButton path={jfItem!.Path!} title={title} />
-              ) : null}
+              {settings.chatUrl && adminUI(settings) && jfItem?.Path ? <MoveButton path={jfItem!.Path!} title={title} /> : null}
             </View>
           ) : null}
 
           {/* ——— Demande façon Seerr (serveur Lumio) ——— */}
           {/* Film absent avec « Lire » en streaming : un seul bouton, pas de « Demander » (le suivi revient dès que le téléchargement est lancé) */}
           {/* Titre absent : un seul bouton, « Lire » (streaming ou demande) ; la section des demandes ne reste que pour une série déjà en partie sur le serveur (saisons manquantes) */}
-          {serverReq && !Platform.isTV && jfChecked ? (
+          {serverReq && !Platform.isTV && jfChecked && release !== undefined ? (
             <RequestSection
-              inJellyfin={Boolean(jfItem)}
-              beforeRequest={
-                canWatchNow && !jfItem && details.kind === 'movie'
-                  ? async () => {
-                      if (!(await streamReady(settings, { type: 'movie', tmdbId, title }))) return null;
-                      return () => router.push({ pathname: '/watch', params: { type: 'movie', tmdbId: String(tmdbId), imdb: imdbId ?? '', title, stream: '1' } });
-                    }
-                  : undefined
+              inJellyfin={onServer}
+              notOut={notOut}
+              extra={
+                <>
+                  <WatchlistButton item={wlItem} variant="icon" />
+                  {settings.chatUrl && settings.jellyfin?.isAdmin === true ? <DlButton type={details.kind} tmdbId={tmdbId} title={title} imdb={imdbId ?? undefined} /> : null}
+                </>
               }
               onAvailable={refreshJf}
               onChange={() => setMediaKey((k) => k + 1)}

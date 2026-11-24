@@ -6,6 +6,16 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Fiche d'un film ou d'une série : « Lire » s'il est sur le serveur, « Télécharger » s'il est déjà sorti, sinon « Demander » avec sa date de sortie (cinéma ou numérique, d'après le calendrier puis TMDB).
+- Plus aucun streaming dans Lumio : les titres absents se téléchargent ou se demandent.
+- Fini l'écran « Arrivée dans Jellyfin » qui devenait « Lire » : le bouton « Lire » s'affiche directement.
+- Lumio Auto est maintenant dans Lumio : nouvel univers « Lumio Auto » (admin) avec Perf, Seed, Demandes, qBittorrent, Disques, Serveur et Lecture ; l'appli Lumio Auto séparée disparaît.
+- Onglets Chat et Demandes retirés de Films & séries (les demandes se gèrent dans l'univers Lumio Auto).
+- Accueil : la barre du haut reste en place et prend un fond flouté quand on fait défiler.
+- Accueil : un reflet prolonge les couleurs de l'image du haut au lieu d'un passage brutal au noir.
+- Nouveau : Profil → Apparence, pour régler couleurs, fond, arrondis, boutons en verre, taille des affiches et reflet avec des curseurs (aperçu en direct).
+- Serveur 3.135.0 : date de sortie de chaque titre (/api/release).
+
 ## 1.0.207 — 22 novembre 2026
 
 - Twitch : les téléchargements ne restent plus bloqués à 100 % (le fichier n'est plus réécrit en entier à la fin) ; « finalisation » ou « rien de neuf depuis X min » s'affiche si besoin.

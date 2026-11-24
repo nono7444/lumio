@@ -13,7 +13,7 @@ import { useSettings } from '@/lib/settings';
 import { resolveWatch } from '@/lib/smart-play';
 import { tmdb, tmdbImg } from '@/lib/tmdb';
 import { serverCall } from '@/lib/chat';
-import { watchNowApi, watchOrigin } from '@/lib/watch-now';
+import { jf } from '@/lib/jellyfin';
 
 type Params = {
   type: 'movie' | 'tv';
@@ -22,9 +22,6 @@ type Params = {
   title: string;
   season?: string;
   episode?: string;
-  /** « Streaming » (admin) : lecture en streaming même si le titre est sur Jellyfin, dans la qualité choisie */
-  stream?: string;
-  quality?: string;
 };
 
 /**
@@ -51,19 +48,27 @@ export default function Watch() {
         setBackdrop(tmdbImg(details.backdrop_path, 'w1280'));
         const imdb = p.imdb || (type === 'movie' ? (details as any).imdb_id : (details as any).external_ids?.imdb_id);
 
-        const res = await resolveWatch(settings, {
-          type,
-          tmdbId,
-          imdb,
-          title: p.title,
-          season: p.season ? Number(p.season) : undefined,
-          episode: p.episode ? Number(p.episode) : undefined,
-        });
+        const ask = () =>
+          resolveWatch(settings, {
+            type,
+            tmdbId,
+            imdb,
+            title: p.title,
+            season: p.season ? Number(p.season) : undefined,
+            episode: p.episode ? Number(p.episode) : undefined,
+          });
+        let res = await ask();
+        // Titre tout juste arrivé sur le serveur : Jellyfin finit parfois de l'indexer, on réessaie quelques secondes
+        for (let i = 0; i < 4 && res.kind !== 'jellyfin' && !cancelled.current; i++) {
+          setStep('Arrivée dans ta bibliothèque…');
+          jf.invalidateIndex();
+          await new Promise((r) => setTimeout(r, 4000));
+          res = await ask();
+        }
         if (cancelled.current) return;
 
-        const forceStream = p.stream === '1';
         // ——— Disponible sur Jellyfin (bouton « Lire ») ———
-        if (res.kind === 'jellyfin' && !forceStream) {
+        if (res.kind === 'jellyfin') {
           const it = res.item;
           // Commencé en streaming avant l'arrivée du fichier : on reprend à la position gardée par le serveur
           let streamPos = 0;
@@ -87,50 +92,11 @@ export default function Watch() {
           return;
         }
 
-        // ——— Pas (encore) sur Jellyfin : « Regarder maintenant » (lien direct par TorBox / AllDebrid) ———
-        const jfEp = res.kind === 'jellyfin' && res.item.Type === 'Episode' ? res.item : null;
-        const season = type === 'tv' ? (jfEp?.ParentIndexNumber ?? (res as any).season ?? (p.season ? Number(p.season) : 1)) : undefined;
-        const episode = type === 'tv' ? (jfEp?.IndexNumber ?? (res as any).episode ?? (p.episode ? Number(p.episode) : 1)) : undefined;
-        if (forceStream && settings.chatUrl) {
-          const ql = p.quality === '2160' ? '4K' : p.quality ? `${p.quality}p` : '';
-          setStep(`Recherche d’un streaming${ql ? ` en ${ql}` : ''}…`);
-          const date = type === 'movie' ? (details as any).release_date : (details as any).first_air_date;
-          const w = await watchNowApi.start(settings, {
-            type,
-            tmdbId,
-            season,
-            episode,
-            title: p.title,
-            quality: p.quality ? Number(p.quality) : undefined,
-            year: date ? String(date).slice(0, 4) : undefined,
-            poster: tmdbImg(details.poster_path, 'w342') ?? undefined,
-            backdrop: tmdbImg(details.backdrop_path, 'w1280') ?? undefined,
-          });
-          if (cancelled.current) return;
-          toast(`Streaming depuis ${watchOrigin(w)}${w.quality ? ` · ${w.quality}` : ''}`);
-          router.replace({
-            pathname: '/player',
-            params: {
-              kind: 'url',
-              uri: w.url,
-              title: type === 'tv' ? `${p.title} · S${season}E${episode}` : p.title,
-              subtitle: [watchOrigin(w), w.quality, w.language, w.download?.state === 'pending' ? 'demande envoyée à l’admin' : w.download?.state === 'started' ? 'téléchargement lancé sur le serveur' : null].filter(Boolean).join(' · '),
-              start: String(w.position ?? 0),
-              stream: '1',
-              hls: w.hls ? '1' : undefined,
-              tmdbId: String(tmdbId),
-              imdb: imdb ?? '',
-              series: type === 'tv' ? p.title : undefined,
-              season: season != null ? String(season) : undefined,
-              episode: episode != null ? String(episode) : undefined,
-            },
-          });
-          return;
-        }
+        // ——— Pas (encore) sur Jellyfin ———
         throw new Error(
           type === 'tv' && (res as any).season != null
-            ? `L’épisode S${(res as any).season}E${(res as any).episode} n’est pas encore sur ton serveur. Demande-le depuis la fiche.`
-            : 'Pas encore sur ton serveur. Demande-le depuis la fiche.'
+            ? `L’épisode S${(res as any).season}E${(res as any).episode} n’est pas encore sur ton serveur. Télécharge-le ou demande-le depuis la fiche.`
+            : 'Pas encore sur ton serveur. Télécharge-le ou demande-le depuis la fiche.'
         );
       } catch (e: any) {
         if (!cancelled.current) setFailure(e?.message ?? String(e));

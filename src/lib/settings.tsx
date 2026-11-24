@@ -93,6 +93,8 @@ export type Settings = {
   /** Photo choisie (copiée dans les fichiers de l'appli) */
   homeBackgroundPhoto?: string;
   tabsLayout: TabPref[];
+  /** Apparence (Profil → Apparence) : couleurs, arrondis, reflet de l'accueil… */
+  look?: Partial<import('./look').Look>;
   /** Rangées de l'onglet Bibliothèque : ordre et visibilité */
   libraryLayout: HomeRow[];
   /** Enchaîner automatiquement l'épisode suivant */

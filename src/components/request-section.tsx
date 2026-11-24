@@ -1,6 +1,6 @@
 // Bloc « demande » de la fiche, comme sur Seerr : statut du média, demandes en cours, boutons.
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, View, Platform } from 'react-native';
 
 import { TvPill } from '@/components/tv-actions';
@@ -30,7 +30,8 @@ export function RequestSection({
   onAvailable,
   onMedia,
   reloadKey,
-  beforeRequest,
+  notOut,
+  extra,
 }: {
   target: RequestTarget;
   onChange?: () => void;
@@ -42,14 +43,14 @@ export function RequestSection({
   onMedia?: (m: MediaInfo) => void;
   /** Change quand la fiche a envoyé une demande (bouton « Demander » d'une saison) : on recharge */
   reloadKey?: number;
-  /** Appelé à l'appui sur « Demander » (film) : true si un streaming a été lancé (la demande part alors avec lui) */
-  /** Film absent : renvoie de quoi lancer le streaming s'il est prêt (sinon null) */
-  beforeRequest?: () => Promise<(() => void) | null>;
+  /** Pas encore sorti (cinéma ou date numérique à venir) : « Demander » ; sinon « Télécharger » */
+  notOut?: boolean;
+  /** Petits boutons affichés à côté du bouton principal (À voir, DL…) quand le titre n'est pas sur le serveur */
+  extra?: ReactNode;
 }) {
   const { settings } = useSettings();
   const [media, setMedia] = useState<MediaInfo | null>(null);
   const [open, setOpen] = useState(false);
-  const [trying, setTrying] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const admin = managerUI(settings);
@@ -202,42 +203,39 @@ export function RequestSection({
         // TV, façon Nuvio : bouton ovale
         <TvPill
           hasTVPreferredFocus
-          icon="paper-plane-outline"
-          label={isTv && status !== MediaStatus.UNKNOWN ? 'Autres saisons' : 'Demander'}
+          icon={notOut || (isTv && status !== MediaStatus.UNKNOWN) ? 'paper-plane-outline' : 'download-outline'}
+          label={isTv && status !== MediaStatus.UNKNOWN ? 'Autres saisons' : notOut ? 'Demander' : 'Télécharger'}
           onPress={() => setOpen(true)}
         />
-      ) : canRequest && !active ? (
-        <Button
-          title={trying ? 'Recherche d’un streaming…' : isTv && status !== MediaStatus.UNKNOWN ? 'Demander d’autres saisons' : 'Demander'}
-          icon="paper-plane-outline"
-          variant={status === MediaStatus.UNKNOWN ? 'primary' : 'glass'}
-          disabled={trying}
-          onPress={async () => {
-            // Film : un streaming prêt (cache TorBox / AllDebrid, Wawacity) se lance tout de suite, et le titre est demandé
-            // en même temps ; sinon, le choix de la demande comme avant
-            // Streaming prêt : on laisse le choix (regarder tout de suite, ou seulement faire la demande)
-            if (beforeRequest && !isTv) {
-              setTrying(true);
-              const watch = await beforeRequest().catch(() => null);
-              setTrying(false);
-              if (watch) {
-                Alert.alert('Disponible en streaming', `${target.title} peut se regarder tout de suite (la demande part avec), ou être seulement demandé.`, [
-                  { text: 'Regarder maintenant', onPress: watch },
-                  { text: 'Seulement demander', onPress: () => setOpen(true) },
-                  { text: 'Annuler', style: 'cancel' },
-                ]);
-                return;
-              }
-            }
-            setOpen(true);
-          }}
-        />
-      ) : null}
+      ) : (
+        (() => {
+          // Titre absent : « Télécharger » (déjà sorti) ou « Demander » (pas encore sorti), avec À voir / DL à côté
+          const primary =
+            canRequest && !active ? (
+              <Button
+                title={isTv && status !== MediaStatus.UNKNOWN ? 'Demander d’autres saisons' : notOut ? 'Demander' : 'Télécharger'}
+                icon={notOut || (isTv && status !== MediaStatus.UNKNOWN) ? 'paper-plane-outline' : 'download-outline'}
+                variant={status === MediaStatus.UNKNOWN ? 'primary' : 'glass'}
+                small={Boolean(extra && !inJellyfin)}
+                onPress={() => setOpen(true)}
+                style={extra && !inJellyfin ? { flex: 1 } : undefined}
+              />
+            ) : null;
+          if (!extra || inJellyfin) return primary;
+          return (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              {primary ?? <View style={{ flex: 1 }} />}
+              {extra}
+            </View>
+          );
+        })()
+      )}
 
       <RequestModal
         visible={open}
         target={target}
         media={media}
+        verb={notOut || (isTv && status !== MediaStatus.UNKNOWN) ? 'Demander' : 'Télécharger'}
         onClose={() => setOpen(false)}
         onDone={(msg) => {
           setOpen(false);

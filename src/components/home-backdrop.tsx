@@ -4,7 +4,10 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useEffect } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
+
+import { SEAM_DARK, setAmbient } from '@/lib/ambient';
 
 import { C } from '@/constants/theme';
 import type { HomeBackground, Settings } from '@/lib/settings';
@@ -39,11 +42,13 @@ export function homeBackdropSource(s: Settings, season: Season | null): number |
 export function HomeBackdrop({ source }: { source: number | { uri: string } }) {
   const { width } = useWindowDimensions();
   const height = Math.round(width * 1.05);
+  useEffect(() => setAmbient({ source, height }), [source, height]);
   return (
     <View style={{ width, height }}>
       <Image source={source} style={StyleSheet.absoluteFill} contentFit="cover" transition={250} cachePolicy="memory-disk" />
       <LinearGradient colors={['rgba(0,0,0,0.45)', 'transparent']} style={[StyleSheet.absoluteFill, { bottom: '70%' }]} pointerEvents="none" />
-      <LinearGradient colors={['transparent', C.bg]} style={[StyleSheet.absoluteFill, { top: '55%' }]} pointerEvents="none" />
+      {/* Le bas s'assombrit sans aller au noir : le reflet en dessous (accueil) prend le relais */}
+      <LinearGradient colors={['transparent', `rgba(0,0,0,${SEAM_DARK})`]} style={[StyleSheet.absoluteFill, { top: '55%' }]} pointerEvents="none" />
     </View>
   );
 }

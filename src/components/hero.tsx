@@ -1,10 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { FlatList, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
 
 import { Button, Fade, tap } from '@/components/ui';
+import { SEAM_DARK, setAmbient } from '@/lib/ambient';
 import { C } from '@/constants/theme';
 import type { LibraryEntry } from '@/lib/arr';
 import { openMedia } from '@/lib/navigation';
@@ -49,7 +51,7 @@ export function heroFromTmdb(item: TmdbItem, badge: LibraryEntry | null): HeroIt
   };
 }
 
-function Slide({ item, width, height, season }: { item: HeroItem; width: number; height: number; season: Season | null }) {
+function Slide({ item, width, height, season, active }: { item: HeroItem; width: number; height: number; season: Season | null; active?: boolean }) {
   const { settings } = useSettings();
   // Les affiches ont souvent le titre imprimé dessus : on prend une affiche sans texte (ou un fond sans texte)
   // et on garde un seul titre, le logo (plus lisible), sinon le nom en texte.
@@ -73,6 +75,10 @@ function Slide({ item, width, height, season }: { item: HeroItem; width: number;
       clearTimeout(t);
     };
   }, [settings, item.logoUrl, item.tmdb, item.posterUrl]);
+  // Accueil (téléphone) : l'image affichée colore aussi le reflet sous le carrousel
+  useEffect(() => {
+    if (active && art?.bg && !Platform.isTV) setAmbient({ source: { uri: art.bg }, height });
+  }, [active, art?.bg, height]);
   // Affiche avec son titre imprimé et pas d'image propre : on n'ajoute rien par-dessus (un seul titre)
   const logo = art?.logo ?? null;
   const showName = art ? !art.textOnBg || !item.posterUrl : false;
@@ -97,7 +103,17 @@ function Slide({ item, width, height, season }: { item: HeroItem; width: number;
       />
       {season && <View style={[StyleSheet.absoluteFill, { backgroundColor: season.tint }]} pointerEvents="none" />}
       <Fade height={height * 0.25} top />
-      <Fade height={height * 0.62} />
+      {Platform.isTV ? (
+        <Fade height={height * 0.62} />
+      ) : (
+        // Téléphone : le bas s'assombrit sans aller au noir, le reflet en dessous prend le relais
+        <LinearGradient
+          pointerEvents="none"
+          colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.42)', `rgba(0,0,0,${SEAM_DARK})`]}
+          locations={[0, 0.6, 1]}
+          style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: height * 0.62 }}
+        />
+      )}
 
       <View style={styles.content}>
         {!showName ? null : logo ? (
@@ -158,7 +174,8 @@ export function Hero({ items, season }: { items: HeroItem[]; season?: Season | n
         onScrollBeginDrag={() => (touching.current = true)}
         onScrollEndDrag={() => (touching.current = false)}
         onMomentumScrollEnd={(e) => setIndex(Math.round(e.nativeEvent.contentOffset.x / width))}
-        renderItem={({ item }) => <Slide item={item} width={width} height={height} season={season ?? null} />}
+        renderItem={({ item, index: i }) => <Slide item={item} width={width} height={height} season={season ?? null} active={i === index} />}
+        extraData={index}
       />
       <View style={styles.dots} pointerEvents="none">
         {items.map((_, i) => (
