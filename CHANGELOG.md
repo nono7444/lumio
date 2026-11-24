@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.208 — 24 novembre 2026
+
 - Fiche d'un film ou d'une série : « Lire » s'il est sur le serveur, « Télécharger » s'il est déjà sorti, sinon « Demander » avec sa date de sortie (cinéma ou numérique, d'après le calendrier puis TMDB).
 - Plus aucun streaming dans Lumio : les titres absents se téléchargent ou se demandent.
 - Fini l'écran « Arrivée dans Jellyfin » qui devenait « Lire » : le bouton « Lire » s'affiche directement.
