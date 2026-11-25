@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.139.0';
+const VERSION = '3.140.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3934,8 +3934,9 @@ function autoIndexerKey(re) {
 }
 const BOOK_TRACKERS = {
   // Clé : celle de l'indexeur C411 / Tr4ker de Lumio Auto en priorité (elle sert tous les jours), sinon celle réglée dans Livres
-  c411: { label: 'C411', url: 'https://c411.org/api/torznab', key: () => process.env.BOOKS_C411_KEY || autoIndexerKey(/c411/i) || (config.books && config.books.c411Key) || '' },
-  tr4ker: { label: 'Tr4ker', url: 'https://tr4ker.net/torznab', key: () => process.env.BOOKS_TR4KER_KEY || autoIndexerKey(/tr4ker/i) || (config.books && config.books.tr4kerKey) || '' },
+  c411: { label: 'C411', url: 'https://c411.org/api/torznab', urlFrom: /c411/i, key: () => process.env.BOOKS_C411_KEY || autoIndexerKey(/c411/i) || (config.books && config.books.c411Key) || '' },
+  // Adresse : celle de l'indexeur Tr4ker de Lumio Auto s'il y en a un (c'est celle qui marche au quotidien)
+  tr4ker: { label: 'Tr4ker', url: 'https://tr4ker.net/torznab', urlFrom: /tr4ker/i, key: () => process.env.BOOKS_TR4KER_KEY || autoIndexerKey(/tr4ker/i) || (config.books && config.books.tr4kerKey) || '' },
 };
 const BOOK_EXT = { '.cbz': 'bd', '.cbr': 'bd', '.zip': 'bd', '.epub': 'epub', '.pdf': 'pdf', '.mp3': 'audio', '.m4b': 'audio', '.m4a': 'audio', '.aac': 'audio', '.ogg': 'audio', '.flac': 'audio' };
 // Sites des livres (C411, Tr4ker, Wawacity) : souvent bloqués par le DNS de la box / du FAI → même DNS de secours
@@ -3980,11 +3981,21 @@ const bookFormat = (t) => {
 };
 const notFrench = (t) => /\b(ENG|ENGLISH|VO|SPANISH|ITA|GERMAN|JAP|RAW)\b/i.test(t) && !/\b(FR|FRENCH|VF|VOSTFR|MULTI)\b/i.test(t);
 
-async function torznabSearch(id, q, kind) {
+function bookTrackerUrl(tr) {
+  try {
+    const ix = autoIndexers().find((x) => x && x.url && /torznab|api/i.test(String(x.url)) && (tr.urlFrom.test(String(x.url)) || tr.urlFrom.test(String(x.name || ''))));
+    if (ix) return String(ix.url).trim().replace(/[?#].*$/, '').replace(/\/+$/, '');
+  } catch {}
+  return tr.url;
+}
+// Livres / audio repérés au nom quand le site range mal ses catégories (Tr4ker : catégories maison)
+const BOOK_TITLE_RE = { mangas: /\b(cbz|cbr|manga|tome|t\d{1,3}|vol)\b/i, bd: /\b(cbz|cbr|bd|tome|t\d{1,3})\b/i, comics: /\b(cbz|cbr|comics?)\b/i, livres: /\b(epub|pdf|mobi|azw3?|ebook|livre)\b/i, audio: /\b(mp3|m4b|aac|flac|audio ?book|livre audio|lu par)\b/i };
+async function torznabSearch(id, q, kind, anyCat = false) {
   const tr = BOOK_TRACKERS[id];
   const key = tr.key();
   if (!key) return { id, label: tr.label, state: 'nokey', items: [] };
-  const url = `${tr.url}?t=search&q=${encodeURIComponent(q)}&cat=${BOOK_KINDS[kind].torznab.join(',')}&limit=100&apikey=${encodeURIComponent(key)}`;
+  const base = bookTrackerUrl(tr);
+  const url = `${base}?t=search&q=${encodeURIComponent(q)}${anyCat ? '' : `&cat=${BOOK_KINDS[kind].torznab.join(',')}`}&limit=100&apikey=${encodeURIComponent(key)}`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 15000);
   try {
@@ -4001,8 +4012,17 @@ async function torznabSearch(id, q, kind) {
       const attr = (n) => (block.match(new RegExp(`name="${n}"\\s+value="([^"]*)"`, 'i')) || [])[1];
       const size = Number(attr('size') || (block.match(/<size>(\d+)<\/size>/i) || [])[1] || 0);
       if (!title || !link) continue;
-      items.push({ title, link, size, seeders: Number(attr('seeders') || 0), hash: (attr('infohash') || '').toLowerCase(), source: tr.label });
+      const cats = [...block.matchAll(/name="category"\s+value="(\d+)"/gi)].map((m) => Number(m[1]));
+      items.push({ title, link, size, seeders: Number(attr('seeders') || 0), hash: (attr('infohash') || '').toLowerCase(), source: tr.label, cats });
     }
+    if (anyCat) {
+      // Sans filtre de catégorie : on garde la bonne famille (7000 livres, 3030 audio) ou un nom qui ressemble à un livre
+      const fam = kind === 'audio' ? (c) => c === 3030 : (c) => c >= 7000 && c < 8000;
+      const keep = items.filter((it) => it.cats.some(fam) || BOOK_TITLE_RE[kind].test(it.title.replace(/[._]+/g, ' ')));
+      return { id, label: tr.label, state: 'ok', items: keep };
+    }
+    // Rien dans la catégorie : le site range peut-être ailleurs (Tr4ker) → nouvelle recherche sans catégorie
+    if (!items.length) return torznabSearch(id, q, kind, true);
     return { id, label: tr.label, state: 'ok', items };
   } catch (e) {
     return { id, label: tr.label, state: 'error', message: ctrl.signal.aborted ? 'pas de réponse' : String(e.message || e), items: [] };

@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Livres, BD et livres audio : Tr4ker trouve enfin des résultats (même adresse que dans Lumio Auto, et recherche élargie quand le site range ses livres dans d'autres catégories) (serveur 3.140.0).
+
 - Livres et BD : boutons « Recharger les infos » retirés (fiche et série) ; « Changer la couverture » reste.
 
 ## 1.0.211 — 25 novembre 2026
