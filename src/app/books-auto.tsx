@@ -57,7 +57,7 @@ export default function BooksAutoScreen() {
               <Ionicons name="sparkles" size={22} color={st.enabled ? C.success : C.textDim} />
               <View style={{ flex: 1, gap: 3 }}>
                 <Text style={styles.t}>Compléter mes séries</Text>
-                <Text style={styles.s}>Toutes les 6 h, le serveur cherche les tomes qui manquent et le tome suivant, puis les télécharge (6 au plus à chaque fois, en français, au même format que la série).</Text>
+                <Text style={styles.s}>Toutes les 6 h, le serveur cherche les tomes qui manquent et le tome suivant, puis les télécharge (12 au plus à chaque fois, en français, au même format que la série). Les tomes manquants apparaissent aussi dans chaque collection.</Text>
               </View>
               <Switch value={st.enabled} onValueChange={toggle} />
             </View>
@@ -77,7 +77,7 @@ export default function BooksAutoScreen() {
                     {m.name}
                   </Text>
                   <Text style={styles.s}>
-                    Manque {tomes(m.gaps)} · jusqu’au T{m.max}
+                    Manque {tomes(m.gaps)}{m.max ? ` · tu as jusqu’au T${m.max}` : ' · sortis, pas encore chez toi'}
                   </Text>
                 </View>
               ))

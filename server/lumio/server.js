@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.142.0';
+const VERSION = '3.143.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -5041,13 +5041,29 @@ async function bookRoutes(req, res, p, q, user) {
 // dernier, plus le tome suivant. Une recherche par série (C411, Tr4ker, Wawacity), on garde le bon tome en français
 // (pas les packs), et on télécharge comme à la main. Un tome introuvable est réessayé plus tard (3 jours, 1 jour pour le suivant).
 const BOOK_AUTO_EVERY = 6 * 3600_000;
-const BOOK_AUTO_MAX = 6; // téléchargements lancés au plus par passage
+const BOOK_AUTO_MAX = 12; // téléchargements lancés au plus par passage
+const BOOK_AUTO_AHEAD = 12; // tomes suivants cherchés après le dernier (One Piece : du 101 au 112)
 let bookAutoRunning = false;
 const bookAutoState = () => (booksState.auto ||= { tried: {}, log: [], missing: [], lastRun: null });
 const bookNorm = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 function bookAutoPublic() {
   const a = bookAutoState();
-  return { enabled: Boolean(config.books && config.books.autoComplete), running: bookAutoRunning, lastRun: a.lastRun, missing: a.missing || [], log: (a.log || []).slice(0, 40) };
+  const recent = Date.now() - 2 * 86400_000;
+  const downloading = (a.log || []).filter((l) => l.status === 'started' && Date.parse(l.at) > recent).map((l) => ({ key: bookNorm(l.series), tome: l.tome }));
+  // Tomes suivants vus sur un site (pas encore chez toi) : ajoutés aux manquants
+  const ahead = {};
+  for (const [k, at] of Object.entries(a.found || {})) {
+    if (Date.now() - at > 30 * 86400_000) continue;
+    const [key, n] = k.split('#');
+    (ahead[key] ||= []).push(Number(n));
+  }
+  const missing = (a.missing || []).map((m) => ({ ...m, key: m.key || bookNorm(m.name) }));
+  for (const [key, list] of Object.entries(ahead)) {
+    const m = missing.find((x) => x.key === key);
+    if (m) m.gaps = [...new Set([...m.gaps, ...list])].sort((x, y) => x - y);
+    else missing.push({ key, name: key, gaps: list.sort((x, y) => x - y), max: 0 });
+  }
+  return { enabled: Boolean(config.books && config.books.autoComplete), running: bookAutoRunning, lastRun: a.lastRun, missing, downloading, log: (a.log || []).slice(0, 40) };
 }
 function bookAutoLog(entry) {
   const a = bookAutoState();
@@ -5071,7 +5087,7 @@ function bookAutoGaps(books) {
     const max = Math.max(...sr.have);
     const gaps = [];
     for (let n = 1; n < max && gaps.length < 40; n++) if (!sr.have.has(n)) gaps.push(n);
-    out.push({ key: sr.key, name: sr.name, kind: sr.format === 'bd' ? 'mangas' : 'livres', count: sr.have.size, max, gaps, next: max + 1 });
+    out.push({ key: sr.key, name: sr.name, kind: sr.format === 'bd' ? 'mangas' : 'livres', count: sr.have.size, max, gaps, next: max + 1, have: sr.have });
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -5085,26 +5101,50 @@ async function bookAutoRun(manual = false) {
   try {
     const lib = await bookLibrary();
     const gaps = bookAutoGaps(lib.books);
-    a.missing = gaps.filter((g) => g.gaps.length).map((g) => ({ name: g.name, gaps: g.gaps, max: g.max }));
+    a.missing = gaps.filter((g) => g.gaps.length).map((g) => ({ key: g.key, name: g.name, gaps: g.gaps, max: g.max }));
+    a.found = a.found || {}; // tomes suivants qui existent (vus sur un site) : affichés « manquant » dans la collection
     const busy = new Set(downloads.filter((j) => j.book && ['queued', 'debrid', 'downloading'].includes(j.status)).map((j) => bookNorm(j.name)));
     const now = Date.now();
     for (const g of gaps) {
       if (started >= BOOK_AUTO_MAX) break;
       // Tomes voulus : les trous, puis le suivant ; sans ceux essayés récemment
-      const wanted = [...g.gaps.map((n) => ({ n, wait: 3 * 86400_000 })), { n: g.next, wait: 86400_000, next: true }].filter((w) => {
+      for (const k of Object.keys(a.found)) if (k.startsWith(`${g.key}#`) && g.have.has(Number(k.split('#')[1]))) delete a.found[k];
+      const ahead = Array.from({ length: BOOK_AUTO_AHEAD }, (_, i) => ({ n: g.next + i, wait: 86400_000, next: true }));
+      const wanted = [...g.gaps.map((n) => ({ n, wait: 3 * 86400_000 })), ...ahead].filter((w) => {
         const t = a.tried[`${g.key}#${w.n}`];
         return !t || now - t > (manual ? 3600_000 : w.wait);
       });
       if (!wanted.length) continue;
       const res = await Promise.all([torznabSearch('c411', g.name, g.kind), torznabSearch('tr4ker', g.name, g.kind), wawaSearch(g.name, g.kind)]);
       for (const w of wanted) a.tried[`${g.key}#${w.n}`] = now;
-      const pool = res.flatMap((r) => r.items).filter((it) => {
+      const fits = (it) => {
         if (notFrench(it.title)) return false;
         const vol = bookVolumes(it.title);
         if (vol.genre !== 'tome') return false;
         const ser = bookSeries(String(it.title).replace(/[._]+/g, ' '), true);
         return ser && bookNorm(ser.name) === g.key && ser.index === vol.tome;
-      });
+      };
+      const pool = res.flatMap((r) => r.items).filter(fits);
+      // Recherche large limitée à 100 résultats (souvent les vieux tomes) : recherche ciblée « Série T101 » pour
+      // les tomes pas trouvés (6 au plus par série et par passage)
+      let targeted = 0;
+      for (const w of wanted) {
+        if (targeted >= 6 || pool.some((it) => bookVolumes(it.title).tome === w.n)) continue;
+        targeted++;
+        const more = await Promise.all([torznabSearch('c411', `${g.name} T${String(w.n).padStart(2, '0')}`, g.kind), torznabSearch('tr4ker', `${g.name} T${String(w.n).padStart(2, '0')}`, g.kind)]);
+        let hits = more.flatMap((r) => r.items).filter(fits);
+        if (!hits.length) {
+          const alt = await Promise.all([torznabSearch('c411', `${g.name} tome ${w.n}`, g.kind), torznabSearch('tr4ker', `${g.name} tome ${w.n}`, g.kind)]);
+          hits = alt.flatMap((r) => r.items).filter(fits);
+        }
+        pool.push(...hits);
+        // Pas de tome N : inutile de chercher N+1, N+2… (pas encore sortis)
+        if (w.next && !hits.some((it) => bookVolumes(it.title).tome === w.n)) break;
+      }
+      for (const it of pool) {
+        const t = bookVolumes(it.title).tome;
+        if (t > g.max && !g.have.has(t)) a.found[`${g.key}#${t}`] = now;
+      }
       for (const w of wanted) {
         if (started >= BOOK_AUTO_MAX) break;
         const hits = pool.filter((it) => bookVolumes(it.title).tome === w.n);

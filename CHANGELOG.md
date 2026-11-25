@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Livres : les tomes manquants s'affichent dans chaque collection (case « MANQUANT », ou « EN COURS » pendant le téléchargement). Séries à compléter : cherche aussi les 12 tomes suivants avec une recherche ciblée (« One Piece T101 »), 12 téléchargements au plus par passage (serveur 3.143.0).
+
 ## 1.0.214 — 25 novembre 2026
 
 - Livres (admin) : « Séries à compléter » (bouton ✦ en haut de l'onglet Livres). Le serveur repère les tomes manquants de chaque série et le tome suivant, les cherche toutes les 6 h sur C411, Tr4ker et Wawacity, et les télécharge tout seul (en français, même format, 6 au plus par passage). Liste des trous et journal dans l'écran (serveur 3.142.0).

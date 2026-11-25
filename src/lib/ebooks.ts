@@ -11,7 +11,8 @@ export type BooksAuto = {
   enabled: boolean;
   running: boolean;
   lastRun: string | null;
-  missing: { name: string; gaps: number[]; max: number }[];
+  missing: { key: string; name: string; gaps: number[]; max: number }[];
+  downloading?: { key: string; tome: number }[];
   log: { at: string; series?: string; tome?: number; status: 'started' | 'error' | 'none'; title?: string; source?: string; message?: string }[];
 };
 
