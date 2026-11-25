@@ -10,7 +10,8 @@ import { BookCover, ReadBar } from '@/components/ebook-ui';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { Button, ScreenTitle, tap } from '@/components/ui';
 import { C } from '@/constants/theme';
-import { ebookApi, groupSeries, seriesByKey, tomeOf, useEbooks, type BooksAuto, type Ebook } from '@/lib/ebooks';
+import { Image } from 'expo-image';
+import { ebookApi, groupSeries, JOB_ACTIVE, jobForTome, seriesByKey, tomeOf, useEbooks, type BooksAuto, type Ebook, type EbookJob, type SeriesInfo } from '@/lib/ebooks';
 import { useSettings } from '@/lib/settings';
 
 export default function SeriesScreen() {
@@ -19,10 +20,20 @@ export default function SeriesScreen() {
   const { settings } = useSettings();
   // Tomes manquants de cette série (repérés par le serveur) : cases grisées « Manquant » dans la grille
   const [auto, setAuto] = useState<BooksAuto | null>(null);
+  const [info, setInfo] = useState<SeriesInfo | null>(null);
+  const [jobs, setJobs] = useState<EbookJob[]>([]);
+  const seriesName = (lib ? groupSeries(lib.books).series.find((x) => x.key === key) : null)?.name ?? seriesByKey(String(key))?.name ?? '';
   useFocusEffect(
     useCallback(() => {
       ebookApi.auto(settings).then(setAuto).catch(() => {});
-    }, [settings])
+      // Tous les tomes parus (MangaDex) : ceux qu'on n'a pas s'affichent aussi
+      if (seriesName) ebookApi.seriesInfo(settings, seriesName).then(setInfo).catch(() => {});
+      // Téléchargements suivis en direct (toutes les 4 s)
+      const tick = () => ebookApi.jobs(settings).then((r) => setJobs(r.jobs)).catch(() => {});
+      tick();
+      const t = setInterval(tick, 4000);
+      return () => clearInterval(t);
+    }, [settings, seriesName])
   );
   const { width } = useWindowDimensions();
   // Relue depuis la bibliothèque (positions à jour), sinon celle gardée par l'onglet
@@ -45,7 +56,9 @@ export default function SeriesScreen() {
   const have = new Set(s.books.map((b) => tomeOf(b)).filter((x): x is number => x != null));
   const miss = auto?.missing.find((m) => m.key === s.key);
   const coming = new Set((auto?.downloading ?? []).filter((d) => d.key === s.key).map((d) => d.tome));
-  const holes = (miss?.gaps ?? []).filter((t) => !have.has(t));
+  // Tomes absents : trous repérés par le serveur + tous les tomes parus (MangaDex) qu'on n'a pas
+  const known = new Map((info?.volumes ?? []).map((v) => [v.n, v]));
+  const holes = [...new Set([...(miss?.gaps ?? []), ...(info?.volumes ?? []).map((v) => v.n)])].filter((t) => !have.has(t));
   // Livres et cases manquantes, dans l'ordre des tomes
   const cells: ({ k: 'book'; b: Ebook; t: number | null } | { k: 'miss'; t: number })[] = [
     ...s.books.map((b) => ({ k: 'book' as const, b, t: tomeOf(b) })),
@@ -58,7 +71,7 @@ export default function SeriesScreen() {
       <ScrollView contentContainerStyle={{ paddingBottom: 60 }}>
         <View style={{ paddingHorizontal: 16, gap: 10, marginBottom: 18 }}>
           <Text style={styles.s}>
-            {[`${s.books.length} tomes`, holes.length ? `${holes.length} manquant${holes.length > 1 ? 's' : ''}` : null, read ? `${read} lus` : null, authors || null].filter(Boolean).join(' · ')}
+            {[`${s.books.length} tomes`, info?.total ? `${info.total} parus` : null, holes.length ? `${holes.length} pas sur le serveur` : null, read ? `${read} lus` : null, authors || null].filter(Boolean).join(' · ')}
           </Text>
           <ReadBar value={read / s.books.length} />
           <Button
@@ -71,14 +84,28 @@ export default function SeriesScreen() {
         <View style={styles.grid}>
           {cells.map((c) => {
             if (c.k === 'miss') {
-              const dl = coming.has(c.t);
+              const job = jobForTome(jobs, s.name, c.t);
+              const live = job && JOB_ACTIVE.includes(job.status);
+              const dl = live || (coming.has(c.t) && !job);
+              const pct = live && job.size ? Math.round((job.done / job.size) * 100) : null;
+              const cover = known.get(c.t)?.cover;
+              const kind = s.books.some((b) => b.format === 'bd') ? 'mangas' : 'livres';
               return (
-                <View key={`miss-${c.t}`} style={{ width: w, gap: 5 }}>
+                <Pressable
+                  key={`miss-${c.t}`}
+                  onPress={() => (tap(), router.push({ pathname: '/book-tome', params: { name: s.name, n: String(c.t), kind } }))}
+                  style={{ width: w, gap: 5 }}>
                   <View style={[styles.missing, { width: w, height: Math.round(w * 1.5) }]}>
-                    <Ionicons name={dl ? 'cloud-download-outline' : 'help-outline'} size={26} color={C.textFaint} />
-                    <View style={[styles.missTag, dl ? { backgroundColor: C.info } : null]}>
-                      <Text style={styles.missTagText}>{dl ? 'EN COURS' : 'MANQUANT'}</Text>
+                    {cover ? <Image source={cover} style={[StyleSheet.absoluteFill, { opacity: 0.35 }]} contentFit="cover" cachePolicy="memory-disk" /> : null}
+                    <Ionicons name={dl ? 'cloud-download-outline' : 'search'} size={24} color={C.text} />
+                    <View style={[styles.missTag, dl ? { backgroundColor: C.info } : job?.status === 'error' ? { backgroundColor: C.warning } : null]}>
+                      <Text style={styles.missTagText}>{dl ? (pct != null ? `EN COURS ${pct} %` : 'EN COURS') : job?.status === 'error' ? 'ÉCHEC' : 'PAS SUR LE SERVEUR'}</Text>
                     </View>
+                    {pct != null ? (
+                      <View style={styles.missBar}>
+                        <View style={{ width: `${pct}%`, height: '100%', backgroundColor: C.info }} />
+                      </View>
+                    ) : null}
                     <View style={styles.tome}>
                       <Text style={styles.tomeText}>{c.t}</Text>
                     </View>
@@ -86,7 +113,7 @@ export default function SeriesScreen() {
                   <Text numberOfLines={2} style={[styles.t, { color: C.textFaint }]}>
                     {s.name} T{String(c.t).padStart(2, '0')}
                   </Text>
-                </View>
+                </Pressable>
               );
             }
             const b = c.b;
@@ -129,8 +156,9 @@ const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, gap: 14 },
   tome: { position: 'absolute', left: 6, top: 6, minWidth: 24, height: 24, paddingHorizontal: 6, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.75)', alignItems: 'center', justifyContent: 'center' },
   tomeText: { color: '#fff', fontWeight: '800', fontSize: 12 },
-  missing: { borderRadius: 8, borderWidth: 1.5, borderStyle: 'dashed', borderColor: C.border, backgroundColor: C.surface, alignItems: 'center', justifyContent: 'center', gap: 10 },
-  missTag: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: C.danger },
-  missTagText: { color: '#fff', fontWeight: '800', fontSize: 10, letterSpacing: 0.5 },
+  missing: { overflow: 'hidden', borderRadius: 8, borderWidth: 1.5, borderStyle: 'dashed', borderColor: C.border, backgroundColor: C.surface, alignItems: 'center', justifyContent: 'center', gap: 10 },
+  missBar: { position: 'absolute', left: 8, right: 8, bottom: 8, height: 4, borderRadius: 2, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.2)' },
+  missTag: { marginHorizontal: 6, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: C.danger },
+  missTagText: { color: '#fff', fontWeight: '800', fontSize: 10, letterSpacing: 0.5, textAlign: 'center' },
   done: { position: 'absolute', right: 6, top: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: C.success, alignItems: 'center', justifyContent: 'center' },
 });

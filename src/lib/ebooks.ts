@@ -55,7 +55,26 @@ export type EbookResult = {
   range?: string;
 };
 export type EbookSource = { id: string; label: string; state: string; count: number; message?: string };
-export type EbookJob = { id: string; name: string; status: string; size: number; done: number; speed: number; error?: string; createdAt: string };
+export type EbookJob = { id: string; name: string; status: string; size: number; done: number; speed: number; error?: string; createdAt: string; finishedAt?: string; by?: string; current?: string };
+/** Tomes parus d'une série (MangaDex) */
+export type SeriesInfo = { source: string | null; title?: string; total: number; status?: string | null; volumes: { n: number; cover: string | null; fr?: boolean }[] };
+const normName = (t: string) =>
+  t
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+/** Le téléchargement en cours de ce tome (d'après le nom du fichier), s'il y en a un */
+export function jobForTome(jobs: EbookJob[], series: string, n: number): EbookJob | undefined {
+  const k = normName(series);
+  const re = new RegExp(`(^|\\D)0*${n}(\\D|$)`);
+  return jobs.find((j) => {
+    const name = normName(j.name);
+    return name.includes(k) && re.test(name.replace(k, ' '));
+  });
+}
+export const JOB_ACTIVE = ['queued', 'debrid', 'downloading', 'running'];
 
 /** Adresse complète d'un lien du serveur */
 export const bookUrl = (s: Settings, u: string) => (s.chatUrl ? `${serverBase(s.chatUrl)}${u}` : null);
@@ -69,6 +88,8 @@ export const ebookApi = {
     serverCall<{ results: EbookResult[]; sources: EbookSource[] }>(s, `/api/books/search?kind=${kind}&q=${encodeURIComponent(q)}`),
   download: (s: Settings, id: string) => serverCall<{ job: EbookJob }>(s, '/api/books/download', { method: 'POST', body: JSON.stringify({ id }) }),
   jobs: (s: Settings) => serverCall<{ jobs: EbookJob[] }>(s, '/api/books/jobs'),
+  cancelJob: (s: Settings, id: string) => serverCall<{ ok: boolean }>(s, `/api/books/jobs/${id}`, { method: 'DELETE' }),
+  seriesInfo: (s: Settings, name: string) => serverCall<SeriesInfo>(s, `/api/books/series-info?name=${encodeURIComponent(name)}`),
   /** Compléter les séries tout seul (tomes manquants et tome suivant) */
   auto: (s: Settings) => serverCall<BooksAuto>(s, '/api/books/auto'),
   setAuto: (s: Settings, enabled: boolean) => serverCall<BooksAuto>(s, '/api/books/auto', { method: 'PUT', body: JSON.stringify({ enabled }) }),

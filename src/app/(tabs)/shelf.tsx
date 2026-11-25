@@ -90,9 +90,19 @@ function Shelf() {
           title="Livres"
           right={
             lib?.admin ? (
-              <Pressable onPress={() => (tap(), router.push('/books-auto'))} hitSlop={8} accessibilityLabel="Séries à compléter" style={styles.autoBtn}>
-                <Ionicons name="sparkles-outline" size={20} color={C.text} />
-              </Pressable>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <Pressable onPress={() => (tap(), router.push('/book-downloads'))} hitSlop={8} accessibilityLabel="Téléchargements" style={styles.autoBtn}>
+                  <Ionicons name="cloud-download-outline" size={20} color={lib.downloading ? C.info : C.text} />
+                  {lib.downloading ? (
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>{lib.downloading}</Text>
+                    </View>
+                  ) : null}
+                </Pressable>
+                <Pressable onPress={() => (tap(), router.push('/books-auto'))} hitSlop={8} accessibilityLabel="Séries à compléter" style={styles.autoBtn}>
+                  <Ionicons name="sparkles-outline" size={20} color={C.text} />
+                </Pressable>
+              </View>
             ) : undefined
           }
         />
@@ -186,7 +196,7 @@ function Shelf() {
               </View>
             ) : null}
             {lib.downloading ? (
-              <Text style={[styles.s, { textAlign: 'center', marginTop: 18 }]}>
+              <Text onPress={() => router.push('/book-downloads')} style={[styles.s, { textAlign: 'center', marginTop: 18, color: C.info }]}>
                 {lib.downloading} livre{lib.downloading > 1 ? 's' : ''} en cours de téléchargement…
               </Text>
             ) : null}
@@ -261,6 +271,8 @@ function Empty({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: str
 }
 
 const styles = StyleSheet.create({
+  badge: { position: 'absolute', top: -3, right: -3, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, backgroundColor: C.info, alignItems: 'center', justifyContent: 'center' },
+  badgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   autoBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: C.surface, alignItems: 'center', justifyContent: 'center' },
   h: { color: C.text, fontSize: 20, fontWeight: '800', paddingHorizontal: 16, marginBottom: 10 },
   t: { color: C.text, fontWeight: '700', fontSize: 13 },

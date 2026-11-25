@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Livres : les collections affichent tous les tomes parus (liste et couvertures de MangaDex), même ceux que tu n'as pas, marqués « PAS SUR LE SERVEUR ». Un appui sur l'un d'eux lance directement la recherche de ce tome (C411, Tr4ker, Wawacity) avec téléchargement en un appui et suivi en direct (« EN COURS 42 % » dans la collection).
+- Livres (admin) : nouvel écran « Téléchargements » (bouton nuage en haut de l'onglet Livres, avec le nombre en cours) : étape, progression, vitesse, temps restant, annuler, retirer les terminés (serveur 3.144.0).
+
 ## 1.0.215 — 25 novembre 2026
 
 - Livres : les tomes manquants s'affichent dans chaque collection (case « MANQUANT », ou « EN COURS » pendant le téléchargement). Séries à compléter : cherche aussi les 12 tomes suivants avec une recherche ciblée (« One Piece T101 »), 12 téléchargements au plus par passage (serveur 3.143.0).

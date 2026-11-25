@@ -1,6 +1,7 @@
 // Lumio Livres → onglet « Trouver » (admin) : recherche de livres, BD, mangas et comics sur C411, Tr4ker et Wawacity,
 // téléchargement par le serveur Lumio (AllDebrid), suivi des téléchargements.
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
@@ -135,7 +136,12 @@ function Find() {
 
         {active.length || recent.length ? (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Téléchargements</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={styles.cardTitle}>Téléchargements</Text>
+              <Text onPress={() => router.push('/book-downloads')} style={[styles.s, { color: C.info, fontWeight: '700' }]}>
+                Tout voir
+              </Text>
+            </View>
             {[...active, ...recent].map((j) => (
               <View key={j.id} style={styles.job}>
                 <Ionicons

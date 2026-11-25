@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.143.0';
+const VERSION = '3.144.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3911,7 +3911,7 @@ async function runMove(job, from, to, token) {
 const publicJob = (j) => ({
   id: j.id, name: j.name, link: j.link.slice(0, 120), root: j.root, folder: j.folder, status: j.status,
   size: j.size || 0, done: j.done || 0, speed: j.speed || 0, current: j.current, error: j.error,
-  createdAt: j.createdAt, finishedAt: j.finishedAt,
+  createdAt: j.createdAt, finishedAt: j.finishedAt, by: j.by,
 });
 
 // ——— Book : livres, BD, mangas et livres audio (C411, Tr4ker, Wawacity) → AllDebrid → disque, puis lecture dans l'appli ———
@@ -4612,6 +4612,52 @@ function bookCoversWarm(files) {
     }
   })().finally(() => (coversWarming = false));
 }
+/** Tomes parus d'une série sur MangaDex (numéros et couvertures, en français s'il y en a), gardés 24 h. */
+const seriesInfoCache = new Map();
+async function seriesInfo(series) {
+  const k = bookNorm(series);
+  const hit = seriesInfoCache.get(k);
+  if (hit && Date.now() - hit.at < 24 * 3600_000) return hit.v;
+  const ua = { 'User-Agent': 'Lumio/1.0 (serveur familial)' };
+  const j = await (await fetch(`https://api.mangadex.org/manga?title=${encodeURIComponent(series)}&limit=10&order[relevance]=desc`, { headers: ua, signal: AbortSignal.timeout(10000) })).json();
+  const want = coverWords(series);
+  // Titre identique d'abord (« One Piece », pas « One Piece Party »), sinon celui qui contient tous les mots
+  const titlesOf = (m) => [...Object.values(m.attributes?.title || {}), ...(m.attributes?.altTitles || []).flatMap((x) => Object.values(x))].map(String);
+  const list = j.data || [];
+  const manga =
+    list.find((m) => titlesOf(m).some((t) => bookNorm(t) === k)) ||
+    list.find((m) => titlesOf(m).some((t) => {
+      const got = coverWords(t);
+      return want.length && want.every((w) => got.includes(w));
+    }));
+  let v = null;
+  if (manga) {
+    const covers = [];
+    for (let off = 0; off < 500; off += 100) {
+      const c = await (await fetch(`https://api.mangadex.org/cover?manga[]=${manga.id}&limit=100&offset=${off}&order[volume]=asc`, { headers: ua, signal: AbortSignal.timeout(10000) })).json();
+      covers.push(...(c.data || []));
+      if (!c.data || c.data.length < 100) break;
+    }
+    const byVol = new Map();
+    for (const c of covers) {
+      const n = Number(c.attributes?.volume);
+      if (!Number.isInteger(n) || n < 1 || n > 400) continue;
+      const cur = byVol.get(n);
+      const rank = (x) => ['fr', 'ja', 'en'].indexOf(x?.attributes?.locale) >>> 0;
+      if (!cur || rank(c) < rank(cur)) byVol.set(n, c);
+    }
+    const last = Number(manga.attributes?.lastVolume) || 0;
+    const total = Math.max(last, ...byVol.keys(), 0);
+    const volumes = [];
+    for (let n = 1; n <= total; n++) {
+      const c = byVol.get(n);
+      volumes.push({ n, cover: c ? `https://uploads.mangadex.org/covers/${manga.id}/${c.attributes.fileName}.256.jpg` : null, fr: c?.attributes?.locale === 'fr' });
+    }
+    v = { source: 'MangaDex', title: titlesOf(manga)[0] || series, total, status: manga.attributes?.status || null, volumes };
+  }
+  seriesInfoCache.set(k, { at: Date.now(), v });
+  return v;
+}
 /** Couverture d'un tome de manga sur MangaDex (édition française d'abord, sinon japonaise). */
 async function mangadexCover(series, tome) {
   const ua = { 'User-Agent': 'Lumio/1.0 (serveur familial)' };
@@ -5010,6 +5056,13 @@ async function bookRoutes(req, res, p, q, user) {
     if (!found) throw new HttpError(404, 'Résultat expiré : relance la recherche');
     const job = await bookStartDownload(found, user.name);
     send(res, 201, { job: publicJob(job) });
+    return true;
+  }
+  // Tous les tomes parus d'une série (MangaDex) : pour afficher aussi ceux qu'on n'a pas dans la collection
+  if (req.method === 'GET' && p === '/api/books/series-info') {
+    const name = String(q.get('name') || '').trim();
+    if (name.length < 2) throw new HttpError(400, 'Nom de série manquant');
+    send(res, 200, (await seriesInfo(name).catch(() => null)) || { source: null, total: 0, volumes: [] });
     return true;
   }
   // Compléter les séries tout seul : état, interrupteur, vérification immédiate
