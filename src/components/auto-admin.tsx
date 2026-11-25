@@ -2684,6 +2684,7 @@ export function AutoServerScreen() {
         <AutoHeader title="Serveur" sub={version ? `Serveur Lumio ${version}` : 'Redémarrer et mettre à jour'} color={version ? C.success : C.textFaint} />
         <ServerActionsSection />
         <DirectDownloadCard />
+        <BookTrackersCard />
       </ScrollView>
     </SectionCollapse.Provider>
   );
@@ -2729,6 +2730,57 @@ function DirectDownloadCard() {
         <Button title="Enregistrer la clé" icon="save-outline" small loading={busy} disabled={!key.trim()} onPress={() => save(key.trim())} style={{ flex: 1 }} />
         {st.torbox ? <Button title="Retirer" variant="secondary" small onPress={() => save('')} /> : null}
       </View>
+      <Text style={styles.small}>La clé part sur ton serveur et y reste : elle n’est jamais renvoyée aux applis.</Text>
+    </View>
+  );
+}
+
+/** Livres, BD et livres audio : clés C411 et Tr4ker gardées sur le serveur (sinon celles des sites de Lumio Auto). */
+function BookTrackersCard() {
+  const { settings } = useSettings();
+  const [st, setSt] = useState<{ c411: boolean; tr4ker: boolean } | null>(null);
+  const [keys, setKeys] = useState<{ c411: string; tr4ker: string }>({ c411: '', tr4ker: '' });
+  const [busy, setBusy] = useState<string | null>(null);
+  const load = useCallback(() => {
+    serverCall<{ c411: boolean; tr4ker: boolean }>(settings, '/api/books/settings')
+      .then(setSt)
+      .catch(() => setSt(null));
+  }, [settings]);
+  useFocusEffect(load);
+  const save = (site: 'c411' | 'tr4ker', k: string) => {
+    setBusy(site);
+    serverCall(settings, '/api/books/settings', { method: 'PUT', body: JSON.stringify({ [`${site}Key`]: k }) })
+      .then(() => (setKeys((x) => ({ ...x, [site]: '' })), toast(k ? 'Clé enregistrée sur le serveur' : 'Clé retirée'), load()))
+      .catch((e) => Alert.alert('Livres', e?.message ?? String(e)))
+      .finally(() => setBusy(null));
+  };
+  if (!st) return null;
+  return (
+    <View style={styles.bigCard}>
+      <Text style={styles.bigCardTitle}>Livres : C411 et Tr4ker</Text>
+      <Text style={styles.small}>Clés utilisées pour chercher des livres, BD, mangas et livres audio. Sans clé ici, Lumio prend celle du site réglé dans Lumio Auto.</Text>
+      {(['c411', 'tr4ker'] as const).map((site) => (
+        <View key={site} style={{ gap: 8 }}>
+          <View style={styles.kv}>
+            <Text style={styles.kvK}>{site === 'c411' ? 'C411' : 'Tr4ker'}</Text>
+            <Text style={[styles.small, { color: st[site] ? C.success : C.warning, fontWeight: '700' }]}>{st[site] ? 'clé enregistrée' : 'pas de clé'}</Text>
+          </View>
+          <View style={styles.searchBox}>
+            <Ionicons name="key-outline" size={18} color={C.textDim} />
+            <TextInput
+              value={keys[site]}
+              onChangeText={(v) => setKeys((x) => ({ ...x, [site]: v }))}
+              placeholder={`${st[site] ? 'Nouvelle clé' : 'Clé'} API ${site === 'c411' ? 'C411' : 'Tr4ker'}`}
+              placeholderTextColor={C.textFaint}
+              style={styles.searchInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+            />
+          </View>
+          {keys[site].trim() ? <Button title="Enregistrer la clé" icon="save-outline" small loading={busy === site} onPress={() => save(site, keys[site].trim())} /> : null}
+        </View>
+      ))}
       <Text style={styles.small}>La clé part sur ton serveur et y reste : elle n’est jamais renvoyée aux applis.</Text>
     </View>
   );

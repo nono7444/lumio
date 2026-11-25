@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Serveur : nouvelle carte « Livres : C411 et Tr4ker » pour enregistrer les clés de recherche des livres, BD et livres audio (gardées sur le serveur) (serveur 3.141.0).
+
 - Livres, BD et livres audio : Tr4ker trouve enfin des résultats (même adresse que dans Lumio Auto, et recherche élargie quand le site range ses livres dans d'autres catégories) (serveur 3.140.0).
 
 - Livres et BD : boutons « Recharger les infos » retirés (fiche et série) ; « Changer la couverture » reste.

@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.140.0';
+const VERSION = '3.141.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3933,10 +3933,10 @@ function autoIndexerKey(re) {
   }
 }
 const BOOK_TRACKERS = {
-  // Clé : celle de l'indexeur C411 / Tr4ker de Lumio Auto en priorité (elle sert tous les jours), sinon celle réglée dans Livres
-  c411: { label: 'C411', url: 'https://c411.org/api/torznab', urlFrom: /c411/i, key: () => process.env.BOOKS_C411_KEY || autoIndexerKey(/c411/i) || (config.books && config.books.c411Key) || '' },
+  // Clé : celle réglée pour les livres (Serveur → Livres : C411 et Tr4ker), sinon celle de l'indexeur de Lumio Auto
+  c411: { label: 'C411', url: 'https://c411.org/api/torznab', urlFrom: /c411/i, key: () => process.env.BOOKS_C411_KEY || (config.books && config.books.c411Key) || autoIndexerKey(/c411/i) || '' },
   // Adresse : celle de l'indexeur Tr4ker de Lumio Auto s'il y en a un (c'est celle qui marche au quotidien)
-  tr4ker: { label: 'Tr4ker', url: 'https://tr4ker.net/torznab', urlFrom: /tr4ker/i, key: () => process.env.BOOKS_TR4KER_KEY || autoIndexerKey(/tr4ker/i) || (config.books && config.books.tr4kerKey) || '' },
+  tr4ker: { label: 'Tr4ker', url: 'https://tr4ker.net/torznab', urlFrom: /tr4ker/i, key: () => process.env.BOOKS_TR4KER_KEY || (config.books && config.books.tr4kerKey) || autoIndexerKey(/tr4ker/i) || '' },
 };
 const BOOK_EXT = { '.cbz': 'bd', '.cbr': 'bd', '.zip': 'bd', '.epub': 'epub', '.pdf': 'pdf', '.mp3': 'audio', '.m4b': 'audio', '.m4a': 'audio', '.aac': 'audio', '.ogg': 'audio', '.flac': 'audio' };
 // Sites des livres (C411, Tr4ker, Wawacity) : souvent bloqués par le DNS de la box / du FAI → même DNS de secours
