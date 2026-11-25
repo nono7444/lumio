@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.144.0';
+const VERSION = '3.145.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3981,20 +3981,36 @@ const bookFormat = (t) => {
 };
 const notFrench = (t) => /\b(ENG|ENGLISH|VO|SPANISH|ITA|GERMAN|JAP|RAW)\b/i.test(t) && !/\b(FR|FRENCH|VF|VOSTFR|MULTI)\b/i.test(t);
 
-function bookTrackerUrl(tr) {
-  try {
-    const ix = autoIndexers().find((x) => x && x.url && /torznab|api/i.test(String(x.url)) && (tr.urlFrom.test(String(x.url)) || tr.urlFrom.test(String(x.name || ''))));
-    if (ix) return String(ix.url).trim().replace(/[?#].*$/, '').replace(/\/+$/, '');
-  } catch {}
-  return tr.url;
-}
 // Livres / audio repérés au nom quand le site range mal ses catégories (Tr4ker : catégories maison)
 const BOOK_TITLE_RE = { mangas: /\b(cbz|cbr|manga|tome|t\d{1,3}|vol)\b/i, bd: /\b(cbz|cbr|bd|tome|t\d{1,3})\b/i, comics: /\b(cbz|cbr|comics?)\b/i, livres: /\b(epub|pdf|mobi|azw3?|ebook|livre)\b/i, audio: /\b(mp3|m4b|aac|flac|audio ?book|livre audio|lu par)\b/i };
-async function torznabSearch(id, q, kind, anyCat = false) {
+/** Adresses et clés possibles d'un site, dans l'ordre : l'indexeur de Lumio Auto (adresse + clé, ce qui marche au
+ *  quotidien), puis l'adresse officielle avec la clé réglée pour les livres, puis avec celle de Lumio Auto. */
+function bookTrackerCandidates(tr, id) {
+  const out = [];
+  const add = (base, key) => {
+    if (base && key && !out.some((c) => c.base === base && c.key === key)) out.push({ base, key });
+  };
+  if (process.env[`BOOKS_${id.toUpperCase()}_KEY`]) add(tr.url, process.env[`BOOKS_${id.toUpperCase()}_KEY`]);
+  try {
+    const ix = autoIndexers().find((x) => x && x.url && x.key && (tr.urlFrom.test(String(x.url)) || tr.urlFrom.test(String(x.name || '')) || tr.urlFrom.test(String(x.type || ''))));
+    if (ix) add(String(ix.url).trim().replace(/[?#].*$/, '').replace(/\/+$/, ''), String(ix.key).trim());
+  } catch {}
+  add(tr.url, config.books && config.books[`${id}Key`]);
+  add(tr.url, autoIndexerKey(tr.urlFrom));
+  return out;
+}
+async function torznabSearch(id, q, kind) {
   const tr = BOOK_TRACKERS[id];
-  const key = tr.key();
-  if (!key) return { id, label: tr.label, state: 'nokey', items: [] };
-  const base = bookTrackerUrl(tr);
+  const cands = bookTrackerCandidates(tr, id);
+  if (!cands.length) return { id, label: tr.label, state: 'nokey', items: [] };
+  let last = null;
+  for (const c of cands) {
+    last = await torznabOnce(id, tr, c.base, c.key, q, kind);
+    if (last.state === 'ok') return last;
+  }
+  return last;
+}
+async function torznabOnce(id, tr, base, key, q, kind, anyCat = false) {
   const url = `${base}?t=search&q=${encodeURIComponent(q)}${anyCat ? '' : `&cat=${BOOK_KINDS[kind].torznab.join(',')}`}&limit=100&apikey=${encodeURIComponent(key)}`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 15000);
@@ -4022,7 +4038,7 @@ async function torznabSearch(id, q, kind, anyCat = false) {
       return { id, label: tr.label, state: 'ok', items: keep };
     }
     // Rien dans la catégorie : le site range peut-être ailleurs (Tr4ker) → nouvelle recherche sans catégorie
-    if (!items.length) return torznabSearch(id, q, kind, true);
+    if (!items.length) return torznabOnce(id, tr, base, key, q, kind, true);
     return { id, label: tr.label, state: 'ok', items };
   } catch (e) {
     return { id, label: tr.label, state: 'error', message: ctrl.signal.aborted ? 'pas de réponse' : String(e.message || e), items: [] };

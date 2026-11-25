@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Livres : C411 revient. Pour C411 et Tr4ker, le serveur essaie l'adresse et la clé de Lumio Auto, puis l'adresse officielle avec la clé des livres, et garde la première qui répond (serveur 3.145.0).
+
 ## 1.0.216 — 25 novembre 2026
 
 - Livres : les collections affichent tous les tomes parus (liste et couvertures de MangaDex), même ceux que tu n'as pas, marqués « PAS SUR LE SERVEUR ». Un appui sur l'un d'eux lance directement la recherche de ce tome (C411, Tr4ker, Wawacity) avec téléchargement en un appui et suivi en direct (« EN COURS 42 % » dans la collection).
