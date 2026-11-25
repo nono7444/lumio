@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.210 — 25 novembre 2026
+
 - Livres et BD : l'édition française officielle passe avant la 1re page du fichier (parfois la couverture japonaise), et le téléphone récupère une couverture dès qu'elle change sur le serveur (serveur 3.138.0).
 - qBit : la carte avec les interrupteurs Lumio Auto / AllDebrid n'est plus en haut de l'onglet (le serveur gère tout) ; ils restent dans Serveur → Sites et réglages. Un rappel s'affiche seulement si Lumio Auto est en pause.
 
