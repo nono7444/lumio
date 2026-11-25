@@ -2852,7 +2852,13 @@ export function AutoQbitScreen() {
             <Loading error={error} />
           ) : (
             <>
-              <Switches st={st} save={save} running={running.length} toChoose={st.items.filter((i) => i.needsChoice).length} />
+              {/* Les interrupteurs Lumio Auto / AllDebrid sont dans les réglages (roue dentée) ; ici seulement un rappel s'il est en pause */}
+              {!st.enabled ? (
+                <Pressable onPress={() => router.push('/lumio-auto')} style={[styles.banner, { borderColor: C.border, paddingVertical: 10 }]}>
+                  <Ionicons name="pause-circle" size={18} color={C.textDim} />
+                  <Text style={[styles.small, { flex: 1 }]}>Lumio Auto en pause : les nouvelles demandes attendent. Réactiver dans les réglages.</Text>
+                </Pressable>
+              ) : null}
               <Telechargements st={st} reload={load} onItem={(id) => setItemOpen(id)} hideSeed />
               <SeedingList />
               <AddTorrentCard />
