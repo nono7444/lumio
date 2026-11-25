@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.215 — 25 novembre 2026
+
 - Livres : les tomes manquants s'affichent dans chaque collection (case « MANQUANT », ou « EN COURS » pendant le téléchargement). Séries à compléter : cherche aussi les 12 tomes suivants avec une recherche ciblée (« One Piece T101 »), 12 téléchargements au plus par passage (serveur 3.143.0).
 
 ## 1.0.214 — 25 novembre 2026
