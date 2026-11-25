@@ -1,9 +1,10 @@
 // Bibliothèque : uniquement les bibliothèques Jellyfin, en grandes cartes (affiches récentes en éventail, nombre de titres).
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Modal, Platform, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -16,6 +17,11 @@ import { useLumioCollections } from '@/lib/collections';
 import { useSettings } from '@/lib/settings';
 
 type Lib = { view: JfItem; count: number | null; posters: string[]; backdrops: string[] };
+
+// Dernier état gardé en mémoire et sur le téléphone : l'onglet s'affiche tout de suite, puis se met à jour en silence
+const LIB_KEY = 'lumio.libraryCache.v1';
+let memo: { key: string; libs: Lib[] } | null = null;
+const libKey = (s: { jellyfin?: { url?: string; userId?: string } | null }) => `${s.jellyfin?.url ?? ''}|${s.jellyfin?.userId ?? ''}`;
 
 const TYPES: Record<string, string> = {
   movies: 'Movie',
@@ -78,6 +84,7 @@ function LibraryCard({ lib, width, onChooseCover }: { lib: Lib; width: number; o
               key={p}
               source={p}
               contentFit="cover"
+              cachePolicy="memory-disk"
               transition={200}
               style={[
                 styles.poster,
@@ -157,8 +164,19 @@ export default function Library() {
   const { settings, update } = useSettings();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const [libs, setLibs] = useState<Lib[]>([]);
+  const key = libKey(settings);
+  const [libs, setLibs] = useState<Lib[]>(() => (memo?.key === key ? memo.libs : []));
   const [loading, setLoading] = useState(true);
+  // Démarrage à froid : la dernière liste enregistrée sur le téléphone
+  useEffect(() => {
+    if (memo?.key === key) return;
+    AsyncStorage.getItem(LIB_KEY)
+      .then((raw) => {
+        const c = raw ? (JSON.parse(raw) as { key: string; libs: Lib[] }) : null;
+        if (c?.key === key && c.libs?.length) setLibs((cur) => (cur.length ? cur : c.libs));
+      })
+      .catch(() => {});
+  }, [key]);
   const [error, setError] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
 
@@ -188,13 +206,15 @@ export default function Library() {
         })
       );
       setLibs(out);
+      memo = { key, libs: out };
+      AsyncStorage.setItem(LIB_KEY, JSON.stringify(memo)).catch(() => {});
     } catch (e: any) {
       setError(e?.message ?? String(e));
       setExpired(e instanceof JellyfinError && e.status === 401);
     } finally {
       setLoading(false);
     }
-  }, [settings]);
+  }, [settings, key]);
 
   useFocusEffect(
     useCallback(() => {

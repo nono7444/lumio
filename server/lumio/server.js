@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.136.0';
+const VERSION = '3.137.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4123,7 +4123,9 @@ const BOOK_SECRET = (() => {
   return s;
 })();
 function bookSign(root, rel) {
-  const body = Buffer.from(JSON.stringify({ r: root, p: rel, e: Date.now() + 24 * 3600_000 })).toString('base64url');
+  // Expiration arrondie au jour : le lien reste identique toute la journée, le téléphone garde les images en cache
+  const e = (Math.floor(Date.now() / 86400e3) + 2) * 86400e3;
+  const body = Buffer.from(JSON.stringify({ r: root, p: rel, e })).toString('base64url');
   return `${body}.${crypto.createHmac('sha256', BOOK_SECRET).update(body).digest('base64url')}`;
 }
 function bookVerify(tok) {
@@ -4518,6 +4520,7 @@ async function bookLibrary() {
   await walk('', 0);
   const infos = new Map();
   for (const f of found) infos.set(f.rel, await bookInfo(path.join(full, f.rel), f.name, f.st));
+  bookCoversWarm(found.map((f) => path.join(full, f.rel)));
   return {
     dir,
     books: found
@@ -4557,6 +4560,29 @@ async function imageSaturation(buf) {
     fs.promises.rm(tmp, { force: true }).catch(() => {});
   }
 }
+/** Prépare les couvertures en arrière-plan (2 à la fois) : elles sont déjà prêtes quand on ouvre l'onglet. */
+let coversWarming = false;
+function bookCoversWarm(files) {
+  if (coversWarming) return;
+  coversWarming = true;
+  (async () => {
+    const todo = [];
+    for (const f of files) {
+      const id = bookId(f);
+      const ok = await fs.promises.access(path.join(BOOK_COVERS_DIR, `${id}.v2.img`)).then(() => true, () => false);
+      const none = await fs.promises.access(path.join(BOOK_COVERS_DIR, `${id}.v2.none`)).then(() => true, () => false);
+      if (!ok && !none) todo.push(f);
+    }
+    const work = async () => {
+      while (todo.length) await bookCover(todo.shift()).catch(() => {});
+    };
+    await Promise.all([work(), work()]);
+    // Anciennes couvertures (souvent japonaises) : supprimées une fois les nouvelles prêtes
+    for (const n of await fs.promises.readdir(BOOK_COVERS_DIR).catch(() => [])) {
+      if (!n.includes('.v2.')) fs.promises.rm(path.join(BOOK_COVERS_DIR, n), { force: true }).catch(() => {});
+    }
+  })().finally(() => (coversWarming = false));
+}
 /** Couverture d'un tome de manga sur MangaDex (édition française d'abord, sinon japonaise). */
 async function mangadexCover(series, tome) {
   const ua = { 'User-Agent': 'Lumio/1.0 (serveur familial)' };
@@ -4584,12 +4610,12 @@ async function mangadexCover(series, tome) {
 async function bookCover(file) {
   const ext = path.extname(file).toLowerCase();
   const id = bookId(file);
-  const cached = path.join(BOOK_COVERS_DIR, `${id}.img`);
+  const cached = path.join(BOOK_COVERS_DIR, `${id}.v2.img`); // v2 : couvertures françaises d'abord
   try {
     const buf = await fs.promises.readFile(cached);
     return { buf, type: sniffType(buf) };
   } catch {}
-  const miss = path.join(BOOK_COVERS_DIR, `${id}.none`);
+  const miss = path.join(BOOK_COVERS_DIR, `${id}.v2.none`);
   try {
     if (Date.now() - (await fs.promises.stat(miss)).mtimeMs < 7 * 86400e3) return null;
   } catch {}
@@ -4605,19 +4631,20 @@ async function bookCover(file) {
       const e = b.cover && b.entries.find((x) => x.name === b.cover);
       if (e) return keep(await zipRead(file, e));
     } else if (ext === '.cbz' || ext === '.zip') {
+      // Couverture française d'abord : 1re page du fichier si elle est en couleur (c'est l'édition qu'on a),
+      // puis l'édition française en ligne (Apple Books FR, Google Books en français), puis MangaDex (fr, sinon ja)
       const ser = bookSeries(info.title, true);
-      if (ser) {
-        const md = await mangadexCover(ser.name, ser.index).catch(() => null);
-        if (md) return keep(md);
-      }
       const e = (await zipEntries(file)).filter((x) => isImage(x.name)).sort((a, b) => natural(a.name, b.name))[0];
       const first = e ? await zipRead(file, e) : null;
       const sat = first ? await imageSaturation(first) : null;
       if (first && (sat == null || sat > 8)) return keep(first);
-      // 1re page en noir et blanc : couverture en ligne (« Série tome N »), sinon cette page quand même
       const q = ser ? `${ser.name} tome ${ser.index}` : info.title;
-      const online = await audioCoverSearch(q, info.author, 'ebook').catch(() => null);
+      const online = await audioCoverSearch(q, info.author, 'ebook', ser ? ser.index : null).catch(() => null);
       if (online) return keep(online);
+      if (ser) {
+        const md = await mangadexCover(ser.name, ser.index).catch(() => null);
+        if (md) return keep(md);
+      }
       if (first) return keep(first);
     }
   } catch {}
@@ -5139,7 +5166,7 @@ async function coverCandidates(title, author, media = 'audiobook', limit = 12) {
       for (const r of j.results || []) if (r.artworkUrl100) add(r.artworkUrl100.replace(/\/\d+x\d+bb\./, '/1000x1000bb.'));
     })().catch(() => {}),
     (async () => {
-      const j = await (await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(term)}&maxResults=10`, { signal: AbortSignal.timeout(10000) })).json();
+      const j = await (await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(term)}&maxResults=10&langRestrict=fr`, { signal: AbortSignal.timeout(10000) })).json();
       for (const it of j.items || []) {
         const l = (it.volumeInfo || {}).imageLinks;
         const u = l && (l.thumbnail || l.smallThumbnail);
@@ -5178,13 +5205,15 @@ async function coverFind(name, media) {
   return url;
 }
 
-async function audioCoverSearch(title, author, media = 'audiobook') {
-  return (await audioCoverSearchOnce(title, author, media)) || (author ? await audioCoverSearchOnce(title, null, media) : null);
+/** num : numéro de tome exigé dans le titre trouvé (sinon on prendrait la couverture d'un autre tome). */
+async function audioCoverSearch(title, author, media = 'audiobook', num = null) {
+  return (await audioCoverSearchOnce(title, author, media, num)) || (author ? await audioCoverSearchOnce(title, null, media, num) : null);
 }
-async function audioCoverSearchOnce(title, author, media = 'audiobook') {
+async function audioCoverSearchOnce(title, author, media = 'audiobook', num = null) {
   const want = coverWords(title);
   const fits = (name) => {
     const got = coverWords(name || '');
+    if (num != null && !new RegExp(`(^|\\D)0*${num}(\\D|$)`).test(String(name || ''))) return false;
     return want.length && want.filter((w) => got.includes(w)).length >= Math.ceil(want.length * 0.6);
   };
   const tries = [
@@ -5196,7 +5225,7 @@ async function audioCoverSearchOnce(title, author, media = 'audiobook') {
     },
     async () => {
       const q = encodeURIComponent(`intitle:${title}${author ? ` inauthor:${author}` : ''}`);
-      const j = await (await fetch(`https://www.googleapis.com/books/v1/volumes?q=${q}&maxResults=10`, { signal: AbortSignal.timeout(10000) })).json();
+      const j = await (await fetch(`https://www.googleapis.com/books/v1/volumes?q=${q}&maxResults=10&langRestrict=fr`, { signal: AbortSignal.timeout(10000) })).json();
       const v = (j.items || []).map((x) => x.volumeInfo || {}).find((x) => fits(x.title) && x.imageLinks);
       const u = v && (v.imageLinks.thumbnail || v.imageLinks.smallThumbnail);
       return u ? u.replace(/^http:/, 'https:').replace(/&edge=curl/, '').replace(/zoom=\d/, 'zoom=1') : null;

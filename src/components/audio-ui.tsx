@@ -65,7 +65,15 @@ export function Cover({ book, size, radius = 10 }: { book: AudioBook; size: numb
   return (
     <View style={{ width: size, height: size, borderRadius: radius, overflow: 'hidden', backgroundColor: `hsl(${hue},35%,22%)` }}>
       {uri && !bad ? (
-        <Image source={{ uri }} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} onError={() => setBad(true)} />
+        <Image
+          source={{ uri, cacheKey: `audio-cover-${book.id}-${(book.cover ?? '').split('?v=')[1] ?? ''}` }}
+          style={StyleSheet.absoluteFill}
+          contentFit="cover"
+          transition={150}
+          cachePolicy="memory-disk"
+          recyclingKey={book.id}
+          onError={() => setBad(true)}
+        />
       ) : (
         <View style={[StyleSheet.absoluteFill, { padding: size * 0.1, justifyContent: 'flex-end' }]}>
           <Ionicons name="headset" size={size * 0.22} color="rgba(255,255,255,0.55)" style={{ position: 'absolute', top: size * 0.1, left: size * 0.1 }} />

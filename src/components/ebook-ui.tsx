@@ -34,7 +34,7 @@ export function BookCover({ book, width, radius = 8 }: { book: Ebook; width: num
         </View>
       </View>
       {uri && !bad ? (
-        <Image source={{ uri }} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} cachePolicy="disk" onError={() => setBad(true)} />
+        <Image source={{ uri, cacheKey: `book-cover-v2-${book.id}` }} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} cachePolicy="memory-disk" recyclingKey={book.id} onError={() => setBad(true)} />
       ) : null}
       {/* Liseré façon reliure */}
       <View style={styles.spine} />
