@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.141.0';
+const VERSION = '3.142.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -5008,6 +5008,137 @@ async function bookRoutes(req, res, p, q, user) {
     const b = await readBody(req);
     const found = bookFound.get(String(b.id || ''));
     if (!found) throw new HttpError(404, 'Résultat expiré : relance la recherche');
+    const job = await bookStartDownload(found, user.name);
+    send(res, 201, { job: publicJob(job) });
+    return true;
+  }
+  // Compléter les séries tout seul : état, interrupteur, vérification immédiate
+  if (req.method === 'GET' && p === '/api/books/auto') {
+    send(res, 200, bookAutoPublic());
+    return true;
+  }
+  if (req.method === 'PUT' && p === '/api/books/auto') {
+    requireAdmin(user);
+    const b = await readBody(req);
+    config.books = { ...(config.books || {}), autoComplete: Boolean(b.enabled) };
+    saveConfig();
+    if (b.enabled) bookAutoRun().catch(() => {});
+    send(res, 200, bookAutoPublic());
+    return true;
+  }
+  if (req.method === 'POST' && p === '/api/books/auto/run') {
+    requireAdmin(user);
+    bookAutoRun(true).catch(() => {});
+    await new Promise((r) => setTimeout(r, 300));
+    send(res, 200, bookAutoPublic());
+    return true;
+  }
+  return false;
+}
+
+// ——— Livres : compléter les séries tout seul ———
+// Toutes les 6 h (si activé) : pour chaque série de la bibliothèque (BD, mangas, livres), les tomes manquants entre 1 et le
+// dernier, plus le tome suivant. Une recherche par série (C411, Tr4ker, Wawacity), on garde le bon tome en français
+// (pas les packs), et on télécharge comme à la main. Un tome introuvable est réessayé plus tard (3 jours, 1 jour pour le suivant).
+const BOOK_AUTO_EVERY = 6 * 3600_000;
+const BOOK_AUTO_MAX = 6; // téléchargements lancés au plus par passage
+let bookAutoRunning = false;
+const bookAutoState = () => (booksState.auto ||= { tried: {}, log: [], missing: [], lastRun: null });
+const bookNorm = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+function bookAutoPublic() {
+  const a = bookAutoState();
+  return { enabled: Boolean(config.books && config.books.autoComplete), running: bookAutoRunning, lastRun: a.lastRun, missing: a.missing || [], log: (a.log || []).slice(0, 40) };
+}
+function bookAutoLog(entry) {
+  const a = bookAutoState();
+  a.log = [{ at: new Date().toISOString(), ...entry }, ...(a.log || [])].slice(0, 80);
+}
+/** Séries de la bibliothèque et tomes manquants. */
+function bookAutoGaps(books) {
+  const series = new Map();
+  for (const b of books) {
+    if (b.format === 'audio') continue;
+    const ser = bookSeries(b.title, b.format === 'bd') || bookSeries(String(b.name).replace(/\.[^.]+$/, '').replace(/[._]+/g, ' '), b.format === 'bd');
+    if (!ser || ser.index < 1 || ser.index > 400) continue;
+    const key = bookNorm(ser.name);
+    if (!key) continue;
+    const cur = series.get(key) || { key, name: ser.name, format: b.format, have: new Set() };
+    cur.have.add(ser.index);
+    series.set(key, cur);
+  }
+  const out = [];
+  for (const sr of series.values()) {
+    const max = Math.max(...sr.have);
+    const gaps = [];
+    for (let n = 1; n < max && gaps.length < 40; n++) if (!sr.have.has(n)) gaps.push(n);
+    out.push({ key: sr.key, name: sr.name, kind: sr.format === 'bd' ? 'mangas' : 'livres', count: sr.have.size, max, gaps, next: max + 1 });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+async function bookAutoRun(manual = false) {
+  if (bookAutoRunning) return;
+  if (!manual && !(config.books && config.books.autoComplete)) return;
+  if (!booksDir()) return;
+  bookAutoRunning = true;
+  const a = bookAutoState();
+  let started = 0;
+  try {
+    const lib = await bookLibrary();
+    const gaps = bookAutoGaps(lib.books);
+    a.missing = gaps.filter((g) => g.gaps.length).map((g) => ({ name: g.name, gaps: g.gaps, max: g.max }));
+    const busy = new Set(downloads.filter((j) => j.book && ['queued', 'debrid', 'downloading'].includes(j.status)).map((j) => bookNorm(j.name)));
+    const now = Date.now();
+    for (const g of gaps) {
+      if (started >= BOOK_AUTO_MAX) break;
+      // Tomes voulus : les trous, puis le suivant ; sans ceux essayés récemment
+      const wanted = [...g.gaps.map((n) => ({ n, wait: 3 * 86400_000 })), { n: g.next, wait: 86400_000, next: true }].filter((w) => {
+        const t = a.tried[`${g.key}#${w.n}`];
+        return !t || now - t > (manual ? 3600_000 : w.wait);
+      });
+      if (!wanted.length) continue;
+      const res = await Promise.all([torznabSearch('c411', g.name, g.kind), torznabSearch('tr4ker', g.name, g.kind), wawaSearch(g.name, g.kind)]);
+      for (const w of wanted) a.tried[`${g.key}#${w.n}`] = now;
+      const pool = res.flatMap((r) => r.items).filter((it) => {
+        if (notFrench(it.title)) return false;
+        const vol = bookVolumes(it.title);
+        if (vol.genre !== 'tome') return false;
+        const ser = bookSeries(String(it.title).replace(/[._]+/g, ' '), true);
+        return ser && bookNorm(ser.name) === g.key && ser.index === vol.tome;
+      });
+      for (const w of wanted) {
+        if (started >= BOOK_AUTO_MAX) break;
+        const hits = pool.filter((it) => bookVolumes(it.title).tome === w.n);
+        if (!hits.length) continue;
+        if ([...busy].some((b) => b.includes(g.key) && new RegExp(`(^|\\D)0*${w.n}(\\D|$)`).test(b))) continue;
+        // Même format que le reste de la série (CBZ pour les BD, EPUB pour les livres), puis le plus partagé
+        const fmt = g.kind === 'mangas' ? /cbz|cbr/i : /epub/i;
+        hits.sort((x, y) => Number(fmt.test(y.title)) - Number(fmt.test(x.title)) || (y.seeders || 0) - (x.seeders || 0));
+        const it = hits[0];
+        try {
+          const job = await bookStartDownload({ kind: it.wawa ? 'wawa' : 'torrent', link: it.link, title: it.title, source: it.source, hash: it.hash }, 'Lumio (série auto)');
+          busy.add(bookNorm(job.name));
+          started++;
+          bookAutoLog({ series: g.name, tome: w.n, status: 'started', title: it.title, source: it.source });
+        } catch (e) {
+          bookAutoLog({ series: g.name, tome: w.n, status: 'error', title: it.title, message: String(e.message || e) });
+        }
+      }
+    }
+    a.lastRun = new Date().toISOString();
+    if (manual && !started) bookAutoLog({ status: 'none', message: 'Aucun tome manquant trouvé pour le moment' });
+  } catch (e) {
+    bookAutoLog({ status: 'error', message: String(e.message || e) });
+  } finally {
+    bookAutoRunning = false;
+    saveBooksState();
+  }
+}
+setTimeout(() => bookAutoRun().catch(() => {}), 5 * 60_000);
+setInterval(() => bookAutoRun().catch(() => {}), BOOK_AUTO_EVERY);
+
+/** Lance le téléchargement d'un résultat de recherche (torrent C411 / Tr4ker par AllDebrid, ou liens Wawacity). */
+async function bookStartDownload(found, by) {
+  {
     const dir = booksDir();
     if (!dir) throw new HttpError(503, 'Aucun disque n’est relié au serveur Lumio');
     let link;
@@ -5026,15 +5157,17 @@ async function bookRoutes(req, res, p, q, user) {
       link = links[0];
     }
     const job = { id: crypto.randomBytes(5).toString('hex'), link, links, root: dir.root, folder: dir.folder, status: 'queued', book: true, quiet: true,
-      name, size: 0, done: 0, speed: 0, token: null, createdAt: new Date().toISOString(), by: user.name };
+      name, size: 0, done: 0, speed: 0, token: null, createdAt: new Date().toISOString(), by };
     downloads.push(job);
     // Packs (.rar, .zip de plusieurs tomes), BD en .cbr ou en dossiers d'images : rangés en CBZ lisibles
     runDownload(job)
       .then(() => bookTidy(true))
       .catch(() => {});
-    send(res, 201, { job: publicJob(job) });
-    return true;
+    return job;
   }
+}
+
+async function bookRoutesMore(req, res, p, q, user) {
   if (req.method === 'GET' && p === '/api/books/jobs') {
     send(res, 200, { jobs: downloads.filter((j) => j.book).map(publicJob).reverse() });
     return true;
@@ -10760,6 +10893,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
     const q = url.searchParams;
     // Book (livres, BD, mangas, audio)
     if (await bookRoutes(req, res, p, q, user)) return;
+    if (p.startsWith('/api/books') && (await bookRoutesMore(req, res, p, q, user))) return;
     if (await audioRoutes(req, res, p, q, user)) return;
     if (await twitchRoutes(req, res, p, q, user)) return;
     if (await profileRoutes(req, res, p, q, user)) return;

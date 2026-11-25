@@ -86,7 +86,16 @@ function Shelf() {
         contentContainerStyle={{ paddingBottom: TAB_SPACE }}
         refreshControl={<RefreshControl refreshing={loading && !!lib} onRefresh={reload} tintColor={C.text} />}>
         <UniverseSwitch style={{ marginLeft: 16, marginTop: 8 }} />
-        <ScreenTitle title="Livres" />
+        <ScreenTitle
+          title="Livres"
+          right={
+            lib?.admin ? (
+              <Pressable onPress={() => (tap(), router.push('/books-auto'))} hitSlop={8} accessibilityLabel="Séries à compléter" style={styles.autoBtn}>
+                <Ionicons name="sparkles-outline" size={20} color={C.text} />
+              </Pressable>
+            ) : undefined
+          }
+        />
         {!settings.chatUrl ? (
           <Empty icon="cloud-offline-outline" text="Serveur Lumio non configuré (Profil)." />
         ) : !lib && libErr ? (
@@ -252,6 +261,7 @@ function Empty({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: str
 }
 
 const styles = StyleSheet.create({
+  autoBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: C.surface, alignItems: 'center', justifyContent: 'center' },
   h: { color: C.text, fontSize: 20, fontWeight: '800', paddingHorizontal: 16, marginBottom: 10 },
   t: { color: C.text, fontWeight: '700', fontSize: 13 },
   s: { color: C.textDim, fontSize: 12 },

@@ -7,6 +7,14 @@ import { useSettings, type Settings } from './settings';
 
 export type BookFormat = 'epub' | 'pdf' | 'bd' | 'audio';
 export type BookProgress = { chapter: number; scroll: number; page: number; pct: number; done: boolean; at: number };
+export type BooksAuto = {
+  enabled: boolean;
+  running: boolean;
+  lastRun: string | null;
+  missing: { name: string; gaps: number[]; max: number }[];
+  log: { at: string; series?: string; tome?: number; status: 'started' | 'error' | 'none'; title?: string; source?: string; message?: string }[];
+};
+
 export type Ebook = {
   id: string;
   name: string;
@@ -60,6 +68,10 @@ export const ebookApi = {
     serverCall<{ results: EbookResult[]; sources: EbookSource[] }>(s, `/api/books/search?kind=${kind}&q=${encodeURIComponent(q)}`),
   download: (s: Settings, id: string) => serverCall<{ job: EbookJob }>(s, '/api/books/download', { method: 'POST', body: JSON.stringify({ id }) }),
   jobs: (s: Settings) => serverCall<{ jobs: EbookJob[] }>(s, '/api/books/jobs'),
+  /** Compléter les séries tout seul (tomes manquants et tome suivant) */
+  auto: (s: Settings) => serverCall<BooksAuto>(s, '/api/books/auto'),
+  setAuto: (s: Settings, enabled: boolean) => serverCall<BooksAuto>(s, '/api/books/auto', { method: 'PUT', body: JSON.stringify({ enabled }) }),
+  autoRun: (s: Settings) => serverCall<BooksAuto>(s, '/api/books/auto/run', { method: 'POST', body: '{}' }),
   /** Admin : recharge titre et couverture (refait la recherche) */
   refresh: (s: Settings, tokens: string[]) =>
     serverCall<{ ok: boolean; count: number; left: number }>(s, '/api/books/refresh', { method: 'POST', body: JSON.stringify({ tokens }) }),
