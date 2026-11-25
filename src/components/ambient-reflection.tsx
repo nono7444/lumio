@@ -24,9 +24,11 @@ export function AmbientReflection() {
         style={{ position: 'absolute', top: 0, left: 0, width, height: a.height, transform: [{ scaleY: -1 }] }}
         contentFit="cover"
         blurRadius={blur}
-        transition={700}
+        transition={300}
         cachePolicy="memory-disk"
       />
+      {/* Même teinte de saison (Noël…) que la photo au-dessus */}
+      {a.tint ? <View style={[StyleSheet.absoluteFill, { backgroundColor: a.tint }]} /> : null}
       {/* Même noir qu'en bas de la photo au point de jonction, puis le fond de l'appli */}
       <LinearGradient
         colors={[`rgba(0,0,0,${SEAM_DARK})`, 'rgba(0,0,0,0.8)', C.bg]}

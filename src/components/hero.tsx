@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import MaskedView from '@react-native-masked-view/masked-view';
 import { LinearGradient } from 'expo-linear-gradient';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { FlatList, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
@@ -77,8 +78,8 @@ function Slide({ item, width, height, season, active }: { item: HeroItem; width:
   }, [settings, item.logoUrl, item.tmdb, item.posterUrl]);
   // Accueil (téléphone) : l'image affichée colore aussi le reflet sous le carrousel
   useEffect(() => {
-    if (active && art?.bg && !Platform.isTV) setAmbient({ source: { uri: art.bg }, height });
-  }, [active, art?.bg, height]);
+    if (active && art?.bg && !Platform.isTV) setAmbient({ source: { uri: art.bg }, height, tint: season?.tint ?? null });
+  }, [active, art?.bg, height, season?.tint]);
   // Affiche avec son titre imprimé et pas d'image propre : on n'ajoute rien par-dessus (un seul titre)
   const logo = art?.logo ?? null;
   const showName = art ? !art.textOnBg || !item.posterUrl : false;
@@ -101,6 +102,15 @@ function Slide({ item, width, height, season, active }: { item: HeroItem; width:
         priority="high"
         placeholder={{ blurhash: 'L03[%0IU00~q00xu00Rj00%M~qIU' }}
       />
+      {/* Téléphone : le bas de la photo passe peu à peu à la même image floutée que le reflet dessous → aucune couture */}
+      {!Platform.isTV && art?.bg && settings.look?.reflection !== false ? (
+        <MaskedView
+          pointerEvents="none"
+          style={StyleSheet.absoluteFill}
+          maskElement={<LinearGradient colors={['transparent', 'transparent', '#000']} locations={[0, 0.62, 0.97]} style={StyleSheet.absoluteFill} />}>
+          <Image source={art.bg} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={settings.look?.reflectionBlur ?? 26} cachePolicy="memory-disk" />
+        </MaskedView>
+      ) : null}
       {season && <View style={[StyleSheet.absoluteFill, { backgroundColor: season.tint }]} pointerEvents="none" />}
       <Fade height={height * 0.25} top />
       {Platform.isTV ? (
