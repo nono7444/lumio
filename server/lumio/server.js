@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.137.0';
+const VERSION = '3.138.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4539,6 +4539,8 @@ async function bookLibrary() {
           size: f.st.size,
           modified: f.st.mtime.toISOString(),
           token: bookSign(dir.root, rel),
+          // Version de la couverture (date du fichier gardé sur le serveur) : le téléphone la retélécharge quand elle change
+          coverV: bookCoverVersion(path.join(full, f.rel)),
         };
       }),
   };
@@ -4560,6 +4562,13 @@ async function imageSaturation(buf) {
     fs.promises.rm(tmp, { force: true }).catch(() => {});
   }
 }
+function bookCoverVersion(file) {
+  try {
+    return Math.round(fs.statSync(path.join(BOOK_COVERS_DIR, `${bookId(file)}.v3.img`)).mtimeMs);
+  } catch {
+    return 0;
+  }
+}
 /** Prépare les couvertures en arrière-plan (2 à la fois) : elles sont déjà prêtes quand on ouvre l'onglet. */
 let coversWarming = false;
 function bookCoversWarm(files) {
@@ -4569,8 +4578,8 @@ function bookCoversWarm(files) {
     const todo = [];
     for (const f of files) {
       const id = bookId(f);
-      const ok = await fs.promises.access(path.join(BOOK_COVERS_DIR, `${id}.v2.img`)).then(() => true, () => false);
-      const none = await fs.promises.access(path.join(BOOK_COVERS_DIR, `${id}.v2.none`)).then(() => true, () => false);
+      const ok = await fs.promises.access(path.join(BOOK_COVERS_DIR, `${id}.v3.img`)).then(() => true, () => false);
+      const none = await fs.promises.access(path.join(BOOK_COVERS_DIR, `${id}.v3.none`)).then(() => true, () => false);
       if (!ok && !none) todo.push(f);
     }
     const work = async () => {
@@ -4579,7 +4588,7 @@ function bookCoversWarm(files) {
     await Promise.all([work(), work()]);
     // Anciennes couvertures (souvent japonaises) : supprimées une fois les nouvelles prêtes
     for (const n of await fs.promises.readdir(BOOK_COVERS_DIR).catch(() => [])) {
-      if (!n.includes('.v2.')) fs.promises.rm(path.join(BOOK_COVERS_DIR, n), { force: true }).catch(() => {});
+      if (!n.includes('.v3.')) fs.promises.rm(path.join(BOOK_COVERS_DIR, n), { force: true }).catch(() => {});
     }
   })().finally(() => (coversWarming = false));
 }
@@ -4610,12 +4619,12 @@ async function mangadexCover(series, tome) {
 async function bookCover(file) {
   const ext = path.extname(file).toLowerCase();
   const id = bookId(file);
-  const cached = path.join(BOOK_COVERS_DIR, `${id}.v2.img`); // v2 : couvertures françaises d'abord
+  const cached = path.join(BOOK_COVERS_DIR, `${id}.v3.img`); // v3 : édition française officielle d'abord
   try {
     const buf = await fs.promises.readFile(cached);
     return { buf, type: sniffType(buf) };
   } catch {}
-  const miss = path.join(BOOK_COVERS_DIR, `${id}.v2.none`);
+  const miss = path.join(BOOK_COVERS_DIR, `${id}.v3.none`);
   try {
     if (Date.now() - (await fs.promises.stat(miss)).mtimeMs < 7 * 86400e3) return null;
   } catch {}
@@ -4631,16 +4640,16 @@ async function bookCover(file) {
       const e = b.cover && b.entries.find((x) => x.name === b.cover);
       if (e) return keep(await zipRead(file, e));
     } else if (ext === '.cbz' || ext === '.zip') {
-      // Couverture française d'abord : 1re page du fichier si elle est en couleur (c'est l'édition qu'on a),
-      // puis l'édition française en ligne (Apple Books FR, Google Books en français), puis MangaDex (fr, sinon ja)
+      // Édition française officielle d'abord (Apple Books FR, Google Books en français, avec le bon numéro de tome) :
+      // la 1re page du fichier est parfois la couverture japonaise. Puis 1re page en couleur, puis MangaDex.
       const ser = bookSeries(info.title, true);
+      const q = ser ? `${ser.name} tome ${ser.index}` : info.title;
+      const online = await audioCoverSearch(q, info.author, 'ebook', ser ? ser.index : null).catch(() => null);
+      if (online) return keep(online);
       const e = (await zipEntries(file)).filter((x) => isImage(x.name)).sort((a, b) => natural(a.name, b.name))[0];
       const first = e ? await zipRead(file, e) : null;
       const sat = first ? await imageSaturation(first) : null;
       if (first && (sat == null || sat > 8)) return keep(first);
-      const q = ser ? `${ser.name} tome ${ser.index}` : info.title;
-      const online = await audioCoverSearch(q, info.author, 'ebook', ser ? ser.index : null).catch(() => null);
-      if (online) return keep(online);
       if (ser) {
         const md = await mangadexCover(ser.name, ser.index).catch(() => null);
         if (md) return keep(md);
@@ -5210,7 +5219,8 @@ async function audioCoverSearch(title, author, media = 'audiobook', num = null) 
   return (await audioCoverSearchOnce(title, author, media, num)) || (author ? await audioCoverSearchOnce(title, null, media, num) : null);
 }
 async function audioCoverSearchOnce(title, author, media = 'audiobook', num = null) {
-  const want = coverWords(title);
+  // « tome », « vol » : absents de beaucoup de titres (« Dandadan T01 »), ils ne comptent pas
+  const want = coverWords(title).filter((w) => !/^(tome|vol|volume)$/.test(w));
   const fits = (name) => {
     const got = coverWords(name || '');
     if (num != null && !new RegExp(`(^|\\D)0*${num}(\\D|$)`).test(String(name || ''))) return false;
@@ -5220,7 +5230,7 @@ async function audioCoverSearchOnce(title, author, media = 'audiobook', num = nu
     async () => {
       const q = new URLSearchParams({ term: `${title} ${author || ''}`.trim(), media, entity: media, country: 'fr', limit: '10' });
       const j = await (await fetch(`https://itunes.apple.com/search?${q}`, { signal: AbortSignal.timeout(10000) })).json();
-      const r = (j.results || []).find((x) => fits(x.collectionName)) || null;
+      const r = (j.results || []).find((x) => fits(x.collectionName || x.trackName)) || null; // livres : trackName
       return r && r.artworkUrl100 ? r.artworkUrl100.replace(/\/\d+x\d+bb\./, '/1000x1000bb.') : null;
     },
     async () => {

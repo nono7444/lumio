@@ -1,7 +1,7 @@
 // Lumio Livres : couverture d'un livre (celle du fichier, sinon trouvée en ligne par le serveur) et barre d'avancement.
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { C } from '@/constants/theme';
@@ -14,6 +14,8 @@ const ICON: Record<string, keyof typeof Ionicons.glyphMap> = { epub: 'book', pdf
 export function BookCover({ book, width, radius = 8 }: { book: Ebook; width: number; radius?: number }) {
   const { settings } = useSettings();
   const [bad, setBad] = useState(false);
+  // Couverture prête ou changée sur le serveur : on réessaie
+  useEffect(() => setBad(false), [book.coverV]);
   const uri = fileUrl(settings, book, 'cover');
   const height = Math.round(width * 1.5);
   const hue = [...book.title].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 11);
@@ -34,7 +36,7 @@ export function BookCover({ book, width, radius = 8 }: { book: Ebook; width: num
         </View>
       </View>
       {uri && !bad ? (
-        <Image source={{ uri, cacheKey: `book-cover-v2-${book.id}` }} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} cachePolicy="memory-disk" recyclingKey={book.id} onError={() => setBad(true)} />
+        <Image source={{ uri, cacheKey: `book-cover-${book.id}-${book.coverV ?? 0}` }} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} cachePolicy="memory-disk" recyclingKey={book.id} onError={() => setBad(true)} />
       ) : null}
       {/* Liseré façon reliure */}
       <View style={styles.spine} />

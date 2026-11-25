@@ -18,6 +18,8 @@ export type Ebook = {
   size: number;
   modified: string;
   token: string;
+  /** Version de la couverture sur le serveur (0 = pas encore prête) */
+  coverV?: number;
   progress: BookProgress | null;
 };
 export type EbookLibrary = {

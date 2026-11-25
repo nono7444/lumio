@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Livres et BD : l'édition française officielle passe avant la 1re page du fichier (parfois la couverture japonaise), et le téléphone récupère une couverture dès qu'elle change sur le serveur (serveur 3.138.0).
+
 ## 1.0.209 — 25 novembre 2026
 
 - Disques : les dossiers et fichiers de films et séries affichent leur jaquette, dans la liste comme dans la recherche (serveur 3.136.0).
