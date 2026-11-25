@@ -106,7 +106,7 @@ export default function EbookCoverScreen() {
           />
           {busy ? <ActivityIndicator color={C.text} /> : null}
         </View>
-        <Text style={styles.hint}>Touche une image pour la garder. Elle est gardée sur le serveur (« Recharger les infos » la remplace).</Text>
+        <Text style={styles.hint}>Touche une image pour la garder. Elle est gardée sur le serveur, même après un redémarrage.</Text>
         <View style={styles.grid}>
           {covers?.map((u) => (
             <Pressable key={u} onPress={() => (tap(), save(u, { url: u }))} disabled={!!saving} style={{ width: size, height: Math.round(size * 1.5), borderRadius: 10, overflow: 'hidden', backgroundColor: C.surfaceHigh }}>

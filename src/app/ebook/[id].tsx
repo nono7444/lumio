@@ -7,7 +7,6 @@ import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BookCover, ReadBar } from '@/components/ebook-ui';
-import { toast } from '@/components/toast';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { Button, ScreenTitle, tap } from '@/components/ui';
 import { C } from '@/constants/theme';
@@ -21,7 +20,6 @@ export default function EbookScreen() {
   const book = ebookById(String(id));
   const [chapters, setChapters] = useState<string[] | null>(null);
   const [pages, setPages] = useState<number | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     if (!book) return;
@@ -103,24 +101,6 @@ export default function EbookScreen() {
 
           {lib?.admin ? (
             <View style={{ paddingHorizontal: 20, marginTop: 28, gap: 10 }}>
-              <Button
-                title="Recharger les infos"
-                icon="refresh"
-                variant="secondary"
-                loading={refreshing}
-                onPress={async () => {
-                  setRefreshing(true);
-                  try {
-                    await ebookApi.refresh(settings, [book.token]);
-                    await loadEbooks(settings);
-                    toast('Infos et couverture rechargées');
-                  } catch (e) {
-                    toast(e instanceof Error ? e.message : String(e), 'error');
-                  } finally {
-                    setRefreshing(false);
-                  }
-                }}
-              />
               <Button title="Changer la couverture" icon="image-outline" variant="secondary" onPress={() => router.push({ pathname: '/ebook-cover', params: { id: book.id } })} />
               <Button
                 title="Supprimer du serveur"
