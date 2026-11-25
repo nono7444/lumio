@@ -2,7 +2,7 @@
 // ou le premier tome pas encore lu.
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -10,11 +10,15 @@ import { BookCover, ReadBar } from '@/components/ebook-ui';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { Button, ScreenTitle, tap } from '@/components/ui';
 import { C } from '@/constants/theme';
-import { groupSeries, seriesByKey, tomeOf, useEbooks } from '@/lib/ebooks';
+import { toast } from '@/components/toast';
+import { ebookApi, groupSeries, loadEbooks, seriesByKey, tomeOf, useEbooks } from '@/lib/ebooks';
+import { useSettings } from '@/lib/settings';
 
 export default function SeriesScreen() {
   const { key } = useLocalSearchParams<{ key: string }>();
   const { lib } = useEbooks();
+  const { settings } = useSettings();
+  const [refreshing, setRefreshing] = useState(false);
   const { width } = useWindowDimensions();
   // Relue depuis la bibliothèque (positions à jour), sinon celle gardée par l'onglet
   const s = useMemo(() => (lib ? groupSeries(lib.books).series.find((x) => x.key === key) : null) ?? seriesByKey(String(key)), [lib, key]);
@@ -48,13 +52,37 @@ export default function SeriesScreen() {
             icon="book-outline"
             onPress={() => router.push({ pathname: '/reader', params: { id: next.id } })}
           />
+          {lib?.admin ? (
+            <Button
+              title="Recharger les infos de la série"
+              icon="refresh"
+              variant="secondary"
+              loading={refreshing}
+              onPress={async () => {
+                setRefreshing(true);
+                try {
+                  const r = await ebookApi.refresh(settings, s.books.map((b) => b.token));
+                  await loadEbooks(settings);
+                  toast(r.left ? `Rechargé · ${r.left} couverture(s) encore en cours, rouvre dans une minute` : 'Infos et couvertures rechargées');
+                } catch (e) {
+                  toast(e instanceof Error ? e.message : String(e), 'error');
+                } finally {
+                  setRefreshing(false);
+                }
+              }}
+            />
+          ) : null}
+          {lib?.admin ? <Text style={styles.s}>Appui long sur un tome : changer sa couverture</Text> : null}
         </View>
         <View style={styles.grid}>
           {s.books.map((b) => {
             const t = tomeOf(b);
             const pr = b.progress?.pct ?? 0;
             return (
-              <Pressable key={b.id} onPress={() => (tap(), router.push({ pathname: '/ebook/[id]', params: { id: b.id } }))} style={{ width: w, gap: 5 }}>
+              <Pressable
+                key={b.id}
+                onPress={() => (tap(), router.push({ pathname: '/ebook/[id]', params: { id: b.id } }))}
+                onLongPress={lib?.admin ? () => (tap(), router.push({ pathname: '/ebook-cover', params: { id: b.id } })) : undefined} style={{ width: w, gap: 5 }}>
                 <View>
                   <BookCover book={b} width={w} />
                   {t != null ? (

@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Livres et BD (admin) : « Recharger les infos » sur un livre et sur toute une série (refait le titre et la recherche de couverture), et « Changer la couverture » : propositions en français, lien d'une image collé, ou image du téléphone. Appui long sur un tome dans une série pour y aller directement (serveur 3.139.0).
+
 ## 1.0.210 — 25 novembre 2026
 
 - Livres et BD : l'édition française officielle passe avant la 1re page du fichier (parfois la couverture japonaise), et le téléphone récupère une couverture dès qu'elle change sur le serveur (serveur 3.138.0).

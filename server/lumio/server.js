@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.138.0';
+const VERSION = '3.139.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -5063,6 +5063,64 @@ async function bookRoutes(req, res, p, q, user) {
     mine[pm[1]] = { chapter: num(b.chapter, 1e5), scroll: num(b.scroll, 1), page: num(b.page, 1e5), pct: num(b.pct, 1), done: Boolean(b.done), at: Date.now() };
     saveBooksState();
     send(res, 200, { ok: true });
+    return true;
+  }
+  // Admin : recharger titre et couverture d'un ou plusieurs tomes (refait la recherche de couverture)
+  if (req.method === 'POST' && p === '/api/books/refresh') {
+    if (!user.admin) throw new HttpError(403, 'Réservé à l’admin');
+    const b = await readBody(req);
+    const files = [...new Set((Array.isArray(b.tokens) ? b.tokens : [b.token]).map((t) => bookVerify(String(t || ''))).filter(Boolean))].slice(0, 300);
+    if (!files.length) throw new HttpError(400, 'Aucun livre');
+    for (const f of files) {
+      const id = bookId(f);
+      delete booksState.meta[id];
+      for (const ext of ['img', 'none']) await fs.promises.rm(path.join(BOOK_COVERS_DIR, `${id}.v3.${ext}`), { force: true });
+      zipCache.delete(f);
+    }
+    saveBooksState();
+    const todo = [...files];
+    const work = async () => {
+      while (todo.length) await bookCover(todo.shift()).catch(() => {});
+    };
+    // Jusqu'à 25 s d'attente (le reste continue en arrière-plan)
+    await Promise.race([Promise.all([work(), work(), work()]), new Promise((r) => setTimeout(r, 25_000))]);
+    send(res, 200, { ok: true, count: files.length, left: todo.length });
+    return true;
+  }
+  // Admin : propositions de couvertures (Apple Books FR, Google Books en français, Open Library) pour un tome
+  if (req.method === 'POST' && p === '/api/books/cover-choices') {
+    if (!user.admin) throw new HttpError(403, 'Réservé à l’admin');
+    const b = await readBody(req);
+    const file = bookVerify(String(b.token || ''));
+    if (!file) throw new HttpError(403, 'Lien expiré');
+    const info = booksState.meta[bookId(file)] || { title: bookTitle(path.basename(file)), author: null };
+    const ser = bookSeries(info.title, true);
+    const query = String(b.q || '').trim() || (ser ? `${ser.name} tome ${ser.index}` : info.title);
+    const isComic = /\.(cbz|cbr|zip)$/i.test(file);
+    send(res, 200, { query, covers: await coverCandidates(query, b.q ? null : isComic ? null : info.author, isComic ? 'comic' : 'ebook', 18) });
+    return true;
+  }
+  // Admin : couverture choisie à la main (lien d'image ou image envoyée depuis le téléphone)
+  if (req.method === 'POST' && p === '/api/books/cover') {
+    if (!user.admin) throw new HttpError(403, 'Réservé à l’admin');
+    const b = await readBody(req, 15 * 1024 * 1024);
+    const file = bookVerify(String(b.token || ''));
+    if (!file) throw new HttpError(403, 'Lien expiré');
+    let buf = null;
+    if (b.data) buf = Buffer.from(String(b.data).replace(/^data:[^,]*,/, ''), 'base64');
+    else if (/^https?:\/\//i.test(String(b.url || ''))) {
+      const r = await fetch(String(b.url), { headers: { 'User-Agent': 'Mozilla/5.0 Lumio' }, signal: AbortSignal.timeout(20000) }).catch(() => null);
+      if (!r || !r.ok) throw new HttpError(400, 'Image introuvable à ce lien');
+      buf = Buffer.from(await r.arrayBuffer());
+    } else throw new HttpError(400, 'Donne un lien d’image (https://…) ou une image');
+    const isImg = buf && buf.length > 1000 && buf.length < 12 * 1024 * 1024 &&
+      ((buf[0] === 0xff && buf[1] === 0xd8) || (buf[0] === 0x89 && buf[1] === 0x50) || (buf[0] === 0x52 && buf[1] === 0x49 && buf.slice(8, 12).toString() === 'WEBP'));
+    if (!isImg) throw new HttpError(400, 'Ce n’est pas une image JPEG, PNG ou WebP');
+    const id = bookId(file);
+    await fs.promises.mkdir(BOOK_COVERS_DIR, { recursive: true }).catch(() => {});
+    await fs.promises.writeFile(path.join(BOOK_COVERS_DIR, `${id}.v3.img`), buf);
+    await fs.promises.rm(path.join(BOOK_COVERS_DIR, `${id}.v3.none`), { force: true });
+    send(res, 200, { ok: true, coverV: bookCoverVersion(file) });
     return true;
   }
   if (req.method === 'POST' && p === '/api/books/delete') {

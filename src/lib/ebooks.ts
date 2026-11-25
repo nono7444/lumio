@@ -60,6 +60,14 @@ export const ebookApi = {
     serverCall<{ results: EbookResult[]; sources: EbookSource[] }>(s, `/api/books/search?kind=${kind}&q=${encodeURIComponent(q)}`),
   download: (s: Settings, id: string) => serverCall<{ job: EbookJob }>(s, '/api/books/download', { method: 'POST', body: JSON.stringify({ id }) }),
   jobs: (s: Settings) => serverCall<{ jobs: EbookJob[] }>(s, '/api/books/jobs'),
+  /** Admin : recharge titre et couverture (refait la recherche) */
+  refresh: (s: Settings, tokens: string[]) =>
+    serverCall<{ ok: boolean; count: number; left: number }>(s, '/api/books/refresh', { method: 'POST', body: JSON.stringify({ tokens }) }),
+  coverChoices: (s: Settings, token: string, q?: string) =>
+    serverCall<{ query: string; covers: string[] }>(s, '/api/books/cover-choices', { method: 'POST', body: JSON.stringify({ token, q }) }),
+  /** Admin : couverture à la main, lien d'image ou image en base64 */
+  setCover: (s: Settings, token: string, body: { url: string } | { data: string }) =>
+    serverCall<{ ok: boolean; coverV: number }>(s, '/api/books/cover', { method: 'POST', body: JSON.stringify({ token, ...body }) }),
   remove: (s: Settings, token: string) => serverCall<{ ok: boolean }>(s, '/api/books/delete', { method: 'POST', body: JSON.stringify({ token }) }),
   epub: (s: Settings, b: Ebook) => fetch(fileUrl(s, b, 'epub')!).then((r) => r.json() as Promise<{ title: string; chapters: string[]; error?: string }>),
   pages: (s: Settings, b: Ebook) => fetch(fileUrl(s, b, 'pages')!).then((r) => r.json() as Promise<{ title: string; pages: number; error?: string }>),
