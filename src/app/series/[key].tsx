@@ -11,6 +11,7 @@ import { FocusPressable as Pressable } from '@/components/tv';
 import { Button, ScreenTitle, tap } from '@/components/ui';
 import { C } from '@/constants/theme';
 import { Image } from 'expo-image';
+import { toast } from '@/components/toast';
 import { ebookApi, loadEbooks, groupSeries, JOB_ACTIVE, jobForTome, seriesByKey, tomeOf, useEbooks, type BooksAuto, type Ebook, type EbookJob, type SeriesInfo } from '@/lib/ebooks';
 import { useSettings } from '@/lib/settings';
 
@@ -22,6 +23,7 @@ export default function SeriesScreen() {
   const [auto, setAuto] = useState<BooksAuto | null>(null);
   const [info, setInfo] = useState<SeriesInfo | null>(null);
   const [jobs, setJobs] = useState<EbookJob[]>([]);
+  const [fetching, setFetching] = useState(false);
   const seriesName = (lib ? groupSeries(lib.books).series.find((x) => x.key === key) : null)?.name ?? seriesByKey(String(key))?.name ?? '';
   useFocusEffect(
     useCallback(() => {
@@ -79,6 +81,23 @@ export default function SeriesScreen() {
             icon="book-outline"
             onPress={() => router.push({ pathname: '/reader', params: { id: next.id } })}
           />
+          {lib?.admin && holes.filter((t) => !jobForTome(jobs, s.name, t)).length ? (
+            <Button
+              title={`Télécharger les tomes manquants (${holes.filter((t) => !jobForTome(jobs, s.name, t)).length})`}
+              icon="cloud-download-outline"
+              variant="secondary"
+              loading={fetching}
+              onPress={() => {
+                const want = holes.filter((t) => !jobForTome(jobs, s.name, t));
+                setFetching(true);
+                ebookApi
+                  .fetchTomes(settings, s.name, s.books.some((b) => b.comic === 'bd') ? 'bd' : 'mangas', want)
+                  .then(() => toast(`Recherche de ${want.length} tome${want.length > 1 ? 's' : ''} lancée : ils passent « EN COURS » dès qu’une version est trouvée`))
+                  .catch((e) => toast(e?.message ?? String(e), 'error'))
+                  .finally(() => setTimeout(() => setFetching(false), 4000));
+              }}
+            />
+          ) : null}
           {lib?.admin && s.books.some((b) => b.format === 'bd') ? (
             <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
               <Text style={styles.s}>Ranger dans :</Text>

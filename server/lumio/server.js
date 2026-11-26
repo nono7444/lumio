@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.156.0';
+const VERSION = '3.157.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -5388,6 +5388,15 @@ async function bookRoutes(req, res, p, q, user) {
     send(res, 200, bookAutoPublic());
     return true;
   }
+  if (req.method === 'POST' && p === '/api/books/fetch-tomes') {
+    requireAdmin(user);
+    const b = await readBody(req);
+    const tomes = [...new Set((b.tomes || []).map(Number).filter((n) => n > 0 && n < 500))].sort((x, y) => x - y);
+    if (!b.name || !tomes.length) throw new HttpError(400, 'Série ou tomes manquants');
+    bookFetchTomes(String(b.name), ['mangas', 'bd', 'livres'].includes(b.kind) ? b.kind : 'mangas', tomes, user.name).catch(() => {});
+    send(res, 202, { ok: true, count: tomes.length });
+    return true;
+  }
   if (req.method === 'POST' && p === '/api/books/auto/run') {
     requireAdmin(user);
     bookAutoRun(true).catch(() => {});
@@ -5532,6 +5541,57 @@ async function bookAutoRun(manual = false) {
     bookAutoLog({ status: 'error', message: String(e.message || e) });
   } finally {
     bookAutoRunning = false;
+    saveBooksState();
+  }
+}
+/** Télécharger tout de suite des tomes précis d'une série (bouton « Télécharger les tomes manquants » d'une collection) :
+ *  recherche large + recherche ciblée par tome (C411, Tr4ker, Wawacity), version française au même format, en arrière-plan. */
+const bookFetching = new Set();
+async function bookFetchTomes(name, kind, tomes, by) {
+  const key = bookNorm(name);
+  if (!key || bookFetching.has(key)) return;
+  bookFetching.add(key);
+  try {
+    const fits = (it) => {
+      if (notFrench(it.title)) return false;
+      const vol = bookVolumes(it.title);
+      if (vol.genre !== 'tome') return false;
+      const ser = bookSeries(String(it.title).replace(/[._]+/g, ' '), true);
+      return ser && sameSeries(ser.name, name) && ser.index === vol.tome;
+    };
+    const res = await Promise.all([torznabSearch('c411', name, kind), torznabSearch('tr4ker', name, kind), wawaSearch(name, kind)]);
+    const pool = res.flatMap((r) => r.items).filter(fits);
+    for (const n of tomes.slice(0, 40)) {
+      if (pool.some((it) => bookVolumes(it.title).tome === n)) continue;
+      const pad = String(n).padStart(2, '0');
+      let more = await Promise.all([torznabSearch('c411', `${name} T${pad}`, kind), torznabSearch('tr4ker', `${name} T${pad}`, kind), wawaSearch(`${name} tome ${n}`, kind)]);
+      let hits = more.flatMap((r) => r.items).filter(fits);
+      if (!hits.length) {
+        more = await Promise.all([torznabSearch('c411', `${name} tome ${n}`, kind), torznabSearch('tr4ker', `${name} tome ${n}`, kind)]);
+        hits = more.flatMap((r) => r.items).filter(fits);
+      }
+      pool.push(...hits);
+    }
+    const busy = downloads.filter((j) => j.book && ['queued', 'debrid', 'downloading'].includes(j.status)).map((j) => bookNorm(j.name));
+    const fmt = kind === 'mangas' || kind === 'bd' ? /cbz|cbr/i : /epub/i;
+    for (const n of tomes) {
+      const hits = pool.filter((it) => bookVolumes(it.title).tome === n);
+      if (!hits.length) {
+        bookAutoLog({ series: name, tome: n, status: 'error', message: 'aucune version trouvée' });
+        continue;
+      }
+      if (busy.some((b) => b.includes(key) && new RegExp(`(^|\\D)0*${n}(\\D|$)`).test(b))) continue;
+      hits.sort((x, y) => Number(fmt.test(y.title)) - Number(fmt.test(x.title)) || (y.seeders || 0) - (x.seeders || 0));
+      const it = hits[0];
+      try {
+        await bookStartDownload({ kind: it.wawa ? 'wawa' : 'torrent', link: it.link, title: it.title, source: it.source, hash: it.hash }, by);
+        bookAutoLog({ series: name, tome: n, status: 'started', title: it.title, source: it.source });
+      } catch (e) {
+        bookAutoLog({ series: name, tome: n, status: 'error', title: it.title, message: String(e.message || e) });
+      }
+    }
+  } finally {
+    bookFetching.delete(key);
     saveBooksState();
   }
 }

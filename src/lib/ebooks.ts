@@ -96,6 +96,9 @@ export const ebookApi = {
   discover: (s: Settings, kind: DiscoverKind) => serverCall<{ items: DiscoverItem[] }>(s, `/api/books/discover?kind=${kind}`),
   setComic: (s: Settings, name: string, kind: 'manga' | 'bd', titles: string[] = []) =>
     serverCall<{ ok: boolean }>(s, '/api/books/comic-kind', { method: 'POST', body: JSON.stringify({ name, kind, titles }) }),
+  /** Admin : télécharger tout de suite des tomes précis d'une série */
+  fetchTomes: (s: Settings, name: string, kind: 'mangas' | 'bd', tomes: number[]) =>
+    serverCall<{ ok: boolean; count: number }>(s, '/api/books/fetch-tomes', { method: 'POST', body: JSON.stringify({ name, kind, tomes }) }),
   cancelJob: (s: Settings, id: string) => serverCall<{ ok: boolean }>(s, `/api/books/jobs/${id}`, { method: 'DELETE' }),
   seriesInfo: (s: Settings, name: string) => serverCall<SeriesInfo>(s, `/api/books/series-info?name=${encodeURIComponent(name)}`),
   /** Compléter les séries tout seul (tomes manquants et tome suivant) */
