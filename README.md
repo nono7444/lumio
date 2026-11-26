@@ -105,7 +105,7 @@ Les addons identifient les titres par IMDb (`tt…`) ou `tmdb:…`. Lumio passe 
 ## Android TV
 
 L'appli TV est **Lumio TV**, un fork de NuvioTV (GPL-3.0) : https://github.com/nono7444/lumio-tv
-Pour l'installer, ouvre `lumio.wawanono.lol/tv` dans Downloader : c'est un raccourci du serveur Lumio vers le dernier APK.
+Pour l'installer, ouvre `lumio.wawanono.lol/tvnuvio` dans Downloader (`/tvnuvio64` pour une box 64 bits) : c'est un raccourci du serveur Lumio vers le dernier APK.
 
 ## Lancer en dev
 

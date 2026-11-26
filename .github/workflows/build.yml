@@ -210,7 +210,7 @@ jobs:
             echo "---"
             echo "iPhone : mets à jour depuis FlareStore (source : https://github.com/${{ github.repository }}/releases/latest/download/altstore.json), ou installe lumio-unsigned.ipa avec Sideloadly / SideStore."
             echo "Android (téléphone) : https://github.com/${{ github.repository }}/releases/latest/download/lumio-android.apk"
-            echo "Android TV : Lumio TV (https://github.com/nono7444/lumio-tv/releases/latest), ou lumio.wawanono.lol/tv dans Downloader"
+            echo "Android TV : Lumio TV (https://github.com/nono7444/lumio-tv/releases/latest), ou lumio.wawanono.lol/tvnuvio dans Downloader"
             echo "Toutes les notes : https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md"
           } > body.md
       - uses: softprops/action-gh-release@v2

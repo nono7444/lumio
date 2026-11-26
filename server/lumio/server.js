@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.145.0';
+const VERSION = '3.146.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -6339,6 +6339,11 @@ if (!auto.v375) {
     if (it.type !== 'tv') continue;
     it.future = false;
     if (it.since && !(it.requestIds || []).length && it.seasons.length > 1) it.seasons = [Math.min(...it.seasons)];
+    // Séries suivies depuis la bibliothèque puis demandées : les saisons demandées se rattrapent en entier
+    if (it.type === 'tv' && it.since && (it.requestIds || []).length) {
+      const asked = requests.filter((r) => it.requestIds.includes(r.id)).flatMap((r) => r.seasons || []).map(Number).filter((n) => n > 0);
+      if (asked.length) it.fullSeasons = [...new Set([...(it.fullSeasons || []), ...asked])];
+    }
   }
 }
 // Volume téléchargé par indexeur et par jour ({ ixId: { '2026-11-04': octets } }) : quota des trackers privés
@@ -8123,7 +8128,8 @@ async function autoSearchTick(force = false) {
           item.nextUpgrade = Date.now() + 24 * 3600e3;
         } else {
           item.needsChoice = false; // pas encore sorti ou complet : rien à choisir
-          item.note = item.type === 'movie' && !(item.meta && item.meta.available) ? `pas encore sorti${item.meta && item.meta.availableFrom ? ` (prévu le ${item.meta.availableFrom})` : ''}` : up.length ? 'complet · une version H.265 plus légère est guettée' : 'rien ne manque';
+          const dl = auto.grabs.some((g) => g.itemId === item.id && ['sent', 'downloading', 'importing'].includes(g.state));
+          item.note = dl ? 'téléchargement en cours' : item.type === 'movie' && !(item.meta && item.meta.available) ? `pas encore sorti${item.meta && item.meta.availableFrom ? ` (prévu le ${item.meta.availableFrom})` : ''}` : up.length ? 'complet · une version H.265 plus légère est guettée' : 'rien ne manque';
           item.nextSearch = Date.now() + 6 * 3600e3;
           continue;
         }
@@ -9311,8 +9317,12 @@ async function autoAdd({ type, tmdbId, tvdbId, title, seasons, folderPath, futur
     item.folderPath = f ? f.path : null;
   }
   if (type === 'tv') {
-    for (const n of (seasons || []).map(Number).filter((n) => n > 0)) if (!item.seasons.includes(n)) item.seasons.push(n);
+    const asked = (seasons || []).map(Number).filter((n) => n > 0);
+    for (const n of asked) if (!item.seasons.includes(n)) item.seasons.push(n);
     item.seasons.sort((a, b) => a - b);
+    // Saisons demandées (Télécharger / Demander) : tous leurs épisodes, même anciens — sinon une série déjà suivie
+    // depuis la bibliothèque n'attendait que les épisodes diffusés après son ajout (« rien ne manque » à tort)
+    if (asked.length) item.fullSeasons = [...new Set([...(item.fullSeasons || []), ...asked])];
     if (/anim/i.test(String(item.folderPath || ''))) item.anime = true;
   }
   if (requestId && !item.requestIds.includes(requestId)) item.requestIds.push(requestId);
