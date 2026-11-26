@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.152.0';
+const VERSION = '3.154.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -2352,6 +2352,19 @@ async function filePoster(rootName, rel, isDir) {
   if (hit && Date.now() - hit.at < 7 * 86400e3) return hit.url;
   const { full } = safePath(rootName, rel);
   const name = path.basename(full);
+  // Dossier Livres : la couverture du livre (ou du premier tome du dossier), jamais une affiche de film
+  try {
+    const bd = booksDir();
+    const books = bd && safePath(bd.root, bd.folder).full;
+    if (books && (full === books || full.startsWith(books + path.sep))) {
+      let target = null;
+      if (!isDir) target = BOOK_EXT[path.extname(name).toLowerCase()] && BOOK_EXT[path.extname(name).toLowerCase()] !== 'audio' ? full : null;
+      else target = (await walkFiles(full)).filter((f) => { const t = BOOK_EXT[path.extname(f).toLowerCase()]; return t && t !== 'audio'; }).sort(natural)[0] || null;
+      const url = target ? `/api/books/f/${bookSign(rootName, path.relative(safePath(rootName, '').full, target))}/cover` : null;
+      filePosterCache.set(k, { at: Date.now(), url });
+      return url;
+    }
+  } catch {}
   if (!isDir && (!POSTER_VIDEO.test(name) || /S\d{1,2}E\d{1,3}/i.test(name))) return null; // épisodes : pas de jaquette
   let url = null;
   let kind = 'movie';
@@ -4545,41 +4558,117 @@ async function bookTidy(force) {
   }
 }
 
+// Dossiers « de catégorie » (on range dedans plutôt qu'à côté)
+const BOOK_CATEGORY_DIR = /^(mangas?|manhwas?|webtoons?|bd|bds|comics?|bandes? dessin[ée]es?|livres?|romans?|ebooks?|scans?)$/i;
+/** Deux noms de série désignent-ils la même série ? (« Tsugai - Daemons of the Shadow Realm » = « Daemons of the Shadow Realm ») */
+function sameSeries(a, b) {
+  const na = bookNorm(a);
+  const nb = bookNorm(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const parts = (x) => String(x).split(/\s+[-–]\s+|\s*:\s+/).map(bookNorm).filter((p) => p.length >= 4);
+  return parts(a).includes(nb) || parts(b).includes(na);
+}
+/** Un tome rangé dans « Tsugai - Daemons of the Shadow Realm/ » mais nommé « Daemons of the Shadow Realm T08 » prend le nom
+ *  du dossier : tous les tomes d'une série se regroupent en une seule collection dans l'appli. */
+function bookTitleInFolder(title, rel, kind) {
+  if (kind !== 'bd') return title;
+  const segs = String(rel).split('/').slice(0, -1).filter((x) => !BOOK_CATEGORY_DIR.test(x));
+  const folder = segs[0];
+  if (!folder) return title;
+  const ser = bookSeries(title, true);
+  if (!ser || bookNorm(ser.name) === bookNorm(folder) || !sameSeries(folder, ser.name)) return title;
+  return `${folder} T${String(ser.index).padStart(2, '0')}`;
+}
+/** Joli nom de dossier pour une série */
+function seriesFolderName(name) {
+  let n = String(name).replace(/[\\/:*?"<>|]+/g, ' - ').replace(/\s+/g, ' ').replace(/^[\s.-]+|[\s.-]+$/g, '');
+  if (n === n.toUpperCase() && /[A-Z]{3}/.test(n)) n = n.toLowerCase().replace(/(^|\s)(\p{L})/gu, (m, a, c) => a + c.toUpperCase());
+  return n.slice(0, 120);
+}
+/**
+ * Range chaque tome dans le dossier de sa série :
+ *  - tomes en vrac à la racine (« One Piece T103.cbz ») ;
+ *  - tomes dans des dossiers de téléchargement (« One Piece (01-100+3HS) (Oda) [Digital] (PRiNTER) », « Bleach.74.Tomes… »,
+ *    « One Piece T111 - FR - Ebook Officiel ») → « One Piece/ », « Bleach/ » ;
+ *  - un dossier existant au nom proche est réutilisé (« Tsugai - Daemons of the Shadow Realm » pour « Daemons of the Shadow Realm »).
+ * Les dossiers de téléchargement vidés (il ne reste que .nfo, .txt, images de présentation) sont supprimés.
+ * La lecture en cours, le titre et la couverture suivent chaque tome déplacé.
+ */
 async function bookFolderize(full) {
-  const entries = await fs.promises.readdir(full, { withFileTypes: true }).catch(() => []);
-  const folders = new Map(entries.filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => [bookNorm(e.name), e.name]));
-  // Série reconnue sur au moins un fichier de la racine (les livres seuls restent où ils sont)
+  const top = await fs.promises.readdir(full, { withFileTypes: true }).catch(() => []);
+  // Où ranger : la racine, et chaque dossier de catégorie (Mangas/, BD/…)
+  const bases = [full, ...top.filter((e) => e.isDirectory() && BOOK_CATEGORY_DIR.test(e.name)).map((e) => path.join(full, e.name))];
   let moved = 0;
-  for (const e of entries) {
-    if (!e.isFile() || e.name.startsWith('.')) continue;
-    const ext = path.extname(e.name).toLowerCase();
-    if (!BOOK_EXT[ext] || BOOK_EXT[ext] === 'audio' || e.name.endsWith('.part')) continue;
-    const ser = bookSeries(bookTitle(e.name), BOOK_EXT[ext] === 'bd');
-    if (!ser) continue;
-    const key = bookNorm(ser.name);
-    if (!key || key.length < 2) continue;
-    let folder = folders.get(key);
-    if (!folder) {
-      folder = ser.name.replace(/[\/:*?"<>|]+/g, ' - ').replace(/\s+/g, ' ').replace(/^[\s.-]+|[\s.-]+$/g, '').slice(0, 120);
-      if (!folder) continue;
-      await fs.promises.mkdir(path.join(full, folder), { recursive: true });
-      folders.set(key, folder);
-      console.log(`Livres : dossier « ${folder} » créé`);
+  const touched = new Set();
+  for (const base of bases) {
+    const kids = await fs.promises.readdir(base, { withFileTypes: true }).catch(() => []);
+    const folders = kids.filter((e) => e.isDirectory() && !e.name.startsWith('.') && !BOOK_CATEGORY_DIR.test(e.name)).map((e) => e.name);
+    // Dossier de série « propre » : son nom est lui-même un nom de série (pas de [ ], ( ), « Tomes », numéros…)
+    const clean = (n) => !/[[\]()]|\b(tomes?|int[ée]grale?|integral|t\d{1,4}|v\d{1,4}|cbz|cbr|epub|pdf|fr|french|vf|digital|officiel)\b|\d{2,}/i.test(n.replace(/[._]+/g, ' '));
+    const findFolder = (series) => folders.find((f) => clean(f) && sameSeries(f, series));
+    const files = [];
+    for (const e of kids) {
+      if (e.name.startsWith('.')) continue;
+      const p = path.join(base, e.name);
+      if (e.isFile()) files.push({ file: p, from: null });
+      else if (e.isDirectory() && !BOOK_CATEGORY_DIR.test(e.name)) {
+        // Fichiers d'un dossier de série propre : déjà rangés
+        if (clean(e.name)) continue;
+        for (const f of await walkFiles(p)) files.push({ file: f, from: p });
+      }
     }
-    const from = path.join(full, e.name);
-    const to = path.join(full, folder, e.name);
-    if (await fs.promises.access(to).then(() => true, () => false)) continue; // déjà un fichier du même nom
-    const oldId = bookId(from);
-    await fs.promises.rename(from, to);
-    const newId = bookId(to);
-    // On garde la lecture en cours, le titre et la couverture du tome déplacé
-    for (const mine of Object.values(booksState.progress || {})) if (mine[oldId] && !mine[newId]) (mine[newId] = mine[oldId]), delete mine[oldId];
-    if (booksState.meta[oldId]) (booksState.meta[newId] = booksState.meta[oldId]), delete booksState.meta[oldId];
-    for (const x of ['img', 'none']) await fs.promises.rename(path.join(BOOK_COVERS_DIR, `${oldId}.v3.${x}`), path.join(BOOK_COVERS_DIR, `${newId}.v3.${x}`)).catch(() => {});
-    moved++;
+    for (const { file, from } of files) {
+      const ext = path.extname(file).toLowerCase();
+      const kind = BOOK_EXT[ext];
+      if (!kind || kind === 'audio' || file.endsWith('.part')) continue;
+      const nm = path.basename(file);
+      // Série d'après le nom du fichier, sinon d'après le dossier de téléchargement
+      const ser = bookSeries(bookTitle(nm), kind === 'bd') || (from ? bookSeries(bookTitle(path.basename(from)), true) : null);
+      let seriesName = ser && ser.name;
+      if (!seriesName && from) {
+        const cleaned = bookTitle(path.basename(from)).replace(/\s*\b(T\d{1,4}|tomes?\b.*)$/i, '').trim();
+        if (cleaned.length >= 2) seriesName = cleaned;
+      }
+      if (!seriesName || bookNorm(seriesName).length < 2) continue;
+      let folder = findFolder(seriesName);
+      if (!folder) {
+        folder = seriesFolderName(seriesName);
+        if (!folder) continue;
+        await fs.promises.mkdir(path.join(base, folder), { recursive: true });
+        folders.push(folder);
+        console.log(`Livres : dossier « ${folder} » créé`);
+      }
+      const to = path.join(base, folder, nm);
+      if (to === file) continue;
+      if (await fs.promises.access(to).then(() => true, () => false)) continue; // déjà un fichier du même nom
+      const oldId = bookId(file);
+      try {
+        await fs.promises.rename(file, to);
+      } catch {
+        continue;
+      }
+      const newId = bookId(to);
+      for (const mine of Object.values(booksState.progress || {})) if (mine[oldId] && !mine[newId]) (mine[newId] = mine[oldId]), delete mine[oldId];
+      if (booksState.meta[oldId]) (booksState.meta[newId] = booksState.meta[oldId]), delete booksState.meta[oldId];
+      for (const x of ['img', 'none']) await fs.promises.rename(path.join(BOOK_COVERS_DIR, `${oldId}.v3.${x}`), path.join(BOOK_COVERS_DIR, `${newId}.v3.${x}`)).catch(() => {});
+      if (from) touched.add(from);
+      moved++;
+    }
+  }
+  // Dossiers de téléchargement vidés : supprimés s'il ne reste que des petits fichiers sans importance
+  for (const dir of touched) {
+    const left = await walkFiles(dir);
+    const junk = left.every((f) => /\.(nfo|txt|url|sfv|md5|db|ini|jpe?g|png|webp|gif|html?)$/i.test(f));
+    const pics = left.filter((f) => isImage(path.basename(f))).length;
+    if (junk && pics <= 6) {
+      await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
+      console.log(`Livres : dossier « ${path.basename(dir)} » vidé et supprimé`);
+    }
   }
   if (moved) {
     saveBooksState();
+    filePosterCache.clear();
     console.log(`Livres : ${moved} tome(s) rangé(s) dans le dossier de leur série`);
   }
   return moved;
@@ -4618,7 +4707,7 @@ async function bookLibrary() {
         return {
           id: bookMigrate(path.join(full, f.rel)),
           name: f.name,
-          title: info.title,
+          title: bookTitleInFolder(info.title, f.rel, BOOK_EXT[path.extname(f.name).toLowerCase()]),
           author: info.author,
           folder: f.rel.includes('/') ? f.rel.replace(/\/[^/]*$/, '') : '',
           path: rel,

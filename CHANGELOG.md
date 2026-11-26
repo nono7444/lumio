@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Serveur, Livres : rangement complet du dossier. Les dossiers de téléchargement (« One Piece (01-100+3HS) (Oda) [Digital] (PRiNTER) », « Bleach.74.Tomes… », « One Piece T111 - FR - Ebook Officiel », « Kaamelott, Tomes 01 à 10 [BD]… ») sont vidés dans le dossier de leur série (« One Piece/ », « Bleach/ », « Kaamelott/ ») puis supprimés s'il n'y reste que des .nfo / images de présentation ; un dossier au nom proche est réutilisé (« Tsugai - Daemons of the Shadow Realm » pour « Daemons of the Shadow Realm ») et tous ses tomes forment une seule collection ; dans Disques, les dossiers de livres montrent la couverture du premier tome au lieu d'une affiche de film (serveur 3.154.0).
+
 - Serveur : les tomes posés en vrac dans le dossier Livres (« One Piece T103.cbz », « Naruto.T71… ») sont rangés tout seuls dans le dossier de leur série, créé s'il n'existe pas (un dossier existant au nom proche est réutilisé) ; lecture en cours et couverture gardées (serveur 3.152.0).
 
 - Livres : les fichiers nommés « V001 », « v12 »… (scans) sont reconnus comme tome 1, tome 12 : les collections ne montrent plus tous les tomes en « pas sur le serveur », et chaque tome retrouve sa propre couverture (serveur 3.151.0).
