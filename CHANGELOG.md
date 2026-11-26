@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.218 — 26 novembre 2026
+
 - Livres réorganisé en trois onglets bien séparés : Biblio (Mangas ou BD, un seul type à la fois, plus de romans), Trouver (mangas et BD) et Top (nouveaux mangas 2026+, derniers mangas parus en France, top BD Apple Books). Les tendances ne sont plus mélangées à la bibliothèque (serveur 3.149.0).
 
 ## 1.0.217 — 26 novembre 2026
