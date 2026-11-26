@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Livres : les fichiers nommés « V001 », « v12 »… (scans) sont reconnus comme tome 1, tome 12 : les collections ne montrent plus tous les tomes en « pas sur le serveur », et chaque tome retrouve sa propre couverture (serveur 3.151.0).
+
 ## 1.0.219 — 26 novembre 2026
 
 - Livres (admin) : appui long sur une collection (ou un tome seul) dans Biblio → « Ranger dans BD » / « Ranger dans Mangas » ; le choix est gardé par le serveur et vaut pour tous les tomes de la série (serveur 3.150.0).

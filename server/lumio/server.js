@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.150.0';
+const VERSION = '3.151.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -3971,7 +3971,7 @@ function bookVolumes(title) {
   if (m && Number(m[2]) > Number(m[1])) return { genre: 'pack', range: `T${Number(m[1])} à T${Number(m[2])}` };
   m = t.match(/\(\s*Tomes?\s*0*(\d{1,4})\s*(?:-|à)\s*0*(\d{1,4})\s*\)/i);
   if (m && Number(m[2]) > Number(m[1])) return { genre: 'pack', range: `T${Number(m[1])} à T${Number(m[2])}` };
-  m = t.match(/\b(?:T(?:ome)?|Vol(?:ume)?\.?|#)\s*0*(\d{1,4})\b/i);
+  m = t.match(/\b(?:T(?:ome)?|Vol(?:ume)?\.?|V|#)\s*0*(\d{1,4})\b/i);
   if (m) return { genre: 'tome', tome: Number(m[1]) };
   return { genre: 'livre' };
 }
@@ -4273,7 +4273,11 @@ async function epubBook(file) {
 }
 
 function bookTitle(name) {
-  const base = String(name).replace(/\.[a-z0-9]{2,4}$/i, '').replace(/[._]+/g, ' ');
+  const base = String(name)
+    .replace(/\.[a-z0-9]{2,4}$/i, '')
+    .replace(/[._]+/g, ' ')
+    // « V001 », « v12 » (scans) → « T01 », « T12 »
+    .replace(/(^|[\s\-[(])v(\d{1,4})\b/gi, (_, a, n) => `${a}T${String(Number(n)).padStart(2, '0')}`);
   // Numéro du tome où qu'il soit dans le nom (« Black Clover 2016 FRENCH T33 … »)
   const tm = base.match(/\b(?:t(?:ome)?|vol(?:ume)?)\s*-?\s*(\d{1,4})\b/i);
   let t = base
@@ -4329,7 +4333,7 @@ function bookId(file) {
 /** Titre et auteur : ceux de l'EPUB, sinon « Auteur - Titre » du nom de fichier. */
 async function bookInfo(file, name, st) {
   const id = bookId(file);
-  const sig = `${st.size}-${Math.round(st.mtimeMs)}-v3`; // v3 : titres avec le numéro du tome, BD sans « auteur - »
+  const sig = `${st.size}-${Math.round(st.mtimeMs)}-v4`; // v4 : « V001 » compris comme tome 1
   const c = booksState.meta[id];
   if (c && c.sig === sig) return c;
   let title = bookTitle(name);
@@ -4345,6 +4349,10 @@ async function bookInfo(file, name, st) {
     } catch {}
   }
   const out = { sig, title, author };
+  // Titre changé (ex. le numéro du tome enfin reconnu) : la couverture est recherchée de nouveau
+  if (c && c.title !== title) {
+    for (const ext of ['img', 'none']) fs.promises.rm(path.join(BOOK_COVERS_DIR, `${id}.v3.${ext}`), { force: true }).catch(() => {});
+  }
   booksState.meta[id] = out;
   saveBooksState();
   return out;
