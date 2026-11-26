@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.217 — 26 novembre 2026
+
 - Livres : choix en haut de la bibliothèque entre Livres, Mangas et BD (séparés : d'après le dossier, sinon la série cherchée sur MangaDex ; l'admin peut ranger une série à la main depuis sa page).
 - Livres : rangées « Mangas du moment » (AniList) et « Top livres » (classement Apple Books France) ; Livres audio : « Top livres audio ». L'admin touche une couverture → la recherche du titre se lance (serveur 3.148.0).
 
