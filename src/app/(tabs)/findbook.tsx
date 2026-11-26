@@ -1,7 +1,7 @@
 // Lumio Livres → onglet « Trouver » (admin) : recherche de livres, BD, mangas et comics sur C411, Tr4ker et Wawacity,
 // téléchargement par le serveur Lumio (AllDebrid), suivi des téléchargements.
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
@@ -62,8 +62,19 @@ function Find() {
     return () => clearInterval(t);
   }, [loadJobs]);
 
-  const search = async (k: EbookKind = kind) => {
-    const query = q.trim();
+  // Arrivée depuis « Mangas du moment » / « Top livres » : recherche lancée tout de suite
+  const params = useLocalSearchParams<{ q?: string; kind?: EbookKind }>();
+  useEffect(() => {
+    if (params.q) {
+      const k = params.kind ?? kind;
+      setQ(params.q);
+      setKind(k);
+      search(k, params.q);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.q, params.kind]);
+  const search = async (k: EbookKind = kind, forced?: string) => {
+    const query = (forced ?? q).trim();
     if (query.length < 2) return;
     setBusy(true);
     setErr(null);

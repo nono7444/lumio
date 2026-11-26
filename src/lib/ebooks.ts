@@ -24,6 +24,8 @@ export type Ebook = {
   folder: string;
   path: string;
   format: BookFormat;
+  /** CBZ / CBR : manga ou BD (dossier, sinon MangaDex) */
+  comic?: 'manga' | 'bd';
   size: number;
   modified: string;
   token: string;
@@ -56,6 +58,7 @@ export type EbookResult = {
 };
 export type EbookSource = { id: string; label: string; state: string; count: number; message?: string };
 export type EbookJob = { id: string; name: string; status: string; size: number; done: number; speed: number; error?: string; createdAt: string; finishedAt?: string; by?: string; current?: string };
+export type DiscoverItem = { rank: number; title: string; search: string; author: string | null; year: number | null; cover: string | null };
 /** Tomes parus d'une série (MangaDex) */
 export type SeriesInfo = { source: string | null; title?: string; total: number; status?: string | null; volumes: { n: number; cover: string | null; fr?: boolean }[] };
 const normName = (t: string) =>
@@ -88,6 +91,9 @@ export const ebookApi = {
     serverCall<{ results: EbookResult[]; sources: EbookSource[] }>(s, `/api/books/search?kind=${kind}&q=${encodeURIComponent(q)}`),
   download: (s: Settings, id: string) => serverCall<{ job: EbookJob }>(s, '/api/books/download', { method: 'POST', body: JSON.stringify({ id }) }),
   jobs: (s: Settings) => serverCall<{ jobs: EbookJob[] }>(s, '/api/books/jobs'),
+  /** Découvrir : mangas du moment (AniList), top livres / livres audio (Apple Books France) */
+  discover: (s: Settings, kind: 'manga' | 'livres' | 'audio') => serverCall<{ items: DiscoverItem[] }>(s, `/api/books/discover?kind=${kind}`),
+  setComic: (s: Settings, name: string, kind: 'manga' | 'bd') => serverCall<{ ok: boolean }>(s, '/api/books/comic-kind', { method: 'POST', body: JSON.stringify({ name, kind }) }),
   cancelJob: (s: Settings, id: string) => serverCall<{ ok: boolean }>(s, `/api/books/jobs/${id}`, { method: 'DELETE' }),
   seriesInfo: (s: Settings, name: string) => serverCall<SeriesInfo>(s, `/api/books/series-info?name=${encodeURIComponent(name)}`),
   /** Compléter les séries tout seul (tomes manquants et tome suivant) */

@@ -11,7 +11,7 @@ import { FocusPressable as Pressable } from '@/components/tv';
 import { Button, ScreenTitle, tap } from '@/components/ui';
 import { C } from '@/constants/theme';
 import { Image } from 'expo-image';
-import { ebookApi, groupSeries, JOB_ACTIVE, jobForTome, seriesByKey, tomeOf, useEbooks, type BooksAuto, type Ebook, type EbookJob, type SeriesInfo } from '@/lib/ebooks';
+import { ebookApi, loadEbooks, groupSeries, JOB_ACTIVE, jobForTome, seriesByKey, tomeOf, useEbooks, type BooksAuto, type Ebook, type EbookJob, type SeriesInfo } from '@/lib/ebooks';
 import { useSettings } from '@/lib/settings';
 
 export default function SeriesScreen() {
@@ -79,6 +79,22 @@ export default function SeriesScreen() {
             icon="book-outline"
             onPress={() => router.push({ pathname: '/reader', params: { id: next.id } })}
           />
+          {lib?.admin && s.books.some((b) => b.format === 'bd') ? (
+            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+              <Text style={styles.s}>Ranger dans :</Text>
+              {(['manga', 'bd'] as const).map((k) => {
+                const on = (s.books[0]?.comic ?? 'manga') === k;
+                return (
+                  <Pressable
+                    key={k}
+                    onPress={() => (tap(), ebookApi.setComic(settings, s.name, k).then(() => loadEbooks(settings)).catch(() => {}))}
+                    style={[styles.kindChip, on ? { backgroundColor: C.text } : null]}>
+                    <Text style={[styles.s, { color: on ? '#000' : C.text, fontWeight: '700' }]}>{k === 'manga' ? 'Mangas' : 'BD'}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
           {lib?.admin ? <Text style={styles.s}>Appui long sur un tome : changer sa couverture</Text> : null}
         </View>
         <View style={styles.grid}>
@@ -157,6 +173,7 @@ const styles = StyleSheet.create({
   tome: { position: 'absolute', left: 6, top: 6, minWidth: 24, height: 24, paddingHorizontal: 6, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.75)', alignItems: 'center', justifyContent: 'center' },
   tomeText: { color: '#fff', fontWeight: '800', fontSize: 12 },
   missing: { overflow: 'hidden', borderRadius: 8, borderWidth: 1.5, borderStyle: 'dashed', borderColor: C.border, backgroundColor: C.surface, alignItems: 'center', justifyContent: 'center', gap: 10 },
+  kindChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: C.surface },
   missBar: { position: 'absolute', left: 8, right: 8, bottom: 8, height: 4, borderRadius: 2, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.2)' },
   missTag: { marginHorizontal: 6, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: C.danger },
   missTagText: { color: '#fff', fontWeight: '800', fontSize: 10, letterSpacing: 0.5, textAlign: 'center' },

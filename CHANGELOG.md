@@ -6,6 +6,9 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Livres : choix en haut de la bibliothèque entre Livres, Mangas et BD (séparés : d'après le dossier, sinon la série cherchée sur MangaDex ; l'admin peut ranger une série à la main depuis sa page).
+- Livres : rangées « Mangas du moment » (AniList) et « Top livres » (classement Apple Books France) ; Livres audio : « Top livres audio ». L'admin touche une couverture → la recherche du titre se lance (serveur 3.148.0).
+
 - Lumio Auto : « Relancer la recherche » remet les saisons de la demande dans le suivi (en entier) ; une série demandée sans saison précise prend toutes les saisons ; les vieux épisodes sans date sur TMDB comptent comme diffusés (serveur 3.147.0).
 
 - Lumio Auto : une série déjà suivie depuis la bibliothèque puis demandée (ex. Wakfu) restait sur « rien ne manque » car seuls les nouveaux épisodes étaient attendus ; les saisons demandées se téléchargent maintenant en entier, et la note affiche « téléchargement en cours » quand c'est le cas (serveur 3.146.0).

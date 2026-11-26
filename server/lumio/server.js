@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.147.0';
+const VERSION = '3.148.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4577,6 +4577,8 @@ async function bookLibrary() {
           token: bookSign(dir.root, rel),
           // Version de la couverture (date du fichier gardé sur le serveur) : le téléphone la retélécharge quand elle change
           coverV: bookCoverVersion(path.join(full, f.rel)),
+          // BD / CBZ : « manga » ou « bd » (dossier, sinon série trouvée sur MangaDex)
+          comic: BOOK_EXT[path.extname(f.name).toLowerCase()] === 'bd' ? comicKind(f.rel, info.title) : undefined,
         };
       }),
   };
@@ -4628,6 +4630,84 @@ function bookCoversWarm(files) {
     }
   })().finally(() => (coversWarming = false));
 }
+// ——— Mangas ou BD ? ———
+// D'abord le dossier (« Mangas », « BD », « Comics »), sinon la série cherchée une fois sur MangaDex (trouvée = manga,
+// sinon BD) ; résultat gardé. Les séries pas encore vérifiées passent en arrière-plan (une à la fois).
+const comicQueue = new Set();
+let comicRunning = false;
+function comicKind(rel, title) {
+  const dir = String(rel).toLowerCase();
+  if (/(^|\/)(mangas?|manhwas?|webtoons?|scans?)(\/|$)/.test(dir)) return 'manga';
+  if (/(^|\/)(bd|bds|comics?|bandes? dessin[ée]es?|franco)(\/|$)/.test(dir)) return 'bd';
+  const ser = bookSeries(title, true);
+  const name = ser ? ser.name : title;
+  const key = bookNorm(name);
+  const known = (booksState.comicKind ||= {})[key];
+  if (known) return known;
+  if (key) comicQueue.add(name);
+  setTimeout(comicRun, 2000);
+  return 'manga'; // en attendant : la plupart des CBZ sont des mangas
+}
+async function comicRun() {
+  if (comicRunning || !comicQueue.size) return;
+  comicRunning = true;
+  try {
+    for (const name of [...comicQueue].slice(0, 30)) {
+      comicQueue.delete(name);
+      const info = await seriesInfo(name).catch(() => undefined);
+      if (info === undefined) continue; // MangaDex injoignable : on réessaiera
+      booksState.comicKind[bookNorm(name)] = info ? 'manga' : 'bd';
+      await sleep(400);
+    }
+    saveBooksState();
+  } finally {
+    comicRunning = false;
+    if (comicQueue.size) setTimeout(comicRun, 5000);
+  }
+}
+
+// ——— Découvrir : mangas du moment (AniList), top livres et top livres audio (Apple Books France) ———
+const discoverCache = new Map();
+async function discoverList(kind) {
+  const hit = discoverCache.get(kind);
+  if (hit && Date.now() - hit.at < 12 * 3600_000) return hit.items;
+  let items = [];
+  const big = (u) => String(u || '').replace(/\/\d+x\d+(bb)?\.(jpg|png)$/, '/400x600bb.$2');
+  if (kind === 'manga') {
+    const query = `query { Page(perPage: 24) { media(type: MANGA, sort: TRENDING_DESC, isAdult: false) { title { romaji english } coverImage { large } startDate { year } countryOfOrigin } } }`;
+    const r = await fetch('https://graphql.anilist.co', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ query }), signal: AbortSignal.timeout(12000) });
+    const j = await r.json();
+    items = ((j.data && j.data.Page && j.data.Page.media) || []).map((m, i) => ({
+      rank: i + 1,
+      title: m.title.english || m.title.romaji,
+      search: m.title.romaji || m.title.english,
+      author: m.countryOfOrigin === 'KR' ? 'Manhwa' : m.countryOfOrigin === 'CN' ? 'Manhua' : null,
+      year: m.startDate && m.startDate.year,
+      cover: m.coverImage && m.coverImage.large,
+    }));
+  } else {
+    const feed = kind === 'audio' ? 'audio-books/top/25/audio-books.json' : 'books/top-paid/25/books.json';
+    const j = await (await fetch(`https://rss.applemarketingtools.com/api/v2/fr/${feed}`, { signal: AbortSignal.timeout(12000) }).catch(() => null))?.json().catch(() => null);
+    items = ((j && j.feed && j.feed.results) || []).map((x, i) => ({ rank: i + 1, title: x.name, search: x.name, author: x.artistName, year: null, cover: big(x.artworkUrl100) }));
+    if (!items.length) {
+      // Ancien flux iTunes (encore utilisé pour les livres audio)
+      const old = kind === 'audio' ? 'topaudiobooks' : 'toppaidebooks';
+      const o = await (await fetch(`https://itunes.apple.com/fr/rss/${old}/limit=25/json`, { signal: AbortSignal.timeout(12000) }).catch(() => null))?.json().catch(() => null);
+      items = ((o && o.feed && o.feed.entry) || []).map((x, i) => ({
+        rank: i + 1,
+        title: x['im:name'] && x['im:name'].label,
+        search: x['im:name'] && x['im:name'].label,
+        author: x['im:artist'] && x['im:artist'].label,
+        year: null,
+        cover: big(((x['im:image'] || []).slice(-1)[0] || {}).label),
+      }));
+    }
+  }
+  items = items.filter((x) => x.title);
+  if (items.length) discoverCache.set(kind, { at: Date.now(), items });
+  return items;
+}
+
 /** Tomes parus d'une série sur MangaDex (numéros et couvertures, en français s'il y en a), gardés 24 h. */
 const seriesInfoCache = new Map();
 async function seriesInfo(series) {
@@ -5072,6 +5152,23 @@ async function bookRoutes(req, res, p, q, user) {
     if (!found) throw new HttpError(404, 'Résultat expiré : relance la recherche');
     const job = await bookStartDownload(found, user.name);
     send(res, 201, { job: publicJob(job) });
+    return true;
+  }
+  // Admin : classer une série en manga ou en BD à la main
+  if (req.method === 'POST' && p === '/api/books/comic-kind') {
+    requireAdmin(user);
+    const b = await readBody(req);
+    const key = bookNorm(b.name);
+    if (!key || !['manga', 'bd'].includes(b.kind)) throw new HttpError(400, 'Série ou type manquant');
+    (booksState.comicKind ||= {})[key] = b.kind;
+    saveBooksState();
+    send(res, 200, { ok: true });
+    return true;
+  }
+  // Découvrir : mangas du moment, top livres, top livres audio
+  if (req.method === 'GET' && p === '/api/books/discover') {
+    const kind = ['manga', 'livres', 'audio'].includes(q.get('kind')) ? q.get('kind') : 'manga';
+    send(res, 200, { kind, items: await discoverList(kind).catch(() => []) });
     return true;
   }
   // Tous les tomes parus d'une série (MangaDex) : pour afficher aussi ceux qu'on n'a pas dans la collection

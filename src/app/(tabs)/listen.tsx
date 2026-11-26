@@ -3,6 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { DiscoverRow } from '@/components/discover-row';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -114,6 +115,7 @@ function Listen() {
               </View>
             ) : null}
 
+            <DiscoverRow kind="audio" title="Top livres audio" admin={Boolean(lib.admin)} />
             <Text style={styles.h}>
               Tous les livres <Text style={{ color: C.textFaint }}>· {books.length}</Text>
             </Text>

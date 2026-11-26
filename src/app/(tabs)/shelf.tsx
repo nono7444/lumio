@@ -6,6 +6,7 @@ import { useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { DiscoverRow } from '@/components/discover-row';
 import { BookCover, ReadBar } from '@/components/ebook-ui';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { UniverseSwitch } from '@/components/universe-switch';
@@ -16,7 +17,9 @@ import { useSettings } from '@/lib/settings';
 
 type Sort = 'recent' | 'title' | 'author';
 type Filter = 'all' | 'progress' | 'new' | 'done';
-type Kind = 'all' | 'epub' | 'bd' | 'pdf';
+type Kind = 'all' | 'epub' | 'manga' | 'bd' | 'pdf';
+/** Type affiché d'un livre : livre, manga, BD ou PDF */
+const kindOfBook = (b: Ebook): Exclude<Kind, 'all'> => (b.format === 'bd' ? (b.comic === 'bd' ? 'bd' : 'manga') : b.format === 'pdf' ? 'pdf' : 'epub');
 const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 const open = (b: Ebook) => (tap(), router.push({ pathname: '/ebook/[id]', params: { id: b.id } }));
 const read = (b: Ebook) => (tap(), router.push({ pathname: '/reader', params: { id: b.id } }));
@@ -37,7 +40,7 @@ function Shelf() {
   const w = Math.floor((Math.min(width, 1100) - 32 - (cols - 1) * 14) / cols);
 
   const books = useMemo(() => lib?.books ?? [], [lib]);
-  const kinds = useMemo(() => new Set(books.map((b) => b.format)), [books]);
+  const kinds = useMemo(() => new Set(books.map(kindOfBook)), [books]);
   const going = useMemo(
     () =>
       books
@@ -49,7 +52,7 @@ function Shelf() {
   const shown = useMemo(() => {
     let l = books.filter(
       (b) =>
-        (kind === 'all' || b.format === kind) &&
+        (kind === 'all' || kindOfBook(b) === kind) &&
         (filter === 'progress' ? b.progress && !b.progress.done : filter === 'new' ? !b.progress : filter === 'done' ? b.progress?.done : true)
     );
     if (q.trim()) {
@@ -119,6 +122,14 @@ function Shelf() {
           />
         ) : (
           <>
+            {/* Choix en haut : Livres, Mangas ou BD (séparés), PDF */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chips, { marginBottom: 14 }]}>
+              <SegChip label="Tout" on={kind === 'all'} onPress={() => setKind('all')} />
+              {kinds.has('epub') ? <SegChip label="Livres" icon="book-outline" on={kind === 'epub'} onPress={() => setKind('epub')} /> : null}
+              {kinds.has('manga') ? <SegChip label="Mangas" icon="flash-outline" on={kind === 'manga'} onPress={() => setKind('manga')} /> : null}
+              {kinds.has('bd') ? <SegChip label="BD" icon="images-outline" on={kind === 'bd'} onPress={() => setKind('bd')} /> : null}
+              {kinds.has('pdf') ? <SegChip label="PDF" icon="document-text-outline" on={kind === 'pdf'} onPress={() => setKind('pdf')} /> : null}
+            </ScrollView>
             {going.length ? (
               <View style={{ marginBottom: 18 }}>
                 <Text style={styles.h}>Continuer la lecture</Text>
@@ -139,8 +150,11 @@ function Shelf() {
               </View>
             ) : null}
 
+            {kind === 'all' || kind === 'manga' ? <DiscoverRow kind="manga" title="Mangas du moment" admin={Boolean(lib.admin)} /> : null}
+            {kind === 'all' || kind === 'epub' ? <DiscoverRow kind="livres" title="Top livres" admin={Boolean(lib.admin)} /> : null}
             <Text style={styles.h}>
-              Tous les livres <Text style={{ color: C.textFaint }}>· {books.length}</Text>
+              {kind === 'manga' ? 'Mangas' : kind === 'bd' ? 'BD' : kind === 'epub' ? 'Livres' : kind === 'pdf' ? 'PDF' : 'Tous les livres'}{' '}
+              <Text style={{ color: C.textFaint }}>· {kind === 'all' ? books.length : books.filter((b) => kindOfBook(b) === kind).length}</Text>
             </Text>
             <View style={styles.searchBox}>
               <Ionicons name="search" size={16} color={C.textDim} />
@@ -163,14 +177,6 @@ function Shelf() {
               <SegChip label="Titre" icon="text-outline" on={sort === 'title'} onPress={() => setSort('title')} />
               <SegChip label="Auteur" icon="person-outline" on={sort === 'author'} onPress={() => setSort('author')} />
             </ScrollView>
-            {kinds.size > 1 ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-                <SegChip label="Tout" on={kind === 'all'} onPress={() => setKind('all')} />
-                {kinds.has('epub') ? <SegChip label="Livres" icon="book-outline" on={kind === 'epub'} onPress={() => setKind('epub')} /> : null}
-                {kinds.has('bd') ? <SegChip label="BD / Mangas" icon="images-outline" on={kind === 'bd'} onPress={() => setKind('bd')} /> : null}
-                {kinds.has('pdf') ? <SegChip label="PDF" icon="document-text-outline" on={kind === 'pdf'} onPress={() => setKind('pdf')} /> : null}
-              </ScrollView>
-            ) : null}
             <View style={[styles.grid, { gap: 14 }]}>
               {items.map((it) =>
                 it.t === 'series' ? (

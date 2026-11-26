@@ -1,6 +1,7 @@
 // Lumio Audio → onglet « Trouver » (admin) : recherche de livres audio sur C411, Tr4ker et Wawacity, téléchargement
 // par le serveur Lumio (cache AllDebrid / TorBox d'abord, sinon qBittorrent), suivi des téléchargements.
 import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { FocusPressable as Pressable } from '@/components/tv';
@@ -57,8 +58,17 @@ function Find() {
     return () => clearInterval(t);
   }, [loadJobs]);
 
-  const search = async () => {
-    const query = q.trim();
+  // Arrivée depuis « Top livres audio » : recherche lancée tout de suite
+  const params = useLocalSearchParams<{ q?: string }>();
+  useEffect(() => {
+    if (params.q) {
+      setQ(params.q);
+      search(params.q);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.q]);
+  const search = async (forced?: string) => {
+    const query = (forced ?? q).trim();
     if (query.length < 2) return;
     setBusy(true);
     setErr(null);
@@ -105,7 +115,7 @@ function Find() {
           <TextInput
             value={q}
             onChangeText={setQ}
-            onSubmitEditing={search}
+            onSubmitEditing={() => search()}
             placeholder="Titre ou auteur d'un livre audio"
             placeholderTextColor={C.textFaint}
             style={styles.search}
