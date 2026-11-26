@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.155.0';
+const VERSION = '3.156.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4641,15 +4641,23 @@ async function bookFolderize(full) {
       }
       const to = path.join(base, folder, nm);
       if (to === file) continue;
+      const me = await fs.promises.stat(file).catch(() => null);
+      if (!me) continue;
+      // Fichier encore en cours d'écriture (téléchargement, décompression) : on attend le prochain passage
+      if (Date.now() - me.mtimeMs < 3 * 60_000) continue;
       const there = await fs.promises.stat(to).catch(() => null);
       if (there) {
-        // Même fichier déjà rangé (même nom, même taille) : le doublon du dossier de téléchargement est retiré
-        const me = await fs.promises.stat(file).catch(() => null);
-        if (me && me.size === there.size && from) {
+        if (!from) continue;
+        // Déjà rangé sous le même nom : on garde la version la plus complète (la plus grosse), l'autre est retirée
+        if (me.size > there.size) {
+          await fs.promises.rename(file, to).catch(() => {});
+          console.log(`Livres : « ${nm} » remplacé par la version plus complète`);
+        } else {
           await fs.promises.unlink(file).catch(() => {});
-          touched.add(from);
           console.log(`Livres : doublon « ${nm} » retiré`);
         }
+        touched.add(from);
+        filePosterCache.clear();
         continue;
       }
       const oldId = bookId(file);

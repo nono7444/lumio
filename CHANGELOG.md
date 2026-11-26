@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Serveur, Livres : un tome en double (même nom) dans un dossier de téléchargement → la version la plus complète est gardée dans le dossier de la série, l'autre retirée ; un fichier encore en cours d'écriture n'est jamais déplacé (serveur 3.156.0).
+
 - Serveur, Livres : un tome déjà rangé (même nom, même taille) laissé en double dans un dossier de téléchargement est retiré, pour que le dossier puisse être supprimé ; rangement vérifié toutes les 2 min au lieu de 10 (serveur 3.155.0).
 
 - Serveur, Livres : rangement complet du dossier. Les dossiers de téléchargement (« One Piece (01-100+3HS) (Oda) [Digital] (PRiNTER) », « Bleach.74.Tomes… », « One Piece T111 - FR - Ebook Officiel », « Kaamelott, Tomes 01 à 10 [BD]… ») sont vidés dans le dossier de leur série (« One Piece/ », « Bleach/ », « Kaamelott/ ») puis supprimés s'il n'y reste que des .nfo / images de présentation ; un dossier au nom proche est réutilisé (« Tsugai - Daemons of the Shadow Realm » pour « Daemons of the Shadow Realm ») et tous ses tomes forment une seule collection ; dans Disques, les dossiers de livres montrent la couverture du premier tome au lieu d'une affiche de film (serveur 3.154.0).
