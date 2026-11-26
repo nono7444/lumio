@@ -19,7 +19,7 @@ export const UNIVERSES: { id: Universe; label: string; icon: 'film' | 'headset' 
 export const UNIVERSE_TABS: Record<Universe, string[]> = {
   media: ['index', 'search', 'library', 'live', 'calendar', 'watchlist', 'settings'],
   audio: ['listen', 'find', 'settings'],
-  books: ['shelf', 'findbook', 'settings'],
+  books: ['shelf', 'findbook', 'booktop', 'settings'],
   twitch: ['twitch', 'settings'],
   auto: ['perf', 'seed', 'demandes', 'qbit', 'disks', 'server', 'playing', 'settings'],
 };

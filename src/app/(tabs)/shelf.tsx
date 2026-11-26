@@ -6,7 +6,6 @@ import { useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { DiscoverRow } from '@/components/discover-row';
 import { BookCover, ReadBar } from '@/components/ebook-ui';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { UniverseSwitch } from '@/components/universe-switch';
@@ -17,9 +16,10 @@ import { useSettings } from '@/lib/settings';
 
 type Sort = 'recent' | 'title' | 'author';
 type Filter = 'all' | 'progress' | 'new' | 'done';
-type Kind = 'all' | 'epub' | 'manga' | 'bd' | 'pdf';
+type Kind = 'manga' | 'bd';
 /** Type affiché d'un livre : livre, manga, BD ou PDF */
-const kindOfBook = (b: Ebook): Exclude<Kind, 'all'> => (b.format === 'bd' ? (b.comic === 'bd' ? 'bd' : 'manga') : b.format === 'pdf' ? 'pdf' : 'epub');
+// Univers Livres = mangas et BD seulement (pas de romans) ; jamais mélangés : un type affiché à la fois
+const kindOfBook = (b: Ebook): Kind | null => (b.format === 'bd' ? (b.comic === 'bd' ? 'bd' : 'manga') : null);
 const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 const open = (b: Ebook) => (tap(), router.push({ pathname: '/ebook/[id]', params: { id: b.id } }));
 const read = (b: Ebook) => (tap(), router.push({ pathname: '/reader', params: { id: b.id } }));
@@ -34,13 +34,14 @@ function Shelf() {
   const { width } = useWindowDimensions();
   const [sort, setSort] = useState<Sort>('recent');
   const [filter, setFilter] = useState<Filter>('all');
-  const [kind, setKind] = useState<Kind>('all');
+  const [kind, setKind] = useState<Kind>('manga');
   const [q, setQ] = useState('');
   const cols = width > 700 ? 5 : width > 500 ? 4 : 3;
   const w = Math.floor((Math.min(width, 1100) - 32 - (cols - 1) * 14) / cols);
 
-  const books = useMemo(() => lib?.books ?? [], [lib]);
-  const kinds = useMemo(() => new Set(books.map(kindOfBook)), [books]);
+  const allBooks = useMemo(() => (lib?.books ?? []).filter((b) => kindOfBook(b)), [lib]);
+  const books = useMemo(() => allBooks.filter((b) => kindOfBook(b) === kind), [allBooks, kind]);
+  const count = (k: Kind) => allBooks.filter((b) => kindOfBook(b) === k).length;
   const going = useMemo(
     () =>
       books
@@ -52,7 +53,6 @@ function Shelf() {
   const shown = useMemo(() => {
     let l = books.filter(
       (b) =>
-        (kind === 'all' || kindOfBook(b) === kind) &&
         (filter === 'progress' ? b.progress && !b.progress.done : filter === 'new' ? !b.progress : filter === 'done' ? b.progress?.done : true)
     );
     if (q.trim()) {
@@ -109,6 +109,17 @@ function Shelf() {
             ) : undefined
           }
         />
+        {/* Mangas ou BD : jamais mélangés */}
+        <View style={styles.switch}>
+          {(['manga', 'bd'] as const).map((k) => (
+            <Pressable key={k} onPress={() => (tap(), setKind(k))} style={[styles.switchBtn, kind === k ? styles.switchOn : null]}>
+              <Ionicons name={k === 'manga' ? 'flash' : 'images'} size={16} color={kind === k ? '#000' : C.text} />
+              <Text style={[styles.switchText, kind === k ? { color: '#000' } : null]}>
+                {k === 'manga' ? 'Mangas' : 'BD'} · {count(k)}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
         {!settings.chatUrl ? (
           <Empty icon="cloud-offline-outline" text="Serveur Lumio non configuré (Profil)." />
         ) : !lib && libErr ? (
@@ -118,18 +129,11 @@ function Shelf() {
         ) : !books.length ? (
           <Empty
             icon="library-outline"
-            text={lib.admin ? `Aucun livre pour l'instant. Cherche-en dans l'onglet Trouver${lib.dir ? ` (dossier « ${lib.dir.folder} »)` : ''}.` : "Aucun livre pour l'instant."}
+            text={`${kind === 'manga' ? 'Aucun manga' : 'Aucune BD'} pour l'instant.${lib.admin ? ' Cherche dans Trouver, ou pioche dans le Top.' : ''}${kind === 'bd' && count('manga') ? ' (Une série mal rangée ? Ouvre-la dans Mangas et choisis « Ranger dans : BD ».)' : ''}`}
           />
         ) : (
           <>
-            {/* Choix en haut : Livres, Mangas ou BD (séparés), PDF */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chips, { marginBottom: 14 }]}>
-              <SegChip label="Tout" on={kind === 'all'} onPress={() => setKind('all')} />
-              {kinds.has('epub') ? <SegChip label="Livres" icon="book-outline" on={kind === 'epub'} onPress={() => setKind('epub')} /> : null}
-              {kinds.has('manga') ? <SegChip label="Mangas" icon="flash-outline" on={kind === 'manga'} onPress={() => setKind('manga')} /> : null}
-              {kinds.has('bd') ? <SegChip label="BD" icon="images-outline" on={kind === 'bd'} onPress={() => setKind('bd')} /> : null}
-              {kinds.has('pdf') ? <SegChip label="PDF" icon="document-text-outline" on={kind === 'pdf'} onPress={() => setKind('pdf')} /> : null}
-            </ScrollView>
+
             {going.length ? (
               <View style={{ marginBottom: 18 }}>
                 <Text style={styles.h}>Continuer la lecture</Text>
@@ -150,11 +154,8 @@ function Shelf() {
               </View>
             ) : null}
 
-            {kind === 'all' || kind === 'manga' ? <DiscoverRow kind="manga" title="Mangas du moment" admin={Boolean(lib.admin)} /> : null}
-            {kind === 'all' || kind === 'epub' ? <DiscoverRow kind="livres" title="Top livres" admin={Boolean(lib.admin)} /> : null}
             <Text style={styles.h}>
-              {kind === 'manga' ? 'Mangas' : kind === 'bd' ? 'BD' : kind === 'epub' ? 'Livres' : kind === 'pdf' ? 'PDF' : 'Tous les livres'}{' '}
-              <Text style={{ color: C.textFaint }}>· {kind === 'all' ? books.length : books.filter((b) => kindOfBook(b) === kind).length}</Text>
+              {kind === 'manga' ? 'Tous les mangas' : 'Toutes les BD'} <Text style={{ color: C.textFaint }}>· {books.length}</Text>
             </Text>
             <View style={styles.searchBox}>
               <Ionicons name="search" size={16} color={C.textDim} />
@@ -277,6 +278,10 @@ function Empty({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: str
 }
 
 const styles = StyleSheet.create({
+  switch: { flexDirection: 'row', gap: 6, marginHorizontal: 16, marginBottom: 16, padding: 4, borderRadius: 14, backgroundColor: C.surface },
+  switchBtn: { flex: 1, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 10 },
+  switchOn: { backgroundColor: C.text },
+  switchText: { color: C.text, fontWeight: '800', fontSize: 15 },
   badge: { position: 'absolute', top: -3, right: -3, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, backgroundColor: C.info, alignItems: 'center', justifyContent: 'center' },
   badgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   autoBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: C.surface, alignItems: 'center', justifyContent: 'center' },

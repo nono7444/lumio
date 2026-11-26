@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.148.0';
+const VERSION = '3.149.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4673,26 +4673,59 @@ async function discoverList(kind) {
   if (hit && Date.now() - hit.at < 12 * 3600_000) return hit.items;
   let items = [];
   const big = (u) => String(u || '').replace(/\/\d+x\d+(bb)?\.(jpg|png)$/, '/400x600bb.$2');
+  const getJson = async (url, opts) => (await fetch(url, { signal: AbortSignal.timeout(12000), ...opts }).catch(() => null))?.json().catch(() => null);
+  // Nom de série sans « Tome 3 », « T03 », « Vol. 2 » (pour regrouper et pour la recherche)
+  const serieOf = (t) => String(t || '').replace(/\s*[-–:,]?\s*(tome|t|vol\.?|volume)\s*\d+.*$/i, '').trim();
+  const googleNewest = async (subject) => {
+    const j = await getJson(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(`subject:${subject}`)}&langRestrict=fr&orderBy=newest&printType=books&maxResults=40`);
+    const seen = new Set();
+    const out = [];
+    for (const v of (j && j.items) || []) {
+      const vi = v.volumeInfo || {};
+      const name = serieOf(vi.title);
+      const key = bookNorm(name);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      const img = vi.imageLinks && (vi.imageLinks.thumbnail || vi.imageLinks.smallThumbnail);
+      out.push({ rank: out.length + 1, title: vi.title, search: name, author: (vi.authors || [])[0] || vi.publisher || null, year: vi.publishedDate ? Number(String(vi.publishedDate).slice(0, 4)) : null, cover: img ? String(img).replace(/^http:/, 'https:').replace('&edge=curl', '') : null });
+    }
+    return out;
+  };
   if (kind === 'manga') {
-    const query = `query { Page(perPage: 24) { media(type: MANGA, sort: TRENDING_DESC, isAdult: false) { title { romaji english } coverImage { large } startDate { year } countryOfOrigin } } }`;
-    const r = await fetch('https://graphql.anilist.co', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ query }), signal: AbortSignal.timeout(12000) });
-    const j = await r.json();
-    items = ((j.data && j.data.Page && j.data.Page.media) || []).map((m, i) => ({
+    // Nouvelles séries commencées en 2026 ou après, les plus suivies d'abord (AniList)
+    const query = `query { Page(perPage: 30) { media(type: MANGA, sort: [POPULARITY_DESC], isAdult: false, startDate_greater: 20251231) { title { romaji english } coverImage { large } startDate { year } averageScore countryOfOrigin } } }`;
+    const j = await getJson('https://graphql.anilist.co', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ query }) });
+    items = ((j && j.data && j.data.Page && j.data.Page.media) || []).map((m, i) => ({
       rank: i + 1,
       title: m.title.english || m.title.romaji,
       search: m.title.romaji || m.title.english,
-      author: m.countryOfOrigin === 'KR' ? 'Manhwa' : m.countryOfOrigin === 'CN' ? 'Manhua' : null,
+      author: [m.countryOfOrigin === 'KR' ? 'Manhwa' : m.countryOfOrigin === 'CN' ? 'Manhua' : null, m.averageScore ? `${m.averageScore} %` : null].filter(Boolean).join(' · ') || null,
       year: m.startDate && m.startDate.year,
       cover: m.coverImage && m.coverImage.large,
     }));
+  } else if (kind === 'manga-fr') {
+    // Derniers tomes de mangas parus en français (Google Books, les plus récents d'abord, une ligne par série)
+    items = await googleNewest('manga');
+  } else if (kind === 'bd') {
+    // Top BD Apple Books France (rayon BD et romans graphiques, sans les mangas), sinon les dernières BD parues
+    const o = await getJson('https://itunes.apple.com/fr/rss/toppaidebooks/limit=60/genre=9026/json');
+    items = ((o && o.feed && o.feed.entry) || [])
+      .filter((x) => !/manga/i.test((x.category && x.category.attributes && x.category.attributes.label) || ''))
+      .map((x, i) => ({
+        rank: i + 1,
+        title: x['im:name'] && x['im:name'].label,
+        search: serieOf(x['im:name'] && x['im:name'].label),
+        author: x['im:artist'] && x['im:artist'].label,
+        year: null,
+        cover: big(((x['im:image'] || []).slice(-1)[0] || {}).label),
+      }));
+    if (!items.length) items = await googleNewest('"bandes dessinées"');
   } else {
-    const feed = kind === 'audio' ? 'audio-books/top/25/audio-books.json' : 'books/top-paid/25/books.json';
-    const j = await (await fetch(`https://rss.applemarketingtools.com/api/v2/fr/${feed}`, { signal: AbortSignal.timeout(12000) }).catch(() => null))?.json().catch(() => null);
+    // Livres audio : classement Apple Books France
+    const j = await getJson('https://rss.applemarketingtools.com/api/v2/fr/audio-books/top/25/audio-books.json');
     items = ((j && j.feed && j.feed.results) || []).map((x, i) => ({ rank: i + 1, title: x.name, search: x.name, author: x.artistName, year: null, cover: big(x.artworkUrl100) }));
     if (!items.length) {
-      // Ancien flux iTunes (encore utilisé pour les livres audio)
-      const old = kind === 'audio' ? 'topaudiobooks' : 'toppaidebooks';
-      const o = await (await fetch(`https://itunes.apple.com/fr/rss/${old}/limit=25/json`, { signal: AbortSignal.timeout(12000) }).catch(() => null))?.json().catch(() => null);
+      const o = await getJson('https://itunes.apple.com/fr/rss/topaudiobooks/limit=25/json');
       items = ((o && o.feed && o.feed.entry) || []).map((x, i) => ({
         rank: i + 1,
         title: x['im:name'] && x['im:name'].label,
@@ -5167,7 +5200,7 @@ async function bookRoutes(req, res, p, q, user) {
   }
   // Découvrir : mangas du moment, top livres, top livres audio
   if (req.method === 'GET' && p === '/api/books/discover') {
-    const kind = ['manga', 'livres', 'audio'].includes(q.get('kind')) ? q.get('kind') : 'manga';
+    const kind = ['manga', 'manga-fr', 'bd', 'audio'].includes(q.get('kind')) ? q.get('kind') : 'manga';
     send(res, 200, { kind, items: await discoverList(kind).catch(() => []) });
     return true;
   }

@@ -22,11 +22,10 @@ const JOB_LABEL: Record<string, string> = {
   error: 'Échec',
   debrid: 'AllDebrid prépare le fichier',
 };
+// Univers Livres : mangas et BD seulement
 const KINDS: { id: EbookKind; label: string }[] = [
-  { id: 'livres', label: 'Livres' },
-  { id: 'bd', label: 'BD' },
   { id: 'mangas', label: 'Mangas' },
-  { id: 'comics', label: 'Comics' },
+  { id: 'bd', label: 'BD' },
 ];
 
 export default function FindBookRoute() {
@@ -36,7 +35,7 @@ export default function FindBookRoute() {
 function Find() {
   const { settings } = useSettings();
   const [q, setQ] = useState('');
-  const [kind, setKind] = useState<EbookKind>('livres');
+  const [kind, setKind] = useState<EbookKind>('mangas');
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<EbookResult[] | null>(null);
   const [sources, setSources] = useState<EbookSource[]>([]);

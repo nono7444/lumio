@@ -9,12 +9,20 @@ import { toast } from '@/components/toast';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { tap } from '@/components/ui';
 import { C } from '@/constants/theme';
-import { ebookApi, type DiscoverItem } from '@/lib/ebooks';
+import { ebookApi, type DiscoverItem, type DiscoverKind } from '@/lib/ebooks';
 import { useSettings } from '@/lib/settings';
 
 const cache: Partial<Record<string, DiscoverItem[]>> = {};
 
-export function DiscoverRow({ kind, title, admin }: { kind: 'manga' | 'livres' | 'audio'; title: string; admin: boolean }) {
+/** Toucher une couverture : l'admin part chercher le titre (Trouver), la famille est invitée à demander. */
+export function openDiscover(kind: DiscoverKind, it: DiscoverItem, admin: boolean) {
+  tap();
+  if (!admin) return toast('Demande-le à l’admin pour qu’il l’ajoute à la bibliothèque', 'info');
+  if (kind === 'audio') router.push({ pathname: '/(tabs)/find', params: { q: it.search } });
+  else router.push({ pathname: '/(tabs)/findbook', params: { q: it.search, kind: kind === 'bd' ? 'bd' : 'mangas' } });
+}
+
+export function DiscoverRow({ kind, title, admin }: { kind: DiscoverKind; title: string; admin: boolean }) {
   const { settings } = useSettings();
   const [items, setItems] = useState<DiscoverItem[] | null>(cache[kind] ?? null);
   useEffect(() => {
@@ -24,12 +32,7 @@ export function DiscoverRow({ kind, title, admin }: { kind: 'manga' | 'livres' |
       .catch(() => setItems((x) => x ?? []));
   }, [settings, kind]);
   if (!items?.length) return null;
-  const go = (it: DiscoverItem) => {
-    tap();
-    if (!admin) return toast('Demande-le à l’admin pour qu’il l’ajoute à la bibliothèque', 'info');
-    if (kind === 'audio') router.push({ pathname: '/(tabs)/find', params: { q: it.search } });
-    else router.push({ pathname: '/(tabs)/findbook', params: { q: it.search, kind: kind === 'manga' ? 'mangas' : 'livres' } });
-  };
+  const go = (it: DiscoverItem) => openDiscover(kind, it, admin);
   const w = kind === 'audio' ? 130 : 110;
   const h = kind === 'audio' ? 130 : 165;
   return (

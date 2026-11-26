@@ -64,6 +64,7 @@ export default function TabsLayout() {
         screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: C.bg } }}>
         <Tabs.Screen name="shelf" options={{ title: 'Bibliothèque' }} />
         <Tabs.Screen name="findbook" options={{ title: 'Trouver', href: settings.jellyfin?.isAdmin ? undefined : null }} />
+        <Tabs.Screen name="booktop" options={{ href: null }} />
         <Tabs.Screen name="me" options={{ title: 'Profil' }} />
         <Tabs.Screen name="index" options={{ href: null }} />
         <Tabs.Screen name="search" options={{ href: null }} />
@@ -120,6 +121,7 @@ export default function TabsLayout() {
         <Tabs.Screen name="settings" options={{ href: null }} />
         <Tabs.Screen name="shelf" options={{ href: null }} />
         <Tabs.Screen name="findbook" options={{ href: null }} />
+        <Tabs.Screen name="booktop" options={{ href: null }} />
         <Tabs.Screen name="twitch" options={{ href: null }} />
         <Tabs.Screen name="perf" options={{ href: null }} />
         <Tabs.Screen name="seed" options={{ href: null }} />
@@ -154,6 +156,7 @@ export default function TabsLayout() {
         <Tabs.Screen name="listen" options={{ href: null }} />
         <Tabs.Screen name="shelf" options={{ href: null }} />
         <Tabs.Screen name="findbook" options={{ href: null }} />
+        <Tabs.Screen name="booktop" options={{ href: null }} />
         <Tabs.Screen name="twitch" options={{ href: null }} />
         <Tabs.Screen name="perf" options={{ href: null }} />
         <Tabs.Screen name="seed" options={{ href: null }} />
@@ -204,6 +207,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="listen" options={{ title: 'Livres audio', href: tab('listen', undefined) }} />
       <Tabs.Screen name="shelf" options={{ title: 'Livres', href: tab('shelf', undefined) }} />
       <Tabs.Screen name="findbook" options={{ title: 'Trouver', href: tab('findbook', settings.jellyfin?.isAdmin ? undefined : null) }} />
+      <Tabs.Screen name="booktop" options={{ title: 'Top', href: tab('booktop', undefined) }} />
       <Tabs.Screen name="twitch" options={{ title: 'Twitch', href: tab('twitch', settings.jellyfin?.isAdmin ? undefined : null) }} />
       <Tabs.Screen name="find" options={{ title: 'Trouver', href: tab('find', settings.jellyfin?.isAdmin ? undefined : null) }} />
       <Tabs.Screen name="me" options={{ href: null }} />

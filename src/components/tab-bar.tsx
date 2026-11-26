@@ -50,6 +50,7 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   shelf: 'library',
   twitch: 'logo-twitch',
   findbook: 'search',
+  booktop: 'trophy',
   me: 'person-circle',
 };
 
@@ -74,9 +75,10 @@ const SHORT: Record<string, string> = {
   settings: IS_AUTO ? 'Réglages' : 'Profil',
   listen: IS_AUDIO ? 'Livres' : 'Audio',
   find: 'Trouver',
-  shelf: 'Livres',
+  shelf: 'Biblio',
   twitch: 'Twitch',
   findbook: 'Trouver',
+  booktop: 'Top',
   me: 'Profil',
 };
 
