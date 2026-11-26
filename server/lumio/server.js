@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.146.0';
+const VERSION = '3.147.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -7053,7 +7053,9 @@ async function autoWanted(item) {
     const full = (item.fullSeasons || []).includes(n);
     const inSeason = item.seasons.includes(n);
     // Série reprise de la bibliothèque : seulement les épisodes diffusés à partir du jour où on la suit (pas de rattrapage)
-    const aired = eps.filter((e) => e.air && e.air <= today && (uhd || !item.since || full || extra.has(`${n}:${e.e}`) || e.air >= item.since));
+    // Épisode sans date sur TMDB (vieilles séries) : considéré comme diffusé si la série a plus d'un an
+    const oldShow = Number(item.year) > 0 && Number(item.year) < new Date().getFullYear() - 1;
+    const aired = eps.filter((e) => (e.air ? e.air <= today : oldShow) && (uhd || !item.since || full || extra.has(`${n}:${e.e}`) || (e.air && e.air >= item.since)));
     let missing = aired.filter((e) => !have.has(`${n}:${e.e}`) && !busy.has(`${n}:${e.e}`));
     if (!inSeason) missing = missing.filter((e) => extra.has(`${n}:${e.e}`));
     const firstAbs = absolute;
@@ -9330,6 +9332,12 @@ async function autoAdd({ type, tmdbId, tvdbId, title, seasons, folderPath, futur
   item.nextSearch = 0;
   item.fails = 0;
   await autoMeta(item, true).catch((e) => (item.note = `TMDB : ${e.message}`));
+  // Série demandée sans saison précise : toutes les saisons parues
+  if (type === 'tv' && requestId && !(seasons || []).length && !item.seasons.length && item.meta && item.meta.seasons) {
+    const all = Object.keys(item.meta.seasons).map(Number).filter((n) => n > 0);
+    item.seasons = all.sort((a, b) => a - b);
+    item.fullSeasons = [...new Set([...(item.fullSeasons || []), ...all])];
+  }
   autoSave();
   autoLog(`${item.title} ajouté${type === 'tv' ? ` (saisons ${item.seasons.join(', ') || '—'})` : ''}`);
   autoEvent(item, 'added', requestId ? 'Demande validée : ajouté au suivi' : 'Ajouté à la main au suivi');
@@ -9382,8 +9390,10 @@ async function autoRecheck(r) {
     await autoFromRequest(r);
     saveRequests();
   }
-  const item = findItem(r.type === 'movie' ? 'movie' : 'tv', r.tmdbId);
+  let item = findItem(r.type === 'movie' ? 'movie' : 'tv', r.tmdbId);
   if (!item) return { found: false, message: 'Titre introuvable dans Lumio Auto.' };
+  // Les saisons de la demande sont (re)mises dans le suivi, en entier (anciens épisodes compris)
+  if (item.type === 'tv') item = await autoAdd({ type: 'tv', tmdbId: r.tmdbId, tvdbId: r.tvdbId, title: r.title, seasons: r.seasons, requestId: r.id });
   if (auto.grabs.some((g) => g.itemId === item.id && ['sent', 'downloading', 'importing'].includes(g.state))) return { found: true, message: 'Déjà en téléchargement.' };
   item.paused = false;
   item.fails = 0;

@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Lumio Auto : « Relancer la recherche » remet les saisons de la demande dans le suivi (en entier) ; une série demandée sans saison précise prend toutes les saisons ; les vieux épisodes sans date sur TMDB comptent comme diffusés (serveur 3.147.0).
+
 - Lumio Auto : une série déjà suivie depuis la bibliothèque puis demandée (ex. Wakfu) restait sur « rien ne manque » car seuls les nouveaux épisodes étaient attendus ; les saisons demandées se téléchargent maintenant en entier, et la note affiche « téléchargement en cours » quand c'est le cas (serveur 3.146.0).
 
 - Livres : C411 revient. Pour C411 et Tr4ker, le serveur essaie l'adresse et la clé de Lumio Auto, puis l'adresse officielle avec la clé des livres, et garde la première qui répond (serveur 3.145.0).
