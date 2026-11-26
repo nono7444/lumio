@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.219 — 26 novembre 2026
+
 - Livres (admin) : appui long sur une collection (ou un tome seul) dans Biblio → « Ranger dans BD » / « Ranger dans Mangas » ; le choix est gardé par le serveur et vaut pour tous les tomes de la série (serveur 3.150.0).
 
 ## 1.0.218 — 26 novembre 2026
