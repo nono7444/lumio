@@ -94,7 +94,8 @@ export const ebookApi = {
   jobs: (s: Settings) => serverCall<{ jobs: EbookJob[] }>(s, '/api/books/jobs'),
   /** Découvrir : mangas du moment (AniList), top livres / livres audio (Apple Books France) */
   discover: (s: Settings, kind: DiscoverKind) => serverCall<{ items: DiscoverItem[] }>(s, `/api/books/discover?kind=${kind}`),
-  setComic: (s: Settings, name: string, kind: 'manga' | 'bd') => serverCall<{ ok: boolean }>(s, '/api/books/comic-kind', { method: 'POST', body: JSON.stringify({ name, kind }) }),
+  setComic: (s: Settings, name: string, kind: 'manga' | 'bd', titles: string[] = []) =>
+    serverCall<{ ok: boolean }>(s, '/api/books/comic-kind', { method: 'POST', body: JSON.stringify({ name, kind, titles }) }),
   cancelJob: (s: Settings, id: string) => serverCall<{ ok: boolean }>(s, `/api/books/jobs/${id}`, { method: 'DELETE' }),
   seriesInfo: (s: Settings, name: string) => serverCall<SeriesInfo>(s, `/api/books/series-info?name=${encodeURIComponent(name)}`),
   /** Compléter les séries tout seul (tomes manquants et tome suivant) */

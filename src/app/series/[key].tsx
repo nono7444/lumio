@@ -87,7 +87,7 @@ export default function SeriesScreen() {
                 return (
                   <Pressable
                     key={k}
-                    onPress={() => (tap(), ebookApi.setComic(settings, s.name, k).then(() => loadEbooks(settings)).catch(() => {}))}
+                    onPress={() => (tap(), ebookApi.setComic(settings, s.name, k, s.books.map((b) => b.title)).then(() => loadEbooks(settings)).catch(() => {}))}
                     style={[styles.kindChip, on ? { backgroundColor: C.text } : null]}>
                     <Text style={[styles.s, { color: on ? '#000' : C.text, fontWeight: '700' }]}>{k === 'manga' ? 'Mangas' : 'BD'}</Text>
                   </Pressable>

@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.149.0';
+const VERSION = '3.150.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -5191,9 +5191,14 @@ async function bookRoutes(req, res, p, q, user) {
   if (req.method === 'POST' && p === '/api/books/comic-kind') {
     requireAdmin(user);
     const b = await readBody(req);
-    const key = bookNorm(b.name);
-    if (!key || !['manga', 'bd'].includes(b.kind)) throw new HttpError(400, 'Série ou type manquant');
-    (booksState.comicKind ||= {})[key] = b.kind;
+    if (!['manga', 'bd'].includes(b.kind)) throw new HttpError(400, 'Type manquant');
+    // Mêmes clés que le classement automatique (nom de série tiré du titre de chaque tome)
+    const keys = new Set([b.name, ...(Array.isArray(b.titles) ? b.titles : [])].filter(Boolean).map((t) => {
+      const ser = bookSeries(String(t), true);
+      return bookNorm(ser ? ser.name : String(t));
+    }).filter(Boolean));
+    if (!keys.size) throw new HttpError(400, 'Série manquante');
+    for (const k of keys) (booksState.comicKind ||= {})[k] = b.kind;
     saveBooksState();
     send(res, 200, { ok: true });
     return true;

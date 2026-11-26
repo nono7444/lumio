@@ -3,7 +3,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BookCover, ReadBar } from '@/components/ebook-ui';
@@ -11,7 +11,7 @@ import { FocusPressable as Pressable } from '@/components/tv';
 import { UniverseSwitch } from '@/components/universe-switch';
 import { ScreenTitle, SegChip, tap } from '@/components/ui';
 import { C, TAB_SPACE } from '@/constants/theme';
-import { groupSeries, mo, rememberSeries, useEbooks, type Ebook, type Series } from '@/lib/ebooks';
+import { ebookApi, groupSeries, loadEbooks, mo, rememberSeries, useEbooks, type Ebook, type Series } from '@/lib/ebooks';
 import { useSettings } from '@/lib/settings';
 
 type Sort = 'recent' | 'title' | 'author';
@@ -23,6 +23,20 @@ const kindOfBook = (b: Ebook): Kind | null => (b.format === 'bd' ? (b.comic === 
 const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 const open = (b: Ebook) => (tap(), router.push({ pathname: '/ebook/[id]', params: { id: b.id } }));
 const read = (b: Ebook) => (tap(), router.push({ pathname: '/reader', params: { id: b.id } }));
+
+/** Admin : ranger une collection (ou un tome seul) dans Mangas ou dans BD */
+function askKind(settings: Parameters<typeof ebookApi.setComic>[0], name: string, titles: string[], now: Kind) {
+  tap();
+  const set = (k: Kind) =>
+    ebookApi
+      .setComic(settings, name, k, titles)
+      .then(() => loadEbooks(settings))
+      .catch((e) => Alert.alert('Livres', e?.message ?? String(e)));
+  Alert.alert(name, `Actuellement dans ${now === 'manga' ? 'Mangas' : 'BD'}.`, [
+    { text: 'Annuler', style: 'cancel' },
+    { text: now === 'manga' ? 'Ranger dans BD' : 'Ranger dans Mangas', onPress: () => set(now === 'manga' ? 'bd' : 'manga') },
+  ]);
+}
 
 export default function ShelfRoute() {
   return <Shelf />;
@@ -157,6 +171,7 @@ function Shelf() {
             <Text style={styles.h}>
               {kind === 'manga' ? 'Tous les mangas' : 'Toutes les BD'} <Text style={{ color: C.textFaint }}>· {books.length}</Text>
             </Text>
+            {lib.admin ? <Text style={[styles.s, { paddingHorizontal: 16, marginTop: -6, marginBottom: 10 }]}>Appui long sur une collection pour la ranger dans {kind === 'manga' ? 'BD' : 'Mangas'}.</Text> : null}
             <View style={styles.searchBox}>
               <Ionicons name="search" size={16} color={C.textDim} />
               <TextInput
@@ -181,9 +196,9 @@ function Shelf() {
             <View style={[styles.grid, { gap: 14 }]}>
               {items.map((it) =>
                 it.t === 'series' ? (
-                  <SeriesCard key={`s-${it.s.key}`} s={it.s} w={w} />
+                  <SeriesCard key={`s-${it.s.key}`} s={it.s} w={w} onLong={lib.admin ? () => askKind(settings, it.s.name, it.s.books.map((b) => b.title), kind) : undefined} />
                 ) : (
-                  <BookCard key={it.b.id} b={it.b} w={w} />
+                  <BookCard key={it.b.id} b={it.b} w={w} onLong={lib.admin ? () => askKind(settings, it.b.title, [it.b.title], kind) : undefined} />
                 )
               )}
             </View>
@@ -214,10 +229,10 @@ function Shelf() {
   );
 }
 
-function BookCard({ b, w }: { b: Ebook; w: number }) {
+function BookCard({ b, w, onLong }: { b: Ebook; w: number; onLong?: () => void }) {
   const pr = b.progress?.pct ?? 0;
   return (
-    <Pressable onPress={() => open(b)} style={{ width: w, gap: 5 }}>
+    <Pressable onPress={() => open(b)} onLongPress={onLong} style={{ width: w, gap: 5 }}>
       <View>
         <BookCover book={b} width={w} />
         {b.progress?.done ? (
@@ -240,12 +255,12 @@ function BookCard({ b, w }: { b: Ebook; w: number }) {
 }
 
 /** Collection : couverture du 1er tome, posée sur une pile, avec le nombre de tomes. */
-function SeriesCard({ s, w }: { s: Series; w: number }) {
+function SeriesCard({ s, w, onLong }: { s: Series; w: number; onLong?: () => void }) {
   const read = s.books.filter((b) => b.progress?.done).length;
   const going = s.books.some((b) => b.progress && !b.progress.done);
   const cw = w - 8;
   return (
-    <Pressable onPress={() => (tap(), router.push({ pathname: '/series/[key]', params: { key: s.key } }))} style={{ width: w, gap: 5 }}>
+    <Pressable onPress={() => (tap(), router.push({ pathname: '/series/[key]', params: { key: s.key } }))} onLongPress={onLong} style={{ width: w, gap: 5 }}>
       <View style={{ width: w, height: Math.round(cw * 1.5) + 8 }}>
         <View style={[styles.stack, { left: 8, top: 0, width: cw, height: Math.round(cw * 1.5) }]} />
         <View style={[styles.stack, { left: 4, top: 4, width: cw, height: Math.round(cw * 1.5), opacity: 0.8 }]} />
