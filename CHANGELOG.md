@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.220 — 26 novembre 2026
+
 - Livres (admin) : bouton « Télécharger les tomes manquants (N) » sur une collection : le serveur cherche chaque tome absent (C411, Tr4ker, Wawacity, recherche ciblée par tome) et lance les téléchargements tout seul ; les cases passent « EN COURS », et les tomes introuvables sont notés dans le journal de « Séries à compléter » (serveur 3.157.0).
 
 - Serveur, Livres : un tome en double (même nom) dans un dossier de téléchargement → la version la plus complète est gardée dans le dossier de la série, l'autre retirée ; un fichier encore en cours d'écriture n'est jamais déplacé (serveur 3.156.0).
