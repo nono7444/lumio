@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Serveur : les tomes posés en vrac dans le dossier Livres (« One Piece T103.cbz », « Naruto.T71… ») sont rangés tout seuls dans le dossier de leur série, créé s'il n'existe pas (un dossier existant au nom proche est réutilisé) ; lecture en cours et couverture gardées (serveur 3.152.0).
+
 - Livres : les fichiers nommés « V001 », « v12 »… (scans) sont reconnus comme tome 1, tome 12 : les collections ne montrent plus tous les tomes en « pas sur le serveur », et chaque tome retrouve sa propre couverture (serveur 3.151.0).
 
 ## 1.0.219 — 26 novembre 2026

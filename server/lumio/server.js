@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.151.0';
+const VERSION = '3.152.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -4537,9 +4537,52 @@ async function bookTidy(force) {
         console.log(`Livres : ${path.basename(dir)} pas regroupé (${err.message})`);
       }
     }
+    // 4. Tomes posés en vrac à la racine (« One Piece T103.cbz ») → rangés dans le dossier de leur série
+    //    (« One Piece/ »), créé s'il n'existe pas ; un dossier existant au nom proche est réutilisé
+    await bookFolderize(full).catch((e) => console.log(`Livres : rangement en dossiers impossible (${e.message})`));
   } finally {
     bookTidyRunning = false;
   }
+}
+
+async function bookFolderize(full) {
+  const entries = await fs.promises.readdir(full, { withFileTypes: true }).catch(() => []);
+  const folders = new Map(entries.filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => [bookNorm(e.name), e.name]));
+  // Série reconnue sur au moins un fichier de la racine (les livres seuls restent où ils sont)
+  let moved = 0;
+  for (const e of entries) {
+    if (!e.isFile() || e.name.startsWith('.')) continue;
+    const ext = path.extname(e.name).toLowerCase();
+    if (!BOOK_EXT[ext] || BOOK_EXT[ext] === 'audio' || e.name.endsWith('.part')) continue;
+    const ser = bookSeries(bookTitle(e.name), BOOK_EXT[ext] === 'bd');
+    if (!ser) continue;
+    const key = bookNorm(ser.name);
+    if (!key || key.length < 2) continue;
+    let folder = folders.get(key);
+    if (!folder) {
+      folder = ser.name.replace(/[\/:*?"<>|]+/g, ' - ').replace(/\s+/g, ' ').replace(/^[\s.-]+|[\s.-]+$/g, '').slice(0, 120);
+      if (!folder) continue;
+      await fs.promises.mkdir(path.join(full, folder), { recursive: true });
+      folders.set(key, folder);
+      console.log(`Livres : dossier « ${folder} » créé`);
+    }
+    const from = path.join(full, e.name);
+    const to = path.join(full, folder, e.name);
+    if (await fs.promises.access(to).then(() => true, () => false)) continue; // déjà un fichier du même nom
+    const oldId = bookId(from);
+    await fs.promises.rename(from, to);
+    const newId = bookId(to);
+    // On garde la lecture en cours, le titre et la couverture du tome déplacé
+    for (const mine of Object.values(booksState.progress || {})) if (mine[oldId] && !mine[newId]) (mine[newId] = mine[oldId]), delete mine[oldId];
+    if (booksState.meta[oldId]) (booksState.meta[newId] = booksState.meta[oldId]), delete booksState.meta[oldId];
+    for (const x of ['img', 'none']) await fs.promises.rename(path.join(BOOK_COVERS_DIR, `${oldId}.v3.${x}`), path.join(BOOK_COVERS_DIR, `${newId}.v3.${x}`)).catch(() => {});
+    moved++;
+  }
+  if (moved) {
+    saveBooksState();
+    console.log(`Livres : ${moved} tome(s) rangé(s) dans le dossier de leur série`);
+  }
+  return moved;
 }
 
 async function bookLibrary() {
