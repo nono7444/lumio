@@ -12,7 +12,8 @@ import { Button, ScreenTitle, SegChip, tap } from '@/components/ui';
 import { VpnButton } from '@/components/vpn-button';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { channelStreams, COUNTRIES, countryOf, FRENCH, loadChannels, THEMES, themeOf, type Channel, type Theme, syncLiveSources } from '@/lib/live';
-import { useSettings } from '@/lib/settings';
+import { serverCall } from '@/lib/chat';
+import { useSettings, type LiveSource } from '@/lib/settings';
 
 const ALL = 'Tous les groupes';
 type ThemeFilter = 'all' | 'fav' | Theme;
@@ -44,7 +45,15 @@ export default function Live() {
   useEffect(() => syncLiveSources(settings), [settings.liveSources, settings.chatUrl, settings.jellyfin?.token]); // eslint-disable-line react-hooks/exhaustive-deps
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const sources = settings.liveSources;
+  // Source IPTV du serveur Lumio (configurée par l'admin, flux relayé par le serveur et son VPN)
+  const [relay, setRelay] = useState<LiveSource | null>(null);
+  useEffect(() => {
+    if (!settings.chatUrl || !settings.jellyfin) return;
+    serverCall<{ source: LiveSource | null }>(settings, '/api/iptv/relay/source')
+      .then((r) => setRelay(r.source))
+      .catch(() => {});
+  }, [settings.chatUrl, settings.jellyfin?.token]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sources = useMemo(() => (relay ? [relay, ...settings.liveSources] : settings.liveSources), [relay, settings.liveSources]);
   const [sourceId, setSourceId] = useState<string | null>(sources[0]?.id ?? null);
   const [channels, setChannels] = useState<Channel[] | null>(null);
   const [error, setError] = useState<string | null>(null);

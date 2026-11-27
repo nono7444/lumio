@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Live TV : l'IPTV peut passer par le serveur Lumio et son VPN (comme qBittorrent). Identifiants gardés sur le serveur, une seule connexion par chaîne partagée entre vous, limite de chaînes en même temps réglable. Visible sur le téléphone et sur Lumio TV (serveur 3.159.0).
+
 ## 1.0.221 — 27 novembre 2026
 
 - Twitch : onglet « En direct » — tes chaînes en live, les lives en français et les lives par jeu (jeux les plus regardés) ; un appui lance le live. Sans pub par défaut (relais Luminous / Perfprod, repli automatique sur le flux officiel, bouton « Sans pub / Avec pub »), qualités jusqu'au 1440p avec ton compte Twitch connecté. Le bandeau « EN DIRECT » d'une chaîne lance aussi le live (serveur 3.158.0).

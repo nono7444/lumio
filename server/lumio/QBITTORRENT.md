@@ -125,3 +125,18 @@ docker compose up -d --remove-orphans
 Leurs dossiers de configuration (`./radarr`, `./sonarr`, `./prowlarr`) peuvent être gardés quelques semaines, au cas où,
 puis supprimés. Pense aussi à retirer `radarr.wawanono.lol` et `sonarr.wawanono.lol` de nginx-proxy-manager
 et du tunnel Cloudflare.
+
+## 7. Live TV par le VPN (IPTV relayée par le serveur)
+
+Lumio peut faire passer la liste IPTV et les chaînes par le VPN de Gluetun, comme qBittorrent. Il faut seulement
+allumer le petit proxy de Gluetun. Dans le bloc `gluetun` de `/data/docker-compose.yaml`, ajoute dans `environment` :
+
+```yaml
+      - HTTPPROXY=on
+```
+
+puis `cd /data && docker compose up -d gluetun`. Lumio passe alors par `http://gluetun:8888` (rien à ouvrir sur la box).
+Si le VPN est coupé, les chaînes ne se lancent pas : il n'y a pas de repli sans VPN (sauf si tu choisis « Sans VPN »).
+
+Dans l'appli : **Live TV → Sources** (compte admin) → remplis le lien M3U ou le compte Xtream Codes → **Envoyer au serveur**.
+Les identifiants restent sur le serveur ; la famille voit la source « IPTV (serveur Lumio) » sur le téléphone et sur Lumio TV.

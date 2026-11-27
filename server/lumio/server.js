@@ -9,6 +9,8 @@
 'use strict';
 
 const http = require('http');
+const https = require('https');
+const tls = require('tls');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -26,7 +28,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.158.0';
+const VERSION = '3.159.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -6757,6 +6759,324 @@ async function twitchRoutes(req, res, p, q, user) {
   return false;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ——— Live TV par le serveur : la liste IPTV de l'admin, relayée par le serveur Lumio (et par le VPN Gluetun) ———
+// Les identifiants restent sur le serveur (config.json, jamais dans Git) ; la famille reçoit une liste dont les liens
+// pointent vers Lumio. Une seule connexion par chaîne, partagée entre ceux qui la regardent, et une limite de
+// chaînes en même temps (celle de l'abonnement) : au-delà, Lumio répond « flux occupé ».
+const IPTV_UA = 'VLC/3.0.20 LibVLC/3.0.20';
+const IPTV_RELAY_ID = 'lumio-relay';
+const iptvCfg = () => (config.iptvRelay && config.iptvRelay.url ? config.iptvRelay : null);
+const iptvProxy = () => {
+  const c = iptvCfg();
+  if (!c || c.vpn === false) return null;
+  return String(c.proxy || process.env.IPTV_PROXY || 'http://gluetun:8888');
+};
+let iptvList = { at: 0, channels: [], byId: new Map(), error: null, loading: null };
+const iptvStreams = new Map(); // id de chaîne → { clients:Set, up, ready, closeT, ch, since }
+
+/** GET d'une adresse IPTV, par le proxy HTTP de Gluetun quand le VPN est demandé (aucun repli sans VPN). */
+function iptvGet(target, headers = {}, hops = 0) {
+  const u = new URL(target);
+  const h = { 'User-Agent': IPTV_UA, ...headers };
+  const proxy = iptvProxy();
+  return new Promise((resolve, reject) => {
+    const done = (r) => {
+      if ([301, 302, 303, 307, 308].includes(r.statusCode) && r.headers.location && hops < 5) {
+        r.resume();
+        iptvGet(new URL(r.headers.location, target).href, headers, hops + 1).then(resolve, reject);
+        return;
+      }
+      resolve(r);
+    };
+    const guard = (rq, label) => {
+      rq.on('error', (e) => reject(new Error(`${label} (${e.message})`)));
+      rq.on('timeout', () => rq.destroy(new Error('délai dépassé')));
+    };
+    if (!proxy) {
+      const rq = (u.protocol === 'https:' ? https : http).request(u, { headers: h, timeout: 20000 }, done);
+      guard(rq, 'Source IPTV injoignable');
+      rq.end();
+      return;
+    }
+    let p;
+    try {
+      p = new URL(proxy);
+    } catch {
+      reject(new Error('Adresse du proxy VPN invalide'));
+      return;
+    }
+    const auth = p.username ? { 'Proxy-Authorization': `Basic ${Buffer.from(`${decodeURIComponent(p.username)}:${decodeURIComponent(p.password)}`).toString('base64')}` } : {};
+    const port = Number(p.port) || 8888;
+    if (u.protocol === 'http:') {
+      const rq = http.request({ host: p.hostname, port, method: 'GET', path: u.href, headers: { ...h, Host: u.host, ...auth }, timeout: 20000 }, done);
+      guard(rq, 'VPN injoignable');
+      rq.end();
+      return;
+    }
+    const hostPort = `${u.hostname}:${u.port || 443}`;
+    const c = http.request({ host: p.hostname, port, method: 'CONNECT', path: hostPort, headers: { Host: hostPort, ...auth }, timeout: 20000 });
+    c.on('connect', (pr, socket) => {
+      if (pr.statusCode !== 200) {
+        socket.destroy();
+        reject(new Error(`Le VPN refuse la connexion (${pr.statusCode})`));
+        return;
+      }
+      const rq = https.request(
+        { host: u.hostname, port: u.port || 443, path: u.pathname + u.search, headers: h, agent: false, timeout: 20000, createConnection: () => tls.connect({ socket, servername: u.hostname }) },
+        done
+      );
+      guard(rq, 'Source IPTV injoignable');
+      rq.end();
+    });
+    guard(c, 'VPN injoignable');
+    c.end();
+  });
+}
+async function iptvText(target) {
+  const r = await iptvGet(target);
+  if (r.statusCode !== 200) {
+    r.resume();
+    throw new Error(`La source IPTV répond ${r.statusCode}`);
+  }
+  const parts = [];
+  let size = 0;
+  for await (const ch of r) {
+    size += ch.length;
+    if (size > 300e6) throw new Error('Liste IPTV trop grosse');
+    parts.push(ch);
+  }
+  return Buffer.concat(parts).toString('utf8');
+}
+/** Liste M3U → chaînes en direct (les films / séries à la demande des listes Xtream sont ignorés). */
+function iptvParse(text) {
+  const out = [];
+  let info = null;
+  let headers = {};
+  const attr = (line, n) => ((line.match(new RegExp(`${n}="([^"]*)"`, 'i')) || [])[1] || '').trim() || null;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith('#EXTINF')) {
+      const comma = line.lastIndexOf(',');
+      info = { name: (comma >= 0 ? line.slice(comma + 1) : '').trim() || attr(line, 'tvg-name') || 'Chaîne', logo: attr(line, 'tvg-logo'), group: attr(line, 'group-title'), tvgId: attr(line, 'tvg-id') };
+      headers = {};
+    } else if (line.startsWith('#EXTVLCOPT:')) {
+      const [k, ...v] = line.slice(11).split('=');
+      if (/user-agent/i.test(k)) headers['User-Agent'] = v.join('=');
+      if (/referr?er/i.test(k)) headers.Referer = v.join('=');
+    } else if (line.startsWith('#EXTGRP:') && info && !info.group) {
+      info.group = line.slice(8).trim();
+    } else if (!line.startsWith('#')) {
+      if (info && /^https?:\/\//i.test(line) && !/\/(movie|series)\//i.test(line)) {
+        out.push({ id: crypto.createHash('sha1').update(line).digest('hex').slice(0, 12), ...info, url: line, headers });
+        if (out.length >= 40000) break;
+      }
+      info = null;
+      headers = {};
+    }
+  }
+  return out;
+}
+async function iptvLoad(force) {
+  const c = iptvCfg();
+  if (!c) throw new HttpError(404, 'Aucune source IPTV sur le serveur');
+  if (!force && iptvList.channels.length && Date.now() - iptvList.at < 6 * 3600e3) return iptvList;
+  if (iptvList.loading) return iptvList.loading;
+  iptvList.loading = (async () => {
+    try {
+      const channels = iptvParse(await iptvText(c.url));
+      if (!channels.length) throw new Error('Aucune chaîne trouvée dans la liste');
+      iptvList = { at: Date.now(), channels, byId: new Map(channels.map((x) => [x.id, x])), error: null, loading: null };
+    } catch (e) {
+      iptvList.error = e.message;
+      iptvList.loading = null;
+      if (!iptvList.channels.length) throw new HttpError(502, e.message);
+    }
+    return iptvList;
+  })();
+  return iptvList.loading;
+}
+// Jeton du lien de liste, propre à chaque membre (aucun identifiant IPTV dedans)
+const iptvToken = (userId) => {
+  const b = Buffer.from(String(userId)).toString('base64url');
+  return `${b}.${crypto.createHmac('sha256', BOOK_SECRET).update(`iptv:${b}`).digest('base64url').slice(0, 24)}`;
+};
+const iptvTokenOk = (tok) => {
+  const [b] = String(tok).split('.');
+  return !!b && iptvToken(Buffer.from(b, 'base64url').toString('utf8')) === tok;
+};
+const reqBase = (req) => {
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '');
+  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || (/^(\d+\.\d+\.\d+\.\d+|localhost)(:\d+)?$/.test(host) ? 'http' : 'https');
+  return host ? `${proto}://${host}` : publicUrl();
+};
+/** Source « Lumio (serveur) » ajoutée à la Live TV de chaque membre quand l'admin a configuré l'IPTV. */
+function iptvRelaySource(req, user) {
+  const c = iptvCfg();
+  if (!c) return null;
+  return { id: IPTV_RELAY_ID, name: c.name || 'IPTV (serveur Lumio)', kind: 'm3u', url: `${reqBase(req)}/api/iptv/r/${iptvToken(user.id)}/playlist.m3u` };
+}
+function iptvStatus() {
+  const c = iptvCfg();
+  return {
+    configured: !!c,
+    name: c?.name || null,
+    host: c ? (() => { try { return new URL(c.url).hostname; } catch { return null; } })() : null,
+    maxStreams: c?.maxStreams || 1,
+    vpn: c ? c.vpn !== false : true,
+    channels: iptvList.channels.length,
+    at: iptvList.at ? new Date(iptvList.at).toISOString() : null,
+    error: iptvList.error,
+    playing: [...iptvStreams.values()].map((s) => ({ name: s.ch.name, viewers: s.clients.size, since: new Date(s.since).toISOString() })),
+  };
+}
+function iptvStop(id) {
+  const s = iptvStreams.get(id);
+  if (!s) return;
+  iptvStreams.delete(id);
+  clearTimeout(s.closeT);
+  try { s.up?.destroy(); } catch {}
+  for (const c of s.clients) c.end();
+}
+/** Routes sans jeton Jellyfin (liste et flux, par lien signé). */
+async function iptvRelayRoutes(req, res, p) {
+  const m = p.match(/^\/api\/iptv\/r\/([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\/(playlist\.m3u|c\/([0-9a-f]{12})\.ts)$/);
+  if (!m || req.method !== 'GET') return false;
+  if (!iptvTokenOk(m[1])) {
+    send(res, 403, { error: 'Lien IPTV invalide' });
+    return true;
+  }
+  if (!iptvCfg()) {
+    send(res, 404, { error: 'Aucune source IPTV sur le serveur' });
+    return true;
+  }
+  if (m[2] === 'playlist.m3u') {
+    const list = await iptvLoad(false);
+    const base = `${reqBase(req)}/api/iptv/r/${m[1]}/c`;
+    const q = (x) => String(x || '').replace(/"/g, "'");
+    const lines = ['#EXTM3U'];
+    for (const ch of list.channels) {
+      lines.push(`#EXTINF:-1${ch.tvgId ? ` tvg-id="${q(ch.tvgId)}"` : ''}${ch.logo ? ` tvg-logo="${q(ch.logo)}"` : ''}${ch.group ? ` group-title="${q(ch.group)}"` : ''},${ch.name}`, `${base}/${ch.id}.ts`);
+    }
+    res.writeHead(200, { 'Content-Type': 'audio/x-mpegurl; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(lines.join('\n'));
+    return true;
+  }
+  const id = m[3];
+  const list = await iptvLoad(false);
+  const ch = list.byId.get(id);
+  if (!ch) {
+    send(res, 404, { error: 'Chaîne introuvable (recharge la liste)' });
+    return true;
+  }
+  let s = iptvStreams.get(id);
+  if (!s) {
+    const max = Math.max(1, Number(iptvCfg().maxStreams) || 1);
+    // Une chaîne que plus personne ne regarde libère sa place tout de suite (changement de chaîne)
+    if (iptvStreams.size >= max) for (const [k, v] of iptvStreams) if (!v.clients.size) iptvStop(k);
+    if (iptvStreams.size >= max) {
+      const busy = [...iptvStreams.values()].map((v) => v.ch.name).join(', ');
+      send(res, 503, { error: `Flux occupé : ${busy} est déjà regardé (limite de ${max} chaîne${max > 1 ? 's' : ''} en même temps)` });
+      return true;
+    }
+    s = { clients: new Set(), up: null, closeT: null, ch, since: Date.now() };
+    iptvStreams.set(id, s);
+    s.ready = (async () => {
+      // Listes Xtream : le flux MPEG-TS (.ts) plutôt que HLS, pour pouvoir le partager tel quel
+      const target = ch.url.replace(/(\/live\/[^/]+\/[^/]+\/\d+)\.m3u8$/i, '$1.ts');
+      const r = await iptvGet(target, ch.headers);
+      if (r.statusCode !== 200) {
+        r.resume();
+        throw new Error(`La source IPTV refuse la chaîne (${r.statusCode})`);
+      }
+      s.up = r;
+      r.on('data', (chunk) => {
+        for (const c of s.clients) {
+          // Un appareil trop lent (plus de 16 Mo de retard) est décroché pour ne pas gêner les autres
+          if (c.writableLength > 16e6) c.destroy();
+          else c.write(chunk);
+        }
+      });
+      const end = () => iptvStreams.get(id) === s && iptvStop(id);
+      r.on('end', end);
+      r.on('error', end);
+      r.on('close', end);
+    })();
+    s.ready.catch(() => iptvStreams.get(id) === s && iptvStop(id));
+  }
+  try {
+    await s.ready;
+  } catch (e) {
+    send(res, 502, { error: e.message });
+    return true;
+  }
+  if (!iptvStreams.has(id)) {
+    send(res, 502, { error: 'La chaîne s’est arrêtée' });
+    return true;
+  }
+  res.writeHead(200, { 'Content-Type': 'video/mp2t', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
+  s.clients.add(res);
+  clearTimeout(s.closeT);
+  req.on('close', () => {
+    s.clients.delete(res);
+    if (!s.clients.size) s.closeT = setTimeout(() => !s.clients.size && iptvStop(id), 3000);
+  });
+  return true;
+}
+/** Routes admin (avec jeton) : configurer la source IPTV du serveur. */
+async function iptvAdminRoutes(req, res, p, user) {
+  if (p === '/api/iptv/relay/source' && req.method === 'GET') {
+    send(res, 200, { source: iptvRelaySource(req, user) });
+    return true;
+  }
+  if (p !== '/api/iptv/relay') return false;
+  requireAdmin(user);
+  if (req.method === 'GET') {
+    send(res, 200, iptvStatus());
+    return true;
+  }
+  if (req.method === 'PUT') {
+    const b = await readBody(req);
+    const cur = config.iptvRelay || {};
+    const next = { ...cur };
+    if (b.url !== undefined) {
+      const u = String(b.url || '').trim();
+      if (!/^https?:\/\//i.test(u)) throw new HttpError(400, 'Lien IPTV invalide');
+      next.url = u;
+    }
+    if (b.name !== undefined) next.name = String(b.name || '').trim().slice(0, 60) || null;
+    if (b.maxStreams !== undefined) next.maxStreams = Math.min(10, Math.max(1, Number(b.maxStreams) || 1));
+    if (b.vpn !== undefined) next.vpn = !!b.vpn;
+    if (b.proxy !== undefined) next.proxy = String(b.proxy || '').trim() || null;
+    if (!next.url) throw new HttpError(400, 'Ajoute d’abord le lien de la liste IPTV');
+    const changed = next.url !== cur.url || next.vpn !== cur.vpn || next.proxy !== cur.proxy;
+    config.iptvRelay = next;
+    saveConfig();
+    if (changed) {
+      for (const k of [...iptvStreams.keys()]) iptvStop(k);
+      iptvList = { at: 0, channels: [], byId: new Map(), error: null, loading: null };
+      await iptvLoad(true).catch(() => {});
+    }
+    send(res, 200, iptvStatus());
+    return true;
+  }
+  if (req.method === 'POST') {
+    await iptvLoad(true);
+    send(res, 200, iptvStatus());
+    return true;
+  }
+  if (req.method === 'DELETE') {
+    for (const k of [...iptvStreams.keys()]) iptvStop(k);
+    delete config.iptvRelay;
+    saveConfig();
+    iptvList = { at: 0, channels: [], byId: new Map(), error: null, loading: null };
+    send(res, 200, iptvStatus());
+    return true;
+  }
+  return false;
+}
+
 // Lumio Auto (bêta) : remplace Radarr / Sonarr pour l'essentiel, écrit pour Lumio (aucun code repris d'eux).
 // - Indexeurs à soi (Torznab : C411, Tr4ker, Jackett…) et/ou Prowlarr, avec limite de requêtes par site
 // - Veille RSS des nouveautés + recherche automatique de ce qui manque (films sortis, épisodes diffusés)
@@ -11446,6 +11766,8 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
 
   // Book : lecture des livres par lien signé (sans jeton Jellyfin)
   if (url.pathname.startsWith('/api/books/f/') && (await bookFileRoutes(req, res, url.pathname, url.searchParams))) return;
+  // Live TV par le serveur : liste et flux IPTV par lien signé (les lecteurs n'envoient pas de jeton)
+  if (url.pathname.startsWith('/api/iptv/r/') && (await iptvRelayRoutes(req, res, url.pathname))) return;
 
   if (!url.pathname.startsWith('/api/')) return send(res, 404, { error: 'introuvable' });
 
@@ -11480,6 +11802,7 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
     if (p.startsWith('/api/books') && (await bookRoutesMore(req, res, p, q, user))) return;
     if (await audioRoutes(req, res, p, q, user)) return;
     if (await twitchRoutes(req, res, p, q, user)) return;
+    if (p.startsWith('/api/iptv/') && (await iptvAdminRoutes(req, res, p, user))) return;
     if (await profileRoutes(req, res, p, q, user)) return;
     if (await autoRoutes(req, res, p, q, user)) return;
 
@@ -12286,13 +12609,16 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         const b = await readBody(req);
         const list = Array.isArray(b.sources) ? b.sources : [];
         liveSources[user.id] = list
-          .filter((x) => x && typeof x.url === 'string' && /^https?:\/\//i.test(x.url))
+          .filter((x) => x && x.id !== IPTV_RELAY_ID && typeof x.url === 'string' && /^https?:\/\//i.test(x.url))
           .slice(0, 20)
           .map((x) => ({ id: String(x.id || '').slice(0, 60), name: String(x.name || 'Source').slice(0, 80), kind: x.kind === 'stremio' ? 'stremio' : 'm3u', url: String(x.url).slice(0, 2000) }));
         saveLive();
         return send(res, 200, { ok: true });
       }
-      if (req.method === 'GET') return send(res, 200, { sources: liveSources[user.id] || [] });
+      if (req.method === 'GET') {
+        const relay = iptvRelaySource(req, user);
+        return send(res, 200, { sources: [...(relay ? [relay] : []), ...(liveSources[user.id] || [])] });
+      }
     }
 
     if (req.method === 'GET' && p === '/api/collections') {

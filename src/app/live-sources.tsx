@@ -10,7 +10,20 @@ import { FocusPressable as Pressable } from '@/components/tv';
 import { Button, SegChip } from '@/components/ui';
 import { C, R } from '@/constants/theme';
 import { forgetChannels, newSourceId, probeSource, xtreamM3u, syncLiveSources } from '@/lib/live';
-import { useSettings, type LiveSource } from '@/lib/settings';
+import { serverCall } from '@/lib/chat';
+import { isManager, useSettings, type LiveSource } from '@/lib/settings';
+
+type RelayStatus = {
+  configured: boolean;
+  name: string | null;
+  host: string | null;
+  maxStreams: number;
+  vpn: boolean;
+  channels: number;
+  at: string | null;
+  error: string | null;
+  playing: { name: string; viewers: number }[];
+};
 
 type Kind = 'm3u' | 'xtream' | 'stremio';
 
@@ -28,6 +41,42 @@ export default function LiveSources() {
   const [user, setUser] = useState('');
   const [pass, setPass] = useState('');
   const [busy, setBusy] = useState(false);
+  // IPTV par le serveur (admin) : le serveur Lumio garde les identifiants et relaie les chaînes à la famille
+  const admin = isManager(settings) && !!settings.chatUrl;
+  const [relay, setRelay] = useState<RelayStatus | null>(null);
+  const [relayBusy, setRelayBusy] = useState(false);
+  useEffect(() => {
+    if (admin) serverCall<RelayStatus>(settings, '/api/iptv/relay').then(setRelay).catch(() => {});
+  }, [admin]); // eslint-disable-line react-hooks/exhaustive-deps
+  const relayCall = async (method: string, body?: object) => {
+    setRelayBusy(true);
+    try {
+      const r = await serverCall<RelayStatus>(settings, '/api/iptv/relay', { method, body: body ? JSON.stringify(body) : undefined });
+      setRelay(r);
+      return r;
+    } catch (e: any) {
+      Alert.alert('Serveur Lumio', e?.message ?? String(e));
+      return null;
+    } finally {
+      setRelayBusy(false);
+    }
+  };
+  const sendToServer = async () => {
+    const finalUrl = kind === 'xtream' ? xtreamM3u(server, user, pass) : url.trim();
+    if (kind === 'stremio' || !finalUrl || (kind === 'xtream' && (!server.trim() || !user.trim()))) {
+      Alert.alert('IPTV par le serveur', 'Remplis d’abord un lien M3U ou un compte Xtream Codes ci-dessous.');
+      return;
+    }
+    const r = await relayCall('PUT', { url: finalUrl, name: name.trim() || undefined });
+    if (r) {
+      toast(r.channels ? `Serveur : ${r.channels.toLocaleString('fr-FR')} chaînes` : `Serveur : ${r.error ?? 'liste enregistrée'}`);
+      setName('');
+      setUrl('');
+      setServer('');
+      setUser('');
+      setPass('');
+    }
+  };
 
   const add = async () => {
     const finalUrl = kind === 'xtream' ? xtreamM3u(server, user, pass) : url.trim();
@@ -101,6 +150,57 @@ export default function LiveSources() {
           </View>
         ) : null}
 
+        {admin ? (
+          <>
+            <Text style={styles.section}>IPTV par le serveur</Text>
+            <View style={styles.card}>
+              <Text style={styles.dim}>
+                Le serveur Lumio garde les identifiants et relaie les chaînes (par le VPN, comme qBittorrent) à toute la famille, sur le
+                téléphone et sur Lumio TV. Une même chaîne regardée à plusieurs n’utilise qu’une connexion.
+              </Text>
+              {relay?.configured ? (
+                <>
+                  <Text style={styles.srcName}>
+                    {relay.name || 'IPTV'} · {relay.host}
+                  </Text>
+                  <Text style={styles.dim}>
+                    {relay.error ? `⚠︎ ${relay.error}` : `${relay.channels.toLocaleString('fr-FR')} chaînes`}
+                    {relay.playing.length ? ` · en cours : ${relay.playing.map((x) => `${x.name} (${x.viewers})`).join(', ')}` : ''}
+                  </Text>
+                  <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <Text style={styles.dim}>Chaînes en même temps :</Text>
+                    {[1, 2, 3, 4].map((n) => (
+                      <SegChip key={n} label={String(n)} on={relay.maxStreams === n} onPress={() => relayCall('PUT', { maxStreams: n })} />
+                    ))}
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                    <SegChip label="Par le VPN" icon="shield-checkmark-outline" on={relay.vpn} onPress={() => relayCall('PUT', { vpn: true })} />
+                    <SegChip label="Sans VPN" icon="globe-outline" on={!relay.vpn} onPress={() => relayCall('PUT', { vpn: false })} />
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <Button title="Recharger" icon="refresh" variant="secondary" onPress={() => relayCall('POST')} loading={relayBusy} style={{ flex: 1 }} />
+                    <Button
+                      title="Retirer"
+                      icon="trash-outline"
+                      variant="secondary"
+                      onPress={() =>
+                        Alert.alert('Retirer l’IPTV du serveur ?', 'La famille ne verra plus ces chaînes.', [
+                          { text: 'Annuler', style: 'cancel' },
+                          { text: 'Retirer', style: 'destructive', onPress: () => relayCall('DELETE') },
+                        ])
+                      }
+                      style={{ flex: 1 }}
+                    />
+                  </View>
+                  <Text style={styles.dim}>Pour changer de liste : remplis le formulaire ci-dessous puis « Envoyer au serveur ».</Text>
+                </>
+              ) : (
+                <Text style={styles.dim}>Remplis le formulaire ci-dessous (lien M3U ou Xtream Codes) puis touche « Envoyer au serveur ».</Text>
+              )}
+            </View>
+          </>
+        ) : null}
+
         <Text style={styles.section}>Ajouter une source</Text>
         <View style={styles.card}>
           <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
@@ -153,6 +253,9 @@ export default function LiveSources() {
             />
           )}
           <Button title="Ajouter" icon="add" onPress={add} loading={busy} />
+          {admin && kind !== 'stremio' ? (
+            <Button title="Envoyer au serveur (pour toute la famille)" icon="server-outline" variant="secondary" onPress={sendToServer} loading={relayBusy} />
+          ) : null}
         </View>
         <Text style={styles.dim}>
           Les sources sont enregistrées avec tes réglages. Chaque membre de la famille ajoute les siennes dans son appli.
