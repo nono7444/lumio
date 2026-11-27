@@ -28,7 +28,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.160.1';
+const VERSION = '3.161.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -6997,6 +6997,24 @@ function iptvQuality(name) {
     .trim();
   return { label: q ? q[0] : null, score: q ? q[2] : 2, base: base || name };
 }
+// Logos nets (PNG en grand) des chaînes françaises : dépôt public tv-logo/tv-logos, à la place des petites icônes du fournisseur
+const IPTV_LOGOS = new Set('6ter ab1 ab3 abx action altice-studio animaux arte automoto-la-chaine b-smart bein-sports-1-french bein-sports-2-french bein-sports-3-french bein-sports bet bfm-business bfm-grand-lille bfm-grand-littoral bfm-lyon bfm-paris bfm-tv boing boomerang c-news c-news-prime c-star c8 canal-j canal-plus-box-office canal-plus-cinemas canal-plus-docs canal-plus-foot canal-plus-formula1 canal-plus canal-plus-grand-ecran canal-plus-hello canal-plus-kids canal-plus-ligue1 canal-plus-magic canal-plus-moto-gp canal-plus-outremer canal-plus-premier-league canal-plus-series canal-plus-sport-360 canal-plus-sport canal-plus-story canal-plus-top-14-rugby cartoon-network chasse-et-peche cine-plus-classic cine-plus-emotion cine-plus-family cine-plus-festival cine-plus-frisson cine-plus-ocs cine-plus-premier comedie-plus crime-district culturebox disney-channel disney-jr dreamsee drive-in-movie-channel equidia europe-2-pop-tv europe1-tv eurosport-1 eurosport-2 france-2 france-24 france-3 france-4 france-5 franceinfo game-one golf-plus gulli histoire-tv infosport-plus j-one kto la-chaine-meteo lci lcp lequipe ligue-1plus-10 ligue-1plus-2 ligue-1plus-3 ligue-1plus-4 ligue-1plus-5 ligue-1plus-6 ligue-1plus-7 ligue-1plus-8 ligue-1plus-9 ligue-1plus m6 m6-music mangas mcm mcm-pop mcm-top melody mezzo mezzo-live mgg-tv mon-nickelodeon-junior motorvision-plus motorvision-tv multisports-1 multisports-2 multisports-3 multisports-4 multisports-5 multisports-6 multisports nickelodeon nickelodeon-junior nickelodeon-plus nickelodeon-teen nolife non-stop-people novelas-tv novo19 nrj-12 nrj-hits ocs-choc ocs-city ocs ocs-geants ocs-max ocs-pulp ol-tv olympia-tv one-tv paramount-channel-decale paramount-channel paris-premiere pitchoun-tv piwi-plus planete-plus-aventure planete-plus-crime planete-plus polar-plus public-senat rfm-tv rmc-decouverte rmc-life rmc-sport-1 rmc-sport-2 rmc-sport-3 rmc-sport-4 rmc-sport-access-1 rmc-sport-access-2 rmc-sport-access-3 rmc-sport rmc-sport-live-10 rmc-sport-live-11 rmc-sport-live-12 rmc-sport-live-13 rmc-sport-live-14 rmc-sport-live-15 rmc-sport-live-16 rmc-sport-live-5 rmc-sport-live-6 rmc-sport-live-7 rmc-sport-live-8 rmc-sport-live-9 rmc-sport-news rmc-story rt-france rtl9 science-and-vie-tv seasons serie-club sport-en-france stingray-brava stingray-djazz t18 tcm-cinema teletoon-plus-1 teletoon-plus teva tf1 tf1-plus tf1-series-films tfx tiji tlc tmc tmc-plus toute-lhistoire trace-caribbean trace-latina trace-sport-stars trace-urban trek tv-breizh tv5-monde ultra-nature ushuaia-tv w9 warner-tv warner-tv-next'.split(' '));
+const IPTV_LOGO_ALIAS = { cnews: 'c-news', cstar: 'c-star', 'france-info': 'franceinfo', 'l-equipe': 'lequipe', 'l-equipe-tv': 'lequipe', nrj12: 'nrj-12', tv5monde: 'tv5-monde', 'tv5-monde-europe': 'tv5-monde', 'canal-plus-cinema': 'canal-plus-cinemas', 'canal-plus-sport360': 'canal-plus-sport-360', 'tcm': 'tcm-cinema', 'ocs-cinema': 'ocs', 'disney-junior': 'disney-jr', 'toute-l-histoire': 'toute-lhistoire', 'science-et-vie-tv': 'science-and-vie-tv', 'bfm': 'bfm-tv', 'bfmtv': 'bfm-tv', 'lci-la-chaine-info': 'lci', 'game-one-plus-1': 'game-one', 'eurosport': 'eurosport-1', 'rmc-sport': 'rmc-sport-1' };
+function iptvLogo(base) {
+  let slug = String(base || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\+\s*1\b/g, ' ')
+    .replace(/\+/g, ' plus ')
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  const bein = slug.match(/^bein-sports?-(\d)$/);
+  if (bein) slug = `bein-sports-${bein[1]}-french`;
+  slug = IPTV_LOGO_ALIAS[slug] || slug;
+  return IPTV_LOGOS.has(slug) ? `https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/france/${slug}-fr.png` : null;
+}
 function iptvCurate(channels) {
   const out = [];
   const seen = new Set();
@@ -7013,7 +7031,7 @@ function iptvCurate(channels) {
     const key = `${cat}|${label.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ ...ch, name: label, base: q.base, q: q.score, group: cat });
+    out.push({ ...ch, name: label, base: q.base, q: q.score, group: cat, logo: iptvLogo(q.base) || ch.logo });
   }
   const order = [...IPTV_CATS.map((c) => c[0]), 'Autres'];
   const coll = new Intl.Collator('fr', { numeric: true, sensitivity: 'base' });
