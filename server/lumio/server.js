@@ -26,7 +26,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.157.0';
+const VERSION = '3.158.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -6447,6 +6447,93 @@ async function twitchQualities(master) {
   return out.sort((a, b) => (a.id === 'audio_only') - (b.id === 'audio_only') || (b.id === 'chunked') - (a.id === 'chunked') || b.height - a.height || b.fps - a.fps);
 }
 
+
+// ——— Twitch en direct ———
+// Lecture d'un live : relais sans pub d'abord (ils récupèrent la liste de lecture depuis une région sans publicité),
+// sinon le flux officiel de Twitch. Avec ton compte Twitch connecté, Twitch donne aussi les qualités HEVC / AV1
+// (1440p sur les chaînes qui diffusent en « Enhanced Broadcasting ») : elles s'ajoutent aux qualités du relais.
+const TWITCH_RELAYS = [
+  ['Luminous EU', 'https://eu.luminous.dev/live/{channel}'],
+  ['Luminous EU 2', 'https://eu2.luminous.dev/live/{channel}'],
+  ['Perfprod EU', 'https://lb-eu.cdn-perfprod.com/live/{channel}'],
+  ['Perfprod EU 2', 'https://lb-eu2.cdn-perfprod.com/live/{channel}'],
+  ['Perfprod EU 3', 'https://lb-eu3.cdn-perfprod.com/live/{channel}'],
+  ['Luminous AS', 'https://as.luminous.dev/live/{channel}'],
+];
+async function twitchLiveOfficial(login, codecs) {
+  const d = await twitchGql(`query { streamPlaybackAccessToken(channelName: ${JSON.stringify(login)}, params: { platform: "web", playerBackend: "mediaplayer", playerType: "site" }) { value signature } }`);
+  const t = d.streamPlaybackAccessToken;
+  if (!t?.value) throw new HttpError(404, 'Chaîne hors ligne ou introuvable');
+  const q = new URLSearchParams({ sig: t.signature, token: t.value, allow_source: 'true', allow_audio_only: 'true', fast_bread: 'true', playlist_include_framerate: 'true', player_backend: 'mediaplayer', platform: 'web', supported_codecs: codecs, p: String(Math.floor(Math.random() * 1e7)) });
+  const url = `https://usher.ttvnw.net/api/channel/hls/${login}.m3u8?${q}`;
+  const r = await fetch(url, { signal: AbortSignal.timeout(10000), headers: { 'User-Agent': 'Mozilla/5.0' } });
+  const txt = r.ok ? await r.text() : '';
+  if (r.status === 404 || (r.ok && !txt.startsWith('#EXTM3U'))) throw new HttpError(404, 'Chaîne hors ligne');
+  if (!r.ok) throw new HttpError(502, `Twitch refuse la lecture du live (${r.status})`);
+  return url;
+}
+async function twitchLiveRelay(login) {
+  const one = async ([name, tpl]) => {
+    const t0 = Date.now();
+    const url = `${tpl.replace('{channel}', login)}?allow_source=true&allow_audio_only=true&fast_bread=true`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(6000), headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const txt = r.ok ? await r.text() : '';
+    if (!txt.startsWith('#EXTM3U') || !/#EXT-X-STREAM-INF/.test(txt)) throw new Error(`${name} : ${r.status}`);
+    return { name, url, ms: Date.now() - t0 };
+  };
+  try {
+    return await Promise.any(TWITCH_RELAYS.map(one));
+  } catch {
+    return null;
+  }
+}
+async function twitchLivePlay(login, adFree) {
+  const [relay, official] = await Promise.all([
+    adFree ? twitchLiveRelay(login) : null,
+    twitchLiveOfficial(login, 'av1,h265,h264').catch(() => twitchLiveOfficial(login, 'h264')),
+  ]);
+  const main = relay ? relay.url : official;
+  let qualities = await twitchQualities(main).catch(() => []);
+  // Qualités plus hautes que celles du relais (1440p, 4K) : prises sur le flux officiel
+  if (relay && official) {
+    const extra = (await twitchQualities(official).catch(() => [])).filter((q) => q.height > Math.max(0, ...qualities.map((x) => x.height)));
+    qualities = [...extra.map((q) => ({ ...q, name: `${q.name} · officiel` })), ...qualities];
+  }
+  return { url: main, qualities, source: relay ? relay.name : 'Twitch', adFree: Boolean(relay) };
+}
+// Lives du moment : par jeu, en français, ou les plus regardés
+const twitchBrowseCache = new Map();
+async function twitchBrowse(game, fr) {
+  const k = `${game || ''}|${fr ? 'fr' : ''}`;
+  const hit = twitchBrowseCache.get(k);
+  if (hit && Date.now() - hit.at < 2 * 60_000) return hit.v;
+  const node = 'title viewersCount previewImageURL(width: 440, height: 248) game { name displayName boxArtURL(width: 144, height: 192) } broadcaster { login displayName profileImageURL(width: 70) }';
+  const opts = fr ? ['{ broadcasterLanguages: [FR], sort: VIEWER_COUNT }', '{ broadcasterLanguages: [FR] }'] : ['{ sort: VIEWER_COUNT }', null];
+  let edges = [];
+  for (const o of opts) {
+    const args = `first: 60${o ? `, options: ${o}` : ''}`;
+    const q = game ? `query { game(name: ${JSON.stringify(game)}) { streams(${args}) { edges { node { ${node} } } } } }` : `query { streams(${args}) { edges { node { ${node} } } } }`;
+    const d = await twitchGql(q).catch(() => null);
+    edges = (game ? d?.game?.streams?.edges : d?.streams?.edges) || [];
+    if (edges.length) break;
+  }
+  const v = edges
+    .map((e) => e && e.node)
+    .filter((n) => n && n.broadcaster)
+    .map((n) => ({ login: n.broadcaster.login, name: n.broadcaster.displayName, avatar: n.broadcaster.profileImageURL, title: n.title, viewers: n.viewersCount || 0, game: n.game?.displayName || n.game?.name || null, thumb: n.previewImageURL ? `${n.previewImageURL}?t=${Math.floor(Date.now() / 60000)}` : null }))
+    .sort((a, b) => b.viewers - a.viewers);
+  twitchBrowseCache.set(k, { at: Date.now(), v });
+  return v;
+}
+async function twitchTopGames() {
+  const hit = twitchBrowseCache.get('games');
+  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.v;
+  const d = await twitchGql('query { games(first: 40, options: { sort: VIEWER_COUNT }) { edges { node { name displayName viewersCount boxArtURL(width: 144, height: 192) } } } }').catch(() => twitchGql('query { games(first: 40) { edges { node { name displayName viewersCount boxArtURL(width: 144, height: 192) } } } }'));
+  const v = (d?.games?.edges || []).map((e) => e.node).filter(Boolean).map((g) => ({ name: g.name, label: g.displayName || g.name, viewers: g.viewersCount || 0, box: g.boxArtURL }));
+  twitchBrowseCache.set('games', { at: Date.now(), v });
+  return v;
+}
+
 // Téléchargement d'une rediffusion sur un disque (ffmpeg recopie le flux sans le réencoder : rapide, même qualité)
 const twitchJobs = [];
 const safeName = (x) => String(x || '').replace(/[\/\\:*?"<>|\x00-\x1f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Rediffusion';
@@ -6625,6 +6712,21 @@ async function twitchRoutes(req, res, p, q, user) {
       send(res, 200, { account: null });
       return true;
     }
+  }
+  // Live d'une chaîne (sans pub par défaut)
+  const lm = p.match(/^\/api\/twitch\/live\/([A-Za-z0-9_]{2,30})\/play$/);
+  if (lm && req.method === 'GET') {
+    send(res, 200, await twitchLivePlay(twitchLogin(lm[1]), q.get('adfree') !== '0'));
+    return true;
+  }
+  // Lives du moment : ?game=…&fr=1 ; /api/twitch/games = jeux les plus regardés
+  if (req.method === 'GET' && p === '/api/twitch/browse') {
+    send(res, 200, { lives: await twitchBrowse(String(q.get('game') || '').trim(), q.get('fr') === '1') });
+    return true;
+  }
+  if (req.method === 'GET' && p === '/api/twitch/games') {
+    send(res, 200, { games: await twitchTopGames().catch(() => []) });
+    return true;
   }
   const pm = p.match(/^\/api\/twitch\/vod\/(\d+)\/(play|progress)$/);
   if (pm && req.method === 'GET' && pm[2] === 'play') {

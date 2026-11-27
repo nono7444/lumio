@@ -40,7 +40,15 @@ export type TwitchChannel = {
   error?: string;
 };
 
+export type TwitchLive = { login: string; name: string; avatar: string | null; title: string; viewers: number; game: string | null; thumb: string | null };
+export type TwitchGame = { name: string; label: string; viewers: number; box: string | null };
 export const twitchApi = {
+  /** Live d'une chaîne : relais sans pub d'abord, sinon flux officiel ; qualités jusqu'au 1440p avec le compte connecté */
+  live: (s: Settings, login: string, adFree = true) =>
+    serverCall<{ url: string; qualities: TwitchQuality[]; source: string; adFree: boolean }>(s, `/api/twitch/live/${encodeURIComponent(login)}/play${adFree ? '' : '?adfree=0'}`),
+  browse: (s: Settings, o: { game?: string; fr?: boolean }) =>
+    serverCall<{ lives: TwitchLive[] }>(s, `/api/twitch/browse?${new URLSearchParams({ ...(o.game ? { game: o.game } : {}), ...(o.fr ? { fr: '1' } : {}) })}`),
+  games: (s: Settings) => serverCall<{ games: TwitchGame[] }>(s, '/api/twitch/games'),
   channels: (s: Settings, refresh = false) => serverCall<{ channels: TwitchChannel[] }>(s, `/api/twitch/channels${refresh ? '?refresh=1' : ''}`),
   setChannels: (s: Settings, channels: string[]) =>
     serverCall<{ channels: string[] }>(s, '/api/twitch/channels', { method: 'PUT', body: JSON.stringify({ channels }) }),

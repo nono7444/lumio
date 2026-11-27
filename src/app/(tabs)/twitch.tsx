@@ -14,16 +14,19 @@ import { UniverseSwitch } from '@/components/universe-switch';
 import { C, TAB_SPACE } from '@/constants/theme';
 import { useSettings } from '@/lib/settings';
 import { FolderCard } from '@/components/folder-card';
+import { TwitchLiveTab } from '@/components/twitch-live';
 import { lumioPlayBase } from '@/lib/chat';
 import { folderApi } from '@/lib/ebooks';
-import { fmtDay, fmtLen, loadTwitch, twitchApi, useTwitch, type TwitchChannel, type TwitchJob, type TwitchQuality, type TwitchSaved, type TwitchVod } from '@/lib/twitch';
+import { fmtDay, fmtLen, loadTwitch, twitchApi, useTwitch, type TwitchChannel, type TwitchJob, type TwitchLive, type TwitchQuality, type TwitchSaved, type TwitchVod } from '@/lib/twitch';
 
 const TWITCH = '#9146FF';
 const QKEY = 'lumio:twitch-qualite';
+const ADKEY = 'lumio:twitch-sanspub';
 // Qualités connues avant d'ouvrir une rediffusion (le choix exact vient de Twitch au moment de la lecture)
 const QUALITY_PREFS = [
   { id: 'auto', name: 'Auto' },
   { id: 'chunked', name: 'Source' },
+  { id: '1440p60', name: '1440p60' },
   { id: '1080p60', name: '1080p60' },
   { id: '720p60', name: '720p60' },
   { id: '720p30', name: '720p' },
@@ -56,7 +59,20 @@ export default function TwitchScreen() {
   const [qSheet, setQSheet] = useState(false);
   const [menu, setMenu] = useState<{ v: TwitchVod; qualities: TwitchQuality[] | null } | null>(null);
   const [jobs, setJobs] = useState<TwitchJob[]>([]);
-  const [tab, setTab] = useState<'vods' | 'mine'>('vods');
+  const [tab, setTab] = useState<'live' | 'vods' | 'mine'>('vods');
+  const [adFree, setAdFree] = useState(true);
+  useEffect(() => {
+    AsyncStorage.getItem(ADKEY)
+      .then((v) => v === '0' && setAdFree(false))
+      .catch(() => {});
+  }, []);
+  const toggleAdFree = () => {
+    tap();
+    setAdFree((x) => {
+      AsyncStorage.setItem(ADKEY, x ? '0' : '1').catch(() => {});
+      return !x;
+    });
+  };
   const [mine, setMine] = useState<TwitchSaved[] | null>(null);
   const [diskSheet, setDiskSheet] = useState(false);
   const [disk, setDisk] = useState<string | null>(null);
@@ -162,6 +178,29 @@ export default function TwitchScreen() {
       });
     } catch (e) {
       Alert.alert('Lecture impossible', e instanceof Error ? e.message : String(e));
+    } finally {
+      setOpening(null);
+    }
+  };
+  // Live : relais sans pub si activé (sinon flux officiel), qualité choisie (1440p avec le compte connecté)
+  const playLive = async (l: TwitchLive) => {
+    tap();
+    setOpening(l.login);
+    try {
+      const r = await twitchApi.live(settings, l.login, adFree);
+      const q = pickQuality(r.qualities ?? [], quality);
+      router.push({
+        pathname: '/player',
+        params: {
+          kind: 'url',
+          uri: q?.url ?? r.url,
+          hls: '1',
+          title: `${l.name} · en direct`,
+          subtitle: [l.title, q?.name, r.adFree ? `sans pub (${r.source})` : 'flux officiel'].filter(Boolean).join(' · '),
+        },
+      });
+    } catch (e) {
+      Alert.alert('Live indisponible', e instanceof Error ? e.message : String(e));
     } finally {
       setOpening(null);
     }
@@ -295,7 +334,9 @@ export default function TwitchScreen() {
         {ch?.error ? <Text style={[styles.s, { paddingHorizontal: 16, color: C.danger }]}>{ch.error} (appui long sur la chaîne pour la retirer)</Text> : null}
 
         {ch?.live ? (
-          <View style={styles.live}>
+          <Pressable
+            onPress={() => playLive({ login: ch.login, name: ch.name, avatar: ch.avatar ?? null, title: ch.live!.title, viewers: ch.live!.viewers, game: ch.live!.game, thumb: null })}
+            style={styles.live}>
             <View style={styles.liveBadge}>
               <Text style={styles.liveBadgeText}>EN DIRECT</Text>
             </View>
@@ -303,7 +344,8 @@ export default function TwitchScreen() {
               {ch.live.title}
             </Text>
             <Text style={styles.s}>{[ch.live.game, `${ch.live.viewers.toLocaleString('fr-FR')} spectateurs`].filter(Boolean).join(' · ')}</Text>
-          </View>
+            <Text style={[styles.small, { color: TWITCH }]}>{opening === ch.login ? 'Ouverture…' : '▶ Regarder le live'}</Text>
+          </Pressable>
         ) : null}
 
         {going.length ? (
@@ -323,6 +365,7 @@ export default function TwitchScreen() {
         ) : null}
 
         <View style={styles.tabs}>
+          <SegChip label="En direct" icon="radio-outline" on={tab === 'live'} onPress={() => setTab('live')} />
           <SegChip label={`Rediffusions${ch ? ` · ${ch.vods.length}` : ''}`} icon="logo-twitch" on={tab === 'vods'} onPress={() => setTab('vods')} />
           <SegChip label={`Mes rediffusions${mine ? ` · ${mine.length}` : ''}`} icon="server-outline" on={tab === 'mine'} onPress={() => (setTab('mine'), loadMine())} />
         </View>
@@ -333,6 +376,12 @@ export default function TwitchScreen() {
             <Text style={styles.toolText}>Disque : {disk ?? '…'}</Text>
             <Ionicons name="chevron-down" size={14} color={C.textDim} />
           </Pressable>
+          {tab === 'live' ? (
+            <Pressable onPress={toggleAdFree} style={[styles.tool, adFree && { borderColor: TWITCH }]}>
+              <Ionicons name={adFree ? 'shield-checkmark' : 'shield-outline'} size={16} color={adFree ? TWITCH : C.text} />
+              <Text style={styles.toolText}>{adFree ? 'Sans pub' : 'Avec pub'}</Text>
+            </Pressable>
+          ) : null}
           <Pressable onPress={() => (tap(), setQSheet(true))} style={styles.tool}>
             <Ionicons name="options-outline" size={16} color={C.text} />
             <Text style={styles.toolText}>Qualité : {QUALITY_PREFS.find((x) => x.id === quality)?.name ?? quality}</Text>
@@ -370,6 +419,10 @@ export default function TwitchScreen() {
           </View>
         ))}
 
+        {tab === 'live' ? <TwitchLiveTab channels={data ?? []} onPlay={playLive} busy={opening} /> : null}
+        {tab === 'live' && quality === '1440p60' && !account ? (
+          <Text style={[styles.s, { paddingHorizontal: 16, marginTop: 10 }]}>Le 1440p demande ton compte Twitch connecté (plus haut), et une chaîne qui diffuse en 1440p.</Text>
+        ) : null}
         {tab === 'mine' ? (
           <View style={{ paddingHorizontal: 16, gap: 18 }}>
             {mine === null ? <ActivityIndicator color={C.text} /> : null}

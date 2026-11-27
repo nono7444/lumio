@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Twitch : onglet « En direct » — tes chaînes en live, les lives en français et les lives par jeu (jeux les plus regardés) ; un appui lance le live. Sans pub par défaut (relais Luminous / Perfprod, repli automatique sur le flux officiel, bouton « Sans pub / Avec pub »), qualités jusqu'au 1440p avec ton compte Twitch connecté. Le bandeau « EN DIRECT » d'une chaîne lance aussi le live (serveur 3.158.0).
+
 ## 1.0.220 — 26 novembre 2026
 
 - Livres (admin) : bouton « Télécharger les tomes manquants (N) » sur une collection : le serveur cherche chaque tome absent (C411, Tr4ker, Wawacity, recherche ciblée par tome) et lance les téléchargements tout seul ; les cases passent « EN COURS », et les tomes introuvables sont notés dans le journal de « Séries à compléter » (serveur 3.157.0).
