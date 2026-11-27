@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.223 — 27 novembre 2026
+
 - Menu des univers réorganisé : Films & séries, Lumio Auto, Livres, Livres audio, puis TV (la Live TV devient un univers à part).
 - Twitch n'est plus un univers : un onglet Twitch dans Lumio Auto sert à sauvegarder les rediffusions sur le serveur (toucher une rediffusion → choisir la qualité). Les lives sont retirés.
 
