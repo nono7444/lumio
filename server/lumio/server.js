@@ -28,7 +28,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.159.1';
+const VERSION = '3.160.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -6964,12 +6964,58 @@ const reqBase = (req) => {
   const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || (/^(\d+\.\d+\.\d+\.\d+|localhost)(:\d+)?$/.test(host) ? 'http' : 'https');
   return host ? `${proto}://${host}` : publicUrl();
 };
-/** Source « Lumio (serveur) » ajoutée à la Live TV de chaque membre quand l'admin a configuré l'IPTV. */
-function iptvRelaySource(req, user) {
-  const c = iptvCfg();
-  if (!c) return null;
-  return { id: IPTV_RELAY_ID, name: c.name || 'IPTV (serveur Lumio)', kind: 'm3u', url: `${reqBase(req)}/api/iptv/r/${iptvToken(user.id)}/playlist.m3u` };
+// ——— Chaînes françaises rangées par catégorie (Généralistes, Sport, Cinéma…), triées, noms nettoyés ———
+const IPTV_CATS = [
+  ['Généralistes', /\b(tf1|france ?[2345]|m6|arte|c8|w9|tmc|tfx|nrj ?12|lcp|public s[eé]nat|6ter|ch[eé]rie ?25|rmc story|t18|novo19|l'?[ée]quipe(?! ?(live|21))|france ?ô|cstar)\b/i],
+  ['Sport', /sport|bein|eurosport|\bdazn\b|infosport|golf|automoto|\bfoot|\brmc ?sport|equidia|l'?[ée]quipe ?(live|21)|\bligue ?1\b|\bufc\b|\bmotors?\b|\bnba\b|\bf1\b|tennis|rugby/i],
+  ['Info', /\binfo|news|\bbfm|cnews|\blci\b|euronews|france ?24|\bi24\b|\btv5/i],
+  ['Cinéma & séries', /cin[eé]|film|movie|\bocs\b|\btcm\b|paramount|s[eé]rie|action|warner|syfy|13e ?rue|polar|canal ?\+|\bprime\b|netflix|novelas|comedie|com[eé]die|\bab ?1\b|\btv ?breizh/i],
+  ['Jeunesse', /kids?\b|jeunesse|enfant|disney|nickelodeon|\bnick\b|tiji|boomerang|cartoon|canal ?j\b|piwi|toonami|mangas?\b|\bteletoon|baby/i],
+  ['Documentaires', /docu|discovery|national geo|nat ?geo|histoire|ushua[iï]a|plan[eè]te|science|animaux|d[eé]couverte|chasse|p[eê]che|voyage|trek|museum|crime district|investigation|\brmc ?d[eé]couverte/i],
+  ['Musique', /music|musique|\bmtv\b|\bmcm\b|\btrace\b|nrj ?hits|clubbing|\bmezzo\b|\bm6 ?music/i],
+];
+const IPTV_FR = /(^|[\s|:\[(\-])(fr|france|fran[cç]ais|french|vf)([\s|:\])\-]|$)/i;
+const iptvCleanName = (n) =>
+  String(n || '')
+    .replace(/^\s*[|[(]?\s*(fr|france|vf)\s*[|\]):\-]+\s*/i, '')
+    .replace(/\s*[|[(]\s*(fr|vf)\s*[|\])]\s*/gi, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim() || String(n || 'Chaîne');
+function iptvCurate(channels) {
+  const out = [];
+  const seen = new Set();
+  for (const ch of channels) {
+    if (!IPTV_FR.test(`${ch.group || ''} ${ch.name || ''}`)) continue;
+    // Pas les films / séries « 24/7 », replays et adultes
+    if (/24\/7|\bvod\b|replay|adult|xxx|\+18|18\+/i.test(`${ch.group || ''} ${ch.name || ''}`)) continue;
+    const name = iptvCleanName(ch.name);
+    const hay = `${name} ${ch.group || ''}`;
+    // Le nom de la chaîne d'abord (beIN Sports dans un groupe « Canal+ » reste du sport), puis le groupe
+    let cat = (IPTV_CATS.find(([, re]) => re.test(name)) || IPTV_CATS.find(([, re]) => re.test(hay)) || ['Autres'])[0];
+    const key = `${cat}|${name.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ ...ch, name, group: cat });
+  }
+  const order = [...IPTV_CATS.map((c) => c[0]), 'Autres'];
+  const coll = new Intl.Collator('fr', { numeric: true, sensitivity: 'base' });
+  // Généralistes dans l'ordre de la télécommande (TNT)
+  const TNT = ['tf1', 'france ?2', 'france ?3', 'france ?5', 'm6', 'arte', 'c8', 'w9', 'tmc', 'tfx', 'nrj ?12', 'lcp', 'france ?4', 'cstar', 't18', 'novo19', "l'?[ée]quipe", '6ter', 'rmc story', 'ch[ée]rie ?25'].map((x) => new RegExp(`^${x}\\b`, 'i'));
+  const rank = (c) => (c.group === 'Généralistes' ? ((i) => (i < 0 ? 99 : i))(TNT.findIndex((re) => re.test(c.name))) : 0);
+  return out.sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group) || rank(a) - rank(b) || coll.compare(a.name, b.name));
 }
+const iptvGz = new Map(); // liste prête (gzip) par adresse, recalculée quand la liste change
+/** Sources du serveur pour la Live TV : les chaînes françaises rangées, et la liste complète. */
+function iptvRelaySources(req, user) {
+  const c = iptvCfg();
+  if (!c) return [];
+  const base = `${reqBase(req)}/api/iptv/r/${iptvToken(user.id)}`;
+  return [
+    { id: IPTV_RELAY_ID, name: 'TV française', kind: 'm3u', url: `${base}/playlist.m3u` },
+    { id: `${IPTV_RELAY_ID}-all`, name: `${c.name || 'IPTV'} · tout`, kind: 'm3u', url: `${base}/all.m3u` },
+  ];
+}
+const iptvRelaySource = (req, user) => iptvRelaySources(req, user)[0] || null;
 function iptvStatus() {
   const c = iptvCfg();
   return {
@@ -6994,7 +7040,7 @@ function iptvStop(id) {
 }
 /** Routes sans jeton Jellyfin (liste et flux, par lien signé). */
 async function iptvRelayRoutes(req, res, p) {
-  const m = p.match(/^\/api\/iptv\/r\/([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\/(playlist\.m3u|c\/([0-9a-f]{12})\.ts)$/);
+  const m = p.match(/^\/api\/iptv\/r\/([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\/(playlist\.m3u|all\.m3u|c\/([0-9a-f]{12})\.ts)$/);
   if (!m || req.method !== 'GET') return false;
   if (!iptvTokenOk(m[1])) {
     send(res, 403, { error: 'Lien IPTV invalide' });
@@ -7004,16 +7050,31 @@ async function iptvRelayRoutes(req, res, p) {
     send(res, 404, { error: 'Aucune source IPTV sur le serveur' });
     return true;
   }
-  if (m[2] === 'playlist.m3u') {
+  if (m[2] === 'playlist.m3u' || m[2] === 'all.m3u') {
     const list = await iptvLoad(false);
     const base = `${reqBase(req)}/api/iptv/r/${m[1]}/c`;
-    const q = (x) => String(x || '').replace(/"/g, "'");
-    const lines = ['#EXTM3U'];
-    for (const ch of list.channels) {
-      lines.push(`#EXTINF:-1${ch.tvgId ? ` tvg-id="${q(ch.tvgId)}"` : ''}${ch.logo ? ` tvg-logo="${q(ch.logo)}"` : ''}${ch.group ? ` group-title="${q(ch.group)}"` : ''},${ch.name}`, `${base}/${ch.id}.ts`);
+    const ck = `${m[2]}|${base}|${list.at}`;
+    let gz = iptvGz.get(ck);
+    if (!gz) {
+      if (m[2] === 'playlist.m3u' && !list.fr) list.fr = iptvCurate(list.channels);
+      const chans = m[2] === 'playlist.m3u' ? list.fr : list.channels;
+      const q = (x) => String(x || '').replace(/"/g, "'");
+      const lines = ['#EXTM3U'];
+      for (const ch of chans) {
+        lines.push(`#EXTINF:-1${ch.tvgId ? ` tvg-id="${q(ch.tvgId)}"` : ''}${ch.logo ? ` tvg-logo="${q(ch.logo)}"` : ''}${ch.group ? ` group-title="${q(ch.group)}"` : ''},${ch.name}`, `${base}/${ch.id}.ts`);
+      }
+      gz = zlib.gzipSync(lines.join('\n'), { level: 6 });
+      if (iptvGz.size > 40) iptvGz.clear();
+      iptvGz.set(ck, gz);
     }
-    res.writeHead(200, { 'Content-Type': 'audio/x-mpegurl; charset=utf-8', 'Cache-Control': 'no-store' });
-    res.end(lines.join('\n'));
+    // Liste compressée : bien plus rapide à travers le tunnel (la TV et le téléphone la décompressent seuls)
+    if (/\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) {
+      res.writeHead(200, { 'Content-Type': 'audio/x-mpegurl; charset=utf-8', 'Content-Encoding': 'gzip', 'Cache-Control': 'no-store', 'Content-Length': gz.length });
+      res.end(gz);
+    } else {
+      res.writeHead(200, { 'Content-Type': 'audio/x-mpegurl; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(zlib.gunzipSync(gz));
+    }
     return true;
   }
   const id = m[3];
@@ -7080,7 +7141,7 @@ async function iptvRelayRoutes(req, res, p) {
 /** Routes admin (avec jeton) : configurer la source IPTV du serveur. */
 async function iptvAdminRoutes(req, res, p, user) {
   if (p === '/api/iptv/relay/source' && req.method === 'GET') {
-    send(res, 200, { source: iptvRelaySource(req, user) });
+    send(res, 200, { source: iptvRelaySource(req, user), sources: iptvRelaySources(req, user) });
     return true;
   }
   if (p !== '/api/iptv/relay') return false;
@@ -12670,15 +12731,14 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
         const b = await readBody(req);
         const list = Array.isArray(b.sources) ? b.sources : [];
         liveSources[user.id] = list
-          .filter((x) => x && x.id !== IPTV_RELAY_ID && typeof x.url === 'string' && /^https?:\/\//i.test(x.url))
+          .filter((x) => x && !String(x.id || '').startsWith(IPTV_RELAY_ID) && typeof x.url === 'string' && /^https?:\/\//i.test(x.url))
           .slice(0, 20)
           .map((x) => ({ id: String(x.id || '').slice(0, 60), name: String(x.name || 'Source').slice(0, 80), kind: x.kind === 'stremio' ? 'stremio' : 'm3u', url: String(x.url).slice(0, 2000) }));
         saveLive();
         return send(res, 200, { ok: true });
       }
       if (req.method === 'GET') {
-        const relay = iptvRelaySource(req, user);
-        return send(res, 200, { sources: [...(relay ? [relay] : []), ...(liveSources[user.id] || [])] });
+        return send(res, 200, { sources: [...iptvRelaySources(req, user), ...(liveSources[user.id] || [])] });
       }
     }
 
