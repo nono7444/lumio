@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.222 — 27 novembre 2026
+
 - Live TV : l'IPTV peut passer par le serveur Lumio et son VPN (comme qBittorrent). Identifiants gardés sur le serveur, une seule connexion par chaîne partagée entre vous, limite de chaînes en même temps réglable. Visible sur le téléphone et sur Lumio TV (serveur 3.159.0).
 
 ## 1.0.221 — 27 novembre 2026
