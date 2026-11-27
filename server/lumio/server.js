@@ -28,7 +28,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.160.0';
+const VERSION = '3.160.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -6981,6 +6981,22 @@ const iptvCleanName = (n) =>
     .replace(/\s*[|[(]\s*(fr|vf)\s*[|\])]\s*/gi, ' ')
     .replace(/\s{2,}/g, ' ')
     .trim() || String(n || 'Chaîne');
+// Qualité lue dans le nom : 4K > FHD (1080p) > HD (720p) > SD ; le nom affiché finit par « · 4K », « · FHD »…
+const IPTV_Q = [
+  ['4K', /\b(4k|uhd|2160p?)\b/i, 4],
+  ['FHD', /\b(fhd|full ?hd|1080[pi]?|hevc|h\.?265)\b/i, 3],
+  ['HD', /\b(hd|720p?)\b/i, 2],
+  ['SD', /\b(sd|576p?|480p?|low)\b/i, 1],
+];
+function iptvQuality(name) {
+  const q = IPTV_Q.find(([, re]) => re.test(name));
+  const base = IPTV_Q.reduce((n, [, re]) => n.replace(new RegExp(re.source, 'gi'), ' '), name)
+    .replace(/[\s|·\-]+$/, '')
+    .replace(/^[\s|·\-]+/, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return { label: q ? q[0] : null, score: q ? q[2] : 2, base: base || name };
+}
 function iptvCurate(channels) {
   const out = [];
   const seen = new Set();
@@ -6992,17 +7008,24 @@ function iptvCurate(channels) {
     const hay = `${name} ${ch.group || ''}`;
     // Le nom de la chaîne d'abord (beIN Sports dans un groupe « Canal+ » reste du sport), puis le groupe
     let cat = (IPTV_CATS.find(([, re]) => re.test(name)) || IPTV_CATS.find(([, re]) => re.test(hay)) || ['Autres'])[0];
-    const key = `${cat}|${name.toLowerCase()}`;
+    const q = iptvQuality(name);
+    const label = q.label ? `${q.base} · ${q.label}` : q.base;
+    const key = `${cat}|${label.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ ...ch, name, group: cat });
+    out.push({ ...ch, name: label, base: q.base, q: q.score, group: cat });
   }
   const order = [...IPTV_CATS.map((c) => c[0]), 'Autres'];
   const coll = new Intl.Collator('fr', { numeric: true, sensitivity: 'base' });
   // Généralistes dans l'ordre de la télécommande (TNT)
   const TNT = ['tf1', 'france ?2', 'france ?3', 'france ?5', 'm6', 'arte', 'c8', 'w9', 'tmc', 'tfx', 'nrj ?12', 'lcp', 'france ?4', 'cstar', 't18', 'novo19', "l'?[ée]quipe", '6ter', 'rmc story', 'ch[ée]rie ?25'].map((x) => new RegExp(`^${x}\\b`, 'i'));
-  const rank = (c) => (c.group === 'Généralistes' ? ((i) => (i < 0 ? 99 : i))(TNT.findIndex((re) => re.test(c.name))) : 0);
-  return out.sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group) || rank(a) - rank(b) || coll.compare(a.name, b.name));
+  const rank = (c) => (c.group === 'Généralistes' ? ((i) => (i < 0 ? 99 : i))(TNT.findIndex((re) => re.test(c.base))) : 0);
+  // Même chaîne : la meilleure qualité d'abord (TF1 · 4K, TF1 · FHD, TF1 · HD…)
+  const sorted = out.sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group) || rank(a) - rank(b) || coll.compare(a.base, b.base) || b.q - a.q);
+  // Catégorie « 4K » juste après les généralistes : toutes les chaînes en 4K, réunies
+  const uhd = sorted.filter((c) => c.q === 4).map((c) => ({ ...c, group: '4K' }));
+  const cut = sorted.findIndex((c) => c.group !== 'Généralistes');
+  return cut < 0 ? [...sorted, ...uhd] : [...sorted.slice(0, cut), ...uhd, ...sorted.slice(cut)];
 }
 const iptvGz = new Map(); // liste prête (gzip) par adresse, recalculée quand la liste change
 /** Sources du serveur pour la Live TV : les chaînes françaises rangées, et la liste complète. */
