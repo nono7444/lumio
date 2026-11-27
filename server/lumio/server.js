@@ -28,7 +28,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.159.0';
+const VERSION = '3.159.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -6878,6 +6878,45 @@ function iptvParse(text) {
   }
   return out;
 }
+function iptvXtreamFrom(url) {
+  try {
+    const u = new URL(url);
+    if (!/get\.php$/i.test(u.pathname)) return null;
+    const user = u.searchParams.get('username');
+    const pass = u.searchParams.get('password');
+    return user && pass ? { server: `${u.protocol}//${u.host}`, user, pass } : null;
+  } catch {
+    return null;
+  }
+}
+async function iptvXtreamLoad(x) {
+  const api = `${x.server}/player_api.php?username=${encodeURIComponent(x.user)}&password=${encodeURIComponent(x.pass)}`;
+  const get = async (action) => {
+    let j;
+    try {
+      j = JSON.parse(await iptvText(`${api}&action=${action}`));
+    } catch (e) {
+      throw new Error(/JSON/.test(e.message) ? 'Réponse IPTV illisible' : e.message);
+    }
+    return j;
+  };
+  const cats = await get('get_live_categories').catch(() => []);
+  const streams = await get('get_live_streams');
+  if (!Array.isArray(streams)) throw new Error('Identifiants IPTV refusés (ou abonnement expiré)');
+  const catName = new Map((Array.isArray(cats) ? cats : []).map((c) => [String(c.category_id), c.category_name]));
+  return streams.slice(0, 40000).map((st) => {
+    const url = `${x.server}/live/${encodeURIComponent(x.user)}/${encodeURIComponent(x.pass)}/${st.stream_id}.ts`;
+    return {
+      id: crypto.createHash('sha1').update(url).digest('hex').slice(0, 12),
+      name: String(st.name || '').trim() || 'Chaîne',
+      logo: st.stream_icon || null,
+      group: catName.get(String(st.category_id)) || null,
+      tvgId: st.epg_channel_id || null,
+      url,
+      headers: {},
+    };
+  });
+}
 async function iptvLoad(force) {
   const c = iptvCfg();
   if (!c) throw new HttpError(404, 'Aucune source IPTV sur le serveur');
@@ -6885,7 +6924,19 @@ async function iptvLoad(force) {
   if (iptvList.loading) return iptvList.loading;
   iptvList.loading = (async () => {
     try {
-      const channels = iptvParse(await iptvText(c.url));
+      // Compte Xtream (lien get.php) : son API d'abord (beaucoup de fournisseurs bloquent le téléchargement get.php),
+      // la liste M3U en repli
+      const x = iptvXtreamFrom(c.url);
+      let channels = null;
+      let apiErr = null;
+      if (x) channels = await iptvXtreamLoad(x).catch((e) => ((apiErr = e), null));
+      if (!channels?.length) {
+        try {
+          channels = iptvParse(await iptvText(c.url));
+        } catch (e) {
+          throw apiErr || e;
+        }
+      }
       if (!channels.length) throw new Error('Aucune chaîne trouvée dans la liste');
       iptvList = { at: Date.now(), channels, byId: new Map(channels.map((x) => [x.id, x])), error: null, loading: null };
     } catch (e) {
@@ -6897,6 +6948,8 @@ async function iptvLoad(force) {
   })();
   return iptvList.loading;
 }
+// Les grosses listes peuvent dépasser le délai du tunnel : on répond au bout de 25 s, le chargement continue
+const iptvLoadSoon = () => Promise.race([iptvLoad(true).catch(() => {}), new Promise((r) => setTimeout(r, 25000))]);
 // Jeton du lien de liste, propre à chaque membre (aucun identifiant IPTV dedans)
 const iptvToken = (userId) => {
   const b = Buffer.from(String(userId)).toString('base64url');
@@ -6927,7 +6980,7 @@ function iptvStatus() {
     vpn: c ? c.vpn !== false : true,
     channels: iptvList.channels.length,
     at: iptvList.at ? new Date(iptvList.at).toISOString() : null,
-    error: iptvList.error,
+    error: iptvList.loading ? 'chargement de la liste en cours… (touche Recharger dans une minute)' : iptvList.error,
     playing: [...iptvStreams.values()].map((s) => ({ name: s.ch.name, viewers: s.clients.size, since: new Date(s.since).toISOString() })),
   };
 }
@@ -7056,13 +7109,13 @@ async function iptvAdminRoutes(req, res, p, user) {
     if (changed) {
       for (const k of [...iptvStreams.keys()]) iptvStop(k);
       iptvList = { at: 0, channels: [], byId: new Map(), error: null, loading: null };
-      await iptvLoad(true).catch(() => {});
+      await iptvLoadSoon();
     }
     send(res, 200, iptvStatus());
     return true;
   }
   if (req.method === 'POST') {
-    await iptvLoad(true);
+    await iptvLoadSoon();
     send(res, 200, iptvStatus());
     return true;
   }
@@ -11767,7 +11820,15 @@ a.b{display:block;margin:14px 0;padding:16px;border-radius:14px;background:#fff;
   // Book : lecture des livres par lien signé (sans jeton Jellyfin)
   if (url.pathname.startsWith('/api/books/f/') && (await bookFileRoutes(req, res, url.pathname, url.searchParams))) return;
   // Live TV par le serveur : liste et flux IPTV par lien signé (les lecteurs n'envoient pas de jeton)
-  if (url.pathname.startsWith('/api/iptv/r/') && (await iptvRelayRoutes(req, res, url.pathname))) return;
+  if (url.pathname.startsWith('/api/iptv/r/')) {
+    try {
+      if (await iptvRelayRoutes(req, res, url.pathname)) return;
+    } catch (e) {
+      if (!res.headersSent) send(res, e instanceof HttpError ? e.status : 502, { error: String(e?.message || e) });
+      else res.end();
+      return;
+    }
+  }
 
   if (!url.pathname.startsWith('/api/')) return send(res, 404, { error: 'introuvable' });
 
