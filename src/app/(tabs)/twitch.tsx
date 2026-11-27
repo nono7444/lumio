@@ -161,6 +161,15 @@ export default function TwitchScreen() {
   const going = useMemo(() => (ch?.vods ?? []).filter((v) => v.progress && !v.progress.done && v.progress.pos > 60).slice(0, 8), [ch]);
   const cw = Math.min(width - 32, 640);
 
+  // Toucher une rediffusion : la sauvegarder sur le serveur (choix de la qualité), ou la regarder
+  const openMenu = (v: TwitchVod) => {
+    tap();
+    setMenu({ v, qualities: null });
+    twitchApi
+      .play(settings, v.id)
+      .then((r) => setMenu((m) => (m && m.v.id === v.id ? { v, qualities: r.qualities ?? [] } : m)))
+      .catch((e) => (setMenu(null), Alert.alert('Rediffusion indisponible', e instanceof Error ? e.message : String(e))));
+  };
   const play = async (v: TwitchVod, from?: number, want?: string) => {
     tap();
     setOpening(v.id);
@@ -333,39 +342,9 @@ export default function TwitchScreen() {
         {!data && !err ? <ActivityIndicator color={C.text} style={{ marginTop: 40 }} /> : null}
         {ch?.error ? <Text style={[styles.s, { paddingHorizontal: 16, color: C.danger }]}>{ch.error} (appui long sur la chaîne pour la retirer)</Text> : null}
 
-        {ch?.live ? (
-          <Pressable
-            onPress={() => playLive({ login: ch.login, name: ch.name, avatar: ch.avatar ?? null, title: ch.live!.title, viewers: ch.live!.viewers, game: ch.live!.game, thumb: null })}
-            style={styles.live}>
-            <View style={styles.liveBadge}>
-              <Text style={styles.liveBadgeText}>EN DIRECT</Text>
-            </View>
-            <Text numberOfLines={2} style={styles.t}>
-              {ch.live.title}
-            </Text>
-            <Text style={styles.s}>{[ch.live.game, `${ch.live.viewers.toLocaleString('fr-FR')} spectateurs`].filter(Boolean).join(' · ')}</Text>
-            <Text style={[styles.small, { color: TWITCH }]}>{opening === ch.login ? 'Ouverture…' : '▶ Regarder le live'}</Text>
-          </Pressable>
-        ) : null}
 
-        {going.length ? (
-          <View style={{ marginBottom: 16 }}>
-            <Text style={styles.h}>Reprendre</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
-              {going.map((v) => (
-                <Pressable key={v.id} onPress={() => play(v)} style={{ width: 220, gap: 6 }}>
-                  <Thumb v={v} w={220} busy={opening === v.id} />
-                  <Text numberOfLines={2} style={styles.small}>
-                    {v.title}
-                  </Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
-        ) : null}
 
         <View style={styles.tabs}>
-          <SegChip label="En direct" icon="radio-outline" on={tab === 'live'} onPress={() => setTab('live')} />
           <SegChip label={`Rediffusions${ch ? ` · ${ch.vods.length}` : ''}`} icon="logo-twitch" on={tab === 'vods'} onPress={() => setTab('vods')} />
           <SegChip label={`Mes rediffusions${mine ? ` · ${mine.length}` : ''}`} icon="server-outline" on={tab === 'mine'} onPress={() => (setTab('mine'), loadMine())} />
         </View>
@@ -388,7 +367,7 @@ export default function TwitchScreen() {
             <Ionicons name="chevron-down" size={14} color={C.textDim} />
           </Pressable>
         </View>
-        {tab === 'vods' ? <Text style={[styles.s, { paddingHorizontal: 16, marginBottom: 12 }]}>Appui long sur une rediffusion : autre qualité ou téléchargement sur le serveur.</Text> : null}
+        {tab === 'vods' ? <Text style={[styles.s, { paddingHorizontal: 16, marginBottom: 12 }]}>Touche une rediffusion pour la sauvegarder sur le serveur (choix de la qualité).</Text> : null}
         {jobs.filter((j) => j.status === 'queued' || j.status === 'running' || j.status === 'error').slice(0, 5).map((j) => (
           <View key={j.id} style={styles.job}>
             <Ionicons name={j.status === 'error' ? 'alert-circle' : 'cloud-download-outline'} size={18} color={j.status === 'error' ? C.danger : TWITCH} />
@@ -478,15 +457,8 @@ export default function TwitchScreen() {
             return (
               <Pressable
                 key={v.id}
-                onPress={() => play(v)}
-                onLongPress={() => {
-                  tap();
-                  setMenu({ v, qualities: null });
-                  twitchApi
-                    .play(settings, v.id)
-                    .then((r) => setMenu((m) => (m && m.v.id === v.id ? { v, qualities: r.qualities ?? [] } : m)))
-                    .catch((e) => (setMenu(null), Alert.alert('Rediffusion indisponible', e instanceof Error ? e.message : String(e))));
-                }}
+                onPress={() => openMenu(v)}
+                onLongPress={() => openMenu(v)}
                 style={{ gap: 8 }}>
                 <Thumb v={v} w={cw} busy={opening === v.id} saved={saved.includes(v.id)} job={jobOf(v.id)} />
                 <Text numberOfLines={2} style={styles.t}>
@@ -541,7 +513,7 @@ export default function TwitchScreen() {
         </View>
       </Modal>
 
-      {/* Une rediffusion : regarder dans une autre qualité, ou télécharger sur le serveur */}
+      {/* Une rediffusion : la sauvegarder sur le serveur, ou la regarder */}
       <Modal visible={!!menu} transparent animationType="slide" onRequestClose={() => setMenu(null)}>
         <Pressable style={styles.backdrop} onPress={() => setMenu(null)} />
         <View style={styles.sheet}>
@@ -552,19 +524,19 @@ export default function TwitchScreen() {
             <ActivityIndicator color={C.text} style={{ margin: 20 }} />
           ) : (
             <ScrollView style={{ maxHeight: 420 }}>
-              <Text style={styles.sheetSub}>Regarder en</Text>
-              {menu.qualities.map((x) => (
-                <Pressable key={`p-${x.id}`} onPress={() => (setMenu(null), play(menu.v, undefined, x.id))} style={styles.opt}>
-                  <Text style={styles.optText}>{x.name}</Text>
-                  <Ionicons name="play" size={16} color={C.textDim} />
-                </Pressable>
-              ))}
-              <Text style={[styles.sheetSub, { marginTop: 14 }]}>Télécharger sur le serveur en</Text>
+              <Text style={styles.sheetSub}>Sauvegarder sur le serveur en</Text>
               {saved.includes(menu.v.id) ? <Text style={styles.s}>Déjà téléchargée (retélécharger la remplace).</Text> : null}
               {menu.qualities.map((x) => (
                 <Pressable key={`d-${x.id}`} onPress={() => (setMenu(null), download(menu.v, x.id))} style={styles.opt}>
                   <Text style={styles.optText}>{x.name}</Text>
                   <Ionicons name="download-outline" size={18} color={C.textDim} />
+                </Pressable>
+              ))}
+              <Text style={[styles.sheetSub, { marginTop: 14 }]}>Ou regarder en</Text>
+              {menu.qualities.map((x) => (
+                <Pressable key={`p-${x.id}`} onPress={() => (setMenu(null), play(menu.v, undefined, x.id))} style={styles.opt}>
+                  <Text style={styles.optText}>{x.name}</Text>
+                  <Ionicons name="play" size={16} color={C.textDim} />
                 </Pressable>
               ))}
             </ScrollView>

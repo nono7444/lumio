@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { toast } from '@/components/toast';
 import { FocusPressable as Pressable } from '@/components/tv';
 import { Button, ScreenTitle, SegChip, tap } from '@/components/ui';
+import { UniverseSwitch } from '@/components/universe-switch';
 import { VpnButton } from '@/components/vpn-button';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { channelStreams, COUNTRIES, countryOf, FRENCH, loadChannels, THEMES, themeOf, type Channel, type Theme, syncLiveSources } from '@/lib/live';
@@ -179,6 +180,7 @@ export default function Live() {
 
   const header = (
     <View>
+      <UniverseSwitch style={{ marginLeft: 16, marginTop: 8 }} />
       <ScreenTitle
         title="Live TV"
         right={

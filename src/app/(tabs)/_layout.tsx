@@ -17,8 +17,8 @@ let askedThisLaunch = false;
 export default function TabsLayout() {
   const { settings, update } = useSettings();
   const rawUniverse = useUniverse();
-  // Twitch et Lumio Auto sont réservés à l'admin : un membre retombe sur Films & séries
-  const universe = (rawUniverse === 'twitch' || rawUniverse === 'auto') && !settings.jellyfin?.isAdmin ? 'media' : rawUniverse;
+  // Lumio Auto (avec Twitch) est réservé à l'admin : un membre retombe sur Films & séries
+  const universe = rawUniverse === 'auto' && !settings.jellyfin?.isAdmin ? 'media' : rawUniverse;
 
   useEffect(() => {
     const h = settings.household;

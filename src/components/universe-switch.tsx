@@ -1,5 +1,5 @@
 // Lumio : bouton « univers » en haut de l'accueil, des livres audio et des livres. Il ouvre un petit menu
-// (Films & séries, Livres audio, Livres, Twitch et Lumio Auto pour l'admin) ; les onglets du bas suivent l'univers choisi.
+// (Films & séries, Lumio Auto pour l'admin, Livres, Livres audio, TV) ; les onglets du bas suivent l'univers choisi.
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useState } from 'react';
