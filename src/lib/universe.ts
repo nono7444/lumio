@@ -21,7 +21,7 @@ export const UNIVERSE_TABS: Record<Universe, string[]> = {
   auto: ['perf', 'seed', 'demandes', 'twitch', 'qbit', 'disks', 'server', 'playing', 'settings'],
   books: ['shelf', 'findbook', 'booktop', 'settings'],
   audio: ['listen', 'find', 'settings'],
-  tv: ['live', 'settings'],
+  tv: ['live', 'matches', 'settings'],
 };
 
 const KEY = 'lumio:univers';

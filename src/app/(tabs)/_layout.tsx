@@ -70,6 +70,7 @@ export default function TabsLayout() {
         <Tabs.Screen name="search" options={{ href: null }} />
         <Tabs.Screen name="library" options={{ href: null }} />
         <Tabs.Screen name="live" options={{ href: null }} />
+        <Tabs.Screen name="matches" options={{ href: null }} />
         <Tabs.Screen name="calendar" options={{ href: null }} />
         <Tabs.Screen name="chat" options={{ href: null }} />
         <Tabs.Screen name="activity" options={{ href: null }} />
@@ -109,6 +110,7 @@ export default function TabsLayout() {
         <Tabs.Screen name="search" options={{ href: null }} />
         <Tabs.Screen name="library" options={{ href: null }} />
         <Tabs.Screen name="live" options={{ href: null }} />
+        <Tabs.Screen name="matches" options={{ href: null }} />
         <Tabs.Screen name="calendar" options={{ href: null }} />
         <Tabs.Screen name="chat" options={{ href: null }} />
         <Tabs.Screen name="activity" options={{ href: null }} />
@@ -150,6 +152,7 @@ export default function TabsLayout() {
         <Tabs.Screen name="library" options={{ href: null }} />
         <Tabs.Screen name="search" options={{ href: null }} />
         <Tabs.Screen name="live" options={{ href: null }} />
+        <Tabs.Screen name="matches" options={{ href: null }} />
         <Tabs.Screen name="calendar" options={{ href: null }} />
         <Tabs.Screen name="chat" options={{ href: null }} />
         <Tabs.Screen name="watchlist" options={{ href: null }} />
@@ -189,6 +192,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="search" options={{ title: 'Recherche', href: tab('search', undefined) }} />
       <Tabs.Screen name="library" options={{ title: 'Bibliothèque', href: tab('library', settings.jellyfin ? undefined : null) }} />
       <Tabs.Screen name="live" options={{ title: 'Live TV', href: tab('live', undefined) }} />
+      <Tabs.Screen name="matches" options={{ title: 'Matchs', href: tab('matches', undefined) }} />
       <Tabs.Screen name="calendar" options={{ title: 'Calendrier', href: tab('calendar', undefined) }} />
       {/* Plus de Chat ni de Demandes dans Lumio : les demandes se gèrent dans l'univers Lumio Auto */}
       <Tabs.Screen name="chat" options={{ title: 'Chat', href: null }} />

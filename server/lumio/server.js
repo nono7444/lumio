@@ -28,7 +28,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.161.0';
+const VERSION = '3.162.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -7046,6 +7046,108 @@ function iptvCurate(channels) {
   return cut < 0 ? [...sorted, ...uhd] : [...sorted.slice(0, cut), ...uhd, ...sorted.slice(cut)];
 }
 const iptvGz = new Map(); // liste prête (gzip) par adresse, recalculée quand la liste change
+
+// ——— Matchs du jour : le guide des programmes (EPG) du fournisseur, sur les chaînes de sport et les grandes chaînes ———
+// Chaque match est associé aux chaînes qui le diffusent (une connexion seulement par chaîne, comme le reste).
+const MATCH_SPORT = [
+  ['Football', /foot|ligue ?1|ligue ?2|premier league|liga\b|serie a|bundesliga|champions|europa|conference league|coupe de france|\bcan\b|mondial|euro ?20|\bfc\b|\bpsg\b|\bom\b|\bol\b/i],
+  ['Rugby', /rugby|top ?14|pro ?d2|six nations|6 nations|champions cup/i],
+  ['Basket', /basket|\bnba\b|euroleague|betclic [ée]lite/i],
+  ['Tennis', /tennis|atp|wta|roland|open d'australie|wimbledon|us open|masters 1000/i],
+  ['Sport auto', /formule ?1|\bf1\b|grand prix|gp de|motogp|rallye|wec|nascar|indycar/i],
+  ['Combat', /\bufc\b|\bmma\b|boxe|\bpfl\b|kickboxing/i],
+  ['Hand', /handball|starligue/i],
+  ['Hockey', /hockey|\bnhl\b/i],
+  ['Football US', /\bnfl\b|super bowl|football am[ée]ricain/i],
+  ['Cyclisme', /cyclisme|tour de france|giro|vuelta/i],
+];
+const MATCH_VS = /\S\s+(\/|vs\.?|v\.?|contre|@|–|-)\s+\S/i;
+const MATCH_NOT = /r[ée]sum[ée]|magazine|avant[- ]match|after|plateau|journal|talk|replay|rediff|meilleurs moments|best of|highlights|d[ée]brief|le mag|l'[ée]quipe du soir|late football|canal football club|club\b|quotidien|documentaire|t[ée]l[ée]achat|programmes? de la nuit|fin des programmes/i;
+let iptvMatchCache = { at: 0, list: [], loading: null };
+const b64 = (x) => {
+  try {
+    const t = Buffer.from(String(x || ''), 'base64').toString('utf8');
+    return /\uFFFD/.test(t) ? String(x || '') : t;
+  } catch {
+    return String(x || '');
+  }
+};
+async function iptvMatchesLoad() {
+  const c = iptvCfg();
+  const x = c && iptvXtreamFrom(c.url);
+  if (!x) return [];
+  const list = await iptvLoad(false);
+  if (!list.fr) list.fr = iptvCurate(list.channels);
+  // Une version par chaîne (la meilleure qualité, déjà en premier) : Sport, puis les grandes chaînes qui diffusent du sport
+  const big = /^(tf1|france ?[23]|m6|w9|tmc|tfx|l'?[ée]quipe|canal ?\+|c8|cstar|6ter|rmc story)/i;
+  const pick = new Map();
+  for (const ch of list.fr) {
+    if (ch.group === '4K') continue;
+    if (ch.group !== 'Sport' && !(ch.group === 'Généralistes' && big.test(ch.base)) && !(/^canal ?\+/i.test(ch.base))) continue;
+    const sid = (String(ch.url).match(/\/live\/[^/]+\/[^/]+\/(\d+)/) || [])[1];
+    if (!sid || pick.has(ch.base.toLowerCase())) continue;
+    pick.set(ch.base.toLowerCase(), { ch, sid });
+  }
+  const chans = [...pick.values()].slice(0, 160);
+  const api = `${x.server}/player_api.php?username=${encodeURIComponent(x.user)}&password=${encodeURIComponent(x.pass)}`;
+  const now = Date.now() / 1000;
+  // Aujourd'hui (heure de Paris) jusqu'à demain 6 h
+  const parisDay = new Intl.DateTimeFormat('fr-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const off = (() => {
+    const d = new Date();
+    const p = new Date(d.toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
+    return Math.round((p - new Date(d.toLocaleString('en-US', { timeZone: 'UTC' }))) / 60000);
+  })();
+  const dayStart = Date.parse(`${parisDay}T00:00:00Z`) / 1000 - off * 60;
+  const dayEnd = dayStart + 30 * 3600;
+  const found = new Map();
+  let i = 0;
+  const worker = async () => {
+    while (i < chans.length) {
+      const { ch, sid } = chans[i++];
+      let j;
+      try {
+        j = JSON.parse(await iptvText(`${api}&action=get_short_epg&stream_id=${sid}&limit=40`));
+      } catch {
+        continue;
+      }
+      for (const e of j?.epg_listings || []) {
+        const start = Number(e.start_timestamp) || Date.parse(String(e.start).replace(' ', 'T') + 'Z') / 1000;
+        const end = Number(e.stop_timestamp) || Date.parse(String(e.end).replace(' ', 'T') + 'Z') / 1000;
+        if (!start || !end || end < now || start > dayEnd || end < dayStart) continue;
+        const title = b64(e.title).replace(/\s+/g, ' ').trim();
+        const desc = b64(e.description).replace(/\s+/g, ' ').trim();
+        if (!title || MATCH_NOT.test(title)) continue;
+        const sport = (MATCH_SPORT.find(([, re]) => re.test(title)) || MATCH_SPORT.find(([, re]) => re.test(desc.slice(0, 160))) || [null])[0];
+        const vs = MATCH_VS.test(title.replace(/^[^:]*:\s*/, ''));
+        // Un match : deux équipes face à face, ou une épreuve connue (Grand Prix, tournoi…) sur une chaîne de sport
+        if (!vs && !(sport && /grand prix|gp |tennis|atp|wta|cyclisme|ufc|boxe|rallye|motogp|formule/i.test(title))) continue;
+        if (!sport && ch.group !== 'Sport') continue;
+        const key = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '')}|${Math.round(start / 900)}`;
+        const m = found.get(key) || { id: crypto.createHash('sha1').update(key).digest('hex').slice(0, 10), title, sport: sport || 'Sport', start: start * 1000, end: end * 1000, desc: desc.slice(0, 240), channels: [] };
+        if (!m.channels.some((k) => k.id === ch.id)) m.channels.push({ id: ch.id, name: ch.base, logo: ch.logo || null });
+        found.set(key, m);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: 4 }, worker));
+  return [...found.values()].sort((a, b) => a.start - b.start || a.title.localeCompare(b.title));
+}
+async function iptvMatches(force) {
+  if (!iptvCfg()) return [];
+  if (!force && Date.now() - iptvMatchCache.at < 60 * 60e3) return iptvMatchCache.list;
+  if (iptvMatchCache.loading) return iptvMatchCache.loading;
+  iptvMatchCache.loading = iptvMatchesLoad()
+    .then((list) => ((iptvMatchCache = { at: Date.now(), list, loading: null }), list))
+    .catch((e) => {
+      console.log('Matchs du jour :', e.message);
+      iptvMatchCache.loading = null;
+      return iptvMatchCache.list;
+    });
+  return iptvMatchCache.loading;
+}
+const matchHour = (t) => new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' }).format(new Date(t));
+
 /** Sources du serveur pour la Live TV : les chaînes françaises rangées, et la liste complète. */
 function iptvRelaySources(req, user) {
   const c = iptvCfg();
@@ -7094,13 +7196,21 @@ async function iptvRelayRoutes(req, res, p) {
   if (m[2] === 'playlist.m3u' || m[2] === 'all.m3u') {
     const list = await iptvLoad(false);
     const base = `${reqBase(req)}/api/iptv/r/${m[1]}/c`;
-    const ck = `${m[2]}|${base}|${list.at}`;
+    // Matchs du jour en tête de la liste française (attendus 20 s au plus la première fois)
+    const matches = m[2] === 'playlist.m3u' ? await Promise.race([iptvMatches(false), new Promise((r) => setTimeout(() => r(iptvMatchCache.list), 20000))]) : [];
+    const ck = `${m[2]}|${base}|${list.at}|${iptvMatchCache.at}`;
     let gz = iptvGz.get(ck);
     if (!gz) {
       if (m[2] === 'playlist.m3u' && !list.fr) list.fr = iptvCurate(list.channels);
       const chans = m[2] === 'playlist.m3u' ? list.fr : list.channels;
       const q = (x) => String(x || '').replace(/"/g, "'");
       const lines = ['#EXTM3U'];
+      for (const mt of matches) {
+        for (const c of mt.channels) {
+          const live = mt.start <= Date.now() && mt.end > Date.now();
+          lines.push(`#EXTINF:-1${c.logo ? ` tvg-logo="${q(c.logo)}"` : ''} group-title="⚽ Matchs du jour",${live ? '🔴 ' : ''}${matchHour(mt.start)} · ${mt.title} · ${c.name}`, `${base}/${c.id}.ts`);
+        }
+      }
       for (const ch of chans) {
         lines.push(`#EXTINF:-1${ch.tvgId ? ` tvg-id="${q(ch.tvgId)}"` : ''}${ch.logo ? ` tvg-logo="${q(ch.logo)}"` : ''}${ch.group ? ` group-title="${q(ch.group)}"` : ''},${ch.name}`, `${base}/${ch.id}.ts`);
       }
@@ -7181,6 +7291,16 @@ async function iptvRelayRoutes(req, res, p) {
 }
 /** Routes admin (avec jeton) : configurer la source IPTV du serveur. */
 async function iptvAdminRoutes(req, res, p, user) {
+  if (p === '/api/iptv/matches' && req.method === 'GET') {
+    const list = await iptvMatches(new URL(req.url, 'http://x').searchParams.get('refresh') === '1');
+    const base = `${reqBase(req)}/api/iptv/r/${iptvToken(user.id)}/c`;
+    const now = Date.now();
+    send(res, 200, {
+      at: iptvMatchCache.at ? new Date(iptvMatchCache.at).toISOString() : null,
+      matches: list.map((m) => ({ ...m, live: m.start <= now && m.end > now, hour: matchHour(m.start), channels: m.channels.map((c) => ({ ...c, url: `${base}/${c.id}.ts` })) })),
+    });
+    return true;
+  }
   if (p === '/api/iptv/relay/source' && req.method === 'GET') {
     send(res, 200, { source: iptvRelaySource(req, user), sources: iptvRelaySources(req, user) });
     return true;
