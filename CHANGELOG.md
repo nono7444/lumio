@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.224 — 27 novembre 2026
+
 - TV : nouvel onglet « Matchs » — les matchs du jour (foot, rugby, basket, tennis, F1…) trouvés dans le guide des programmes de l'IPTV, avec les chaînes qui les diffusent ; toucher une chaîne lance le direct (serveur 3.162.0).
 
 ## 1.0.223 — 27 novembre 2026
