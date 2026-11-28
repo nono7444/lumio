@@ -27,6 +27,7 @@ type Match = {
   score?: string | null;
   clock?: string | null;
   tv?: string[];
+  tvGuess?: boolean;
   start: number;
   end: number;
   hour: string;
@@ -56,14 +57,19 @@ export default function MatchesRoute() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sport, setSport] = useState<string | null>(null);
+  const [info, setInfo] = useState<{ espn: number; livefoot: number | string; epg: number } | null>(null);
 
   const load = (refresh = false) => {
     setBusy(true);
     setErr(null);
-    serverCall<{ matches: Match[] }>(settings, `/api/iptv/matches${refresh ? '?refresh=1' : ''}`)
+    serverCall<{ matches: Match[]; info?: { espn: number; livefoot: number | string; epg: number } }>(
+      settings,
+      `/api/iptv/matches${refresh ? '?refresh=1' : ''}`
+    )
       .then((r) => {
         memo = r.matches;
         setList(r.matches);
+        setInfo(r.info ?? null);
       })
       .catch((e) => setErr(e?.message ?? String(e)))
       .finally(() => setBusy(false));
@@ -75,7 +81,11 @@ export default function MatchesRoute() {
 
   const sports = useMemo(() => [...new Set((list ?? []).map((m) => m.sport))], [list]);
   const [onlyTv, setOnlyTv] = useState(false);
-  const shown = (list ?? []).filter((m) => (!sport || m.sport === sport) && (!onlyTv || m.channels.length > 0));
+  const [all, setAll] = useState(false);
+  // Par défaut : les matchs diffusés à la télé (les petits matchs sans diffuseur sont cachés, « Tous les matchs » les montre)
+  const shown = (list ?? []).filter(
+    (m) => (!sport || m.sport === sport) && (!onlyTv || m.channels.length > 0) && (all || onlyTv || m.channels.length > 0 || (m.tv?.length ?? 0) > 0)
+  );
   const live = shown.filter((m) => m.live);
   const later = shown.filter((m) => !m.live);
 
@@ -114,8 +124,14 @@ export default function MatchesRoute() {
       ) : (
         <Text style={styles.title}>{m.title}</Text>
       )}
-      {!m.channels.length ? (
-        <Text style={styles.dim}>{m.tv?.length ? `${m.tv.join(', ')} · chaîne absente de ton IPTV` : 'Pas de chaîne trouvée dans ton IPTV'}</Text>
+      {m.tv?.length ? (
+        <Text style={styles.dim}>
+          📺 {m.tvGuess ? 'Habituellement sur ' : ''}
+          {m.tv.join(' · ')}
+          {!m.channels.length ? ' — absente de ton IPTV' : ''}
+        </Text>
+      ) : !m.channels.length ? (
+        <Text style={styles.dim}>Pas de diffusion TV connue</Text>
       ) : null}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
         {m.channels.map((c) => (
@@ -139,7 +155,8 @@ export default function MatchesRoute() {
         <ScreenTitle title="Matchs du jour" />
         {sports.length > 0 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 12 }}>
-            <SegChip label="Sur mon IPTV" icon="tv" on={onlyTv} onPress={() => setOnlyTv(!onlyTv)} />
+            <SegChip label="Sur mon IPTV" icon="tv" on={onlyTv} onPress={() => (setOnlyTv(!onlyTv), setAll(false))} />
+            <SegChip label="Tous les matchs" icon="list" on={all} onPress={() => (setAll(!all), setOnlyTv(false))} />
             <SegChip label="Tous" on={!sport} onPress={() => setSport(null)} />
             {sports.map((s) => (
               <SegChip key={s} label={`${SPORT_ICON[s] ?? '🏆'} ${s}`} on={sport === s} onPress={() => setSport(sport === s ? null : s)} />
@@ -159,7 +176,10 @@ export default function MatchesRoute() {
           {later.length ? <Text style={styles.h}>À venir</Text> : null}
           {later.map(card)}
           {list?.length ? (
-            <Text style={styles.dim}>D’après le guide des programmes de ton IPTV. Une chaîne déjà regardée par quelqu’un d’autre peut être occupée.</Text>
+            <Text style={styles.dim}>
+              Matchs : ESPN · chaînes : livefoot.fr et le guide de ton IPTV. Une chaîne déjà regardée par quelqu’un d’autre peut être occupée.
+              {info && typeof info.livefoot === 'string' ? `\n⚠︎ Programme TV du foot indisponible (${info.livefoot}).` : ''}
+            </Text>
           ) : null}
         </View>
       </ScrollView>

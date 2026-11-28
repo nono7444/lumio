@@ -28,7 +28,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.163.1';
+const VERSION = '3.164.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -7071,6 +7071,7 @@ const MATCH_SPORT = [
 const MATCH_VS = /\S\s+(\/|vs\.?|v\.?|contre|@|–|-)\s+\S/i;
 const MATCH_NOT = /r[ée]sum[ée]|magazine|avant[- ]match|after|plateau|journal|talk|replay|rediff|meilleurs moments|best of|highlights|d[ée]brief|le mag|l'[ée]quipe du soir|late football|canal football club|club\b|quotidien|documentaire|t[ée]l[ée]achat|programmes? de la nuit|fin des programmes/i;
 let iptvMatchCache = { at: 0, list: [], loading: null };
+let iptvMatchInfo = null;
 const b64 = (x) => {
   try {
     const t = Buffer.from(String(x || ''), 'base64').toString('utf8');
@@ -7151,6 +7152,21 @@ const FOOT_LEAGUES = [
   ['usa.1', 'MLS'], ['fifa.world', 'Coupe du monde'], ['uefa.nations', 'Ligue des nations'], ['fifa.friendly', 'Matchs amicaux'],
   ['fifa.worldq.uefa', 'Qualifs Coupe du monde'], ['uefa.euroq', 'Qualifs Euro'], ['caf.nations', 'CAN'],
 ];
+// Diffuseurs habituels en France (quand livefoot.fr ne précise rien) : affichés comme « habituellement »
+const USUAL_TV = {
+  'Ligue 1': ['Ligue 1+', 'beIN Sports 1'],
+  'Ligue 2': ['beIN Sports 1', 'beIN Sports Max'],
+  'Coupe de France': ['France 2', 'France 3', 'beIN Sports 1'],
+  'Ligue des champions': ['Canal+', 'Canal+ Foot', 'Canal+ Sport'],
+  'Ligue Europa': ['Canal+ Foot', 'Canal+ Sport'],
+  'Ligue Conférence': ['Canal+ Foot', 'Canal+ Sport'],
+  'Premier League': ['Canal+', 'Canal+ Foot', 'Canal+ Sport'],
+  Liga: ['beIN Sports 1', 'beIN Sports 2', 'beIN Sports 3'],
+  'Serie A': ['beIN Sports 1', 'beIN Sports 2', 'beIN Sports 3'],
+  Bundesliga: ['beIN Sports 1', 'beIN Sports 2', 'beIN Sports 3'],
+  MLS: ['Apple TV'],
+  NBA: ['beIN Sports 1', 'beIN Sports 2', 'beIN Sports 3'],
+};
 const OTHER_LEAGUES = [
   ['basketball/nba', 'NBA', 'Basket'],
   ['hockey/nhl', 'NHL', 'Hockey'],
@@ -7183,7 +7199,14 @@ const chanNorm = (n) =>
     .replace(/sports?/g, 'sport')
     .replace(/[^a-z0-9]+/g, '');
 async function webText(url, ms = 12000) {
-  const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Lumio)', 'Accept-Language': 'fr-FR,fr' }, signal: AbortSignal.timeout(ms) });
+  const r = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15',
+      Accept: 'text/html,application/json;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'fr-FR,fr;q=0.9',
+    },
+    signal: AbortSignal.timeout(ms),
+  });
   if (!r.ok) throw new Error(`${new URL(url).hostname} répond ${r.status}`);
   return r.text();
 }
@@ -7193,7 +7216,7 @@ async function liveFootTv(parisDay) {
   const [y, mo, d] = parisDay.split('-').map(Number);
   const MOIS = ['janvier', 'fevrier', 'mars', 'avril', 'mai', 'juin', 'juillet', 'aout', 'septembre', 'octobre', 'novembre', 'decembre'];
   const txt = html
-    .replace(/<img[^>]*?(?:title|alt)="Cha[iî]ne ([^"]+)"[^>]*>/gi, ' [[TV:$1]] ')
+    .replace(/<img[^>]*?(?:title|alt)=["']Cha[iî]ne ([^"']+)["'][^>]*>/gi, ' [[TV:$1]] ')
     .replace(/<\/(tr|p|div|h\d|li)>/gi, '\n')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/g, ' ')
@@ -7299,8 +7322,10 @@ async function iptvMatchesLoad() {
     }
   };
   await Promise.all(Array.from({ length: 6 }, work));
+  const info = { espn: matches.length, livefoot: 0, epg: epg.length };
   // 2. Chaînes françaises du foot (livefoot.fr) ; un match absent d'ESPN y est ajouté
-  const lf = await liveFootTv(parisDay).catch((e) => (console.log('Matchs du jour : livefoot', e.message), []));
+  const lf = await liveFootTv(parisDay).catch((e) => (console.log('Matchs du jour : livefoot', e.message), (info.livefoot = e.message), []));
+  if (!info.livefoot) info.livefoot = lf.length;
   for (const r of lf) {
     const start = dayStart + (r.hh * 60 + r.mm) * 60e3;
     if (start + 2 * 3600e3 < now) continue;
@@ -7318,7 +7343,17 @@ async function iptvMatchesLoad() {
   for (const m of matches) {
     m.title = m.home ? `${m.home} - ${m.away}` : m.title;
     m.live = m.start <= now && m.end > now;
+    // Rien de précis pour ce match : les diffuseurs habituels de la compétition (petits matchs de coupe exclus)
+    if (!m.tv?.length && !m.channels.length && USUAL_TV[m.comp] && !(m.comp === 'Coupe de France' && !m.homeLogo)) {
+      m.tv = USUAL_TV[m.comp];
+      m.tvGuess = true;
+      for (const n of m.tv) {
+        const c = chanFor(n);
+        if (c && !m.channels.some((k) => k.id === c.id)) m.channels.push(c);
+      }
+    }
   }
+  iptvMatchInfo = info;
   // Ordre : en direct, puis par heure ; les matchs avec une chaîne d'abord à heure égale
   return matches
     .filter((m) => m.end > now)
@@ -7488,6 +7523,7 @@ async function iptvAdminRoutes(req, res, p, user) {
     const now = Date.now();
     send(res, 200, {
       at: iptvMatchCache.at ? new Date(iptvMatchCache.at).toISOString() : null,
+      info: iptvMatchInfo,
       matches: list.map((m) => ({ ...m, live: m.start <= now && m.end > now, hour: matchHour(m.start), channels: m.channels.map((c) => ({ ...c, url: `${base}/${c.id}.ts` })) })),
     });
     return true;
