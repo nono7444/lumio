@@ -28,7 +28,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.167.0';
+const VERSION = '3.168.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -7476,6 +7476,13 @@ function iptvRelaySources(req, user) {
   ];
 }
 const iptvRelaySource = (req, user) => iptvRelaySources(req, user)[0] || null;
+// Réserve anti-coupure de la Live TV (secondes de retard sur le direct), réglable par l'admin (config.iptvRelay.bufferSecs)
+const iptvCushion = () => Math.min(120, Math.max(0, Number(iptvCfg()?.bufferSecs ?? 30)));
+const TS_NULL = (() => {
+  const p = Buffer.alloc(188 * 7, 0xff);
+  for (let i = 0; i < 7; i++) p.set([0x47, 0x1f, 0xff, 0x10], i * 188);
+  return p;
+})();
 // Qui regarde quoi (pour l'admin) : débits calculés toutes les 3 s
 const iptvViewers = new Map(); // réponse HTTP → { user, device, ip, since, bytes, rate, channel }
 const iptvHistory = []; // 30 dernières séances
@@ -7497,6 +7504,7 @@ function iptvStatus() {
     name: c?.name || null,
     host: c ? (() => { try { return new URL(c.url).hostname; } catch { return null; } })() : null,
     maxStreams: c?.maxStreams || 1,
+    bufferSecs: iptvCushion(),
     vpn: c ? c.vpn !== false : true,
     channels: iptvList.channels.length,
     at: iptvList.at ? new Date(iptvList.at).toISOString() : null,
@@ -7580,38 +7588,64 @@ async function iptvRelayRoutes(req, res, p) {
   if (!s) {
     const max = Math.max(1, Number(iptvCfg().maxStreams) || 1);
     // Une chaîne que plus personne ne regarde libère sa place tout de suite (changement de chaîne)
-    if (iptvStreams.size >= max) for (const [k, v] of iptvStreams) if (!v.clients.size) iptvStop(k);
+    if (iptvStreams.size >= max) for (const [k, v] of iptvStreams) if (!v.clients.size && !v.waiting) iptvStop(k);
     if (iptvStreams.size >= max) {
       const busy = [...iptvStreams.values()].map((v) => v.ch.name).join(', ');
       send(res, 503, { error: `Flux occupé : ${busy} est déjà regardé (limite de ${max} chaîne${max > 1 ? 's' : ''} en même temps)` });
       return true;
     }
-    s = { clients: new Set(), up: null, closeT: null, ch, since: Date.now(), bytes: 0, rate: 0, last: 0 };
+    s = { clients: new Set(), up: null, closeT: null, ch, since: Date.now(), bytes: 0, rate: 0, last: 0, buf: [], bufBytes: 0, firstAt: 0, retries: 0 };
     iptvStreams.set(id, s);
-    s.ready = (async () => {
-      // Listes Xtream : le flux MPEG-TS (.ts) plutôt que HLS, pour pouvoir le partager tel quel
-      const target = ch.url.replace(/(\/live\/[^/]+\/[^/]+\/\d+)\.m3u8$/i, '$1.ts');
+    // Listes Xtream : le flux MPEG-TS (.ts) plutôt que HLS, pour pouvoir le partager tel quel
+    const target = ch.url.replace(/(\/live\/[^/]+\/[^/]+\/\d+)\.m3u8$/i, '$1.ts');
+    const connect = async () => {
       const r = await iptvGet(target, ch.headers);
       if (r.statusCode !== 200) {
         r.resume();
         throw new Error(`La source IPTV refuse la chaîne (${r.statusCode})`);
       }
+      if (iptvStreams.get(id) !== s) {
+        r.destroy();
+        return;
+      }
       s.up = r;
       r.on('data', (chunk) => {
+        if (!s.firstAt) s.firstAt = Date.now();
+        s.retries = 0;
         s.bytes += chunk.length;
+        // Réserve : les dernières secondes de la chaîne, gardées en mémoire pour les spectateurs
+        const now = Date.now();
+        s.buf.push({ t: now, c: chunk });
+        s.bufBytes += chunk.length;
+        const keep = (iptvCushion() + 5) * 1000;
+        while (s.buf.length && (s.buf[0].t < now - keep || s.bufBytes > 160e6)) s.bufBytes -= s.buf.shift().c.length;
         for (const c of s.clients) {
           const v = iptvViewers.get(c);
           if (v) v.bytes += chunk.length;
-          // Un appareil trop lent (plus de 16 Mo de retard) est décroché pour ne pas gêner les autres
-          if (c.writableLength > 16e6) c.destroy();
+          // Un appareil trop lent (bien plus que la réserve en retard) est décroché pour ne pas gêner les autres
+          if (c.writableLength > 200e6) c.destroy();
           else c.write(chunk);
         }
       });
-      const end = () => iptvStreams.get(id) === s && iptvStop(id);
-      r.on('end', end);
-      r.on('error', end);
-      r.on('close', end);
-    })();
+      // Coupure du fournisseur : on se reconnecte tout seul ; les spectateurs vivent sur leur réserve pendant ce temps
+      let done = false;
+      const lost = () => {
+        if (done) return;
+        done = true;
+        if (iptvStreams.get(id) !== s) return;
+        if ((!s.clients.size && !s.waiting) || s.retries >= 8) return iptvStop(id);
+        s.retries++;
+        console.log(`Live TV : « ${ch.name} » coupée par le fournisseur, reconnexion ${s.retries}/8`);
+        setTimeout(() => {
+          if (iptvStreams.get(id) !== s) return;
+          connect().catch(() => lost());
+        }, Math.min(1000 * 2 ** (s.retries - 1), 8000));
+      };
+      r.on('end', lost);
+      r.on('error', lost);
+      r.on('close', lost);
+    };
+    s.ready = connect();
     s.ready.catch(() => iptvStreams.get(id) === s && iptvStop(id));
   }
   try {
@@ -7625,6 +7659,24 @@ async function iptvRelayRoutes(req, res, p) {
     return true;
   }
   res.writeHead(200, { 'Content-Type': 'video/mp2t', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
+  // Remplissage de la réserve avant de lancer l'image : des paquets « vides » MPEG-TS (ignorés par les lecteurs)
+  // gardent la connexion ouverte pendant l'attente
+  const want = iptvCushion() * 1000;
+  let gone = false;
+  req.on('close', () => (gone = true));
+  const t0 = Date.now();
+  s.waiting = (s.waiting || 0) + 1;
+  while (!gone && iptvStreams.get(id) === s && (!s.firstAt || Date.now() - s.firstAt < want) && Date.now() - t0 < want + 15000) {
+    res.write(TS_NULL);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  s.waiting--;
+  if (gone || iptvStreams.get(id) !== s) {
+    if (!s.clients.size && !s.waiting && iptvStreams.get(id) === s) s.closeT = setTimeout(() => !s.clients.size && iptvStop(id), 3000);
+    return true;
+  }
+  // Toute la réserve d'un coup (le lecteur la met en mémoire), puis le direct : l'image a ~30 s d'avance contre les coupures
+  for (const b of s.buf) res.write(b.c);
   s.clients.add(res);
   // Qui regarde : membre (d'après le lien), appareil, adresse, début, débit
   const uid = (() => {
@@ -7694,6 +7746,7 @@ async function iptvAdminRoutes(req, res, p, user) {
     if (b.name !== undefined) next.name = String(b.name || '').trim().slice(0, 60) || null;
     if (b.maxStreams !== undefined) next.maxStreams = Math.min(10, Math.max(1, Number(b.maxStreams) || 1));
     if (b.vpn !== undefined) next.vpn = !!b.vpn;
+    if (b.bufferSecs !== undefined) next.bufferSecs = Math.min(120, Math.max(0, Number(b.bufferSecs) || 0));
     if (b.proxy !== undefined) next.proxy = String(b.proxy || '').trim() || null;
     if (!next.url) throw new HttpError(400, 'Ajoute d’abord le lien de la liste IPTV');
     const changed = next.url !== cur.url || next.vpn !== cur.vpn || next.proxy !== cur.proxy;
