@@ -28,7 +28,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.169.0';
+const VERSION = '3.169.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -7597,7 +7597,9 @@ async function iptvRelayRoutes(req, res, p) {
   if (!s) {
     const max = Math.max(1, Number(iptvCfg().maxStreams) || 1);
     // Une chaîne que plus personne ne regarde libère sa place tout de suite (changement de chaîne)
-    if (iptvStreams.size >= max) for (const [k, v] of iptvStreams) if (!v.clients.size && !v.waiting && !(v.holdUntil > Date.now())) iptvStop(k);
+    // (une chaîne préparée par ce même membre puis abandonnée — il a changé d'avis — se libère aussi)
+    if (iptvStreams.size >= max)
+      for (const [k, v] of iptvStreams) if (!v.clients.size && !v.waiting && (!(v.holdUntil > Date.now()) || v.holdBy === m[1])) iptvStop(k);
     if (iptvStreams.size >= max) {
       const busy = [...iptvStreams.values()].map((v) => v.ch.name).join(', ');
       send(res, 503, { error: `Flux occupé : ${busy} est déjà regardé (limite de ${max} chaîne${max > 1 ? 's' : ''} en même temps)` });
@@ -7663,6 +7665,9 @@ async function iptvRelayRoutes(req, res, p) {
   }
   // L'appli prépare la réserve avant d'ouvrir le lecteur : la chaîne est gardée ouverte 40 s le temps qu'elle arrive
   if (m[4] === '/warm') {
+    // Ce membre ne prépare qu'une chaîne à la fois : ses autres chaînes préparées mais pas regardées sont fermées
+    for (const [k, v] of iptvStreams) if (k !== id && v.holdBy === m[1] && !v.clients.size && !v.waiting) iptvStop(k);
+    s.holdBy = m[1];
     s.holdUntil = Date.now() + 40000;
     clearTimeout(s.holdT);
     s.holdT = setTimeout(() => iptvStreams.get(id) === s && !s.clients.size && !s.waiting && iptvStop(id), 41000);
@@ -7699,6 +7704,9 @@ async function iptvRelayRoutes(req, res, p) {
   // Toute la réserve d'un coup (le lecteur la met en mémoire), puis le direct : l'image a ~30 s d'avance contre les coupures
   for (const b of s.buf) res.write(b.c);
   s.clients.add(res);
+  // Quelqu'un regarde : la chaîne n'a plus besoin d'être retenue (elle se fermera 3 s après le dernier spectateur)
+  s.holdUntil = 0;
+  s.holdBy = null;
   // Qui regarde : membre (d'après le lien), appareil, adresse, début, débit
   const uid = (() => {
     try {
