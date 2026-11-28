@@ -28,7 +28,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.162.0';
+const VERSION = '3.162.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -6978,11 +6978,17 @@ const IPTV_FR = /(^|[\s|:\[(\-])(fr|france|fran[cç]ais|french|vf)([\s|:\])\-]|$
 const iptvCleanName = (n) =>
   String(n || '')
     .replace(/^\s*[|[(]?\s*(fr|france|vf)\s*[|\]):\-]+\s*/i, '')
+    // « 8K - », « 4K | », « FHD : » devant le nom : la qualité va à la fin (« · 4K »)
+    .replace(/^\s*[|[(]?\s*(8k|4k|uhd|fhd|hd|sd|hevc)\s*[|\]):\-]+\s*(.+)$/i, '$2 $1')
+    .replace(/^\s*[|[(]?\s*(fr|france|vf)\s*[|\]):\-]+\s*/i, '')
     .replace(/\s*[|[(]\s*(fr|vf)\s*[|\])]\s*/gi, ' ')
+    // « BEIN SPORTS FRENCH 1 » → « BEIN SPORTS 1 » (toutes les versions de la chaîne côte à côte)
+    .replace(/\s+(french|fr)(?=\s|$)/gi, ' ')
     .replace(/\s{2,}/g, ' ')
     .trim() || String(n || 'Chaîne');
 // Qualité lue dans le nom : 4K > FHD (1080p) > HD (720p) > SD ; le nom affiché finit par « · 4K », « · FHD »…
 const IPTV_Q = [
+  ['8K', /\b(8k|4320p?)\b/i, 5],
   ['4K', /\b(4k|uhd|2160p?)\b/i, 4],
   ['FHD', /\b(fhd|full ?hd|1080[pi]?|hevc|h\.?265)\b/i, 3],
   ['HD', /\b(hd|720p?)\b/i, 2],
@@ -7041,7 +7047,7 @@ function iptvCurate(channels) {
   // Même chaîne : la meilleure qualité d'abord (TF1 · 4K, TF1 · FHD, TF1 · HD…)
   const sorted = out.sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group) || rank(a) - rank(b) || coll.compare(a.base, b.base) || b.q - a.q);
   // Catégorie « 4K » juste après les généralistes : toutes les chaînes en 4K, réunies
-  const uhd = sorted.filter((c) => c.q === 4).map((c) => ({ ...c, group: '4K' }));
+  const uhd = sorted.filter((c) => c.q >= 4).map((c) => ({ ...c, group: '4K' }));
   const cut = sorted.findIndex((c) => c.group !== 'Généralistes');
   return cut < 0 ? [...sorted, ...uhd] : [...sorted.slice(0, cut), ...uhd, ...sorted.slice(cut)];
 }

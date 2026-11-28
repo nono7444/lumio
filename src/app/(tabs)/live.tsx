@@ -70,6 +70,8 @@ export default function Live() {
   const [opening, setOpening] = useState<string | null>(null);
 
   const source = sources.find((s) => s.id === sourceId) ?? sources[0];
+  // Source du serveur Lumio : déjà triée et rangée (Matchs du jour, Généralistes, 4K, Sport…), on garde ses catégories
+  const fromServer = !!source?.id.startsWith('lumio-relay');
 
   const load = (force = false) => {
     if (!source) return;
@@ -95,8 +97,8 @@ export default function Live() {
 
   // Classement de chaque chaîne (pays / langue, thème), calculé une fois par liste
   const tagged = useMemo(
-    () => (channels ?? []).map((c) => ({ c, country: countryOf(c), theme: themeOf(c) })),
-    [channels]
+    () => (channels ?? []).map((c) => ({ c, country: fromServer ? 'FR' : countryOf(c), theme: themeOf(c) })),
+    [channels, fromServer]
   );
 
   // Langues présentes : Français d'abord, puis les pays les plus fournis
@@ -133,8 +135,13 @@ export default function Live() {
   const groups = useMemo(() => {
     const g = new Map<string, number>();
     for (const t of byTheme) if (t.c.group) g.set(t.c.group, (g.get(t.c.group) ?? 0) + 1);
-    return [ALL, ...[...g.keys()].sort((a, b) => a.localeCompare(b, 'fr'))];
-  }, [byTheme]);
+    return [ALL, ...(fromServer ? [...g.keys()] : [...g.keys()].sort((a, b) => a.localeCompare(b, 'fr')))];
+  }, [byTheme, fromServer]);
+  // Source du serveur : on ouvre sur la première catégorie (Matchs du jour ou Généralistes)
+  useEffect(() => {
+    if (fromServer && group === ALL && groups.length > 1) setGroup(groups[1]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromServer, channels]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -214,7 +221,7 @@ export default function Live() {
             />
           </View>
           {/* Langue / pays */}
-          {langs.length > 1 ? (
+          {langs.length > 1 && !fromServer ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
               {langs.map((l) => (
                 <SegChip
@@ -226,7 +233,8 @@ export default function Live() {
               ))}
             </ScrollView>
           ) : null}
-          {/* Thème : sport, info, cinéma… */}
+          {/* Thème : sport, info, cinéma… (pas pour la source du serveur, déjà rangée par catégorie) */}
+          {fromServer ? null : (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
             <SegChip label="Tout" icon="apps" on={theme === 'all'} onPress={() => { setTheme('all'); setGroup(ALL); }} />
             {hasFav ? <SegChip label="Favoris" icon="star" on={theme === 'fav'} onPress={() => { setTheme('fav'); setGroup(ALL); }} /> : null}
@@ -243,11 +251,23 @@ export default function Live() {
               />
             ))}
           </ScrollView>
-          {/* Groupes d'origine de la liste (affinage) */}
+          )}
+          {/* Groupes d'origine de la liste (affinage) ; source du serveur : ses catégories, dans son ordre */}
           {groups.length > 2 ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+              {fromServer && hasFav ? (
+                <SegChip label="Favoris" icon="star" on={theme === 'fav'} onPress={() => { setTheme('fav'); setGroup(ALL); }} />
+              ) : null}
               {groups.map((g) => (
-                <SegChip key={g} label={g} on={g === group} onPress={() => setGroup(g)} />
+                <SegChip
+                  key={g}
+                  label={g === ALL && fromServer ? 'Tout' : g}
+                  on={g === group && theme !== 'fav'}
+                  onPress={() => {
+                    setTheme('all');
+                    setGroup(g);
+                  }}
+                />
               ))}
             </ScrollView>
           ) : null}

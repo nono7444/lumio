@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Live TV (téléphone) : la source « TV française » du serveur garde ses catégories et leur ordre (Matchs du jour, Généralistes, 4K, Sport…) ; plus de chaînes de sport cachées par le tri par langue. Noms nettoyés (« 8K - », « FRENCH ») côté serveur (3.162.1).
+
 ## 1.0.224 — 27 novembre 2026
 
 - TV : nouvel onglet « Matchs » — les matchs du jour (foot, rugby, basket, tennis, F1…) trouvés dans le guide des programmes de l'IPTV, avec les chaînes qui les diffusent ; toucher une chaîne lance le direct (serveur 3.162.0).
