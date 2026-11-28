@@ -28,7 +28,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.168.1';
+const VERSION = '3.169.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -7477,6 +7477,7 @@ function iptvRelaySources(req, user) {
 }
 const iptvRelaySource = (req, user) => iptvRelaySources(req, user)[0] || null;
 // Réserve anti-coupure de la Live TV (secondes de retard sur le direct), réglable par l'admin (config.iptvRelay.bufferSecs)
+const iptvErrors = new Map(); // chaîne → dernière erreur d'ouverture (pour l'animation de chargement)
 const iptvCushion = () => Math.min(120, Math.max(0, Number(iptvCfg()?.bufferSecs ?? 15)));
 const TS_NULL = (() => {
   const p = Buffer.alloc(188 * 7, 0xff);
@@ -7532,7 +7533,7 @@ function iptvStop(id) {
 }
 /** Routes sans jeton Jellyfin (liste et flux, par lien signé). */
 async function iptvRelayRoutes(req, res, p) {
-  const m = p.match(/^\/api\/iptv\/r\/([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\/(playlist\.m3u|all\.m3u|c\/([0-9a-f]{12})\.ts)$/);
+  const m = p.match(/^\/api\/iptv\/r\/([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\/(playlist\.m3u|all\.m3u|c\/([0-9a-f]{12})(\.ts|\/warm|\/state))$/);
   if (!m || req.method !== 'GET') return false;
   if (!iptvTokenOk(m[1])) {
     send(res, 403, { error: 'Lien IPTV invalide' });
@@ -7578,6 +7579,14 @@ async function iptvRelayRoutes(req, res, p) {
     return true;
   }
   const id = m[3];
+  // Avancement de la réserve (pour l'animation de chargement des applis)
+  if (m[4] === '/state') {
+    const st = iptvStreams.get(id);
+    const want = iptvCushion();
+    const buffered = st?.firstAt ? Math.min(want, (Date.now() - st.firstAt) / 1000) : 0;
+    send(res, 200, { want, buffered: Math.round(buffered * 10) / 10, ready: !!st && buffered >= want, open: !!st, error: st ? null : iptvErrors.get(id) || null });
+    return true;
+  }
   const list = await iptvLoad(false);
   const ch = list.byId.get(id);
   if (!ch) {
@@ -7588,7 +7597,7 @@ async function iptvRelayRoutes(req, res, p) {
   if (!s) {
     const max = Math.max(1, Number(iptvCfg().maxStreams) || 1);
     // Une chaîne que plus personne ne regarde libère sa place tout de suite (changement de chaîne)
-    if (iptvStreams.size >= max) for (const [k, v] of iptvStreams) if (!v.clients.size && !v.waiting) iptvStop(k);
+    if (iptvStreams.size >= max) for (const [k, v] of iptvStreams) if (!v.clients.size && !v.waiting && !(v.holdUntil > Date.now())) iptvStop(k);
     if (iptvStreams.size >= max) {
       const busy = [...iptvStreams.values()].map((v) => v.ch.name).join(', ');
       send(res, 503, { error: `Flux occupé : ${busy} est déjà regardé (limite de ${max} chaîne${max > 1 ? 's' : ''} en même temps)` });
@@ -7633,7 +7642,7 @@ async function iptvRelayRoutes(req, res, p) {
         if (done) return;
         done = true;
         if (iptvStreams.get(id) !== s) return;
-        if ((!s.clients.size && !s.waiting) || s.retries >= 8) return iptvStop(id);
+        if ((!s.clients.size && !s.waiting && !(s.holdUntil > Date.now())) || s.retries >= 8) return iptvStop(id);
         s.retries++;
         console.log(`Live TV : « ${ch.name} » coupée par le fournisseur, reconnexion ${s.retries}/8`);
         setTimeout(() => {
@@ -7645,8 +7654,20 @@ async function iptvRelayRoutes(req, res, p) {
       r.on('error', lost);
       r.on('close', lost);
     };
+    iptvErrors.delete(id);
     s.ready = connect();
-    s.ready.catch(() => iptvStreams.get(id) === s && iptvStop(id));
+    s.ready.catch((e) => {
+      iptvErrors.set(id, e.message);
+      if (iptvStreams.get(id) === s) iptvStop(id);
+    });
+  }
+  // L'appli prépare la réserve avant d'ouvrir le lecteur : la chaîne est gardée ouverte 40 s le temps qu'elle arrive
+  if (m[4] === '/warm') {
+    s.holdUntil = Date.now() + 40000;
+    clearTimeout(s.holdT);
+    s.holdT = setTimeout(() => iptvStreams.get(id) === s && !s.clients.size && !s.waiting && iptvStop(id), 41000);
+    send(res, 200, { want: iptvCushion(), ok: true });
+    return true;
   }
   try {
     await s.ready;

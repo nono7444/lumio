@@ -12,6 +12,7 @@ import { CastIcon, CastingScreen, guessContentType, useCasting } from '@/compone
 import { MpvPlayer } from '@/components/players/mpv-player';
 import { NativePlayer } from '@/components/players/native-player';
 import { Toasts } from '@/components/toast';
+import { GOOGLE_COLORS, GoogleSpinner } from '@/components/google-spinner';
 import { noteTwitchProgress, twitchApi } from '@/lib/twitch';
 import { Button } from '@/components/ui';
 import { C } from '@/constants/theme';
@@ -83,6 +84,36 @@ export default function Player() {
   const [source, setSource] = useState<Source | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  // Live TV par le serveur : la réserve anti-coupure se remplit avant d'ouvrir le lecteur (animation + progression)
+  const iptv = p.kind === 'url' && /\/api\/iptv\/r\/[^/]+\/c\/[0-9a-f]{12}\.ts$/.test(p.uri ?? '');
+  const [warm, setWarm] = useState<{ buffered: number; want: number; ready: boolean } | null>(iptv ? { buffered: 0, want: 15, ready: false } : null);
+  useEffect(() => {
+    if (!iptv || !p.uri) return;
+    let alive = true;
+    const base = p.uri.replace(/\.ts$/, '');
+    (async () => {
+      try {
+        const w = await fetch(`${base}/warm`);
+        if (!w.ok) throw new Error(((await w.json().catch(() => null)) as { error?: string } | null)?.error ?? `HTTP ${w.status}`);
+        const t0 = Date.now();
+        while (alive) {
+          const st = (await (await fetch(`${base}/state`)).json()) as { buffered: number; want: number; ready: boolean; open: boolean; error: string | null };
+          if (!alive) return;
+          if (st.error) throw new Error(st.error);
+          setWarm({ buffered: st.buffered, want: st.want, ready: st.ready });
+          if (st.ready || (!st.open && Date.now() - t0 > 3000) || Date.now() - t0 > 60000) break;
+          await new Promise((r) => setTimeout(r, 400));
+        }
+        if (alive) setWarm((w2) => (w2 ? { ...w2, ready: true } : w2));
+      } catch (e) {
+        if (alive) setError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [iptv, p.uri]);
   // Liste des sources directes : la principale puis les alternatives
   const [altIdx, setAltIdx] = useState(0);
   // Image dans l'image demandée depuis mpv : le lecteur natif démarre directement en PiP
@@ -384,6 +415,28 @@ export default function Player() {
           onEnded={onEnded}
           onClose={() => router.back()}
         />
+      ) : warm && !warm.ready && !error ? (
+        <View style={styles.center}>
+          <GoogleSpinner size={72} stroke={6} />
+          {p.title ? <Text style={styles.loadingTitle}>{p.title}</Text> : null}
+          <Text style={styles.warmText}>
+            Mise en réserve contre les coupures… {Math.floor(warm.buffered)} / {warm.want} s
+          </Text>
+          <View style={styles.warmBar}>
+            {GOOGLE_COLORS.map((c, i) => {
+              // Barre en quatre couleurs Google qui se remplit avec la réserve
+              const part = Math.min(1, Math.max(0, (warm.buffered / Math.max(1, warm.want)) * 4 - i));
+              return (
+                <View key={c} style={styles.warmSeg}>
+                  <View style={{ width: `${part * 100}%`, height: '100%', backgroundColor: c, borderRadius: 3 }} />
+                </View>
+              );
+            })}
+          </View>
+          <Pressable onPress={() => router.back()} style={styles.warmCancel}>
+            <Text style={{ color: '#fff', fontWeight: '700' }}>Annuler</Text>
+          </Pressable>
+        </View>
       ) : source && !error ? (
         engine === 'mpv' || p.audio ? (
           <MpvPlayer
@@ -521,6 +574,10 @@ const styles = StyleSheet.create({
   qualityText: { color: '#fff', fontSize: 13, fontWeight: '800' },
   center: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadingTitle: { color: '#fff', fontSize: 15, fontWeight: '700', marginTop: 6 },
+  warmText: { color: 'rgba(255,255,255,0.75)', fontSize: 14, fontWeight: '600' },
+  warmBar: { flexDirection: 'row', gap: 4, width: 220, height: 6, marginTop: 4 },
+  warmSeg: { flex: 1, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 3, overflow: 'hidden' },
+  warmCancel: { marginTop: 14, paddingHorizontal: 22, paddingVertical: 10, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.14)' },
   errorTitle: { color: C.text, fontSize: 20, fontWeight: '800' },
   errorText: { color: C.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
   nextWrap: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', padding: 24 },
