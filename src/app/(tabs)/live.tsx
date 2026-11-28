@@ -14,7 +14,7 @@ import { VpnButton } from '@/components/vpn-button';
 import { C, R, TAB_SPACE } from '@/constants/theme';
 import { channelStreams, COUNTRIES, countryOf, FRENCH, loadChannels, THEMES, themeOf, type Channel, type Theme, syncLiveSources } from '@/lib/live';
 import { serverCall } from '@/lib/chat';
-import { useSettings, type LiveSource } from '@/lib/settings';
+import { isManager, useSettings, type LiveSource } from '@/lib/settings';
 
 const ALL = 'Tous les groupes';
 type ThemeFilter = 'all' | 'fav' | Theme;
@@ -193,6 +193,11 @@ export default function Live() {
         right={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <VpnButton />
+            {isManager(settings) ? (
+              <Pressable onPress={() => router.push('/iptv-watch')} hitSlop={10} style={styles.headerBtn} accessibilityLabel="Qui regarde">
+                <Ionicons name="people-outline" size={20} color={C.text} />
+              </Pressable>
+            ) : null}
             <Pressable onPress={() => router.push('/live-sources')} hitSlop={10} style={styles.headerBtn}>
               <Ionicons name="add" size={22} color={C.text} />
             </Pressable>

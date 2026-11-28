@@ -28,7 +28,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.166.0';
+const VERSION = '3.167.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -7466,6 +7466,7 @@ const matchHour = (t) => new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Pa
 
 /** Sources du serveur pour la Live TV : les chaînes françaises rangées, et la liste complète. */
 function iptvRelaySources(req, user) {
+  if (user?.id) iptvUserNames.set(String(user.id), user.name || 'Membre');
   const c = iptvCfg();
   if (!c) return [];
   const base = `${reqBase(req)}/api/iptv/r/${iptvToken(user.id)}`;
@@ -7475,6 +7476,20 @@ function iptvRelaySources(req, user) {
   ];
 }
 const iptvRelaySource = (req, user) => iptvRelaySources(req, user)[0] || null;
+// Qui regarde quoi (pour l'admin) : débits calculés toutes les 3 s
+const iptvViewers = new Map(); // réponse HTTP → { user, device, ip, since, bytes, rate, channel }
+const iptvHistory = []; // 30 dernières séances
+const iptvUserNames = new Map(); // id Jellyfin → nom (vu quand le membre ouvre la Live TV)
+setInterval(() => {
+  for (const s of iptvStreams.values()) {
+    s.rate = ((s.bytes - s.last) * 8) / 3;
+    s.last = s.bytes;
+  }
+  for (const v of iptvViewers.values()) {
+    v.rate = ((v.bytes - v.last) * 8) / 3;
+    v.last = v.bytes;
+  }
+}, 3000).unref?.();
 function iptvStatus() {
   const c = iptvCfg();
   return {
@@ -7486,7 +7501,17 @@ function iptvStatus() {
     channels: iptvList.channels.length,
     at: iptvList.at ? new Date(iptvList.at).toISOString() : null,
     error: iptvList.loading ? 'chargement de la liste en cours… (touche Recharger dans une minute)' : iptvList.error,
-    playing: [...iptvStreams.values()].map((s) => ({ name: s.ch.name, viewers: s.clients.size, since: new Date(s.since).toISOString() })),
+    playing: [...iptvStreams.values()].map((s) => ({
+      name: s.ch.name,
+      logo: s.ch.logo || null,
+      group: s.ch.group || null,
+      viewers: s.clients.size,
+      since: new Date(s.since).toISOString(),
+      bytes: s.bytes,
+      rate: Math.round(s.rate),
+      watchers: [...s.clients].map((c) => iptvViewers.get(c)).filter(Boolean).map((v) => ({ ...v, since: new Date(v.since).toISOString(), rate: Math.round(v.rate) })),
+    })),
+    history: iptvHistory.map((h) => ({ ...h, since: new Date(h.since).toISOString(), end: new Date(h.end).toISOString() })),
   };
 }
 function iptvStop(id) {
@@ -7561,7 +7586,7 @@ async function iptvRelayRoutes(req, res, p) {
       send(res, 503, { error: `Flux occupé : ${busy} est déjà regardé (limite de ${max} chaîne${max > 1 ? 's' : ''} en même temps)` });
       return true;
     }
-    s = { clients: new Set(), up: null, closeT: null, ch, since: Date.now() };
+    s = { clients: new Set(), up: null, closeT: null, ch, since: Date.now(), bytes: 0, rate: 0, last: 0 };
     iptvStreams.set(id, s);
     s.ready = (async () => {
       // Listes Xtream : le flux MPEG-TS (.ts) plutôt que HLS, pour pouvoir le partager tel quel
@@ -7573,7 +7598,10 @@ async function iptvRelayRoutes(req, res, p) {
       }
       s.up = r;
       r.on('data', (chunk) => {
+        s.bytes += chunk.length;
         for (const c of s.clients) {
+          const v = iptvViewers.get(c);
+          if (v) v.bytes += chunk.length;
           // Un appareil trop lent (plus de 16 Mo de retard) est décroché pour ne pas gêner les autres
           if (c.writableLength > 16e6) c.destroy();
           else c.write(chunk);
@@ -7598,8 +7626,33 @@ async function iptvRelayRoutes(req, res, p) {
   }
   res.writeHead(200, { 'Content-Type': 'video/mp2t', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
   s.clients.add(res);
+  // Qui regarde : membre (d'après le lien), appareil, adresse, début, débit
+  const uid = (() => {
+    try {
+      return Buffer.from(m[1].split('.')[0], 'base64url').toString('utf8');
+    } catch {
+      return '';
+    }
+  })();
+  const ua = String(req.headers['user-agent'] || '');
+  iptvViewers.set(res, {
+    user: iptvUserNames.get(uid) || 'Membre inconnu',
+    device: /ExoPlayer|okhttp|Dalvik|Android/i.test(ua) ? 'Lumio TV / Android' : /AppleCoreMedia|iPhone|iPad|CFNetwork/i.test(ua) ? 'iPhone / iPad' : /mpv|Lavf|libmpv/i.test(ua) ? 'iPhone / iPad (mpv)' : /VLC/i.test(ua) ? 'VLC' : ua.slice(0, 40) || 'Inconnu',
+    ip: String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim().replace(/^::ffff:/, ''),
+    since: Date.now(),
+    bytes: 0,
+    rate: 0,
+    last: 0,
+    channel: ch.name,
+  });
   clearTimeout(s.closeT);
   req.on('close', () => {
+    const v = iptvViewers.get(res);
+    if (v) {
+      iptvHistory.unshift({ user: v.user, device: v.device, channel: v.channel, since: v.since, end: Date.now(), bytes: v.bytes });
+      iptvHistory.length = Math.min(iptvHistory.length, 30);
+      iptvViewers.delete(res);
+    }
     s.clients.delete(res);
     if (!s.clients.size) s.closeT = setTimeout(() => !s.clients.size && iptvStop(id), 3000);
   });
@@ -7608,6 +7661,7 @@ async function iptvRelayRoutes(req, res, p) {
 /** Routes admin (avec jeton) : configurer la source IPTV du serveur. */
 async function iptvAdminRoutes(req, res, p, user) {
   if (p === '/api/iptv/matches' && req.method === 'GET') {
+    if (user?.id) iptvUserNames.set(String(user.id), user.name || 'Membre');
     const list = await iptvMatches(new URL(req.url, 'http://x').searchParams.get('refresh') === '1');
     const base = `${reqBase(req)}/api/iptv/r/${iptvToken(user.id)}/c`;
     const now = Date.now();

@@ -63,6 +63,7 @@ function Root() {
       <Stack.Screen name="secour" options={{ presentation: 'modal' }} />
       <Stack.Screen name="files" options={{ presentation: 'modal' }} />
       <Stack.Screen name="live-sources" options={{ presentation: 'modal' }} />
+      <Stack.Screen name="iptv-watch" options={{ presentation: 'modal' }} />
       <Stack.Screen name="invite" options={{ animation: 'fade' }} />
       <Stack.Screen name="connect-tv" options={{ presentation: 'modal' }} />
       <Stack.Screen name="watch" options={{ animation: 'fade', presentation: 'fullScreenModal' }} />
