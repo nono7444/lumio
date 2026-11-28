@@ -28,7 +28,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.164.0';
+const VERSION = '3.165.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -7152,21 +7152,6 @@ const FOOT_LEAGUES = [
   ['usa.1', 'MLS'], ['fifa.world', 'Coupe du monde'], ['uefa.nations', 'Ligue des nations'], ['fifa.friendly', 'Matchs amicaux'],
   ['fifa.worldq.uefa', 'Qualifs Coupe du monde'], ['uefa.euroq', 'Qualifs Euro'], ['caf.nations', 'CAN'],
 ];
-// Diffuseurs habituels en France (quand livefoot.fr ne précise rien) : affichés comme « habituellement »
-const USUAL_TV = {
-  'Ligue 1': ['Ligue 1+', 'beIN Sports 1'],
-  'Ligue 2': ['beIN Sports 1', 'beIN Sports Max'],
-  'Coupe de France': ['France 2', 'France 3', 'beIN Sports 1'],
-  'Ligue des champions': ['Canal+', 'Canal+ Foot', 'Canal+ Sport'],
-  'Ligue Europa': ['Canal+ Foot', 'Canal+ Sport'],
-  'Ligue Conférence': ['Canal+ Foot', 'Canal+ Sport'],
-  'Premier League': ['Canal+', 'Canal+ Foot', 'Canal+ Sport'],
-  Liga: ['beIN Sports 1', 'beIN Sports 2', 'beIN Sports 3'],
-  'Serie A': ['beIN Sports 1', 'beIN Sports 2', 'beIN Sports 3'],
-  Bundesliga: ['beIN Sports 1', 'beIN Sports 2', 'beIN Sports 3'],
-  MLS: ['Apple TV'],
-  NBA: ['beIN Sports 1', 'beIN Sports 2', 'beIN Sports 3'],
-};
 const OTHER_LEAGUES = [
   ['basketball/nba', 'NBA', 'Basket'],
   ['hockey/nhl', 'NHL', 'Hockey'],
@@ -7240,6 +7225,62 @@ async function liveFootTv(parisDay) {
   }
   return out;
 }
+// ——— matchendirect.fr : la ligne 📺 « Disney+, DAZN France » de chaque page de match (gardée pour la journée) ———
+const BROADCASTERS = /\b(bein|canal ?\+|canal plus|dazn|disney ?\+|ligue ?1 ?\+|amazon|prime video|m6|w9|tf1|tmc|tfx|france ?[2345]|france\.tv|l'?[ée]quipe|rmc|eurosport|apple ?tv|free|sfr|max\b|polsat|sky|rtl|tva|rds|auvio|rtbf|blue|nba league pass|youtube|twitch)/i;
+let medCache = { day: '', list: null, tv: new Map() };
+async function matchEnDirectTv(parisDay, wanted) {
+  if (medCache.day !== parisDay) medCache = { day: parisDay, list: null, tv: new Map() };
+  if (!medCache.list) {
+    const html = await webText('https://www.matchendirect.fr/');
+    const links = new Map();
+    for (const m of html.matchAll(/href=["']((?:https?:\/\/www\.matchendirect\.fr)?\/live-score\/[^"'#?]+\.html)["']/gi)) {
+      const u = m[1].startsWith('http') ? m[1] : `https://www.matchendirect.fr${m[1]}`;
+      links.set(u, u.split('/').pop().replace(/\.html$/, '').replace(/_\d+$/, ''));
+    }
+    medCache.list = [...links].map(([url, slug]) => ({ url, slug: slug.replace(/-/g, ' ') }));
+    console.log(`Matchs du jour : matchendirect ${medCache.list.length} liens (${html.length} o)`);
+  }
+  const out = new Map();
+  const todo = [];
+  for (const w of wanted) {
+    const h = teamNorm(w.home).split(' ').filter((x) => x.length > 2);
+    const a = teamNorm(w.away).split(' ').filter((x) => x.length > 2);
+    const hit = medCache.list.find((l) => h.some((x) => l.slug.includes(x)) && a.some((x) => l.slug.includes(x)));
+    if (hit) todo.push([w, hit.url]);
+  }
+  let i = 0;
+  const work = async () => {
+    while (i < todo.length) {
+      const [w, url] = todo[i++];
+      if (!medCache.tv.has(url)) {
+        let tv = [];
+        try {
+          const txt = (await webText(url))
+            .replace(/<\/(tr|p|div|li|td|span)>/gi, '\n')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/&#0?39;|&rsquo;/g, "'");
+          // La ligne qui ne contient que des diffuseurs séparés par des virgules (« Disney+, DAZN France »)
+          for (const line of txt.split('\n').map((l) => l.replace(/\s+/g, ' ').trim())) {
+            if (!line || line.length > 120) continue;
+            const parts = line.split(/\s*[,/]\s*/).filter(Boolean);
+            if (parts.length && parts.every((p) => BROADCASTERS.test(p) && p.length < 40)) {
+              tv = parts;
+              break;
+            }
+          }
+        } catch (e) {
+          console.log('Matchs du jour : matchendirect', e.message);
+        }
+        medCache.tv.set(url, tv);
+      }
+      out.set(w, medCache.tv.get(url));
+    }
+  };
+  await Promise.all(Array.from({ length: 4 }, work));
+  return out;
+}
 async function espnDay(path, dates) {
   try {
     const j = JSON.parse(await webText(`https://site.api.espn.com/apis/site/v2/sports/${path}/scoreboard?dates=${dates}&lang=fr&region=fr`));
@@ -7266,6 +7307,18 @@ async function iptvMatchesLoad() {
   const ymd = (t) => new Date(t).toISOString().slice(0, 10).replace(/-/g, '');
   const dates = [...new Set([ymd(dayStart), ymd(dayStart + 24 * 3600e3)])];
   // Chaîne de l'IPTV pour un nom de chaîne (« beIN Sports 4 », « Canal+ Foot », « Ligue 1+ ») : la meilleure version
+  // Nom générique (« beIN Sports », « DAZN », « Canal+ ») : toutes ses chaînes (beIN Sports 1, 2, 3…)
+  const chansFor = (name) => {
+    const n = chanNorm(String(name).replace(/\bfrance\b/i, ''));
+    if (!n) return [];
+    const exact = fr.filter((x) => x.group !== '4K' && chanNorm(x.base) === n);
+    const pool = exact.length ? exact : fr.filter((x) => x.group !== '4K' && chanNorm(x.base).startsWith(n));
+    const seen = new Set();
+    return pool
+      .filter((c) => !seen.has(c.base.toLowerCase()) && seen.add(c.base.toLowerCase()))
+      .slice(0, 4)
+      .map((c) => ({ id: c.id, name: c.base, logo: c.logo || null }));
+  };
   const chanFor = (name) => {
     const n = chanNorm(name);
     if (!n) return null;
@@ -7326,12 +7379,24 @@ async function iptvMatchesLoad() {
   // 2. Chaînes françaises du foot (livefoot.fr) ; un match absent d'ESPN y est ajouté
   const lf = await liveFootTv(parisDay).catch((e) => (console.log('Matchs du jour : livefoot', e.message), (info.livefoot = e.message), []));
   if (!info.livefoot) info.livefoot = lf.length;
+  console.log(`Matchs du jour : ESPN ${info.espn} matchs, livefoot ${info.livefoot}`);
   for (const r of lf) {
     const start = dayStart + (r.hh * 60 + r.mm) * 60e3;
     if (start + 2 * 3600e3 < now) continue;
     const channels = r.tv.map(chanFor).filter(Boolean);
     add({ id: `l${crypto.createHash('sha1').update(r.home + r.away).digest('hex').slice(0, 8)}`, sport: 'Football', comp: null, home: r.home, away: r.away, start, end: start + 2 * 3600e3, live: start <= now, tv: r.tv, channels });
   }
+  // 2 bis. matchendirect.fr : les diffuseurs des matchs encore sans chaîne (ligne 📺 de la page du match)
+  const wanted = matches.filter((m) => m.home && !m.tv?.length && (m.homeLogo || m.comp !== 'Coupe de France'));
+  const med = await matchEnDirectTv(parisDay, wanted).catch((e) => (console.log('Matchs du jour : matchendirect', e.message), (info.matchendirect = e.message), new Map()));
+  if (!info.matchendirect) info.matchendirect = [...med.values()].filter((t) => t.length).length;
+  for (const [m, tv] of med) {
+    if (!tv.length) continue;
+    m.tv = tv;
+    for (const n of tv) for (const c of chansFor(n)) if (!m.channels.some((k) => k.id === c.id)) m.channels.push(c);
+  }
+  // Chaînes de livefoot.fr aussi en version « toutes les chaînes » (beIN Sports → 1, 2, 3)
+  for (const m of matches) for (const n of m.tv || []) if (!m.channels.length) for (const c of chansFor(n)) m.channels.push(c);
   // 3. Guide des programmes de l'IPTV : relie les chaînes aux matchs par les noms d'équipes ; le reste (tennis, rugby, F1…) s'ajoute tel quel
   for (const g of epg) {
     const t = g.title.replace(/^[^:]*:\s*/, '');
@@ -7343,15 +7408,6 @@ async function iptvMatchesLoad() {
   for (const m of matches) {
     m.title = m.home ? `${m.home} - ${m.away}` : m.title;
     m.live = m.start <= now && m.end > now;
-    // Rien de précis pour ce match : les diffuseurs habituels de la compétition (petits matchs de coupe exclus)
-    if (!m.tv?.length && !m.channels.length && USUAL_TV[m.comp] && !(m.comp === 'Coupe de France' && !m.homeLogo)) {
-      m.tv = USUAL_TV[m.comp];
-      m.tvGuess = true;
-      for (const n of m.tv) {
-        const c = chanFor(n);
-        if (c && !m.channels.some((k) => k.id === c.id)) m.channels.push(c);
-      }
-    }
   }
   iptvMatchInfo = info;
   // Ordre : en direct, puis par heure ; les matchs avec une chaîne d'abord à heure égale
