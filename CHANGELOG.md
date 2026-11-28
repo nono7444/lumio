@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.229 — 28 novembre 2026
+
 - Live TV : animation façon Google pendant la mise en réserve anti-coupure (15 s), avec la progression « 7 / 15 s » et une barre en quatre couleurs ; bouton Annuler (serveur 3.169.0).
 
 ## 1.0.228 — 28 novembre 2026
