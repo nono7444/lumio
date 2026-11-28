@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.226 — 28 novembre 2026
+
 - Matchs du jour : tous les matchs de foot du jour (Ligue 1, Premier League, Liga, Ligue des champions… + NBA, NHL, NFL), avec score et minute en direct, logos des équipes, et la chaîne française qui les diffuse reliée à ton IPTV ; filtre « Sur mon IPTV » (serveur 3.163.0).
 
 ## 1.0.225 — 28 novembre 2026
