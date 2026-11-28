@@ -28,7 +28,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.168.0';
+const VERSION = '3.168.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -7477,7 +7477,7 @@ function iptvRelaySources(req, user) {
 }
 const iptvRelaySource = (req, user) => iptvRelaySources(req, user)[0] || null;
 // Réserve anti-coupure de la Live TV (secondes de retard sur le direct), réglable par l'admin (config.iptvRelay.bufferSecs)
-const iptvCushion = () => Math.min(120, Math.max(0, Number(iptvCfg()?.bufferSecs ?? 30)));
+const iptvCushion = () => Math.min(120, Math.max(0, Number(iptvCfg()?.bufferSecs ?? 15)));
 const TS_NULL = (() => {
   const p = Buffer.alloc(188 * 7, 0xff);
   for (let i = 0; i < 7; i++) p.set([0x47, 0x1f, 0xff, 0x10], i * 188);
