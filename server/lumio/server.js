@@ -28,7 +28,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.163.0';
+const VERSION = '3.163.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -7225,8 +7225,11 @@ async function espnDay(path, dates) {
     return [];
   }
 }
+let iptvEpgCache = { at: 0, list: [] };
 async function iptvMatchesLoad() {
-  const epg = await iptvEpgMatches().catch(() => []);
+  // Guide des programmes : 1 h de cache (beaucoup de requêtes au fournisseur) ; scores et horaires : 5 min
+  if (Date.now() - iptvEpgCache.at > 60 * 60e3) iptvEpgCache = { at: Date.now(), list: await iptvEpgMatches().catch(() => []) };
+  const epg = iptvEpgCache.list.map((g) => ({ ...g, channels: [...g.channels] }));
   const list = await iptvLoad(false).catch(() => null);
   const fr = list ? list.fr || (list.fr = iptvCurate(list.channels)) : [];
   const now = Date.now();
@@ -7323,7 +7326,7 @@ async function iptvMatchesLoad() {
 }
 async function iptvMatches(force) {
   if (!iptvCfg()) return [];
-  if (!force && Date.now() - iptvMatchCache.at < 60 * 60e3) return iptvMatchCache.list;
+  if (!force && Date.now() - iptvMatchCache.at < 5 * 60e3) return iptvMatchCache.list;
   if (iptvMatchCache.loading) return iptvMatchCache.loading;
   iptvMatchCache.loading = iptvMatchesLoad()
     .then((list) => ((iptvMatchCache = { at: Date.now(), list, loading: null }), list))
