@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.225 — 28 novembre 2026
+
 - Live TV (téléphone) : la source « TV française » du serveur garde ses catégories et leur ordre (Matchs du jour, Généralistes, 4K, Sport…) ; plus de chaînes de sport cachées par le tri par langue. Noms nettoyés (« 8K - », « FRENCH ») côté serveur (3.162.1).
 
 ## 1.0.224 — 27 novembre 2026
