@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+## 1.0.227 — 28 novembre 2026
+
 - Matchs du jour : chaînes de diffusion affichées (📺) et reliées à ton IPTV ; à défaut, diffuseurs habituels de la compétition (Ligue 1+, beIN, Canal+…) ; petits matchs sans diffusion cachés (« Tous les matchs » pour les voir) (serveur 3.164.0).
 
 ## 1.0.226 — 28 novembre 2026
