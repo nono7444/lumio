@@ -28,7 +28,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.165.0';
+const VERSION = '3.165.1';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -7200,7 +7200,9 @@ async function liveFootTv(parisDay) {
   const html = await webText('https://www.livefoot.fr/programme-tv-football');
   const [y, mo, d] = parisDay.split('-').map(Number);
   const MOIS = ['janvier', 'fevrier', 'mars', 'avril', 'mai', 'juin', 'juillet', 'aout', 'septembre', 'octobre', 'novembre', 'decembre'];
+  // Les cellules d'une ligne sont sur plusieurs lignes du code : on remet tout à plat avant de couper par ligne de tableau
   const txt = html
+    .replace(/\s+/g, ' ')
     .replace(/<img[^>]*?(?:title|alt)=["']Cha[iî]ne ([^"']+)["'][^>]*>/gi, ' [[TV:$1]] ')
     .replace(/<\/(tr|p|div|h\d|li)>/gi, '\n')
     .replace(/<[^>]+>/g, ' ')
@@ -7261,8 +7263,11 @@ async function matchEnDirectTv(parisDay, wanted) {
             .replace(/&nbsp;/g, ' ')
             .replace(/&amp;/g, '&')
             .replace(/&#0?39;|&rsquo;/g, "'");
-          // La ligne qui ne contient que des diffuseurs séparés par des virgules (« Disney+, DAZN France »)
-          for (const line of txt.split('\n').map((l) => l.replace(/\s+/g, ' ').trim())) {
+          // La ligne « 📺 DAZN France, Ligue 1+ » du tableau des détails du match
+          const tvLine = (txt.match(/📺\s*([^\n]+)/) || [])[1];
+          if (tvLine) tv = tvLine.split(/\s*,\s*/).map((x) => x.trim()).filter((x) => x && x.length < 40);
+          // Sinon : une ligne qui ne contient que des diffuseurs séparés par des virgules
+          if (!tv.length) for (const line of txt.split('\n').map((l) => l.replace(/\s+/g, ' ').trim())) {
             if (!line || line.length > 120) continue;
             const parts = line.split(/\s*[,/]\s*/).filter(Boolean);
             if (parts.length && parts.every((p) => BROADCASTERS.test(p) && p.length < 40)) {
