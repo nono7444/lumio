@@ -6,6 +6,8 @@ automatiquement avec le numéro de version et la date, et sert de notes dans l'a
 
 ## À venir
 
+- Matchs du jour : tous les matchs de foot du jour (Ligue 1, Premier League, Liga, Ligue des champions… + NBA, NHL, NFL), avec score et minute en direct, logos des équipes, et la chaîne française qui les diffuse reliée à ton IPTV ; filtre « Sur mon IPTV » (serveur 3.163.0).
+
 ## 1.0.225 — 28 novembre 2026
 
 - Live TV (téléphone) : la source « TV française » du serveur garde ses catégories et leur ordre (Matchs du jour, Généralistes, 4K, Sport…) ; plus de chaînes de sport cachées par le tri par langue. Noms nettoyés (« 8K - », « FRENCH ») côté serveur (3.162.1).

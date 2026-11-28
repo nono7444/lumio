@@ -15,7 +15,25 @@ import { serverCall } from '@/lib/chat';
 import { useSettings } from '@/lib/settings';
 
 type MatchChannel = { id: string; name: string; logo: string | null; url: string };
-type Match = { id: string; title: string; sport: string; start: number; end: number; hour: string; live: boolean; desc?: string; channels: MatchChannel[] };
+type Match = {
+  id: string;
+  title: string;
+  sport: string;
+  comp?: string | null;
+  home?: string;
+  away?: string;
+  homeLogo?: string | null;
+  awayLogo?: string | null;
+  score?: string | null;
+  clock?: string | null;
+  tv?: string[];
+  start: number;
+  end: number;
+  hour: string;
+  live: boolean;
+  desc?: string;
+  channels: MatchChannel[];
+};
 
 const SPORT_ICON: Record<string, string> = {
   Football: '⚽',
@@ -28,6 +46,7 @@ const SPORT_ICON: Record<string, string> = {
   Hockey: '🏒',
   'Football US': '🏈',
   Cyclisme: '🚴',
+  'Autres sports': '🏅',
 };
 let memo: Match[] | null = null;
 
@@ -55,7 +74,8 @@ export default function MatchesRoute() {
   }, [settings.chatUrl, settings.jellyfin?.token]);
 
   const sports = useMemo(() => [...new Set((list ?? []).map((m) => m.sport))], [list]);
-  const shown = (list ?? []).filter((m) => !sport || m.sport === sport);
+  const [onlyTv, setOnlyTv] = useState(false);
+  const shown = (list ?? []).filter((m) => (!sport || m.sport === sport) && (!onlyTv || m.channels.length > 0));
   const live = shown.filter((m) => m.live);
   const later = shown.filter((m) => !m.live);
 
@@ -68,12 +88,35 @@ export default function MatchesRoute() {
   const card = (m: Match) => (
     <View key={m.id} style={styles.card}>
       <View style={styles.row}>
-        <Text style={[styles.hour, m.live && { color: C.danger }]}>{m.live ? '● DIRECT' : m.hour}</Text>
-        <Text style={styles.sport}>
-          {SPORT_ICON[m.sport] ?? '🏆'} {m.sport}
+        <Text style={[styles.hour, m.live && { color: C.danger }]}>
+          {m.live ? `● DIRECT${m.clock ? ` · ${m.clock}` : ''}` : m.hour}
+        </Text>
+        <Text style={styles.sport} numberOfLines={1}>
+          {SPORT_ICON[m.sport] ?? '🏆'} {m.comp || m.sport}
         </Text>
       </View>
-      <Text style={styles.title}>{m.title}</Text>
+      {m.home ? (
+        <View style={styles.teams}>
+          <View style={styles.team}>
+            {m.homeLogo ? <Image source={{ uri: m.homeLogo }} style={styles.crest} contentFit="contain" /> : null}
+            <Text style={styles.title} numberOfLines={1}>
+              {m.home}
+            </Text>
+          </View>
+          <Text style={[styles.score, m.score ? null : { color: C.textDim }]}>{m.score ?? 'vs'}</Text>
+          <View style={[styles.team, { justifyContent: 'flex-end' }]}>
+            <Text style={[styles.title, { textAlign: 'right' }]} numberOfLines={1}>
+              {m.away}
+            </Text>
+            {m.awayLogo ? <Image source={{ uri: m.awayLogo }} style={styles.crest} contentFit="contain" /> : null}
+          </View>
+        </View>
+      ) : (
+        <Text style={styles.title}>{m.title}</Text>
+      )}
+      {!m.channels.length ? (
+        <Text style={styles.dim}>{m.tv?.length ? `${m.tv.join(', ')} · chaîne absente de ton IPTV` : 'Pas de chaîne trouvée dans ton IPTV'}</Text>
+      ) : null}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
         {m.channels.map((c) => (
           <Pressable key={c.id} onPress={() => play(m, c)} style={styles.chan} accessibilityLabel={`Regarder sur ${c.name}`}>
@@ -94,8 +137,9 @@ export default function MatchesRoute() {
         refreshControl={<RefreshControl refreshing={busy && !!list} onRefresh={() => load(true)} tintColor={C.text} />}>
         <UniverseSwitch style={{ marginLeft: 16, marginTop: 8 }} />
         <ScreenTitle title="Matchs du jour" />
-        {sports.length > 1 ? (
+        {sports.length > 0 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 12 }}>
+            <SegChip label="Sur mon IPTV" icon="tv" on={onlyTv} onPress={() => setOnlyTv(!onlyTv)} />
             <SegChip label="Tous" on={!sport} onPress={() => setSport(null)} />
             {sports.map((s) => (
               <SegChip key={s} label={`${SPORT_ICON[s] ?? '🏆'} ${s}`} on={sport === s} onPress={() => setSport(sport === s ? null : s)} />
@@ -129,7 +173,11 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   hour: { color: C.text, fontSize: 14, fontWeight: '800' },
   sport: { color: C.textDim, fontSize: 13, fontWeight: '600' },
-  title: { color: C.text, fontSize: 16, fontWeight: '700', lineHeight: 21 },
+  title: { color: C.text, fontSize: 16, fontWeight: '700', lineHeight: 21, flexShrink: 1 },
+  teams: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  team: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  crest: { width: 24, height: 24 },
+  score: { color: C.text, fontSize: 17, fontWeight: '900', minWidth: 44, textAlign: 'center' },
   chan: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, height: 36, borderRadius: 18, backgroundColor: C.surfaceHigh },
   logo: { width: 28, height: 18 },
   chanText: { color: C.text, fontSize: 13, fontWeight: '700', maxWidth: 160 },
