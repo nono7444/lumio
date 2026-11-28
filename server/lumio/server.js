@@ -28,7 +28,7 @@ const RATINGS_FILE = path.join(DATA_DIR, 'ratings.json');
 const LIVE_FILE = path.join(DATA_DIR, 'live-sources.json');
 const MAX_MESSAGES = 3000;
 const MAX_TEXT = 2000;
-const VERSION = '3.165.1';
+const VERSION = '3.166.0';
 
 // Mêmes valeurs que Seerr
 const RequestStatus = { PENDING: 1, APPROVED: 2, DECLINED: 3, FAILED: 4, COMPLETED: 5 };
@@ -7080,7 +7080,9 @@ const b64 = (x) => {
     return String(x || '');
   }
 };
+let iptvEpgRaw = new Map(); // chaîne → programme du jour (texte simplifié)
 async function iptvEpgMatches() {
+  const raw = new Map();
   const c = iptvCfg();
   const x = c && iptvXtreamFrom(c.url);
   if (!x) return [];
@@ -7125,6 +7127,9 @@ async function iptvEpgMatches() {
         if (!start || !end || end < now || start > dayEnd || end < dayStart) continue;
         const title = b64(e.title).replace(/\s+/g, ' ').trim();
         const desc = b64(e.description).replace(/\s+/g, ' ').trim();
+        // Tout le programme est gardé : il sert à trouver le bon numéro (DAZN 1 ou 2, beIN 1, 2 ou 3…) d'un match
+        if (!raw.has(ch.id)) raw.set(ch.id, []);
+        raw.get(ch.id).push({ start: start * 1000, end: end * 1000, text: teamNorm(`${title} ${desc.slice(0, 200)}`) });
         if (!title || MATCH_NOT.test(title)) continue;
         const sport = (MATCH_SPORT.find(([, re]) => re.test(title)) || MATCH_SPORT.find(([, re]) => re.test(desc.slice(0, 160))) || [null])[0];
         const vs = MATCH_VS.test(title.replace(/^[^:]*:\s*/, ''));
@@ -7139,6 +7144,7 @@ async function iptvEpgMatches() {
     }
   };
   await Promise.all(Array.from({ length: 4 }, worker));
+  iptvEpgRaw = raw;
   return [...found.values()].sort((a, b) => a.start - b.start || a.title.localeCompare(b.title));
 }
 // ——— Football : tous les matchs du jour (ESPN, gratuit et sans clé) + la chaîne française qui les diffuse (livefoot.fr) ———
@@ -7402,6 +7408,29 @@ async function iptvMatchesLoad() {
   }
   // Chaînes de livefoot.fr aussi en version « toutes les chaînes » (beIN Sports → 1, 2, 3)
   for (const m of matches) for (const n of m.tv || []) if (!m.channels.length) for (const c of chansFor(n)) m.channels.push(c);
+  // 2 ter. Le bon numéro : « DAZN » ou « beIN Sports » sans numéro → la chaîne dont le programme, à l'heure du match,
+  // cite une des deux équipes. Si le guide n'en dit rien, toutes les chaînes de la famille restent proposées.
+  const family = (n) => chanNorm(n).replace(/\d+$/, '');
+  for (const m of matches) {
+    if (!m.home || m.channels.length < 2) continue;
+    const words = [...teamNorm(m.home).split(' '), ...teamNorm(m.away).split(' ')].filter((w) => w.length > 3);
+    if (!words.length) continue;
+    const onAir = (c) =>
+      (iptvEpgRaw.get(c.id) || []).some((p) => p.start <= m.start + 30 * 60e3 && p.end >= m.start + 10 * 60e3 && words.some((w) => p.text.includes(w)));
+    const byFam = new Map();
+    for (const c of m.channels) {
+      const f = family(c.name);
+      if (!byFam.has(f)) byFam.set(f, []);
+      byFam.get(f).push(c);
+    }
+    const keep = [];
+    for (const list of byFam.values()) {
+      const sure = list.filter(onAir);
+      for (const c of sure) c.sure = true;
+      keep.push(...(sure.length ? sure : list));
+    }
+    m.channels = keep.sort((a, b) => Number(!!b.sure) - Number(!!a.sure));
+  }
   // 3. Guide des programmes de l'IPTV : relie les chaînes aux matchs par les noms d'équipes ; le reste (tennis, rugby, F1…) s'ajoute tel quel
   for (const g of epg) {
     const t = g.title.replace(/^[^:]*:\s*/, '');
